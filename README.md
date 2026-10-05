@@ -13,7 +13,7 @@
 
 ## 처음 열기
 
-1. Unreal Engine 5.7과 Visual Studio 2022(“C++를 사용한 게임 개발” 워크로드)를 설치합니다.
+1. Unreal Engine 5.8과 Visual Studio 2022(“C++를 사용한 게임 개발” 워크로드)를 설치합니다.
    다른 5.x 버전을 쓰면 `RRRandom.uproject`의 `EngineAssociation` 값을 그 버전으로 바꾸거나,
    `.uproject` 파일 우클릭 → *Switch Unreal Engine version* 을 씁니다.
 2. `git lfs install` 을 한 번 실행합니다. 맵과 에셋(`.uasset`, `.umap`)은 Git LFS로 관리합니다.
