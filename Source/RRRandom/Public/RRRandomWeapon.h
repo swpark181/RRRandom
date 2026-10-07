@@ -1,10 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "RRRandomWeapon.generated.h"
 
 struct FRandomStream;
 
 /** How flashy a weapon's shots look, decided by its damage per shot. */
+UENUM()
 enum class ERRWeaponTier : uint8
 {
 	Common,
@@ -16,20 +18,41 @@ enum class ERRWeaponTier : uint8
 /**
  * A brawler's gun, as multipliers on the brawler's own base stats (damage, fire interval, reload time)
  * and the projectile's (speed, size). The default is the starting pistol, all 1s.
+ * Replicated as part of the brawler so every machine shows the same gun.
  */
+USTRUCT()
 struct RRRANDOM_API FRRWeapon
 {
+	GENERATED_BODY()
+
 	/** Short upper-case name for the HUD, e.g. "CANNON". */
+	UPROPERTY()
 	FString Name = TEXT("PISTOL");
+
+	UPROPERTY()
 	ERRWeaponTier Tier = ERRWeaponTier::Common;
+
+	UPROPERTY()
 	float DamageMultiplier = 1.f;
+
 	/** Rounds per magazine; 0 means the brawler's own MaxAmmo. */
+	UPROPERTY()
 	int32 MagazineSize = 0;
+
 	/** Above 1 fires slower. */
+	UPROPERTY()
 	float FireIntervalMultiplier = 1.f;
+
+	UPROPERTY()
 	float ReloadTimeMultiplier = 1.f;
+
+	UPROPERTY()
 	float ProjectileSpeedMultiplier = 1.f;
+
+	UPROPERTY()
 	float ProjectileScale = 1.f;
+
+	UPROPERTY()
 	bool bIsDefault = true;
 
 	/**

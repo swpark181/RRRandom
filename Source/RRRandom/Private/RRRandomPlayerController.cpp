@@ -1,9 +1,10 @@
 #include "RRRandomPlayerController.h"
 #include "RRRandomCharacter.h"
-#include "RRRandomDiceBuffComponent.h"
+#include "RRRandomSessionSubsystem.h"
 #include "Components/CapsuleComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -53,6 +54,21 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 		ReloadAction = NewObject<UInputAction>(this, TEXT("IA_Reload"));
 		ReloadAction->ValueType = EInputActionValueType::Boolean;
 	}
+	if (!HostAction)
+	{
+		HostAction = NewObject<UInputAction>(this, TEXT("IA_Host"));
+		HostAction->ValueType = EInputActionValueType::Boolean;
+	}
+	if (!JoinAction)
+	{
+		JoinAction = NewObject<UInputAction>(this, TEXT("IA_Join"));
+		JoinAction->ValueType = EInputActionValueType::Boolean;
+	}
+	if (!LeaveAction)
+	{
+		LeaveAction = NewObject<UInputAction>(this, TEXT("IA_Leave"));
+		LeaveAction->ValueType = EInputActionValueType::Boolean;
+	}
 	if (MappingContext)
 	{
 		return;
@@ -63,6 +79,9 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 	MappingContext->MapKey(JumpAction, EKeys::SpaceBar);
 	MappingContext->MapKey(DiceAction, EKeys::E);
 	MappingContext->MapKey(ReloadAction, EKeys::R);
+	MappingContext->MapKey(HostAction, EKeys::F1);
+	MappingContext->MapKey(JoinAction, EKeys::F2);
+	MappingContext->MapKey(LeaveAction, EKeys::F3);
 
 	// Move value: X = right, Y = forward. Keys report on X, so W/S are swizzled onto Y.
 	MappingContext->MapKey(MoveAction, EKeys::D);
@@ -83,6 +102,15 @@ void ARRRandomPlayerController::BeginPlay()
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
 		{
 			Subsystem->AddMappingContext(MappingContext, 0);
+		}
+	}
+
+	// Online status for the HUD, and -RRHost / -RRJoin on the command line once the first arena is up
+	if (IsLocalController())
+	{
+		if (URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>())
+		{
+			Sessions->OnArenaReady();
 		}
 	}
 }
@@ -106,6 +134,33 @@ void ARRRandomPlayerController::SetupInputComponent()
 	EnhancedInput->BindAction(JumpAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnStopJumping);
 	EnhancedInput->BindAction(DiceAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnRollDice);
 	EnhancedInput->BindAction(ReloadAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnReload);
+	EnhancedInput->BindAction(HostAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRHost);
+	EnhancedInput->BindAction(JoinAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRJoin);
+	EnhancedInput->BindAction(LeaveAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRLeave);
+}
+
+void ARRRandomPlayerController::RRHost()
+{
+	if (URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>())
+	{
+		Sessions->HostGame();
+	}
+}
+
+void ARRRandomPlayerController::RRJoin()
+{
+	if (URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>())
+	{
+		Sessions->JoinGame();
+	}
+}
+
+void ARRRandomPlayerController::RRLeave()
+{
+	if (URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>())
+	{
+		Sessions->LeaveGame();
+	}
 }
 
 void ARRRandomPlayerController::OnFire()
@@ -200,10 +255,10 @@ void ARRRandomPlayerController::OnStopJumping()
 
 void ARRRandomPlayerController::OnRollDice()
 {
-	const ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
-	if (RandomCharacter && RandomCharacter->IsAlive())
+	// The character asks the server when this is a client
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()))
 	{
-		RandomCharacter->GetDiceBuffs()->RollDice();
+		RandomCharacter->RollDice();
 	}
 }
 

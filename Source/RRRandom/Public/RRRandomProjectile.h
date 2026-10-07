@@ -16,6 +16,9 @@ class UStaticMeshComponent;
  * Straight-flying shot that deals a random amount of damage to whatever it hits, then disappears.
  * Passes through the shooter's teammates and other shots, and fades out after MaxRange.
  * Shots from stronger guns (higher Tier) glow, leave a trail and burst bigger on impact.
+ *
+ * Networking: only the server spawns shots and decides hits. Clients get a replicated copy that flies without
+ * collision, just for show, and play the impact effects when the server reports where the shot landed.
  */
 UCLASS()
 class RRRANDOM_API ARRRandomProjectile : public AActor
@@ -26,6 +29,8 @@ public:
 	ARRRandomProjectile();
 
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void PostNetReceiveVelocity(const FVector& NewVelocity) override;
 
 	float GetSpeed() const;
 
@@ -51,11 +56,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat")
 	float ImpactImpulse = 300.f;
 
+	/** Color of the viewer's own shots, so they stand out; everyone else's take their team color. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
 	FLinearColor ShotColor = FLinearColor(1.f, 0.85f, 0.1f);
 
 	/** How flashy the shot looks; the shooter sets it from its gun before the shot begins play. */
+	UPROPERTY(Replicated)
 	ERRWeaponTier Tier = ERRWeaponTier::Common;
+
+	/** How long a shot that hit something stays around, hidden, so clients hear about the hit before it goes. */
+	UPROPERTY(EditAnywhere, Category = "Projectile")
+	float ImpactLingerTime = 0.2f;
 
 protected:
 	virtual void BeginPlay() override;
@@ -100,7 +111,23 @@ private:
 
 	void SpawnImpactEffects(const FVector& Location, const FVector& Normal);
 
+	/** Stops and hides the shot where it landed; the server destroys it a moment later. */
+	void HideAfterImpact();
+
+	UFUNCTION()
+	void OnRep_Impact();
+
 	/** Not attached, so its particles linger where they were left after the shot is gone. */
 	UPROPERTY(Transient)
 	TObjectPtr<UNiagaraComponent> Trail;
+
+	/** Set by the server when the shot hits something; clients play the impact from it. */
+	UPROPERTY(ReplicatedUsing = OnRep_Impact)
+	bool bImpacted = false;
+
+	UPROPERTY(Replicated)
+	FVector_NetQuantize ImpactLocation;
+
+	UPROPERTY(Replicated)
+	FVector_NetQuantizeNormal ImpactNormal;
 };

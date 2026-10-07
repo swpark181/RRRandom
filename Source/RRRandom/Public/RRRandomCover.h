@@ -39,6 +39,8 @@ public:
 	/** Distance from the center to the block's outline along a flat direction. */
 	float GetExtentAlong(const FVector& Direction) const;
 
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
@@ -46,9 +48,14 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cover")
 	TObjectPtr<UStaticMeshComponent> Block;
 
-	UPROPERTY(EditAnywhere, Category = "Cover")
+	/** Replicated so cover the server lays out has the same shape on every client. */
+	UPROPERTY(EditAnywhere, ReplicatedUsing = OnRep_Size, Category = "Cover")
 	FVector Size = FVector(100.f, 300.f, 160.f);
 
 	UPROPERTY(EditAnywhere, Category = "Cover")
 	FLinearColor Color = FLinearColor(0.35f, 0.3f, 0.25f);
+
+private:
+	UFUNCTION()
+	void OnRep_Size();
 };

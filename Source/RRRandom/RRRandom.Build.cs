@@ -15,7 +15,9 @@ public class RRRandom : ModuleRules
 			"EnhancedInput",
 			"AIModule",
 			"GameplayTasks",
-			"Niagara"
+			"Niagara",
+			"OnlineSubsystem",
+			"OnlineSubsystemUtils"
 		});
 	}
 }

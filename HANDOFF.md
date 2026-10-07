@@ -13,6 +13,25 @@
 
 - (4차) Space = 점프. 엄폐물 앞에서 점프하면 기어 올라감. 위에서 쏘면 아래층도 맞힘.
 - (4차 수정) "위에서 아래 적을 못 맞힘" 버그 수정.
+- (5차) 서버 없이 소규모 네트워크 플레이. EOS(Epic Online Services) P2P 기준, 테스트 가능한 상태까지. 게임 전체 동기화.
+
+## 5차 — 온라인 플레이 (EOS P2P + LAN 대체)
+
+- 작업 전 상태를 커밋 `91cb123` 으로 저장해 둠. 5차 변경은 아직 커밋 안 됨.
+- 구조: 리슨 서버(호스트가 서버). 체력/탄약/무기/주사위/KO/점수/봇은 호스트 권한, 복제. 자세한 내용은 README "온라인 플레이".
+- `URRRandomSessionSubsystem` (새 파일): F1 호스트 / F2 참가 / F3 나가기, 실행 옵션 `-RRHost` `-RRJoin` `-RRLan` `-RRDevAuth=`. EOS면 Dev Auth Tool 로그인 → EOS 세션(로비 아님, presence 없음) → `?listen` 으로 맵 다시 열기. 참가는 `GetResolvedConnectString` → `ClientTravel`.
+- EOS 키(`DefaultEngine.ini` 의 `+Artifacts`)가 비어 있어서 EOS 초기화가 실패하고("ProductId cannot be null") 엔진이 Null 서브시스템으로 대체함 → LAN 세션 + IP(7777). 게임 코드는 그대로.
+- 넷 드라이버: `NetDriverEOS` (IpNetDriver 대체). LAN 호스트는 `?listen?bUseIPSockets` 로 IP 소켓을 씀. UE 5.8에선 `bIsUsingP2PSockets` 설정이 폐기돼서 넣지 않음.
+- `ARRRandomGameState` (새 파일): 팀 점수 복제. HUD는 게임 모드 대신 이걸 읽음.
+- 게임 모드: `AllyBotCount`/`EnemyBotCount` → `TeamSize` + 자리(slot). 플레이어가 파랑/빨강 번갈아 봇 자리 대체, `Logout` 시 다음 틱에 봇으로 채움.
+- 캐릭터: `Team/Health/Weapon/Ammo/bReloading/bAlive/KnockdownDirection` 복제, `ReloadRemaining/RespawnRemaining` 은 본인만. `ServerFireAt/ServerStartReload/ServerRollDice/ServerStartClimb`, 데미지 숫자는 `MulticastDamagePopup`. KO/부활의 몸 처리(`ApplyKnockedOutBody`/`ApplyStandingBody`)는 `OnRep_Alive` 로 모든 기기에서.
+- 오르기: 캐릭터 이동 예측에 없어서, 서버가 `ServerStartClimb` 을 받으면 그 클라이언트 위치를 믿음(`bIgnoreClientMovementErrorChecksAndCorrection` + `bServerAcceptClientAuthoritativePosition`), 오르기 끝 + `ClimbTrustMargin`(0.5초) 뒤 해제. 해제할 때 MOVE_None 이면 Walking 으로 돌림.
+- 총알: 호스트만 스폰/판정. 클라이언트 복사본은 충돌 끔, `PostNetReceiveVelocity` 로 무기 속도 반영. 맞으면 `bImpacted`+위치 복제 후 0.2초 숨긴 채 남았다가 사라짐(클라이언트가 이펙트를 낼 시간). 총알 색은 각 기기에서 계산(내 총알만 노랑).
+- `FRRWeapon` 을 USTRUCT로, `ERRWeaponTier` 를 UENUM 으로 바꿈(복제하려고).
+- 확인 (2026-10-07, 같은 PC 두 인스턴스, LAN): 빌드 경고 없음. `-RRHost` / `-RRJoin` 으로 LAN 검색 → 참가 → 호스트 로그 `Join succeeded`, 참가자는 빨강 0번 자리. 양쪽 스크린샷에서 점수/주사위/엄폐물/봇 복제, `HOSTING (LAN) 2 PLAYERS` / `ONLINE (LAN) 2 PLAYERS`.
+  임시 `-RRSelfTest` 코드(참가자 폰을 코드로 조종)로 참가자 쪽 RPC 확인 후 코드는 지움: 오르기(z 98 → 257, 위에서 걷기 유지, 서버가 끌어내리지 않음), 발사(탄약 14→0, 자동 재장전), 주사위(4개 → 버프 2 + SMG 23발), R 재장전, F3 나가기(참가자 혼자 플레이로, 호스트 로그 `left; a bot takes over`, 호스트 `1 PLAYER`).
+- 확인 못 한 것: EOS 경로 전체(키 없음), 실제 지연이 있는 인터넷 환경, 사람이 직접 마우스로 하는 사격, 참가자 화면의 데미지 숫자/착탄 이펙트(스크린샷 타이밍에 안 잡힘), 3명 이상.
+- 이 PC는 테스트 중 한 번 장시간 멈췄음(로그 시간 09:02 → 10:22 UTC 공백). 게임 문제는 아님.
 
 ## 4차 수정 — 위에서 아래 사격 버그
 
@@ -188,6 +207,10 @@
 - 체력은 처음엔 브롤스타즈처럼 3~5발에 쓰러지게 50이었으나, 자동 연사로 교전이 너무 빨라 100으로 올림 (평균 9발 정도에 쓰러짐).
 
 ## 다음에 할 만한 것
+
+- [ ] EOS 키 넣고 Dev Auth Tool 두 계정으로 EOS 경로 확인 (README "EOS로 인터넷 플레이")
+- [ ] 지연 상황 테스트: 실행 옵션 `-PktLag=150` 등으로 사격/오르기 체감 확인
+- [ ] 과녁(`RRRandomDummy`) 동기화, 호스트 이전, 로비 UI(지금은 첫 번째 게임에 자동 참가)
 
 - [ ] 실제 플레이로 마우스 사격, 굴림 팝업, 데미지 숫자, 밸런스(체력/재장전/봇 난이도) 확인
 - [x] 엄폐물 + 봇 시야 체크 (덤불은 아직)

@@ -119,15 +119,37 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom")
 	int32 Seed = 0;
 
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
+	/** A new roll arrived: start its popup from this machine's clock. */
+	UFUNCTION()
+	void OnRep_RollCount();
+
+	// The server fills the gauge, rolls and runs the buffs down; clients only show the replicated results
+
 	FRandomStream Stream;
+
+	UPROPERTY(Replicated)
 	TArray<FRRDiceBuff> ActiveBuffs;
+
+	UPROPERTY(Replicated)
 	TArray<FRRDiceRoll> LastRoll;
+
+	/** Counts rolls so clients notice a new one even when it matches the last. */
+	UPROPERTY(ReplicatedUsing = OnRep_RollCount)
+	int32 RollCount = 0;
+
+	/** Local clock; clients set it when a roll arrives. */
 	float LastRollTime = -1.f;
+
+	UPROPERTY(Replicated)
 	float GaugeTime = 0.f;
+
+	UPROPERTY(Replicated)
 	int32 Charges = 0;
 };

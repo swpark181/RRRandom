@@ -16,6 +16,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -41,6 +42,8 @@ namespace
 	constexpr float ClimbUpShare = 0.6f;
 	// Seconds after pressing jump during which reaching a wall still climbs it
 	constexpr float ClimbJumpWindow = 0.5f;
+	// Extra room the server allows a client's climb request, for movement during the request's trip
+	constexpr float ClimbRequestTolerance = 150.f;
 }
 
 ARRRandomCharacter::ARRRandomCharacter()
@@ -128,6 +131,54 @@ void ARRRandomCharacter::BeginPlay()
 	Super::BeginPlay();
 
 	// The random event component has made per-slot dynamic materials by now
+	ApplyTeamColor();
+
+	// Health, ammo, guns and dice are the server's; clients get them replicated (already, by the time they begin play)
+	if (HasAuthority())
+	{
+		WeaponStream.GenerateNewSeed();
+		DiceBuffs->OnWeaponDie.AddUObject(this, &ARRRandomCharacter::OnWeaponDie);
+		Health = MaxHealth;
+		Ammo = GetMaxAmmo();
+	}
+
+	BaseWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
+	HomeLocation = GetActorLocation();
+	HomeRotation = GetActorRotation();
+	MeshRelativeLocation = BodyMesh->GetRelativeLocation();
+	MeshRelativeRotation = BodyMesh->GetRelativeRotation();
+	MeshCollisionProfile = BodyMesh->GetCollisionProfileName();
+
+	// Joined a game where this brawler is lying knocked out
+	if (!bAlive)
+	{
+		ApplyKnockedOutBody();
+	}
+}
+
+void ARRRandomCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(ARRRandomCharacter, Team);
+	DOREPLIFETIME(ARRRandomCharacter, Health);
+	DOREPLIFETIME(ARRRandomCharacter, Weapon);
+	DOREPLIFETIME(ARRRandomCharacter, Ammo);
+	DOREPLIFETIME(ARRRandomCharacter, bReloading);
+	DOREPLIFETIME_CONDITION(ARRRandomCharacter, ReloadRemaining, COND_OwnerOnly);
+	DOREPLIFETIME(ARRRandomCharacter, bAlive);
+	DOREPLIFETIME(ARRRandomCharacter, KnockdownDirection);
+	DOREPLIFETIME_CONDITION(ARRRandomCharacter, RespawnRemaining, COND_OwnerOnly);
+}
+
+FLinearColor ARRRandomCharacter::GetTeamColor(int32 InTeam)
+{
+	return InTeam == 0 ? FLinearColor(0.15f, 0.45f, 1.f) : FLinearColor(1.f, 0.2f, 0.15f);
+}
+
+void ARRRandomCharacter::ApplyTeamColor()
+{
+	USkeletalMeshComponent* BodyMesh = GetMesh();
 	for (int32 Slot = 0; Slot < BodyMesh->GetNumMaterials(); ++Slot)
 	{
 		if (UMaterialInstanceDynamic* Material = Cast<UMaterialInstanceDynamic>(BodyMesh->GetMaterial(Slot)))
@@ -135,23 +186,31 @@ void ARRRandomCharacter::BeginPlay()
 			Material->SetVectorParameterValue(ColorParameter, GetTeamColor(Team));
 		}
 	}
-
-	WeaponStream.GenerateNewSeed();
-	DiceBuffs->OnWeaponDie.AddUObject(this, &ARRRandomCharacter::OnWeaponDie);
-
-	BaseWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
-	Health = MaxHealth;
-	Ammo = GetMaxAmmo();
-	HomeLocation = GetActorLocation();
-	HomeRotation = GetActorRotation();
-	MeshRelativeLocation = BodyMesh->GetRelativeLocation();
-	MeshRelativeRotation = BodyMesh->GetRelativeRotation();
-	MeshCollisionProfile = BodyMesh->GetCollisionProfileName();
 }
 
-FLinearColor ARRRandomCharacter::GetTeamColor(int32 InTeam)
+void ARRRandomCharacter::OnRep_Team()
 {
-	return InTeam == 0 ? FLinearColor(0.15f, 0.45f, 1.f) : FLinearColor(1.f, 0.2f, 0.15f);
+	// Before BeginPlay the body has no tintable materials yet; BeginPlay colors it
+	if (HasActorBegunPlay())
+	{
+		ApplyTeamColor();
+	}
+}
+
+void ARRRandomCharacter::OnRep_Alive()
+{
+	if (!HasActorBegunPlay())
+	{
+		return;
+	}
+	if (bAlive)
+	{
+		ApplyStandingBody();
+	}
+	else
+	{
+		ApplyKnockedOutBody();
+	}
 }
 
 float ARRRandomCharacter::GetProjectileSpeed() const
@@ -182,27 +241,42 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 	UpdateDamagePopups(DeltaSeconds);
 	if (!bAlive)
 	{
-		RespawnRemaining -= DeltaSeconds;
-		if (RespawnRemaining <= 0.f)
+		if (HasAuthority())
 		{
-			Respawn();
+			RespawnRemaining -= DeltaSeconds;
+			if (RespawnRemaining <= 0.f)
+			{
+				Respawn();
+			}
 		}
 		return;
 	}
 
-	// Fell off the arena (jumping past its edge): counts as a knockout
-	if (GetActorLocation().Z < HomeLocation.Z - FallOutDepth)
+	if (HasAuthority())
 	{
-		KnockOut(FVector::UpVector, nullptr);
-		return;
+		// Fell off the arena (jumping past its edge): counts as a knockout
+		if (GetActorLocation().Z < HomeLocation.Z - FallOutDepth)
+		{
+			KnockOut(FVector::UpVector, nullptr);
+			return;
+		}
+
+		UpdateAmmoAndHealth(DeltaSeconds);
+		if (ClientTrustRemaining > 0.f)
+		{
+			ClientTrustRemaining -= DeltaSeconds;
+			if (ClientTrustRemaining <= 0.f)
+			{
+				SetTrustClientMovement(false);
+			}
+		}
 	}
 
-	UpdateAmmoAndHealth(DeltaSeconds);
 	if (bClimbing)
 	{
 		UpdateClimb(DeltaSeconds);
 	}
-	else if (GetCharacterMovement()->IsFalling() && GetWorld()->GetTimeSeconds() - JumpPressedTime < ClimbJumpWindow)
+	else if (IsLocallyControlled() && GetCharacterMovement()->IsFalling() && GetWorld()->GetTimeSeconds() - JumpPressedTime < ClimbJumpWindow)
 	{
 		// Jumped toward a wall: grab its top once in reach
 		TryClimb();
@@ -233,6 +307,12 @@ bool ARRRandomCharacter::TryClimb()
 	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
 	const FVector Location = GetActorLocation();
 	const float FeetZ = Location.Z - HalfHeight;
+
+	// Only the controlling machine decides to climb; a remote player's server hears about it through ServerStartClimb
+	if (!IsLocallyControlled())
+	{
+		return false;
+	}
 
 	// Toward where the brawler is trying to go, or where it faces when standing still
 	FVector Forward = GetLastMovementInputVector().GetSafeNormal2D();
@@ -268,15 +348,59 @@ bool ARRRandomCharacter::TryClimb()
 		return false;
 	}
 
+	const FVector WallFacing = (-Wall.ImpactNormal).GetSafeNormal2D();
+	StartClimb(Destination, WallFacing);
+	if (!HasAuthority())
+	{
+		ServerStartClimb(Destination, WallFacing);
+	}
+	return true;
+}
+
+void ARRRandomCharacter::StartClimb(const FVector& Destination, const FVector& WallFacing)
+{
 	bClimbing = true;
 	ClimbElapsed = 0.f;
-	ClimbStart = Location;
+	ClimbStart = GetActorLocation();
 	ClimbTarget = Destination;
-	SetActorRotation((-Wall.ImpactNormal).GetSafeNormal2D().Rotation());
-	// Movement off while the climb moves the capsule; input does nothing meanwhile
-	GetCharacterMovement()->StopMovementImmediately();
-	GetCharacterMovement()->DisableMovement();
-	return true;
+	SetActorRotation(WallFacing.Rotation());
+	// Movement off while the climb moves the capsule; input does nothing meanwhile.
+	// The server leaves a remote climber's movement alone: that client moves itself and the server follows its position.
+	if (IsLocallyControlled())
+	{
+		GetCharacterMovement()->StopMovementImmediately();
+		GetCharacterMovement()->DisableMovement();
+	}
+}
+
+void ARRRandomCharacter::ServerStartClimb_Implementation(FVector_NetQuantize Destination, FVector_NetQuantizeNormal WallFacing)
+{
+	// Only somewhere a climb from here could end; anything else is ignored
+	const UCapsuleComponent* Capsule = GetCapsuleComponent();
+	const float MaxReach = Capsule->GetScaledCapsuleRadius() * 2.f + ClimbReach + ClimbLedgeInset + ClimbRequestTolerance;
+	const FVector Location = GetActorLocation();
+	if (!bAlive || bClimbing || FVector::Dist2D(Location, Destination) > MaxReach || Destination.Z - Location.Z > MaxClimbHeight + ClimbRequestTolerance)
+	{
+		return;
+	}
+	StartClimb(Destination, WallFacing);
+	SetTrustClientMovement(true);
+}
+
+void ARRRandomCharacter::SetTrustClientMovement(bool bTrust)
+{
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	Movement->bIgnoreClientMovementErrorChecksAndCorrection = bTrust;
+	Movement->bServerAcceptClientAuthoritativePosition = bTrust;
+	if (!bTrust)
+	{
+		ClientTrustRemaining = 0.f;
+		// The client's climbing mode (none) may have been copied over; never leave a standing brawler stuck in it
+		if (bAlive && Movement->MovementMode == MOVE_None)
+		{
+			Movement->SetMovementMode(MOVE_Walking);
+		}
+	}
 }
 
 void ARRRandomCharacter::UpdateClimb(float DeltaSeconds)
@@ -284,17 +408,29 @@ void ARRRandomCharacter::UpdateClimb(float DeltaSeconds)
 	ClimbElapsed += DeltaSeconds;
 	const float Alpha = ClimbDuration > 0.f ? FMath::Clamp(ClimbElapsed / ClimbDuration, 0.f, 1.f) : 1.f;
 
-	// Straight up beside the wall first, then over the edge, so the capsule never cuts through the corner
-	const float UpAlpha = FMath::Clamp(Alpha / ClimbUpShare, 0.f, 1.f);
-	const float OverAlpha = FMath::Clamp((Alpha - ClimbUpShare) / (1.f - ClimbUpShare), 0.f, 1.f);
-	const FVector Flat = FMath::Lerp(FVector(ClimbStart.X, ClimbStart.Y, 0.f), FVector(ClimbTarget.X, ClimbTarget.Y, 0.f), FMath::InterpEaseInOut(0.f, 1.f, OverAlpha, 2.f));
-	const float Z = FMath::InterpEaseOut(ClimbStart.Z, ClimbTarget.Z, UpAlpha, 2.f);
-	SetActorLocation(FVector(Flat.X, Flat.Y, Z));
+	// Only where the brawler is controlled; the server just times a remote client's climb
+	if (IsLocallyControlled())
+	{
+		// Straight up beside the wall first, then over the edge, so the capsule never cuts through the corner
+		const float UpAlpha = FMath::Clamp(Alpha / ClimbUpShare, 0.f, 1.f);
+		const float OverAlpha = FMath::Clamp((Alpha - ClimbUpShare) / (1.f - ClimbUpShare), 0.f, 1.f);
+		const FVector Flat = FMath::Lerp(FVector(ClimbStart.X, ClimbStart.Y, 0.f), FVector(ClimbTarget.X, ClimbTarget.Y, 0.f), FMath::InterpEaseInOut(0.f, 1.f, OverAlpha, 2.f));
+		const float Z = FMath::InterpEaseOut(ClimbStart.Z, ClimbTarget.Z, UpAlpha, 2.f);
+		SetActorLocation(FVector(Flat.X, Flat.Y, Z));
+	}
 
 	if (Alpha >= 1.f)
 	{
 		bClimbing = false;
-		GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+		if (IsLocallyControlled())
+		{
+			GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+		}
+		else if (HasAuthority())
+		{
+			// Keep trusting the client a little longer, until its first moves on top have arrived
+			ClientTrustRemaining = FMath::Max(ClimbTrustMargin, KINDA_SMALL_NUMBER);
+		}
 	}
 }
 
@@ -354,11 +490,53 @@ void ARRRandomCharacter::UpdateLocomotionAnimation()
 	}
 }
 
+float ARRRandomCharacter::GetFireInterval() const
+{
+	return FireInterval * Weapon.FireIntervalMultiplier / DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackSpeed);
+}
+
+FVector ARRRandomCharacter::FaceToward(const FVector& TargetLocation)
+{
+	// The body only turns; the shot itself may tilt toward a target on another level
+	FVector Direction = (TargetLocation - GetActorLocation()).GetSafeNormal2D();
+	if (Direction.IsNearlyZero())
+	{
+		Direction = GetActorForwardVector().GetSafeNormal2D();
+	}
+	SetActorRotation(Direction.Rotation());
+	return Direction;
+}
+
 bool ARRRandomCharacter::FireAt(const FVector& TargetLocation)
+{
+	if (HasAuthority())
+	{
+		return ShootAt(TargetLocation, 0.f);
+	}
+
+	// Client: run the cooldown here so holding the button sends one request per shot, and let the server shoot.
+	// Ammo comes back replicated; the server reloads an empty magazine by itself.
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (!bAlive || !ProjectileClass || bReloading || bClimbing || Ammo <= 0 || Now < NextFireTime)
+	{
+		return false;
+	}
+	NextFireTime = Now + GetFireInterval();
+	FaceToward(TargetLocation);
+	ServerFireAt(TargetLocation);
+	return true;
+}
+
+void ARRRandomCharacter::ServerFireAt_Implementation(FVector_NetQuantize TargetLocation)
+{
+	ShootAt(TargetLocation, FireTimeSlack);
+}
+
+bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSlack)
 {
 	UWorld* World = GetWorld();
 	const float Now = World->GetTimeSeconds();
-	if (!bAlive || !ProjectileClass || bReloading || bClimbing || Now < NextFireTime)
+	if (!bAlive || !ProjectileClass || bReloading || bClimbing || Now + CooldownSlack < NextFireTime)
 	{
 		return false;
 	}
@@ -367,7 +545,7 @@ bool ARRRandomCharacter::FireAt(const FVector& TargetLocation)
 		StartReload();
 		return false;
 	}
-	NextFireTime = Now + FireInterval * Weapon.FireIntervalMultiplier / DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackSpeed);
+	NextFireTime = Now + GetFireInterval();
 	--Ammo;
 	LastCombatTime = Now;
 	// Like an FPS, an empty magazine reloads by itself
@@ -376,14 +554,8 @@ bool ARRRandomCharacter::FireAt(const FVector& TargetLocation)
 		StartReload();
 	}
 
-	// The body only turns; the shot itself may tilt toward a target on another level
-	FVector Direction = (TargetLocation - GetActorLocation()).GetSafeNormal2D();
-	if (Direction.IsNearlyZero())
-	{
-		Direction = GetActorForwardVector().GetSafeNormal2D();
-	}
+	const FVector Direction = FaceToward(TargetLocation);
 	const FRotator Aim = Direction.Rotation();
-	SetActorRotation(Aim);
 
 	const FVector Muzzle = GetActorLocation() + Aim.RotateVector(MuzzleOffset);
 	FVector ShotDirection = TargetLocation + FVector(0.f, 0.f, MuzzleOffset.Z) - Muzzle;
@@ -403,11 +575,6 @@ bool ARRRandomCharacter::FireAt(const FVector& TargetLocation)
 		Projectile->MaxRange = AttackRange;
 		Projectile->SetSpeedMultiplier(Weapon.ProjectileSpeedMultiplier);
 		Projectile->Tier = Weapon.Tier;
-		// The player's own shots keep their default color so they stand out
-		if (!IsPlayerControlled())
-		{
-			Projectile->ShotColor = GetTeamColor(Team);
-		}
 		Projectile->FinishSpawning(SpawnTransform);
 	}
 	return true;
@@ -419,14 +586,56 @@ void ARRRandomCharacter::StartReload()
 	{
 		return;
 	}
+	if (!HasAuthority())
+	{
+		ServerStartReload();
+		return;
+	}
 	bReloading = true;
 	ReloadRemaining = GetReloadTime();
 }
 
+void ARRRandomCharacter::ServerStartReload_Implementation()
+{
+	StartReload();
+}
+
+void ARRRandomCharacter::RollDice()
+{
+	if (!bAlive)
+	{
+		return;
+	}
+	if (!HasAuthority())
+	{
+		ServerRollDice();
+		return;
+	}
+	DiceBuffs->RollDice();
+}
+
+void ARRRandomCharacter::ServerRollDice_Implementation()
+{
+	RollDice();
+}
+
+void ARRRandomCharacter::AddDamagePopup(float Amount)
+{
+	FRRDamagePopup& Popup = DamagePopups.AddDefaulted_GetRef();
+	Popup.Amount = Amount;
+	Popup.OffsetX = FMath::FRandRange(-25.f, 25.f);
+}
+
+void ARRRandomCharacter::MulticastDamagePopup_Implementation(float Amount)
+{
+	AddDamagePopup(Amount);
+}
+
 float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
 {
+	// Shots only hit on the server
 	ARRRandomCharacter* Attacker = DamageCauser ? Cast<ARRRandomCharacter>(DamageCauser->GetInstigator()) : nullptr;
-	if (!bAlive || (Attacker && Attacker != this && Attacker->GetTeam() == Team))
+	if (!HasAuthority() || !bAlive || (Attacker && Attacker != this && Attacker->GetTeam() == Team))
 	{
 		return 0.f;
 	}
@@ -439,10 +648,8 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 
 	Health = FMath::Max(0.f, Health - Damage);
 	LastCombatTime = GetWorld()->GetTimeSeconds();
-
-	FRRDamagePopup& Popup = DamagePopups.AddDefaulted_GetRef();
-	Popup.Amount = Damage;
-	Popup.OffsetX = FMath::FRandRange(-25.f, 25.f);
+	// The number floats up on every machine, the host included
+	MulticastDamagePopup(Damage);
 
 	if (Health <= 0.f)
 	{
@@ -459,13 +666,24 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharacter* Attacker)
 {
 	bAlive = false;
-	bClimbing = false;
 	Health = 0.f;
 	RespawnRemaining = RespawnDelay;
 	DiceBuffs->ClearBuffs();
 	// Back to the starting pistol
 	Weapon = FRRWeapon();
+	KnockdownDirection = ShotDirection.GetSafeNormal2D();
+	SetTrustClientMovement(false);
+	ApplyKnockedOutBody();
 
+	if (ARRRandomGameMode* GameMode = GetWorld()->GetAuthGameMode<ARRRandomGameMode>())
+	{
+		GameMode->OnBrawlerKnockedOut(this, Attacker);
+	}
+}
+
+void ARRRandomCharacter::ApplyKnockedOutBody()
+{
+	bClimbing = false;
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	GetCharacterMovement()->StopMovementImmediately();
 	GetCharacterMovement()->DisableMovement();
@@ -475,15 +693,10 @@ void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharact
 	// Shots fly over the fallen body instead of being soaked up by it
 	BodyMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
 	BodyMesh->SetSimulatePhysics(true);
-	BodyMesh->SetAllPhysicsLinearVelocity(ShotDirection.GetSafeNormal2D() * KnockdownSpeed + FVector(0.f, 0.f, 200.f));
-
-	if (ARRRandomGameMode* GameMode = GetWorld()->GetAuthGameMode<ARRRandomGameMode>())
-	{
-		GameMode->OnBrawlerKnockedOut(this, Attacker);
-	}
+	BodyMesh->SetAllPhysicsLinearVelocity(FVector(KnockdownDirection) * KnockdownSpeed + FVector(0.f, 0.f, 200.f));
 }
 
-void ARRRandomCharacter::Respawn()
+void ARRRandomCharacter::ApplyStandingBody()
 {
 	USkeletalMeshComponent* BodyMesh = GetMesh();
 	BodyMesh->SetSimulatePhysics(false);
@@ -496,9 +709,15 @@ void ARRRandomCharacter::Respawn()
 		CurrentAnimation = IdleAnimation;
 	}
 
-	SetActorLocationAndRotation(HomeLocation, HomeRotation, false, nullptr, ETeleportType::TeleportPhysics);
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+}
+
+void ARRRandomCharacter::Respawn()
+{
+	// Clients follow through replicated movement and OnRep_Alive
+	SetActorLocationAndRotation(HomeLocation, HomeRotation, false, nullptr, ETeleportType::TeleportPhysics);
+	ApplyStandingBody();
 
 	Health = MaxHealth;
 	Ammo = GetMaxAmmo();

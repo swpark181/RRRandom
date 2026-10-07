@@ -11,10 +11,11 @@
 | R | 재장전 (탄창이 비면 자동으로 재장전) |
 | Space | 점프. 엄폐물 앞에서 누르면 위로 기어 올라감 |
 | E | 모아둔 주사위를 전부 굴리기. 주사위 1개당 공격력/공격속도/이동속도 중 하나 +5~30% (15초), 또는 1/6 확률로 **무기 주사위**가 나와 새 무기를 받음 |
+| F1 / F2 / F3 | 온라인 게임 열기(호스트) / 찾아서 참가 / 나가기 (아래 [온라인 플레이](#온라인-플레이)) |
 
 ## 기본 플레이 (브롤스타즈식 팀전)
 
-- 3 대 3: 나 + 아군 봇 2 (파랑) vs 적 봇 3 (빨강). 적은 화면 위쪽 2000 거리에서 시작합니다.
+- 3 대 3: 파랑 팀은 플레이어 스타트에서, 빨강 팀은 화면 위쪽 2000 거리에서 시작합니다. 혼자 하면 나 + 아군 봇 2 vs 적 봇 3 입니다. 온라인에서는 플레이어가 파랑, 빨강 순서로 번갈아 들어가 봇 자리를 대신합니다.
 - 체력 100, 이동 속도 300. 공격은 FPS처럼 누르고 있으면 0.15초마다 한 발씩 나가고, 총알은 초속 5000으로 날아갑니다. 한 탄창 15발, 예비 탄약은 무한이고 재장전은 1.5초에 탄창 전체를 채웁니다. 사거리는 1300입니다.
 - 맵 가운데에 엄폐물(회색 블록)이 있습니다. 총알과 캐릭터 모두 통과하지 못하므로 뒤에 숨으면 공격을 피할 수 있습니다. 레벨에 `RRRandomCover` 를 직접 배치하면 자동 배치는 하지 않습니다.
 - 엄폐물 앞에서 Space를 누르면 위로 기어 올라갑니다 (발 위 200 높이까지, 0.45초). 점프 중에 엄폐물에 닿아도 0.5초 안이면 올라갑니다. 올라가는 동안은 쏠 수 없습니다.
@@ -81,22 +82,82 @@
    (`Config/DefaultEngine.ini` 가 바뀝니다. 같이 커밋해 주세요.)
 3. 과녁은 *Place Actors* 에서 `RRRandomDummy` 를 찾아 원하는 곳에 끌어다 놓습니다.
    자동 배치는 게임 모드의 `bSpawnDummies` 를 켰을 때만 합니다(기본 꺼짐, 팀전 한가운데에 서 있게 되므로).
-4. 봇 수와 팀 시작 거리는 게임 모드의 `AllyBotCount`, `EnemyBotCount`, `TeamSpawnDistance` 로 바꿉니다.
-   바닥이 없는 자리에는 봇을 만들지 않고 로그에 경고를 남깁니다.
+4. 팀 인원과 팀 시작 거리는 게임 모드의 `TeamSize`(기본 3), `TeamSpawnDistance` 로 바꿉니다.
+   `bSplitPlayersAcrossTeams` 를 끄면 온라인 플레이어가 모두 파랑 팀에 들어가 봇과 싸웁니다.
+   바닥이 없는 자리에는 아무도 세우지 않고 로그에 경고를 남깁니다.
+
+## 온라인 플레이
+
+전용 서버 없이, 플레이어 한 명이 호스트(리슨 서버)가 되고 나머지가 접속합니다.
+체력, 탄약, 무기, 주사위, 쓰러짐, 점수, 봇은 모두 호스트가 계산하고 다른 플레이어에게 복제합니다.
+
+| 키 | 동작 |
+| --- | --- |
+| F1 | 게임 열기. 맵을 리슨 서버로 다시 불러옴 |
+| F2 | 게임을 찾아 첫 번째에 참가 |
+| F3 | 나가서 다시 혼자 플레이 |
+
+화면 왼쪽 위에 연결 상태(`SOLO` / `HOSTING (LAN) 2 PLAYERS` / `ONLINE (EOS) ...`)와 마지막 진행 상황(노란 줄)이 나옵니다.
+콘솔 명령 `RRHost`, `RRJoin`, `RRLeave` 도 같고, 실행 옵션 `-RRHost`, `-RRJoin` 을 붙이면 시작하자마자 열기/참가합니다.
+
+### 바로 테스트하기 (LAN, 설정 필요 없음)
+
+EOS 키가 비어 있으면 엔진이 EOS 대신 Null 서브시스템을 쓰고, 게임은 LAN 브로드캐스트로 찾아 IP(포트 7777)로 접속합니다.
+같은 PC 두 창이나 같은 공유기의 PC끼리 바로 됩니다. 실행 옵션 `-RRLan` 을 붙이면 EOS가 설정돼 있어도 LAN을 씁니다.
+
+```powershell
+$ue = "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe"
+$proj = "C:\work\RRRandom\RRRandom.uproject"
+& $ue $proj -game -windowed -ResX=960 -ResY=540 -WinX=0 -WinY=0 -RRHost     # 호스트
+& $ue $proj -game -windowed -ResX=960 -ResY=540 -WinX=960 -WinY=0 -RRJoin   # 참가
+```
+
+다른 PC에서 접속할 때 Windows 방화벽이 UnrealEditor 허용을 물으면 허용합니다.
+게임 로직만 볼 때는 에디터에서 *Play → Net Mode: Play As Listen Server*, *Number of Players: 2* 로도 됩니다 (세션 없이 바로 연결).
+
+### EOS로 인터넷 플레이
+
+EOS는 P2P 연결을 중계해 주므로 포트 포워딩이 필요 없습니다. 무료입니다.
+
+1. [Epic Developer Portal](https://dev.epicgames.com/portal)에서 제품을 만들고 *Product Settings* 에서 Product ID, Sandbox ID, Deployment ID를 확인합니다.
+2. *Product Settings → Clients* 에서 클라이언트를 만듭니다. Client Policy는 **Peer2Peer**. Client ID와 Client Secret을 받습니다.
+3. *Epic Account Services* 에서 애플리케이션의 Permissions(Basic Profile, Online Presence, Friends)를 켜고, Linked Clients에 2번 클라이언트를 연결합니다.
+4. `Config/DefaultEngine.ini` 의 `+Artifacts=(...)` 줄을 채웁니다. `ClientEncryptionKey` 는 64자리 16진수 아무 값이면 됩니다.
+   ```powershell
+   -join ((1..64) | ForEach-Object { '{0:X}' -f (Get-Random -Maximum 16) })
+   ```
+   Client Secret이 이 파일에 들어가므로 공개 저장소라면 이 줄은 커밋하지 마세요.
+5. 포털에서 EOS SDK를 받아 `SDK/Tools` 의 Dev Auth Tool을 실행합니다. 포트 `6547` 로 열고 Epic 계정으로 로그인해 이름 `Player1` 로 credential을 추가합니다.
+   같은 PC에서 두 번째 게임을 띄우려면 다른 Epic 계정을 `Player2` 로 추가하고, 그 게임에는 `-RRDevAuth=Player2` 를 붙입니다.
+6. 한쪽에서 F1, 다른 쪽에서 F2. 왼쪽 위에 `HOSTING (EOS)` / `ONLINE (EOS)` 가 보이면 성공입니다.
+   실패하면 노란 상태 줄과 `Saved/Logs/RRRandom.log` 의 `LogEOS`, `LogOnline` 줄을 봅니다.
+
+- 친구 PC도 각자 Dev Auth Tool로 로그인합니다. 브랜드 심사를 받기 전에는 조직(Organization) 멤버 계정만 로그인될 수 있으니, 안 되면 친구 계정을 조직에 추가합니다.
+- 로그인 방식은 `Config/DefaultGame.ini` 의 `LoginType` 으로 바꿉니다 (`accountportal` 은 Epic 로그인 창). `-AUTH_TYPE=... -AUTH_LOGIN=... -AUTH_PASSWORD=...` 실행 옵션이 있으면 그것을 씁니다.
+
+### 동작 방식과 제약
+
+- 호스트는 혼자 할 때와 같은 게임을 돌리고, 플레이어가 들어오면 파랑, 빨강 순서로 봇 자리를 하나씩 대신합니다. 플레이어가 나가면 봇이 다시 그 자리를 채웁니다.
+- 참가자는 이동을 언리얼 기본 캐릭터 이동 예측으로 하고, 연사 쿨다운만 자기 쪽에서 계산해 발사·재장전·주사위·오르기를 호스트에 요청(RPC)합니다. 탄약과 무기는 호스트 값이 돌아와 표시됩니다.
+- 엄폐물 오르기는 캐릭터 이동 예측에 포함되지 않아서, 참가자가 오르는 동안과 끝난 뒤 0.5초는 호스트가 그 참가자의 위치를 그대로 믿습니다. 치트 방지가 약하므로 친구끼리 하는 것을 전제로 합니다.
+- 호스트가 나가면 게임이 끝나고 참가자는 혼자 플레이로 돌아갑니다 (호스트 이전 없음).
+- 과녁(`RRRandomDummy`)은 아직 동기화하지 않습니다 (기본 꺼짐).
 
 ## 코드 구조
 
 캐릭터와 과녁은 엔진에 들어 있는 언리얼 마네킹(`/Engine/Tutorial/.../TutorialTPP`)과 Idle/Walk 애니메이션을 써서 별도 에셋이 필요 없습니다.
 마네킹 자체 머티리얼은 색을 바꿀 수 없어서, 스켈레탈 메시에 쓸 수 있고 `DiffuseColor` 파라미터가 있는 `/Engine/TemplateResources/M_Template_Master` 를 입힙니다.
 
-- `ARRRandomGameMode` — 기본 폰과 컨트롤러 지정. 레벨에 엄폐물이 없으면 `CoverLayout` 대로 세우고, 양 팀 봇을 세우고 쓰러뜨린 수로 팀 점수를 셈. `bSpawnDummies` 면 과녁도 세움
-- `ARRRandomCharacter` — 플레이어와 봇이 같이 쓰는 탑뷰 마네킹 캐릭터. 팀, 체력/회복, 점프/엄폐물 오르기(`TryClimb`), 엄폐물 위에서만 가장자리로 걸어 내려가기, 15발 탄창/자동 연사/재장전(`StartReload`), `FireAt` 으로 투사체 발사, 쓰러짐(래그돌)과 시작 위치 부활
+- `ARRRandomGameMode` — 호스트에만 있음. 기본 폰과 컨트롤러 지정. 레벨에 엄폐물이 없으면 `CoverLayout` 대로 세움. 팀마다 `TeamSize` 개 자리를 두고 플레이어가 먼저 차지(`SpawnDefaultPawnFor`), 나머지는 봇으로 채움. 플레이어가 나가면(`Logout`) 봇이 대신함. 쓰러뜨린 수로 팀 점수를 올림. `bSpawnDummies` 면 과녁도 세움
+- `ARRRandomGameState` — 팀 점수. 모든 플레이어에게 복제됨
+- `URRRandomSessionSubsystem` — 온라인 플레이. EOS 로그인, 세션 만들기/찾기/참가/나가기, 리슨 서버로 맵 다시 열기. EOS를 못 쓰면 LAN. 게임 인스턴스에 붙어 있어서 맵이 바뀌어도 남음
+- `ARRRandomCharacter` — 플레이어와 봇이 같이 쓰는 탑뷰 마네킹 캐릭터. 팀, 체력/회복, 점프/엄폐물 오르기(`TryClimb`), 엄폐물 위에서만 가장자리로 걸어 내려가기, 15발 탄창/자동 연사/재장전(`StartReload`), `FireAt` 으로 투사체 발사, 쓰러짐(래그돌)과 시작 위치 부활. 체력/탄약/무기/생존 여부를 복제하고, 참가자는 `Server...` RPC로 발사/재장전/주사위/오르기를 요청
 - `ARRRandomAIController` — 봇. 보이는 적을 우선으로 가장 가까운 적을 쫓아 자기 선호 거리를 유지하며 좌우로 움직임. 엄폐물에 가리지 않을 때만 반응 시간 뒤 짧게 끊어 쏘고, 재장전 중이거나 체력 45% 아래, 또는 맞고 있는데 체력 70% 아래면 적 반대편 엄폐물 뒤로 숨음. 적이 안 보이면 미리 재장전. 싸움이 시작되면 주사위를 굴림. 내비메시 없이 직접 이동하고 앞에 엄폐물이 있으면 옆으로 비켜 감
-- `ARRRandomCover` — 엄폐물. 엔진 기본 큐브로 만든 블록이라 에셋이 필요 없음. 총알과 캐릭터를 막음. 피벗이 바닥 가운데라 `Size` 만 바꾸면 바닥에 선 채로 커짐
-- `ARRRandomPlayerController` — WASD 이동, 왼쪽 클릭 공격(누르고 있으면 자동 연사, 커서 아래 바닥/엄폐물 위 높이를 겨눔), R 재장전, Space 점프, E 주사위. 입력 에셋이 지정되지 않으면 코드에서 만들어 씀
-- `ARRRandomProjectile` — 직선으로 날아가 맞은 대상에 랜덤 데미지(8~15)를 줌. 같은 팀과 다른 투사체는 통과하고, 사거리만큼 날면 사라짐. 쓰러진 과녁 래그돌은 밀어냄. 무기 등급에 따라 빛(포인트 라이트), 총구/꼬리/맞은 곳 Niagara 이펙트를 붙임 (`TierLooks` 표)
+- `ARRRandomCover` — 엄폐물. 엔진 기본 큐브로 만든 블록이라 에셋이 필요 없음. 총알과 캐릭터를 막음. 피벗이 바닥 가운데라 `Size` 만 바꾸면 바닥에 선 채로 커짐. 호스트가 세운 엄폐물이 참가자에게도 같은 크기로 복제됨
+- `ARRRandomPlayerController` — WASD 이동, 왼쪽 클릭 공격(누르고 있으면 자동 연사, 커서 아래 바닥/엄폐물 위 높이를 겨눔), R 재장전, Space 점프, E 주사위, F1/F2/F3 온라인 열기/참가/나가기. 입력 에셋이 지정되지 않으면 코드에서 만들어 씀
+- `ARRRandomProjectile` — 직선으로 날아가 맞은 대상에 랜덤 데미지(8~15)를 줌. 같은 팀과 다른 투사체는 통과하고, 사거리만큼 날면 사라짐. 쓰러진 과녁 래그돌은 밀어냄. 무기 등급에 따라 빛(포인트 라이트), 총구/꼬리/맞은 곳 Niagara 이펙트를 붙임 (`TierLooks` 표). 호스트만 만들고 맞힘을 판정함. 참가자 화면의 총알은 충돌 없이 보이기만 하고, 맞은 위치가 복제되면(`bImpacted`) 이펙트를 냄. 내 총알은 노란색, 나머지는 팀 색
 - `FRRWeapon` (`RRRandomWeapon.h`) — 무기 하나를 캐릭터 기본값에 곱하는 배율로 표현. `Roll` 이 무기 종류와 눈금으로 랜덤 무기를 만들고, 한 발 데미지로 등급을 정함
 - `ARRRandomDummy` — 과녁 마네킹. 체력 100, 맞으면 빨갛게 번쩍이고 데미지 숫자가 뜸. 0이 되면 래그돌로 쓰러졌다가 3초 뒤 제자리에서 일어남
-- `URRRandomDiceBuffComponent` — 시간에 따라 게이지를 채워 주사위를 쌓고, E로 굴리면 눈금만큼 시간제 버프를 줌. 같은 능력치 버프는 더해짐. 무기 주사위가 나오면 `OnWeaponDie` 로 알려서 캐릭터가 무기를 바꿈
-- `ARRRandomHUD` — 캔버스에 단순하게 그림. 모든 캐릭터 머리 위에 무기, 체력, 주사위 개수/게이지, 버프, 굴림 결과, 데미지 숫자를 표시하고, 화면에는 팀 점수, 내 주사위 패널, 남은 탄약, 부활 카운트다운을 표시
+- `URRRandomDiceBuffComponent` — 시간에 따라 게이지를 채워 주사위를 쌓고, E로 굴리면 눈금만큼 시간제 버프를 줌. 같은 능력치 버프는 더해짐. 무기 주사위가 나오면 `OnWeaponDie` 로 알려서 캐릭터가 무기를 바꿈. 게이지, 주사위, 버프, 굴림 결과는 호스트가 계산해 복제함
+- `ARRRandomHUD` — 캔버스에 단순하게 그림. 모든 캐릭터 머리 위에 무기, 체력, 주사위 개수/게이지, 버프, 굴림 결과, 데미지 숫자를 표시하고, 화면에는 팀 점수, 내 주사위 패널, 남은 탄약, 부활 카운트다운, 왼쪽 위 온라인 상태를 표시
 - `URRRandomEventComponent` — 무해한 랜덤 효과(색, 크기, 점프, 속도, 회전)를 골라 적용. 원래 Space에 붙어 있었지만 Space가 점프가 되면서 지금은 입력에 연결돼 있지 않음 (`RollRandomEvent` 를 부르면 동작). 몸 색 머티리얼과 속도 배율은 여전히 이 컴포넌트를 거침

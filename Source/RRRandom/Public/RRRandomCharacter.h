@@ -29,6 +29,9 @@ struct FRRDamagePopup
  * swaps to a random gun when a weapon die comes up (back to the pistol on knockout), jumps and climbs onto cover,
  * and is knocked out at 0 health, getting back up at its starting spot after a delay.
  * Uses the engine's mannequin so it needs no project assets.
+ *
+ * Networking: the server (host) owns health, ammo, the gun, dice and knockouts and replicates them.
+ * The owning client predicts its fire cooldown and climbs locally, asking the server through RPCs.
  */
 UCLASS()
 class RRRANDOM_API ARRRandomCharacter : public ACharacter
@@ -39,6 +42,7 @@ public:
 	ARRRandomCharacter();
 
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
 
 	URRRandomEventComponent* GetRandomEvents() const { return RandomEvents; }
@@ -48,17 +52,21 @@ public:
 	 * Turns toward a target and shoots a projectile at it if the magazine has a round and the fire cooldown allows.
 	 * TargetLocation is where the target's capsule center is (or would be), so shots stay level between brawlers on
 	 * the same floor and angle up or down at ones on another level. Returns whether it fired.
+	 * On a client this only predicts the cooldown and asks the server to shoot.
 	 */
 	bool FireAt(const FVector& TargetLocation);
+
+	/** Spends every stored die. On a client, asks the server to roll. */
+	void RollDice();
 
 	/** Climbs onto cover in front if its top is within reach, otherwise jumps. */
 	virtual void Jump() override;
 	bool IsClimbing() const { return bClimbing; }
 
-	/** Starts refilling the magazine unless it is already full or reloading. Spare ammo is unlimited. */
+	/** Starts refilling the magazine unless it is already full or reloading. Spare ammo is unlimited. On a client, asks the server. */
 	void StartReload();
 
-	/** Set before the brawler begins play; changes its body color. */
+	/** Set on the server before the brawler finishes spawning; replicates and changes its body color. */
 	void SetTeam(int32 NewTeam) { Team = NewTeam; }
 	int32 GetTeam() const { return Team; }
 	static FLinearColor GetTeamColor(int32 InTeam);
@@ -103,8 +111,8 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Random")
 	TObjectPtr<URRRandomDiceBuffComponent> DiceBuffs;
 
-	/** 0 is the player's team, 1 the opponents. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Team")
+	/** 0 is the blue team (starting at the player start), 1 the red team. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_Team, Category = "Team")
 	int32 Team = 0;
 
 	UPROPERTY(EditAnywhere, Category = "Health")
@@ -165,6 +173,14 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	float MaxShotPitch = 50.f;
 
+	/** How early, in seconds, the server still accepts a client's shot; covers network jitter. */
+	UPROPERTY(EditAnywhere, Category = "Network")
+	float FireTimeSlack = 0.05f;
+
+	/** Seconds after a client's climb ends during which the server keeps trusting its position. */
+	UPROPERTY(EditAnywhere, Category = "Network")
+	float ClimbTrustMargin = 0.5f;
+
 	UPROPERTY(EditAnywhere, Category = "Animation")
 	TObjectPtr<UAnimSequence> IdleAnimation;
 
@@ -184,33 +200,97 @@ private:
 	void UpdateWalkSpeed();
 	void UpdateAmmoAndHealth(float DeltaSeconds);
 	void UpdateDamagePopups(float DeltaSeconds);
+	void AddDamagePopup(float Amount);
+	/** Seconds between shots with the current gun and attack speed buffs. */
+	float GetFireInterval() const;
+	/** Server side of FireAt. Slack lets a client's shot arrive a little before the server's cooldown ends. */
+	bool ShootAt(const FVector& TargetLocation, float CooldownSlack);
+	/** Turns the body toward the target and returns that flat direction. */
+	FVector FaceToward(const FVector& TargetLocation);
+	/** Server only: drops the brawler, scores for the other team and starts the respawn countdown. */
 	void KnockOut(const FVector& ShotDirection, ARRRandomCharacter* Attacker);
+	/** Ragdoll and no movement, on every machine. */
+	void ApplyKnockedOutBody();
+	/** Back on its feet with movement and collision, on every machine. */
+	void ApplyStandingBody();
+	void ApplyTeamColor();
 	void OnWeaponDie(int32 Face);
-	/** Starts climbing if cover is in front with a reachable top and room to stand there. */
+	/** Starts climbing if cover is in front with a reachable top and room to stand there. Only where the brawler is controlled. */
 	bool TryClimb();
+	void StartClimb(const FVector& Destination, const FVector& WallFacing);
 	void UpdateClimb(float DeltaSeconds);
+	/**
+	 * Server only: lets the owning client move the capsule itself. Character movement doesn't predict the climb,
+	 * so without this the server would keep snapping a climbing client back down.
+	 */
+	void SetTrustClientMovement(bool bTrust);
 	/** Lets brawlers step off the top of cover, but never off the edge of the arena floor. */
 	void UpdateLedgeWalking();
 	void Respawn();
+
+	UFUNCTION(Server, Reliable)
+	void ServerFireAt(FVector_NetQuantize TargetLocation);
+
+	UFUNCTION(Server, Reliable)
+	void ServerStartReload();
+
+	UFUNCTION(Server, Reliable)
+	void ServerRollDice();
+
+	UFUNCTION(Server, Reliable)
+	void ServerStartClimb(FVector_NetQuantize Destination, FVector_NetQuantizeNormal WallFacing);
+
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastDamagePopup(float Amount);
+
+	UFUNCTION()
+	void OnRep_Team();
+
+	UFUNCTION()
+	void OnRep_Alive();
 
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimSequence> CurrentAnimation;
 
 	TArray<FRRDamagePopup> DamagePopups;
+
+	UPROPERTY(Replicated)
 	float Health = 0.f;
+
+	UPROPERTY(Replicated)
 	FRRWeapon Weapon;
+
 	FRandomStream WeaponStream;
 	bool bClimbing = false;
 	float ClimbElapsed = 0.f;
 	FVector ClimbStart = FVector::ZeroVector;
 	FVector ClimbTarget = FVector::ZeroVector;
+	/** Server: seconds left trusting the owning client's position after its climb. */
+	float ClientTrustRemaining = 0.f;
 	/** When jump was last pressed; a jump that reaches a wall shortly after still climbs it. */
 	float JumpPressedTime = -UE_BIG_NUMBER;
+
+	UPROPERTY(Replicated)
 	int32 Ammo = 0;
+
+	UPROPERTY(Replicated)
 	bool bReloading = false;
+
+	/** Sent to the owner only, who shows the reload progress. */
+	UPROPERTY(Replicated)
 	float ReloadRemaining = 0.f;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Alive)
 	bool bAlive = true;
+
+	/** Which way the final shot threw the body, so every machine drops the ragdoll the same way. */
+	UPROPERTY(Replicated)
+	FVector_NetQuantizeNormal KnockdownDirection = FVector::ForwardVector;
+
+	/** Sent to the owner only, who shows the countdown. */
+	UPROPERTY(Replicated)
 	float RespawnRemaining = 0.f;
+
 	float LastCombatTime = -UE_BIG_NUMBER;
 	float NextFireTime = 0.f;
 	float BaseWalkSpeed = 0.f;

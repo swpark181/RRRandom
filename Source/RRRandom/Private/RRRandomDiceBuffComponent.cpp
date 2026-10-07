@@ -1,11 +1,30 @@
 #include "RRRandomDiceBuffComponent.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Net/UnrealNetwork.h"
 
 #define LOCTEXT_NAMESPACE "RRRandomDice"
 
 URRRandomDiceBuffComponent::URRRandomDiceBuffComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	SetIsReplicatedByDefault(true);
+}
+
+void URRRandomDiceBuffComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(URRRandomDiceBuffComponent, ActiveBuffs);
+	DOREPLIFETIME(URRRandomDiceBuffComponent, LastRoll);
+	DOREPLIFETIME(URRRandomDiceBuffComponent, RollCount);
+	DOREPLIFETIME(URRRandomDiceBuffComponent, GaugeTime);
+	DOREPLIFETIME(URRRandomDiceBuffComponent, Charges);
+}
+
+void URRRandomDiceBuffComponent::OnRep_RollCount()
+{
+	LastRollTime = GetWorld()->GetTimeSeconds();
 }
 
 void URRRandomDiceBuffComponent::BeginPlay()
@@ -26,6 +45,11 @@ void URRRandomDiceBuffComponent::TickComponent(float DeltaTime, ELevelTick TickT
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+	if (!GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
 	GaugeTime += DeltaTime;
 	if (GaugeFillTime > 0.f && GaugeTime >= GaugeFillTime)
 	{
@@ -42,13 +66,14 @@ void URRRandomDiceBuffComponent::TickComponent(float DeltaTime, ELevelTick TickT
 
 void URRRandomDiceBuffComponent::RollDice()
 {
-	if (Charges <= 0)
+	if (Charges <= 0 || !GetOwner()->HasAuthority())
 	{
 		return;
 	}
 
 	LastRoll.Reset();
 	LastRollTime = GetWorld()->GetTimeSeconds();
+	++RollCount;
 	int32 BestWeaponFace = 0;
 	for (; Charges > 0; --Charges)
 	{

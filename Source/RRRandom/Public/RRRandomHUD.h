@@ -11,7 +11,8 @@ class URRRandomDiceBuffComponent;
 /**
  * Plain canvas HUD. Over every brawler: health bar, stored dice count, dice gauge, active buffs,
  * the latest dice roll and damage numbers (plus ammo over the player's own brawler).
- * On screen: team score, the player's dice gauge and buff list, magazine count, and a respawn countdown.
+ * On screen: team score, the player's dice gauge and buff list, magazine count, a respawn countdown,
+ * and the online status with its keys in the top-left corner.
  */
 UCLASS()
 class RRRANDOM_API ARRRandomHUD : public AHUD
@@ -33,6 +34,8 @@ private:
 	/** Draws the gun's name chip ending at Right; nothing for the starting pistol. */
 	void DrawWeaponChip(const struct FRRWeapon& Weapon, float Right, float CenterY, UFont* Font);
 	void DrawScore();
+	/** Online role (solo, hosting, joined), the host/join/leave keys and the latest online status. */
+	void DrawOnlinePanel();
 	void DrawRespawnCountdown(const ARRRandomCharacter& Viewer);
 
 	/** Text with a dark drop shadow so it reads over any background. */

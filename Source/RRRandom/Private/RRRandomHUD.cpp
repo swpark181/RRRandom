@@ -1,12 +1,15 @@
 #include "RRRandomHUD.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomDiceBuffComponent.h"
-#include "RRRandomGameMode.h"
+#include "RRRandomGameState.h"
+#include "RRRandomSessionSubsystem.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/PlayerState.h"
 
 namespace
 {
@@ -73,6 +76,7 @@ void ARRRandomHUD::DrawHUD()
 	}
 
 	DrawScore();
+	DrawOnlinePanel();
 	if (Viewer)
 	{
 		DrawDicePanel(*Viewer->GetDiceBuffs());
@@ -376,17 +380,50 @@ void ARRRandomHUD::DrawDicePanel(const URRRandomDiceBuffComponent& Dice)
 	}
 }
 
+void ARRRandomHUD::DrawOnlinePanel()
+{
+	// Top left: how this game is connected, the keys, and the last thing the online code did
+	const URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>();
+	if (!Sessions)
+	{
+		return;
+	}
+
+	const AGameStateBase* State = GetWorld()->GetGameState();
+	const int32 Players = State ? State->PlayerArray.Num() : 1;
+	const TCHAR* Service = Sessions->IsUsingEOS() ? TEXT("EOS") : TEXT("LAN");
+	FString Connection;
+	switch (GetNetMode())
+	{
+	case NM_ListenServer: Connection = FString::Printf(TEXT("HOSTING (%s)  %d PLAYER%s"), Service, Players, Players == 1 ? TEXT("") : TEXT("S")); break;
+	case NM_Client: Connection = FString::Printf(TEXT("ONLINE (%s)  %d PLAYER%s"), Service, Players, Players == 1 ? TEXT("") : TEXT("S")); break;
+	default: Connection = FString::Printf(TEXT("SOLO  -  ONLINE VIA %s"), Service); break;
+	}
+
+	UFont* Font = GEngine->GetSmallFont();
+	float Y = Margin;
+	DrawShadowedText(Connection, FLinearColor::White, Margin, Y, Font);
+	Y += LineHeight;
+	DrawShadowedText(TEXT("[F1] HOST   [F2] JOIN   [F3] LEAVE"), FLinearColor::Gray, Margin, Y, Font);
+	Y += LineHeight;
+	if (!Sessions->GetStatus().IsEmpty())
+	{
+		DrawShadowedText(Sessions->GetStatus(), FLinearColor(1.f, 0.85f, 0.4f), Margin, Y, Font);
+	}
+}
+
 void ARRRandomHUD::DrawScore()
 {
-	const ARRRandomGameMode* GameMode = GetWorld()->GetAuthGameMode<ARRRandomGameMode>();
-	if (!GameMode)
+	// The game mode lives on the server only; the score reaches clients through the game state
+	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
+	if (!State)
 	{
 		return;
 	}
 
 	// "BLUE  2 : 1  RED" centered at the top
 	UFont* Font = GEngine->GetLargeFont();
-	const FString Parts[] = { TEXT("BLUE  "), FString::Printf(TEXT("%d : %d"), GameMode->GetTeamScore(0), GameMode->GetTeamScore(1)), TEXT("  RED") };
+	const FString Parts[] = { TEXT("BLUE  "), FString::Printf(TEXT("%d : %d"), State->GetTeamScore(0), State->GetTeamScore(1)), TEXT("  RED") };
 	const FLinearColor Colors[] = { ScoreColor(0), FLinearColor::White, ScoreColor(1) };
 	float Widths[3] = {};
 	float TotalWidth = 0.f;

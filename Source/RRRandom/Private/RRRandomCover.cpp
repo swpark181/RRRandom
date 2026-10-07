@@ -3,6 +3,7 @@
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -31,6 +32,21 @@ ARRRandomCover::ARRRandomCover()
 	{
 		Block->SetMaterial(0, ShapeMaterial.Object);
 	}
+	SetSize(Size);
+
+	// The game mode lays cover out on the server; clients need the same blocks to walk, climb and hide behind
+	bReplicates = true;
+}
+
+void ARRRandomCover::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(ARRRandomCover, Size);
+}
+
+void ARRRandomCover::OnRep_Size()
+{
 	SetSize(Size);
 }
 

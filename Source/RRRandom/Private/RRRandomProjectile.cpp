@@ -11,6 +11,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Net/UnrealNetwork.h"
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
@@ -133,11 +134,43 @@ ARRRandomProjectile::ARRRandomProjectile()
 	// Ticks only to drag a trail along
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
+
+	// The server's shots show up on every client; their spawn carries position, size and velocity
+	bReplicates = true;
+	SetReplicatingMovement(true);
+}
+
+void ARRRandomProjectile::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(ARRRandomProjectile, Tier);
+	DOREPLIFETIME(ARRRandomProjectile, bImpacted);
+	DOREPLIFETIME(ARRRandomProjectile, ImpactLocation);
+	DOREPLIFETIME(ARRRandomProjectile, ImpactNormal);
+}
+
+void ARRRandomProjectile::PostNetReceiveVelocity(const FVector& NewVelocity)
+{
+	Super::PostNetReceiveVelocity(NewVelocity);
+
+	// The client copy starts at the default speed; take the gun's real speed, which may be above the default cap
+	Movement->MaxSpeed = FMath::Max(Movement->MaxSpeed, NewVelocity.Size());
+	Movement->Velocity = NewVelocity;
 }
 
 void ARRRandomProjectile::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// The viewer's own shots keep their default color so they stand out; everyone else's take their team color
+	if (const ARRRandomCharacter* Shooter = Cast<ARRRandomCharacter>(GetInstigator()))
+	{
+		if (!Shooter->IsLocallyControlled() || !Shooter->IsPlayerControlled())
+		{
+			ShotColor = ARRRandomCharacter::GetTeamColor(Shooter->GetTeam());
+		}
+	}
 
 	const FTierLook& Look = TierLooks[static_cast<int32>(Tier)];
 	if (Look.GlowIntensity > 0.f)
@@ -154,35 +187,43 @@ void ARRRandomProjectile::BeginPlay()
 		SetActorTickEnabled(Trail != nullptr);
 	}
 
-	// Don't hit the shooter on the way out, nor anyone on the shooter's team
-	if (APawn* Shooter = GetInstigator())
+	if (HasAuthority())
 	{
-		Collision->IgnoreActorWhenMoving(Shooter, true);
-		if (const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(Shooter))
+		// Don't hit the shooter on the way out, nor anyone on the shooter's team
+		if (APawn* Shooter = GetInstigator())
 		{
-			for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+			Collision->IgnoreActorWhenMoving(Shooter, true);
+			if (const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(Shooter))
 			{
-				if (It->GetTeam() == Brawler->GetTeam())
+				for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 				{
-					Collision->IgnoreActorWhenMoving(*It, true);
+					if (It->GetTeam() == Brawler->GetTeam())
+					{
+						Collision->IgnoreActorWhenMoving(*It, true);
+					}
 				}
 			}
 		}
-	}
 
-	// Shots pass through each other: both ways, since shots already in the air don't know about this one
-	for (TActorIterator<ARRRandomProjectile> It(GetWorld()); It; ++It)
-	{
-		if (*It != this)
+		// Shots pass through each other: both ways, since shots already in the air don't know about this one
+		for (TActorIterator<ARRRandomProjectile> It(GetWorld()); It; ++It)
 		{
-			Collision->IgnoreActorWhenMoving(*It, true);
-			It->Collision->IgnoreActorWhenMoving(this, true);
+			if (*It != this)
+			{
+				Collision->IgnoreActorWhenMoving(*It, true);
+				It->Collision->IgnoreActorWhenMoving(this, true);
+			}
+		}
+
+		if (MaxRange > 0.f && GetSpeed() > 0.f)
+		{
+			SetLifeSpan(MaxRange / GetSpeed());
 		}
 	}
-
-	if (MaxRange > 0.f && GetSpeed() > 0.f)
+	else
 	{
-		SetLifeSpan(MaxRange / GetSpeed());
+		// Hits and lifetime are the server's call; this copy only shows where the shot is
+		Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 
 	if (UMaterialInstanceDynamic* Material = Visual->CreateAndSetMaterialInstanceDynamic(0))
@@ -245,8 +286,37 @@ void ARRRandomProjectile::SpawnImpactEffects(const FVector& Location, const FVec
 	}
 }
 
+void ARRRandomProjectile::HideAfterImpact()
+{
+	Movement->StopMovementImmediately();
+	Movement->Deactivate();
+	Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Visual->SetVisibility(false);
+	Glow->SetVisibility(false);
+	if (Trail)
+	{
+		Trail->Deactivate();
+		Trail = nullptr;
+	}
+	SetActorTickEnabled(false);
+}
+
+void ARRRandomProjectile::OnRep_Impact()
+{
+	if (bImpacted)
+	{
+		SpawnImpactEffects(ImpactLocation, ImpactNormal);
+		HideAfterImpact();
+	}
+}
+
 void ARRRandomProjectile::OnHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
+	if (bImpacted || !HasAuthority())
+	{
+		return;
+	}
+
 	if (OtherActor && OtherActor != GetInstigator())
 	{
 		const FVector ShotDirection = GetActorForwardVector();
@@ -258,6 +328,13 @@ void ARRRandomProjectile::OnHit(UPrimitiveComponent* HitComponent, AActor* Other
 			OtherComp->AddImpulseAtLocation(ShotDirection * ImpactImpulse, Hit.ImpactPoint, Hit.BoneName);
 		}
 	}
+
+	// Tell the clients where it landed, then go once they've had time to hear it
+	bImpacted = true;
+	ImpactLocation = Hit.ImpactPoint;
+	ImpactNormal = Hit.ImpactNormal;
+	ForceNetUpdate();
 	SpawnImpactEffects(Hit.ImpactPoint, Hit.ImpactNormal);
-	Destroy();
+	HideAfterImpact();
+	SetLifeSpan(ImpactLingerTime);
 }
