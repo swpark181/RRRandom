@@ -19,7 +19,7 @@
 
 ## 7차 — 거인화
 
-- 아직 커밋 안 됨 (6차와 함께).
+- 커밋 `4ee3a8e` (6차 타이틀과 함께).
 - 주사위: `FRRDiceRoll::bGiant`, `GiantDieChance` 0.1, `OnGiantDie(Face)` (무기 주사위와 같은 방식, 가장 높은 눈 한 번). 한 번의 `FRand` 로 무기(< 1/6) / 거인(< 1/6 + 0.1) / 버프를 가름.
 - 캐릭터: `bGiant`, `GiantRemaining` 복제 (서버가 줄임). `UpdateGiantSize` 가 모든 기기에서 액터 스케일을 0.3초에 걸쳐 1 ↔ 1.5 로 바꿈. `SetBodyScale` 은 서버/조종하는 클라이언트에서만 캡슐 반높이 변화만큼 Z를 올려 발을 바닥에 둠 (나머지는 위치 복제로 따라옴). 카메라 붐은 `SetUsingAbsoluteScale(true)` 라 시야 그대로.
 - 파워: 투사체 `DamageMultiplier` 에 `GiantDamageMultiplier`(1.5) 곱함. 방어: `TakeDamage` 에서 `Super::TakeDamage` 전에 `GiantDamageTakenMultiplier`(0.5) 곱함 → 데미지 숫자도 줄어든 값.
@@ -33,7 +33,7 @@
 
 ## 6차 — 임시 타이틀 화면
 
-- 아직 커밋 안 됨 (5차는 `82f6d28` 로 커밋됨).
+- 커밋 `4ee3a8e` (7차 거인화와 함께).
 - 타이틀 맵 = 엔진의 빈 맵 `/Engine/Maps/Entry` (`GameDefaultMap`). `GameModeMapPrefixes` 로 이름이 `Entry` 로 시작하는 맵에 `ARRRandomTitleGameMode` (폰 없음, `PlayerCanRestart` false). 맵 에셋을 만들지 않으려고 이렇게 함.
 - 새 파일: `RRRandomTitleGameMode`, `RRRandomTitlePlayerController` (메뉴 상태 + Enhanced Input: W/S/화살표, Enter/Space, Esc, 왼쪽 클릭), `RRRandomTitleHUD` (캔버스. 버튼 사각형을 저장해 두고 마우스가 **움직였을 때만** 그 버튼을 선택 → 키보드 선택을 가만히 있는 마우스가 덮어쓰지 않음).
 - 메뉴: SINGLE PLAY / NETWORK(→ HOST GAME / JOIN GAME / BACK) / QUIT. 진행 중엔 버튼이 흐려지고 Esc = 취소.
