@@ -1,8 +1,7 @@
 #include "RRRandomEventComponent.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/MeshComponent.h"
 #include "Engine/Engine.h"
 #include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "TimerManager.h"
 
@@ -10,7 +9,6 @@
 
 namespace
 {
-	const FName ColorParameter(TEXT("Color"));
 	constexpr float SpinSpeed = 720.f;
 }
 
@@ -34,21 +32,19 @@ void URRRandomEventComponent::BeginPlay()
 	}
 
 	AActor* Owner = GetOwner();
-	TArray<UStaticMeshComponent*> OwnerMeshes;
-	Owner->GetComponents<UStaticMeshComponent>(OwnerMeshes);
-	for (UStaticMeshComponent* Mesh : OwnerMeshes)
+	TArray<UMeshComponent*> OwnerMeshes;
+	Owner->GetComponents<UMeshComponent>(OwnerMeshes);
+	for (UMeshComponent* Mesh : OwnerMeshes)
 	{
 		Meshes.Add(Mesh);
 		BaseMeshScales.Add(Mesh->GetRelativeScale3D());
-		if (UMaterialInstanceDynamic* Material = Mesh->CreateAndSetMaterialInstanceDynamic(0))
+		for (int32 Slot = 0; Slot < Mesh->GetNumMaterials(); ++Slot)
 		{
-			Materials.Add(Material);
+			if (UMaterialInstanceDynamic* Material = Mesh->CreateAndSetMaterialInstanceDynamic(Slot))
+			{
+				Materials.Add(Material);
+			}
 		}
-	}
-
-	if (const ACharacter* Character = Cast<ACharacter>(Owner))
-	{
-		BaseWalkSpeed = Character->GetCharacterMovement()->MaxWalkSpeed;
 	}
 }
 
@@ -77,7 +73,7 @@ FText URRRandomEventComponent::ApplyRandomColor()
 	const FLinearColor Color = FLinearColor::MakeFromHSV8(static_cast<uint8>(Stream.RandRange(0, 255)), 200, 255);
 	for (UMaterialInstanceDynamic* Material : Materials)
 	{
-		Material->SetVectorParameterValue(ColorParameter, Color);
+		Material->SetVectorParameterValue(ColorParameterName, Color);
 	}
 	return LOCTEXT("Color", "New color!");
 }
@@ -105,16 +101,9 @@ FText URRRandomEventComponent::ApplyHop()
 
 FText URRRandomEventComponent::ApplyRandomSpeed()
 {
-	ACharacter* Character = Cast<ACharacter>(GetOwner());
-	if (!Character)
-	{
-		return FText::GetEmpty();
-	}
-
-	const float Multiplier = Stream.FRandRange(0.5f, 1.8f);
-	Character->GetCharacterMovement()->MaxWalkSpeed = BaseWalkSpeed * Multiplier;
+	SpeedMultiplier = Stream.FRandRange(0.5f, 1.8f);
 	GetWorld()->GetTimerManager().SetTimer(SpeedResetTimer, this, &URRRandomEventComponent::ResetSpeed, SpeedEffectDuration);
-	return Multiplier >= 1.f ? LOCTEXT("Fast", "Zoom zoom!") : LOCTEXT("Slow", "Sleepy feet...");
+	return SpeedMultiplier >= 1.f ? LOCTEXT("Fast", "Zoom zoom!") : LOCTEXT("Slow", "Sleepy feet...");
 }
 
 FText URRRandomEventComponent::ApplySpin()
@@ -126,10 +115,7 @@ FText URRRandomEventComponent::ApplySpin()
 
 void URRRandomEventComponent::ResetSpeed()
 {
-	if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
-	{
-		Character->GetCharacterMovement()->MaxWalkSpeed = BaseWalkSpeed;
-	}
+	SpeedMultiplier = 1.f;
 }
 
 void URRRandomEventComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)

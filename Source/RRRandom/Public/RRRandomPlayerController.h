@@ -9,8 +9,8 @@ class UInputMappingContext;
 struct FInputActionValue;
 
 /**
- * Top-down controls: hold left mouse to follow the cursor, click to walk to a spot,
- * WASD to walk, Space to roll a random event.
+ * Top-down controls: WASD to walk, left mouse to shoot toward the cursor (hold for full auto), R to reload,
+ * Space to jump (climbing onto cover when facing it), E to roll the stored buff dice.
  * Input assets are built in code when none are assigned, so the project runs without .uasset files.
  */
 UCLASS()
@@ -21,41 +21,38 @@ class RRRANDOM_API ARRRandomPlayerController : public APlayerController
 public:
 	ARRRandomPlayerController();
 
+	/** The capsule-center point a shot along this cursor ray should go for. */
+	FVector GetAimTarget(const FVector& CursorOrigin, const FVector& CursorDirection) const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
-	virtual void PlayerTick(float DeltaTime) override;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputMappingContext> MappingContext;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
-	TObjectPtr<UInputAction> ClickAction;
+	TObjectPtr<UInputAction> FireAction;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> MoveAction;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
-	TObjectPtr<UInputAction> RollAction;
+	TObjectPtr<UInputAction> JumpAction;
 
-	/** Presses shorter than this count as a click and walk to the clicked spot. */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	float ShortPressThreshold = 0.3f;
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> DiceAction;
 
-	/** How close to the clicked spot counts as arrived. */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	float AcceptanceRadius = 30.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> ReloadAction;
 
 private:
 	void CreateDefaultInputAssets();
 
-	void OnClickStarted();
-	void OnClickTriggered();
-	void OnClickReleased();
+	void OnFire();
 	void OnMove(const FInputActionValue& Value);
-	void OnRoll();
-
-	FVector CachedDestination = FVector::ZeroVector;
-	float FollowTime = 0.f;
-	bool bWalkingToDestination = false;
+	void OnJump();
+	void OnStopJumping();
+	void OnRollDice();
+	void OnReload();
 };

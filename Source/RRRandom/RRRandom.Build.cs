@@ -12,7 +12,10 @@ public class RRRandom : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"InputCore",
-			"EnhancedInput"
+			"EnhancedInput",
+			"AIModule",
+			"GameplayTasks",
+			"Niagara"
 		});
 	}
 }
