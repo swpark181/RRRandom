@@ -122,9 +122,18 @@ void URRRandomSessionSubsystem::OnArenaReady()
 	const UWorld* World = GetGameInstance()->GetWorld();
 	if (World && World->GetNetMode() == NM_Client)
 	{
-		SetStatus(TEXT("Joined the game. F3 leaves it."));
+		SetStatus(TEXT("Joined the game. F3 plays alone, Esc goes to the title."));
 	}
+	RunStartupCommand();
+}
 
+void URRRandomSessionSubsystem::OnTitleReady()
+{
+	RunStartupCommand();
+}
+
+void URRRandomSessionSubsystem::RunStartupCommand()
+{
 	if (bStartupCommandDone)
 	{
 		return;
@@ -139,6 +148,16 @@ void URRRandomSessionSubsystem::OnArenaReady()
 	{
 		JoinGame(StartupJoinRetries);
 	}
+	else if (FParse::Param(FCommandLine::Get(), TEXT("RRSolo")) && IsOnTitle())
+	{
+		PlaySolo();
+	}
+}
+
+bool URRRandomSessionSubsystem::IsOnTitle() const
+{
+	const UWorld* World = GetGameInstance()->GetWorld();
+	return World && UWorld::RemovePIEPrefix(World->GetOutermost()->GetName()) == TitleMap;
 }
 
 void URRRandomSessionSubsystem::HostGame()
@@ -162,23 +181,62 @@ void URRRandomSessionSubsystem::JoinGame(int32 Retries)
 	Continue();
 }
 
-void URRRandomSessionSubsystem::LeaveGame()
+void URRRandomSessionSubsystem::PlaySolo()
+{
+	LeaveThen(EAfterLeave::PlaySolo);
+}
+
+void URRRandomSessionSubsystem::ReturnToTitle()
+{
+	LeaveThen(EAfterLeave::Title);
+}
+
+void URRRandomSessionSubsystem::CancelPending()
+{
+	if (!IsBusy())
+	{
+		return;
+	}
+	// Callbacks still on their way are ignored once nothing is pending; a session they leave behind is destroyed by the next host or join
+	StopPending();
+	SetStatus(TEXT("Cancelled"));
+}
+
+void URRRandomSessionSubsystem::StopPending()
 {
 	Pending = EPendingAction::None;
 	JoinRetriesLeft = 0;
 	GetGameInstance()->GetTimerManager().ClearTimer(RetryTimer);
+}
+
+void URRRandomSessionSubsystem::LeaveThen(EAfterLeave Next)
+{
+	StopPending();
 
 	BindOnlineDelegates();
 	IOnlineSessionPtr Sessions = GetSessions();
 	if (Sessions && Sessions->GetNamedSession(NAME_GameSession))
 	{
 		SetStatus(TEXT("Leaving the game..."));
-		bReturnToSoloAfterDestroy = true;
+		AfterLeave = Next;
 		Sessions->DestroySession(NAME_GameSession);
 		return;
 	}
-	SetStatus(TEXT("Playing alone"));
-	OpenArena(false);
+	FinishLeaving(Next);
+}
+
+void URRRandomSessionSubsystem::FinishLeaving(EAfterLeave Next)
+{
+	if (Next == EAfterLeave::PlaySolo)
+	{
+		SetStatus(TEXT("Playing alone"));
+		OpenArena(false);
+	}
+	else if (Next == EAfterLeave::Title)
+	{
+		Status.Reset();
+		OpenTitle();
+	}
 }
 
 void URRRandomSessionSubsystem::Continue()
@@ -196,7 +254,7 @@ void URRRandomSessionSubsystem::Continue()
 	if (Sessions->GetNamedSession(NAME_GameSession))
 	{
 		SetStatus(TEXT("Leaving the previous game..."));
-		bReturnToSoloAfterDestroy = false;
+		AfterLeave = EAfterLeave::Nothing;
 		Sessions->DestroySession(NAME_GameSession);
 		return;
 	}
@@ -295,7 +353,7 @@ void URRRandomSessionSubsystem::OnCreateSessionComplete(FName SessionName, bool 
 		return;
 	}
 	Pending = EPendingAction::None;
-	SetStatus(FString::Printf(TEXT("Hosting (%s). Others can join with F2."), IsUsingEOS() ? TEXT("EOS") : TEXT("LAN")));
+	SetStatus(FString::Printf(TEXT("Hosting (%s). Others can join now."), IsUsingEOS() ? TEXT("EOS") : TEXT("LAN")));
 	OpenArena(true);
 }
 
@@ -338,7 +396,7 @@ void URRRandomSessionSubsystem::OnFindSessionsComplete(bool bWasSuccessful)
 		GetGameInstance()->GetTimerManager().SetTimer(RetryTimer, FTimerDelegate::CreateUObject(this, &URRRandomSessionSubsystem::FindSessions), JoinRetryDelay, false);
 		return;
 	}
-	Fail(bWasSuccessful ? TEXT("No game found. Has someone pressed F1 to host?") : TEXT("Searching for games failed"));
+	Fail(bWasSuccessful ? TEXT("No game found. Has someone hosted one?") : TEXT("Searching for games failed"));
 }
 
 void URRRandomSessionSubsystem::OnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result)
@@ -364,11 +422,11 @@ void URRRandomSessionSubsystem::OnJoinSessionComplete(FName SessionName, EOnJoin
 
 void URRRandomSessionSubsystem::OnDestroySessionComplete(FName SessionName, bool bWasSuccessful)
 {
-	if (bReturnToSoloAfterDestroy)
+	if (AfterLeave != EAfterLeave::Nothing)
 	{
-		bReturnToSoloAfterDestroy = false;
-		SetStatus(TEXT("Playing alone"));
-		OpenArena(false);
+		const EAfterLeave Next = AfterLeave;
+		AfterLeave = EAfterLeave::Nothing;
+		FinishLeaving(Next);
 		return;
 	}
 	if (Pending != EPendingAction::None)
@@ -405,7 +463,12 @@ void URRRandomSessionSubsystem::OnTravelFailure(UWorld* World, ETravelFailure::T
 FString URRRandomSessionSubsystem::GetArenaMap() const
 {
 	const UWorld* World = GetGameInstance()->GetWorld();
-	return World ? UWorld::RemovePIEPrefix(World->GetOutermost()->GetName()) : FString();
+	return World && !IsOnTitle() ? UWorld::RemovePIEPrefix(World->GetOutermost()->GetName()) : ArenaMap;
+}
+
+void URRRandomSessionSubsystem::OpenTitle()
+{
+	UGameplayStatics::OpenLevel(GetGameInstance(), FName(*TitleMap));
 }
 
 void URRRandomSessionSubsystem::OpenArena(bool bListen)

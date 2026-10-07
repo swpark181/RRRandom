@@ -64,6 +64,11 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 		JoinAction = NewObject<UInputAction>(this, TEXT("IA_Join"));
 		JoinAction->ValueType = EInputActionValueType::Boolean;
 	}
+	if (!TitleAction)
+	{
+		TitleAction = NewObject<UInputAction>(this, TEXT("IA_Title"));
+		TitleAction->ValueType = EInputActionValueType::Boolean;
+	}
 	if (!LeaveAction)
 	{
 		LeaveAction = NewObject<UInputAction>(this, TEXT("IA_Leave"));
@@ -82,6 +87,7 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 	MappingContext->MapKey(HostAction, EKeys::F1);
 	MappingContext->MapKey(JoinAction, EKeys::F2);
 	MappingContext->MapKey(LeaveAction, EKeys::F3);
+	MappingContext->MapKey(TitleAction, EKeys::Escape);
 
 	// Move value: X = right, Y = forward. Keys report on X, so W/S are swizzled onto Y.
 	MappingContext->MapKey(MoveAction, EKeys::D);
@@ -137,6 +143,7 @@ void ARRRandomPlayerController::SetupInputComponent()
 	EnhancedInput->BindAction(HostAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRHost);
 	EnhancedInput->BindAction(JoinAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRJoin);
 	EnhancedInput->BindAction(LeaveAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRLeave);
+	EnhancedInput->BindAction(TitleAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRTitle);
 }
 
 void ARRRandomPlayerController::RRHost()
@@ -159,7 +166,15 @@ void ARRRandomPlayerController::RRLeave()
 {
 	if (URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>())
 	{
-		Sessions->LeaveGame();
+		Sessions->PlaySolo();
+	}
+}
+
+void ARRRandomPlayerController::RRTitle()
+{
+	if (URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>())
+	{
+		Sessions->ReturnToTitle();
 	}
 }
 

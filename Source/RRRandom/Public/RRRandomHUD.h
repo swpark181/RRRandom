@@ -27,9 +27,11 @@ private:
 	void DrawAmmoBar(const ARRRandomCharacter& Brawler, float Left, float Top);
 	/** Draws the buff chips ending just above Bottom and returns the new top edge. */
 	float DrawBuffChips(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom, UFont* Font);
+	/** Draws the GIANT chip ending just above Bottom and returns the new top edge. */
+	float DrawGiantChip(const ARRRandomCharacter& Brawler, float CenterX, float Bottom, UFont* Font);
 	void DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom, UFont* Font);
 	void DrawDamagePopups(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer);
-	void DrawDicePanel(const URRRandomDiceBuffComponent& Dice);
+	void DrawDicePanel(const ARRRandomCharacter& Viewer);
 	void DrawAmmoPanel(const ARRRandomCharacter& Brawler);
 	/** Draws the gun's name chip ending at Right; nothing for the starting pistol. */
 	void DrawWeaponChip(const struct FRRWeapon& Weapon, float Right, float CenterY, UFont* Font);

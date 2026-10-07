@@ -1,6 +1,6 @@
 # 작업 이어하기 메모 — 팀전 프로토타입 (FPS식 사격 + 엄폐물)
 
-최종 업데이트: 2026-10-07
+최종 업데이트: 2026-10-07 (6차)
 
 ## 요청 내용
 
@@ -14,10 +14,41 @@
 - (4차) Space = 점프. 엄폐물 앞에서 점프하면 기어 올라감. 위에서 쏘면 아래층도 맞힘.
 - (4차 수정) "위에서 아래 적을 못 맞힘" 버그 수정.
 - (5차) 서버 없이 소규모 네트워크 플레이. EOS(Epic Online Services) P2P 기준, 테스트 가능한 상태까지. 게임 전체 동기화.
+- (6차) 임시 타이틀 화면. 싱글 / 네트워크를 골라 시작.
+- (7차) 랜덤(주사위)에 거인화 추가. 거인이 되면 방어력과 파워가 좋아짐.
+
+## 7차 — 거인화
+
+- 아직 커밋 안 됨 (6차와 함께).
+- 주사위: `FRRDiceRoll::bGiant`, `GiantDieChance` 0.1, `OnGiantDie(Face)` (무기 주사위와 같은 방식, 가장 높은 눈 한 번). 한 번의 `FRand` 로 무기(< 1/6) / 거인(< 1/6 + 0.1) / 버프를 가름.
+- 캐릭터: `bGiant`, `GiantRemaining` 복제 (서버가 줄임). `UpdateGiantSize` 가 모든 기기에서 액터 스케일을 0.3초에 걸쳐 1 ↔ 1.5 로 바꿈. `SetBodyScale` 은 서버/조종하는 클라이언트에서만 캡슐 반높이 변화만큼 Z를 올려 발을 바닥에 둠 (나머지는 위치 복제로 따라옴). 카메라 붐은 `SetUsingAbsoluteScale(true)` 라 시야 그대로.
+- 파워: 투사체 `DamageMultiplier` 에 `GiantDamageMultiplier`(1.5) 곱함. 방어: `TakeDamage` 에서 `Super::TakeDamage` 전에 `GiantDamageTakenMultiplier`(0.5) 곱함 → 데미지 숫자도 줄어든 값.
+- KO: `bGiant` 끔. 쓰러진 동안엔 크기를 안 건드림 (래그돌 스케일 변경 피함). `ApplyStandingBody` 에서 스케일을 맞춤 → 부활 시 원래 크기.
+- 총구 높이(`MuzzleOffset`)는 스케일 안 함. 거인 캡슐 중심이 48 높아도 `SameLevelHeight`(50) 안이라 같은 층 사격은 그대로 수평.
+- HUD: 굴림 팝업 `N GIANT` (하늘색 `GetGiantColor`), 머리 위 `GIANT` 칩, 왼쪽 아래 패널 첫 줄. `DrawDicePanel` 인자가 캐릭터로 바뀜.
+- 로그: `RRRandom: <이름> (team N) turns giant for N s.`
+- 확인 (2026-10-07, `-RRSolo`): 빌드 경고 없음. 약 40초 동안 봇/플레이어 6명 중 5번 거인화 로그. 플레이어 E 굴림 `5 GIANT` → 몸 커짐(아군 대비), 머리 위 칩, 왼쪽 아래 `GIANT ATK x1.5 DMG TAKEN x0.5 10s` (스크린샷). 그 뒤 KO → 부활 시 원래 크기, PISTOL.
+- 확인 못 한 것: 시간이 다 돼서 줄어드는 장면(KO 로 먼저 끝남), 데미지 수치 실측(1.5배/절반), 네트워크 참가자 쪽 크기/위치 보정, 엄폐물 옆에서 커질 때 끼임.
+- 밸런스 메모: 40초에 5번이면 자주 나오는 편. `GiantDieChance` 로 조절.
+
+## 6차 — 임시 타이틀 화면
+
+- 아직 커밋 안 됨 (5차는 `82f6d28` 로 커밋됨).
+- 타이틀 맵 = 엔진의 빈 맵 `/Engine/Maps/Entry` (`GameDefaultMap`). `GameModeMapPrefixes` 로 이름이 `Entry` 로 시작하는 맵에 `ARRRandomTitleGameMode` (폰 없음, `PlayerCanRestart` false). 맵 에셋을 만들지 않으려고 이렇게 함.
+- 새 파일: `RRRandomTitleGameMode`, `RRRandomTitlePlayerController` (메뉴 상태 + Enhanced Input: W/S/화살표, Enter/Space, Esc, 왼쪽 클릭), `RRRandomTitleHUD` (캔버스. 버튼 사각형을 저장해 두고 마우스가 **움직였을 때만** 그 버튼을 선택 → 키보드 선택을 가만히 있는 마우스가 덮어쓰지 않음).
+- 메뉴: SINGLE PLAY / NETWORK(→ HOST GAME / JOIN GAME / BACK) / QUIT. 진행 중엔 버튼이 흐려지고 Esc = 취소.
+- 세션 서브시스템: `LeaveGame` → `PlaySolo` 로 이름 바꿈, `ReturnToTitle`, `CancelPending`, `OnTitleReady`, `IsOnTitle` 추가. 나간 뒤 어디로 갈지는 `bReturnToSoloAfterDestroy` 대신 `EAfterLeave`(Nothing/PlaySolo/Title). Config `TitleMap`, `ArenaMap` (`DefaultGame.ini`). `GetArenaMap` 은 타이틀이면 `ArenaMap`, 아레나 안이면 지금 맵 (F1 동작 그대로).
+- 아레나: Esc(콘솔 `RRTitle`) → 타이틀. HUD 왼쪽 위 키 안내에 `[ESC] TITLE`.
+- 연결이 끊기면 엔진이 기본 맵으로 보내므로 이제 참가자는 타이틀로 감 (전엔 혼자 플레이 아레나).
+- 실행 옵션 `-RRSolo` 추가 (타이틀 건너뛰고 혼자 플레이). `-RRHost`/`-RRJoin` 은 타이틀에서 바로 실행됨.
+- **`RRRandom.Build.cs` 에 `bUseUnity = false`**: 파일이 늘어 unity 묶음이 바뀌자 `ColorParameter`/`RagdollProfile` (Character/Projectile/Cover/Dummy 각각 익명 namespace, 값이 다름) 이 충돌해 빌드 실패. 모듈이 작아서 unity 를 끔.
+- 확인 (2026-10-07, `-game` 두 인스턴스, 키는 PostMessage 로 보냄): 빌드 경고 없음. 타이틀 표시(로그 `Game class is 'RRRandomTitleGameMode'`), 클릭으로 SINGLE PLAY → 아레나, 아레나 Esc → 타이틀, NETWORK 화면(`ONLINE VIA LAN` 표시), 호스트 없이 JOIN → `Looking for a game...` + `[ESC] CANCEL` → `No game found...`, 인스턴스 1 HOST GAME → 리슨 서버, 인스턴스 2 JOIN GAME → 호스트 로그 `Join succeeded`, 빨강 0번 자리. 호스트 Esc → 참가자 타이틀에 `Disconnected: ...`. 두 창 QUIT 로 종료.
+- 확인 못 한 것: Esc 취소를 진행 중에 실제로 누르는 경우, EOS 경로(키 없음), PIE 에서의 동작 (PIE는 지금 레벨에서 바로 시작하므로 타이틀 안 거침, Esc 는 PIE 종료).
+- 캔버스 기본 폰트를 4배로 키워서 제목 글자가 약간 흐림. 임시 화면이라 그대로 둠.
 
 ## 5차 — 온라인 플레이 (EOS P2P + LAN 대체)
 
-- 작업 전 상태를 커밋 `91cb123` 으로 저장해 둠. 5차 변경은 아직 커밋 안 됨.
+- 작업 전 상태를 커밋 `91cb123` 으로 저장해 둠. 5차 변경은 `82f6d28` 로 커밋됨.
 - 구조: 리슨 서버(호스트가 서버). 체력/탄약/무기/주사위/KO/점수/봇은 호스트 권한, 복제. 자세한 내용은 README "온라인 플레이".
 - `URRRandomSessionSubsystem` (새 파일): F1 호스트 / F2 참가 / F3 나가기, 실행 옵션 `-RRHost` `-RRJoin` `-RRLan` `-RRDevAuth=`. EOS면 Dev Auth Tool 로그인 → EOS 세션(로비 아님, presence 없음) → `?listen` 으로 맵 다시 열기. 참가는 `GetResolvedConnectString` → `ClientTravel`.
 - EOS 키(`DefaultEngine.ini` 의 `+Artifacts`)가 비어 있어서 EOS 초기화가 실패하고("ProductId cannot be null") 엔진이 Null 서브시스템으로 대체함 → LAN 세션 + IP(7777). 게임 코드는 그대로.
@@ -210,7 +241,8 @@
 
 - [ ] EOS 키 넣고 Dev Auth Tool 두 계정으로 EOS 경로 확인 (README "EOS로 인터넷 플레이")
 - [ ] 지연 상황 테스트: 실행 옵션 `-PktLag=150` 등으로 사격/오르기 체감 확인
-- [ ] 과녁(`RRRandomDummy`) 동기화, 호스트 이전, 로비 UI(지금은 첫 번째 게임에 자동 참가)
+- [ ] 과녁(`RRRandomDummy`) 동기화, 호스트 이전, 로비 UI(지금은 첫 번째 게임에 자동 참가 — 타이틀 JOIN 에 게임 목록을 보여 주는 식으로 확장 가능)
+- [ ] 제대로 된 타이틀 (UMG 위젯/폰트, 배경 맵), 게임 중 일시정지 메뉴
 
 - [ ] 실제 플레이로 마우스 사격, 굴림 팝업, 데미지 숫자, 밸런스(체력/재장전/봇 난이도) 확인
 - [x] 엄폐물 + 봇 시야 체크 (덤불은 아직)

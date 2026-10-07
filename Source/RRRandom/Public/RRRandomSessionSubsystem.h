@@ -19,7 +19,8 @@ class UNetDriver;
  * games are found by LAN broadcast and joined over plain IP, which is enough to test on one PC or a home network.
  *
  * Lives on the game instance so it survives the map reloads that hosting and joining cause.
- * Command line: -RRHost hosts and -RRJoin joins as soon as the arena loads; -RRDevAuth=Name picks the
+ * The game starts on the title screen (TitleMap); playing alone or hosting from there opens ArenaMap.
+ * Command line: -RRSolo plays alone, -RRHost hosts and -RRJoin joins as soon as the game starts; -RRDevAuth=Name picks the
  * EOS Dev Auth Tool credential, and -AUTH_TYPE/-AUTH_LOGIN/-AUTH_PASSWORD are passed through to EOS.
  */
 UCLASS(Config = Game)
@@ -37,11 +38,23 @@ public:
 	/** Logs in if needed, finds a game and joins the first one. Retries a few times when nothing is found yet. */
 	void JoinGame(int32 Retries = 0);
 
-	/** Ends or leaves the current game and goes back to playing alone. */
-	void LeaveGame();
+	/** Ends or leaves any online game and plays alone in the arena (the title's SINGLE PLAY, F3 in the arena). */
+	void PlaySolo();
 
-	/** Called by the local player controller whenever an arena has loaded: updates the status, and the first time runs -RRHost or -RRJoin. */
+	/** Ends or leaves any online game and goes back to the title screen. */
+	void ReturnToTitle();
+
+	/** Stops a host or join that is still logging in or searching. */
+	void CancelPending();
+
+	/** Called by the local player controller whenever an arena has loaded: updates the status, and the first time runs -RRSolo, -RRHost or -RRJoin. */
 	void OnArenaReady();
+
+	/** Called by the title screen's player controller once it is up; the first time runs -RRSolo, -RRHost or -RRJoin. */
+	void OnTitleReady();
+
+	/** True while the title map is loaded. */
+	bool IsOnTitle() const;
 
 	/** What the last step did, for the HUD. */
 	const FString& GetStatus() const { return Status; }
@@ -52,6 +65,14 @@ public:
 	bool IsUsingEOS() const;
 
 protected:
+	/** The title screen's map. Its name picks the title game mode (GameModeMapPrefixes in DefaultEngine.ini). */
+	UPROPERTY(Config)
+	FString TitleMap = TEXT("/Engine/Maps/Entry");
+
+	/** The map played on when starting from the title. Hosting from inside an arena keeps that arena. */
+	UPROPERTY(Config)
+	FString ArenaMap = TEXT("/Engine/Maps/Templates/Template_Default");
+
 	/**
 	 * EOS login: "developer" uses the EOS Dev Auth Tool (DevAuthHost + DevAuthCredential),
 	 * "accountportal" opens the Epic account login, "persistentauth" reuses a saved login.
@@ -86,11 +107,26 @@ private:
 		Join,
 	};
 
+	/** Where to go once the current session is gone. */
+	enum class EAfterLeave : uint8
+	{
+		Nothing,
+		PlaySolo,
+		Title,
+	};
+
 	IOnlineSubsystem* GetOnline() const;
 	TSharedPtr<IOnlineSession, ESPMode::ThreadSafe> GetSessions() const;
 	void BindOnlineDelegates();
 	void SetStatus(const FString& NewStatus);
 	void Fail(const FString& Reason);
+	/** Forgets a pending host or join without a status message. */
+	void StopPending();
+	/** Runs -RRSolo, -RRHost or -RRJoin the first time a map is ready. */
+	void RunStartupCommand();
+	/** Leaves the session (if any), then goes on to Next. */
+	void LeaveThen(EAfterLeave Next);
+	void FinishLeaving(EAfterLeave Next);
 
 	/** Moves the pending host or join along: leaves an old session, logs in, then creates or searches. */
 	void Continue();
@@ -106,13 +142,15 @@ private:
 	void OnNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& Error);
 	void OnTravelFailure(UWorld* World, ETravelFailure::Type FailureType, const FString& Error);
 
-	/** Reloads the arena map, as a listen server when hosting. */
+	/** Opens (or reloads) the arena map, as a listen server when hosting. */
 	void OpenArena(bool bListen);
+	void OpenTitle();
+	/** The arena currently loaded, or ArenaMap when on the title. */
 	FString GetArenaMap() const;
 
 	EPendingAction Pending = EPendingAction::None;
-	/** Set by LeaveGame: once the session is gone, go back to playing alone. */
-	bool bReturnToSoloAfterDestroy = false;
+	/** Set by PlaySolo/ReturnToTitle while the session is being destroyed. */
+	EAfterLeave AfterLeave = EAfterLeave::Nothing;
 	bool bDelegatesBound = false;
 	bool bStartupCommandDone = false;
 	int32 JoinRetriesLeft = 0;

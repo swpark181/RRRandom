@@ -75,14 +75,22 @@ void URRRandomDiceBuffComponent::RollDice()
 	LastRollTime = GetWorld()->GetTimeSeconds();
 	++RollCount;
 	int32 BestWeaponFace = 0;
+	int32 BestGiantFace = 0;
 	for (; Charges > 0; --Charges)
 	{
 		FRRDiceRoll& Roll = LastRoll.AddDefaulted_GetRef();
 		Roll.Face = Stream.RandRange(1, 6);
-		Roll.bWeapon = Stream.FRand() < WeaponDieChance;
+		const float Kind = Stream.FRand();
+		Roll.bWeapon = Kind < WeaponDieChance;
+		Roll.bGiant = !Roll.bWeapon && Kind < WeaponDieChance + GiantDieChance;
 		if (Roll.bWeapon)
 		{
 			BestWeaponFace = FMath::Max(BestWeaponFace, Roll.Face);
+			continue;
+		}
+		if (Roll.bGiant)
+		{
+			BestGiantFace = FMath::Max(BestGiantFace, Roll.Face);
 			continue;
 		}
 		Roll.Stat = static_cast<ERRDiceBuffStat>(Stream.RandRange(0, 2));
@@ -97,6 +105,11 @@ void URRRandomDiceBuffComponent::RollDice()
 	if (BestWeaponFace > 0)
 	{
 		OnWeaponDie.Broadcast(BestWeaponFace);
+	}
+	// Likewise one giant spell, as long as the best giant die gives
+	if (BestGiantFace > 0)
+	{
+		OnGiantDie.Broadcast(BestGiantFace);
 	}
 }
 

@@ -79,7 +79,7 @@ void ARRRandomHUD::DrawHUD()
 	DrawOnlinePanel();
 	if (Viewer)
 	{
-		DrawDicePanel(*Viewer->GetDiceBuffs());
+		DrawDicePanel(*Viewer);
 		if (Viewer->IsAlive())
 		{
 			DrawAmmoPanel(*Viewer);
@@ -155,9 +155,33 @@ void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRand
 	DrawRect(Backing, Left, RowY, HealthBarWidth, GaugeBarHeight);
 	DrawRect(DiceColor, Left, RowY, HealthBarWidth * FMath::Clamp(Dice->GetGaugeProgress(), 0.f, 1.f), GaugeBarHeight);
 
-	// Above the health number: active buffs, then the latest roll
-	const float ChipsTop = DrawBuffChips(*Dice, Head.X, HealthTextY - 2.f, Font);
+	// Above the health number: active buffs, the giant chip, then the latest roll
+	float ChipsTop = DrawBuffChips(*Dice, Head.X, HealthTextY - 2.f, Font);
+	if (Brawler.IsGiant())
+	{
+		ChipsTop = DrawGiantChip(Brawler, Head.X, ChipsTop, Font);
+	}
 	DrawRollPopup(*Dice, Head.X, ChipsTop, Font);
+}
+
+float ARRRandomHUD::DrawGiantChip(const ARRRandomCharacter& Brawler, float CenterX, float Bottom, UFont* Font)
+{
+	const FString Label = TEXT("GIANT");
+	float Width = 0.f;
+	float TextHeight = 0.f;
+	GetTextSize(Label, Width, TextHeight, Font);
+	Width += ChipPadding * 2.f;
+	const float ChipHeight = TextHeight + 2.f;
+	const float X = CenterX - Width * 0.5f;
+	const float Y = Bottom - ChipHeight;
+
+	// Blinks like a buff when about to run out
+	const float Alpha = Brawler.GetGiantRemaining() < BuffBlinkTime ? 0.35f + 0.65f * (0.5f + 0.5f * FMath::Cos(GetWorld()->GetTimeSeconds() * 12.f)) : 1.f;
+	const FLinearColor Color = URRRandomDiceBuffComponent::GetGiantColor();
+	DrawRect(WithAlpha(Color, Alpha), X - 1.f, Y - 1.f, Width + 2.f, ChipHeight + 2.f);
+	DrawRect(Backing, X, Y, Width, ChipHeight);
+	DrawText(Label, WithAlpha(Color, Alpha), X + ChipPadding, Y + 1.f, Font);
+	return Y - 3.f;
 }
 
 void ARRRandomHUD::DrawAmmoBar(const ARRRandomCharacter& Brawler, float Left, float Top)
@@ -312,7 +336,7 @@ void ARRRandomHUD::DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float C
 	float TextHeight = 0.f;
 	for (const FRRDiceRoll& Die : Roll)
 	{
-		Parts.Add(FString::Printf(TEXT("%d %s"), Die.Face, Die.bWeapon ? TEXT("GUN") : *URRRandomDiceBuffComponent::GetStatShortName(Die.Stat)));
+		Parts.Add(FString::Printf(TEXT("%d %s"), Die.Face, Die.bWeapon ? TEXT("GUN") : Die.bGiant ? TEXT("GIANT") : *URRRandomDiceBuffComponent::GetStatShortName(Die.Stat)));
 		float Width = 0.f;
 		GetTextSize(Parts.Last(), Width, TextHeight, Font);
 		TotalWidth += Width + (Parts.Num() > 1 ? Gap : 0.f);
@@ -323,7 +347,8 @@ void ARRRandomHUD::DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float C
 	float X = CenterX - TotalWidth * 0.5f;
 	for (int32 Index = 0; Index < Roll.Num(); ++Index)
 	{
-		const FLinearColor DieColor = Roll[Index].bWeapon ? WeaponDieColor : URRRandomDiceBuffComponent::GetStatColor(Roll[Index].Stat);
+		const FLinearColor DieColor = Roll[Index].bWeapon ? WeaponDieColor
+			: Roll[Index].bGiant ? URRRandomDiceBuffComponent::GetGiantColor() : URRRandomDiceBuffComponent::GetStatColor(Roll[Index].Stat);
 		DrawShadowedText(Parts[Index], WithAlpha(DieColor, Alpha), X, Y, Font);
 		float Width = 0.f;
 		GetTextSize(Parts[Index], Width, TextHeight, Font);
@@ -358,8 +383,9 @@ void ARRRandomHUD::DrawDamagePopups(const ARRRandomCharacter& Brawler, const ARR
 	}
 }
 
-void ARRRandomHUD::DrawDicePanel(const URRRandomDiceBuffComponent& Dice)
+void ARRRandomHUD::DrawDicePanel(const ARRRandomCharacter& Viewer)
 {
+	const URRRandomDiceBuffComponent& Dice = *Viewer.GetDiceBuffs();
 	UFont* Font = GEngine->GetMediumFont();
 	const float BarY = Canvas->ClipY - Margin - BarHeight;
 
@@ -369,8 +395,15 @@ void ARRRandomHUD::DrawDicePanel(const URRRandomDiceBuffComponent& Dice)
 	const FLinearColor CountColor = Dice.GetCharges() > 0 ? FLinearColor::White : FLinearColor::Gray;
 	DrawText(FString::Printf(TEXT("DICE x%d  [E]"), Dice.GetCharges()), CountColor, Margin + BarWidth + 10.f, BarY, Font);
 
-	// Active buffs stacked upward from the gauge
+	// Giant, then active buffs, stacked upward from the gauge
 	float LineY = BarY - LineHeight - 4.f;
+	if (Viewer.IsGiant())
+	{
+		const FString Line = FString::Printf(TEXT("GIANT  ATK x%.1f  DMG TAKEN x%.1f  %.0fs"),
+			Viewer.GetGiantDamageMultiplier(), Viewer.GetGiantDamageTakenMultiplier(), FMath::CeilToFloat(Viewer.GetGiantRemaining()));
+		DrawText(Line, URRRandomDiceBuffComponent::GetGiantColor(), Margin, LineY, Font);
+		LineY -= LineHeight;
+	}
 	for (const FRRDiceBuff& Buff : Dice.GetActiveBuffs())
 	{
 		const FString Line = FString::Printf(TEXT("%s +%d%%  %.0fs"),
@@ -404,7 +437,7 @@ void ARRRandomHUD::DrawOnlinePanel()
 	float Y = Margin;
 	DrawShadowedText(Connection, FLinearColor::White, Margin, Y, Font);
 	Y += LineHeight;
-	DrawShadowedText(TEXT("[F1] HOST   [F2] JOIN   [F3] LEAVE"), FLinearColor::Gray, Margin, Y, Font);
+	DrawShadowedText(TEXT("[F1] HOST   [F2] JOIN   [F3] LEAVE   [ESC] TITLE"), FLinearColor::Gray, Margin, Y, Font);
 	Y += LineHeight;
 	if (!Sessions->GetStatus().IsEmpty())
 	{

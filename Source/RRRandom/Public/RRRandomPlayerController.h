@@ -12,6 +12,7 @@ struct FInputActionValue;
  * Top-down controls: WASD to walk, left mouse to shoot toward the cursor (hold for full auto), R to reload,
  * Space to jump (climbing onto cover when facing it), E to roll the stored buff dice.
  * Online play: F1 hosts a game, F2 joins one, F3 leaves (also the console commands RRHost, RRJoin, RRLeave).
+ * Esc (or RRTitle) goes back to the title screen.
  * Input assets are built in code when none are assigned, so the project runs without .uasset files.
  */
 UCLASS()
@@ -36,6 +37,10 @@ public:
 	/** Leaves the online game and plays alone again (F3). */
 	UFUNCTION(Exec)
 	void RRLeave();
+
+	/** Leaves any online game and goes back to the title screen (Esc). */
+	UFUNCTION(Exec)
+	void RRTitle();
 
 protected:
 	virtual void BeginPlay() override;
@@ -67,6 +72,9 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> LeaveAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> TitleAction;
 
 private:
 	void CreateDefaultInputAssets();

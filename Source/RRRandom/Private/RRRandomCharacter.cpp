@@ -72,6 +72,8 @@ ARRRandomCharacter::ARRRandomCharacter()
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
 	CameraBoom->SetUsingAbsoluteRotation(true);
+	// The view stays put when the brawler turns giant
+	CameraBoom->SetUsingAbsoluteScale(true);
 	CameraBoom->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f));
 	CameraBoom->TargetArmLength = 1400.f;
 	CameraBoom->bDoCollisionTest = false;
@@ -138,6 +140,7 @@ void ARRRandomCharacter::BeginPlay()
 	{
 		WeaponStream.GenerateNewSeed();
 		DiceBuffs->OnWeaponDie.AddUObject(this, &ARRRandomCharacter::OnWeaponDie);
+		DiceBuffs->OnGiantDie.AddUObject(this, &ARRRandomCharacter::OnGiantDie);
 		Health = MaxHealth;
 		Ammo = GetMaxAmmo();
 	}
@@ -169,6 +172,8 @@ void ARRRandomCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ARRRandomCharacter, bAlive);
 	DOREPLIFETIME(ARRRandomCharacter, KnockdownDirection);
 	DOREPLIFETIME_CONDITION(ARRRandomCharacter, RespawnRemaining, COND_OwnerOnly);
+	DOREPLIFETIME(ARRRandomCharacter, bGiant);
+	DOREPLIFETIME(ARRRandomCharacter, GiantRemaining);
 }
 
 FLinearColor ARRRandomCharacter::GetTeamColor(int32 InTeam)
@@ -226,6 +231,42 @@ void ARRRandomCharacter::OnWeaponDie(int32 Face)
 	}
 }
 
+void ARRRandomCharacter::OnGiantDie(int32 Face)
+{
+	if (!bAlive)
+	{
+		return;
+	}
+	// Another giant die while giant tops the time up rather than adding to it
+	bGiant = true;
+	GiantRemaining = FMath::Max(GiantRemaining, GiantBaseDuration + Face * GiantSecondsPerPip);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) turns giant for %.0f s."), *GetName(), Team, GiantRemaining);
+}
+
+void ARRRandomCharacter::UpdateGiantSize(float DeltaSeconds)
+{
+	const float Current = GetActorScale3D().Z;
+	const float Target = bGiant ? GiantScale : 1.f;
+	if (FMath::IsNearlyEqual(Current, Target))
+	{
+		return;
+	}
+	const float GrowSpeed = GiantGrowTime > 0.f ? FMath::Abs(GiantScale - 1.f) / GiantGrowTime : UE_BIG_NUMBER;
+	SetBodyScale(FMath::FInterpConstantTo(Current, Target, DeltaSeconds, GrowSpeed));
+}
+
+void ARRRandomCharacter::SetBodyScale(float NewScale)
+{
+	// The capsule grows around its center; lift it by the change so the feet stay on the floor.
+	// Only where the movement is decided (server, or the controlling client); others get the position replicated.
+	if (HasAuthority() || IsLocallyControlled())
+	{
+		const float HalfHeight = GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight();
+		AddActorWorldOffset(FVector(0.f, 0.f, HalfHeight * (NewScale - GetActorScale3D().Z)));
+	}
+	SetActorScale3D(FVector(NewScale));
+}
+
 void ARRRandomCharacter::EquipWeapon(const FRRWeapon& NewWeapon)
 {
 	Weapon = NewWeapon;
@@ -262,6 +303,15 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 		}
 
 		UpdateAmmoAndHealth(DeltaSeconds);
+		if (bGiant)
+		{
+			GiantRemaining -= DeltaSeconds;
+			if (GiantRemaining <= 0.f)
+			{
+				bGiant = false;
+				GiantRemaining = 0.f;
+			}
+		}
 		if (ClientTrustRemaining > 0.f)
 		{
 			ClientTrustRemaining -= DeltaSeconds;
@@ -281,6 +331,7 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 		// Jumped toward a wall: grab its top once in reach
 		TryClimb();
 	}
+	UpdateGiantSize(DeltaSeconds);
 	UpdateLedgeWalking();
 	UpdateWalkSpeed();
 	UpdateLocomotionAnimation();
@@ -571,7 +622,7 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 	const FTransform SpawnTransform(ShotRotation, Muzzle, FVector(Weapon.ProjectileScale));
 	if (ARRRandomProjectile* Projectile = World->SpawnActorDeferred<ARRRandomProjectile>(ProjectileClass, SpawnTransform, this, this, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
 	{
-		Projectile->DamageMultiplier = DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackPower) * Weapon.DamageMultiplier;
+		Projectile->DamageMultiplier = DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackPower) * Weapon.DamageMultiplier * (bGiant ? GiantDamageMultiplier : 1.f);
 		Projectile->MaxRange = AttackRange;
 		Projectile->SetSpeedMultiplier(Weapon.ProjectileSpeedMultiplier);
 		Projectile->Tier = Weapon.Tier;
@@ -640,7 +691,8 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 		return 0.f;
 	}
 
-	const float Damage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+	// Giants shrug off part of every hit
+	const float Damage = Super::TakeDamage(DamageAmount * (bGiant ? GiantDamageTakenMultiplier : 1.f), DamageEvent, EventInstigator, DamageCauser);
 	if (Damage <= 0.f)
 	{
 		return 0.f;
@@ -669,8 +721,10 @@ void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharact
 	Health = 0.f;
 	RespawnRemaining = RespawnDelay;
 	DiceBuffs->ClearBuffs();
-	// Back to the starting pistol
+	// Back to the starting pistol. A giant falls as one and gets back up normal size (see ApplyStandingBody).
 	Weapon = FRRWeapon();
+	bGiant = false;
+	GiantRemaining = 0.f;
 	KnockdownDirection = ShotDirection.GetSafeNormal2D();
 	SetTrustClientMovement(false);
 	ApplyKnockedOutBody();
@@ -698,6 +752,9 @@ void ARRRandomCharacter::ApplyKnockedOutBody()
 
 void ARRRandomCharacter::ApplyStandingBody()
 {
+	// Size is left alone while knocked out, so the ragdoll isn't rescaled mid-fall; back to normal here
+	SetActorScale3D(FVector(bGiant ? GiantScale : 1.f));
+
 	USkeletalMeshComponent* BodyMesh = GetMesh();
 	BodyMesh->SetSimulatePhysics(false);
 	BodyMesh->SetCollisionProfileName(MeshCollisionProfile);
