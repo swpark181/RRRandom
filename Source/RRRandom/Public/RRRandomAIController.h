@@ -78,6 +78,14 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "AI")
 	float SeparationDistance = 220.f;
 
+	/** With the flight power and an opponent near, the bot takes off this often (seconds after landing)... */
+	UPROPERTY(EditAnywhere, Category = "AI")
+	FVector2D FlightHopDelay = FVector2D(0.3f, 1.5f);
+
+	/** ...holding jump this long, so it rises to a random height and glides down shooting. */
+	UPROPERTY(EditAnywhere, Category = "AI")
+	FVector2D FlightHoldTime = FVector2D(0.4f, 1.2f);
+
 	/** 0 picks a new seed each play session. */
 	UPROPERTY(EditAnywhere, Category = "AI")
 	int32 Seed = 0;
@@ -95,6 +103,8 @@ private:
 	void TryShoot(ARRRandomCharacter* Self, const ARRRandomCharacter* Opponent, float Distance);
 	void UpdateReload(ARRRandomCharacter* Self, bool bOpponentInSight);
 	void UpdateDice(ARRRandomCharacter* Self, float Distance, float DeltaSeconds);
+	/** Takes off and lets go of jump while the flight power lasts and a fight is near. */
+	void UpdateFlight(ARRRandomCharacter* Self, float Distance, float DeltaSeconds);
 
 	TWeakObjectPtr<ARRRandomCharacter> Opponent;
 	FRandomStream Stream;
@@ -117,4 +127,7 @@ private:
 	float LastHealth = 0.f;
 	float DiceTimer = 0.f;
 	int32 DiceHoldLimit = 3;
+	float FlightHopTimer = 0.f;
+	/** Seconds left holding jump; 0 when not holding. */
+	float FlightHoldRemaining = 0.f;
 };

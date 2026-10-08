@@ -4,6 +4,7 @@
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomEventComponent.h"
 #include "RRRandomGameMode.h"
+#include "RRRandomMovementComponent.h"
 #include "RRRandomProjectile.h"
 #include "Animation/AnimSequence.h"
 #include "Camera/CameraComponent.h"
@@ -46,7 +47,8 @@ namespace
 	constexpr float ClimbRequestTolerance = 150.f;
 }
 
-ARRRandomCharacter::ARRRandomCharacter()
+ARRRandomCharacter::ARRRandomCharacter(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<URRRandomMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.f);
 
@@ -141,11 +143,15 @@ void ARRRandomCharacter::BeginPlay()
 		WeaponStream.GenerateNewSeed();
 		DiceBuffs->OnWeaponDie.AddUObject(this, &ARRRandomCharacter::OnWeaponDie);
 		DiceBuffs->OnGiantDie.AddUObject(this, &ARRRandomCharacter::OnGiantDie);
+		DiceBuffs->OnFlightDie.AddUObject(this, &ARRRandomCharacter::OnFlightDie);
 		Health = MaxHealth;
 		Ammo = GetMaxAmmo();
 	}
 
 	BaseWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
+	BaseJumpZVelocity = GetCharacterMovement()->JumpZVelocity;
+	BaseJumpMaxHoldTime = JumpMaxHoldTime;
+	BaseAirControl = GetCharacterMovement()->AirControl;
 	HomeLocation = GetActorLocation();
 	HomeRotation = GetActorRotation();
 	MeshRelativeLocation = BodyMesh->GetRelativeLocation();
@@ -174,6 +180,8 @@ void ARRRandomCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME_CONDITION(ARRRandomCharacter, RespawnRemaining, COND_OwnerOnly);
 	DOREPLIFETIME(ARRRandomCharacter, bGiant);
 	DOREPLIFETIME(ARRRandomCharacter, GiantRemaining);
+	DOREPLIFETIME(ARRRandomCharacter, bFlying);
+	DOREPLIFETIME(ARRRandomCharacter, FlightRemaining);
 }
 
 FLinearColor ARRRandomCharacter::GetTeamColor(int32 InTeam)
@@ -241,6 +249,33 @@ void ARRRandomCharacter::OnGiantDie(int32 Face)
 	bGiant = true;
 	GiantRemaining = FMath::Max(GiantRemaining, GiantBaseDuration + Face * GiantSecondsPerPip);
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) turns giant for %.0f s."), *GetName(), Team, GiantRemaining);
+}
+
+void ARRRandomCharacter::OnFlightDie(int32 Face)
+{
+	if (!bAlive)
+	{
+		return;
+	}
+	bFlying = true;
+	FlightRemaining = FMath::Max(FlightRemaining, FlightBaseDuration + Face * FlightSecondsPerPip);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) can fly for %.0f s."), *GetName(), Team, FlightRemaining);
+}
+
+void ARRRandomCharacter::UpdateFlight()
+{
+	// Flying: a held jump keeps rising at FlightRiseSpeed for up to FlightMaxHoldTime (the engine's variable-height jump)
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	Movement->JumpZVelocity = bFlying ? FlightRiseSpeed : BaseJumpZVelocity;
+	JumpMaxHoldTime = bFlying ? FlightMaxHoldTime : BaseJumpMaxHoldTime;
+
+	// The glide lasts until landing even if the power runs out mid-air, but not once falling off the arena
+	if (URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(Movement))
+	{
+		const bool bStillInAir = RandomMovement->bGliding && Movement->IsFalling() && GetActorLocation().Z > HomeLocation.Z - GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+		RandomMovement->bGliding = bFlying || bStillInAir;
+		Movement->AirControl = RandomMovement->bGliding ? FlightAirControl : BaseAirControl;
+	}
 }
 
 void ARRRandomCharacter::UpdateGiantSize(float DeltaSeconds)
@@ -312,6 +347,15 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 				GiantRemaining = 0.f;
 			}
 		}
+		if (bFlying)
+		{
+			FlightRemaining -= DeltaSeconds;
+			if (FlightRemaining <= 0.f)
+			{
+				bFlying = false;
+				FlightRemaining = 0.f;
+			}
+		}
 		if (ClientTrustRemaining > 0.f)
 		{
 			ClientTrustRemaining -= DeltaSeconds;
@@ -326,11 +370,12 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 	{
 		UpdateClimb(DeltaSeconds);
 	}
-	else if (IsLocallyControlled() && GetCharacterMovement()->IsFalling() && GetWorld()->GetTimeSeconds() - JumpPressedTime < ClimbJumpWindow)
+	else if (!bFlying && IsLocallyControlled() && GetCharacterMovement()->IsFalling() && GetWorld()->GetTimeSeconds() - JumpPressedTime < ClimbJumpWindow)
 	{
-		// Jumped toward a wall: grab its top once in reach
+		// Jumped toward a wall: grab its top once in reach (a flyer just flies over it)
 		TryClimb();
 	}
+	UpdateFlight();
 	UpdateGiantSize(DeltaSeconds);
 	UpdateLedgeWalking();
 	UpdateWalkSpeed();
@@ -344,7 +389,8 @@ void ARRRandomCharacter::Jump()
 		return;
 	}
 	JumpPressedTime = GetWorld()->GetTimeSeconds();
-	if (!TryClimb())
+	// With the flight power the jump is the lift-off; holding it keeps rising
+	if (bFlying || !TryClimb())
 	{
 		Super::Jump();
 	}
@@ -725,6 +771,8 @@ void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharact
 	Weapon = FRRWeapon();
 	bGiant = false;
 	GiantRemaining = 0.f;
+	bFlying = false;
+	FlightRemaining = 0.f;
 	KnockdownDirection = ShotDirection.GetSafeNormal2D();
 	SetTrustClientMovement(false);
 	ApplyKnockedOutBody();

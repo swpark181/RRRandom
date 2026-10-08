@@ -16,6 +16,21 @@
 - (5차) 서버 없이 소규모 네트워크 플레이. EOS(Epic Online Services) P2P 기준, 테스트 가능한 상태까지. 게임 전체 동기화.
 - (6차) 임시 타이틀 화면. 싱글 / 네트워크를 골라 시작.
 - (7차) 랜덤(주사위)에 거인화 추가. 거인이 되면 방어력과 파워가 좋아짐.
+- (8차) 비행 추가 (오버워치 파라처럼): Space 누르는 만큼 떠오르고, 떼면 서서히 떨어짐. 거인화처럼 주사위로 일정 확률.
+
+## 8차 — 비행
+
+- 커밋 "Add flight dice" (`git log` 참고).
+- 주사위: `FRRDiceRoll::bFlight`, `FlightDieChance` 0.1, `OnFlightDie(Face)`, 색 `GetFlightColor` (분홍). 한 번의 `FRand` 로 무기 / 거인 / 비행 / 버프.
+- 상승 = 엔진의 "누르는 만큼 높이 뛰는 점프" 그대로: 비행 중엔 `JumpZVelocity` = `FlightRiseSpeed`(500), `JumpMaxHoldTime` = `FlightMaxHoldTime`(1.2). `bDontFallBelowJumpZVelocityDuringJump`(기본 켜짐) 덕에 누르는 동안 등속 상승. 점프 입력은 원래 네트워크 예측(압축 플래그)에 들어 있어서 따로 RPC 없음.
+- 하강 = 새 `URRRandomMovementComponent` (캐릭터 생성자를 `FObjectInitializer` 로 바꿔 `SetDefaultSubobjectClass`): `bGliding` 이면 `GetGravityZ` 가 올라가는 중엔 x2.5 (뗀 뒤 빨리 멈춤), 내려가는 중엔 x0.25, `NewFallVelocity` 에서 낙하 속도 -250 제한. 서버/조종 클라이언트가 같은 계산을 하므로 예측됨.
+- 캐릭터 `UpdateFlight` (모든 기기, 매 틱): 점프 값/AirControl 전환, `bGliding` = 비행 중 || (전에 글라이드 중이었고 아직 공중이고 시작 바닥 높이 - 캡슐 반높이 위). 비행 중 `Jump()` 는 `TryClimb` 을 건너뜀, 점프 직후 벽 잡기도 안 함. KO 시 끔.
+- 봇: `UpdateFlight` (AI) — 비행 중이고 후퇴 중 아니고 적이 사거리x1.2 안이고 땅에 있으면 `FlightHopDelay`(0.3~1.5초)마다 `Jump`, `FlightHoldTime`(0.4~1.2초) 뒤 `StopJumping`.
+- HUD: 머리 위 칩을 `DrawPowerChips` 로 일반화 (`[GIANT] [FLY]` 나란히), 굴림 팝업 `N FLY`, 왼쪽 아래 `FLY  HOLD [SPACE] TO RISE  Ns`.
+- 로그: `RRRandom: <이름> (team N) can fly for N s.`
+- 확인 (2026-10-08, `-RRSolo` + 임시 `-RRFlyTest` 스위치: 플레이어 주사위를 전부 비행으로 하고 0.2초마다 높이 로그, 확인 후 코드 지움): 빌드 경고 없음. Space 를 누르는 동안 vz ≈ 490 으로 상승, 1.2초 제한에서 높이 약 640, 뗀 뒤 0.2초 안에 상승 멈춤(+10), 하강 속도가 -250 까지 늘었다가 유지, 640 에서 약 2.6초 뒤 착지 → 다시 Space 로 상승. 스크린샷: 머리 위 `FLY`, 아군 `[GIANT] [FLY]`, 굴림 팝업 `5 FLY`, 왼쪽 아래 줄, 공중에 뜬 아군(그림자와 몸이 떨어짐). 봇 비행 로그 여러 번.
+- 확인 못 한 것: 네트워크 참가자의 비행(예측/보정이 거슬리는지), 봇이 실제로 떠서 쏘는 모습을 오래 관찰, 맵 밖으로 날아가 떨어지는 경우.
+- 메모: 카메라가 캐릭터를 따라 올라가서 화면으로는 높이가 잘 안 느껴짐 (그림자와의 거리로 보임). 필요하면 카메라를 바닥 높이에 고정하거나 그림자/높이 표시 추가.
 
 ## 7차 — 거인화
 

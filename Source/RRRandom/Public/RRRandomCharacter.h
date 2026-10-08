@@ -27,7 +27,8 @@ struct FRRDamagePopup
  * Brawler seen from a fixed top-down camera, used by both the player and the bots.
  * Shoots full auto from a magazine that reloads all at once (spare ammo is unlimited), heals after staying out of combat,
  * swaps to a random gun when a weapon die comes up (back to the pistol on knockout),
- * turns giant for a while when a giant die comes up (bigger, more damage dealt, less taken), jumps and climbs onto cover,
+ * turns giant for a while when a giant die comes up (bigger, more damage dealt, less taken),
+ * flies for a while when a flight die comes up (hold jump to rise, let go to glide down), jumps and climbs onto cover,
  * and is knocked out at 0 health, getting back up at its starting spot after a delay.
  * Uses the engine's mannequin so it needs no project assets.
  *
@@ -40,7 +41,7 @@ class RRRANDOM_API ARRRandomCharacter : public ACharacter
 	GENERATED_BODY()
 
 public:
-	ARRRandomCharacter();
+	ARRRandomCharacter(const FObjectInitializer& ObjectInitializer);
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -100,6 +101,11 @@ public:
 	float GetGiantDamageMultiplier() const { return GiantDamageMultiplier; }
 	/** Damage taken while giant, as a factor. */
 	float GetGiantDamageTakenMultiplier() const { return GiantDamageTakenMultiplier; }
+
+	/** True while the flight power lasts: holding jump rises, letting go glides down. */
+	bool CanFly() const { return bFlying; }
+	/** Seconds of flight left. */
+	float GetFlightRemaining() const { return FlightRemaining; }
 	const TArray<FRRDamagePopup>& GetDamagePopups() const { return DamagePopups; }
 
 	/** How long damage numbers stay up. */
@@ -201,6 +207,25 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Giant")
 	float GiantGrowTime = 0.3f;
 
+	/** Upward speed while holding jump with the flight power. */
+	UPROPERTY(EditAnywhere, Category = "Flight", meta = (ClampMin = "0"))
+	float FlightRiseSpeed = 500.f;
+
+	/** Longest a held jump keeps rising with the flight power; with FlightRiseSpeed this caps the height (about 600). */
+	UPROPERTY(EditAnywhere, Category = "Flight", meta = (ClampMin = "0"))
+	float FlightMaxHoldTime = 1.2f;
+
+	/** Steering in the air while flying or gliding. */
+	UPROPERTY(EditAnywhere, Category = "Flight", meta = (ClampMin = "0", ClampMax = "1"))
+	float FlightAirControl = 0.8f;
+
+	/** Seconds of flight from a flight die: this plus FlightSecondsPerPip for each pip on it. */
+	UPROPERTY(EditAnywhere, Category = "Flight")
+	float FlightBaseDuration = 6.f;
+
+	UPROPERTY(EditAnywhere, Category = "Flight")
+	float FlightSecondsPerPip = 1.f;
+
 	/** Shots never tilt more than this many degrees up or down. */
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	float MaxShotPitch = 50.f;
@@ -252,6 +277,9 @@ private:
 	void UpdateGiantSize(float DeltaSeconds);
 	/** Scales the whole brawler, keeping its feet where they are. */
 	void SetBodyScale(float NewScale);
+	void OnFlightDie(int32 Face);
+	/** Jump and glide settings for the flight power, on every machine so movement prediction agrees. */
+	void UpdateFlight();
 	/** Starts climbing if cover is in front with a reachable top and room to stand there. Only where the brawler is controlled. */
 	bool TryClimb();
 	void StartClimb(const FVector& Destination, const FVector& WallFacing);
@@ -334,6 +362,17 @@ private:
 
 	UPROPERTY(Replicated)
 	float GiantRemaining = 0.f;
+
+	/** Every machine switches the jump to flight while this is set. */
+	UPROPERTY(Replicated)
+	bool bFlying = false;
+
+	UPROPERTY(Replicated)
+	float FlightRemaining = 0.f;
+
+	float BaseJumpZVelocity = 0.f;
+	float BaseJumpMaxHoldTime = 0.f;
+	float BaseAirControl = 0.f;
 
 	float LastCombatTime = -UE_BIG_NUMBER;
 	float NextFireTime = 0.f;

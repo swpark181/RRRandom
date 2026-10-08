@@ -5,6 +5,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 namespace
 {
@@ -98,6 +99,7 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		bHasCoverSpot = false;
 		BurstRemaining = 0;
 		UnderFireTimer = 0.f;
+		FlightHoldRemaining = 0.f;
 		LastHealth = Self ? Self->GetMaxHealth() : 0.f;
 		return;
 	}
@@ -154,6 +156,7 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 
 	UpdateReload(Self, bCanSee && Distance <= Self->GetAttackRange());
 	UpdateDice(Self, Distance, DeltaSeconds);
+	UpdateFlight(Self, Distance, DeltaSeconds);
 
 	// Hide while reloading or hurt; otherwise fight
 	const bool bWantsCover = Target && (bRetreating || Self->IsReloading() || (UnderFireTimer > 0.f && HealthShare < UnderFireCoverHealthShare));
@@ -413,6 +416,35 @@ void ARRRandomAIController::UpdateReload(ARRRandomCharacter* Self, bool bOpponen
 	if (bQuiet || bNearlyEmpty)
 	{
 		Self->StartReload();
+	}
+}
+
+void ARRRandomAIController::UpdateFlight(ARRRandomCharacter* Self, float Distance, float DeltaSeconds)
+{
+	if (FlightHoldRemaining > 0.f)
+	{
+		FlightHoldRemaining -= DeltaSeconds;
+		if (FlightHoldRemaining <= 0.f || !Self->CanFly())
+		{
+			FlightHoldRemaining = 0.f;
+			Self->StopJumping();
+		}
+		return;
+	}
+
+	// Take off from the ground when a fight is near: over cover to get a shot, out of reach of the ground
+	const bool bFightNear = !bRetreating && Distance <= Self->GetAttackRange() * EngageRangeShare;
+	if (!Self->CanFly() || !bFightNear || !Self->GetCharacterMovement()->IsMovingOnGround())
+	{
+		FlightHopTimer = FMath::Min(FlightHopTimer, FlightHopDelay.Y);
+		return;
+	}
+	FlightHopTimer -= DeltaSeconds;
+	if (FlightHopTimer <= 0.f)
+	{
+		Self->Jump();
+		FlightHoldRemaining = Stream.FRandRange(FlightHoldTime.X, FlightHoldTime.Y);
+		FlightHopTimer = Stream.FRandRange(FlightHopDelay.X, FlightHopDelay.Y);
 	}
 }
 

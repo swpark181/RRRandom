@@ -49,6 +49,10 @@ struct FRRDiceRoll
 	/** A giant die makes its owner a giant for a while instead of a buff; Stat is unused then. */
 	UPROPERTY(BlueprintReadOnly, Category = "RRRandom")
 	bool bGiant = false;
+
+	/** A flight die lets its owner fly for a while instead of a buff; Stat is unused then. */
+	UPROPERTY(BlueprintReadOnly, Category = "RRRandom")
+	bool bFlight = false;
 };
 
 /** Fired once per roll that had weapon dice, with the best weapon die's face. */
@@ -57,11 +61,15 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FRRWeaponDieSignature, int32 /*Face*/);
 /** Fired once per roll that had giant dice, with the best giant die's face. */
 DECLARE_MULTICAST_DELEGATE_OneParam(FRRGiantDieSignature, int32 /*Face*/);
 
+/** Fired once per roll that had flight dice, with the best flight die's face. */
+DECLARE_MULTICAST_DELEGATE_OneParam(FRRFlightDieSignature, int32 /*Face*/);
+
 /**
  * A gauge fills over time; each full gauge stores one die. Rolling spends every stored die,
  * and each die grants a timed bonus to attack power, attack speed or move speed sized by its face,
  * or now and then comes up as a weapon die that hands its owner a new random gun,
- * or a giant die that makes its owner bigger, harder hitting and harder to hurt for a while.
+ * or a giant die that makes its owner bigger, harder hitting and harder to hurt for a while,
+ * or a flight die that lets its owner rise while holding jump and glide down for a while.
  */
 UCLASS(ClassGroup = (RRRandom), meta = (BlueprintSpawnableComponent))
 class RRRANDOM_API URRRandomDiceBuffComponent : public UActorComponent
@@ -110,6 +118,9 @@ public:
 	/** The owner listens to this to turn giant. */
 	FRRGiantDieSignature OnGiantDie;
 
+	/** The owner listens to this to start flying. */
+	FRRFlightDieSignature OnFlightDie;
+
 	/** Chance for each die to be a weapon die. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom", meta = (ClampMin = "0", ClampMax = "1"))
 	float WeaponDieChance = 1.f / 6.f;
@@ -118,7 +129,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom", meta = (ClampMin = "0", ClampMax = "1"))
 	float GiantDieChance = 0.1f;
 
+	/** Chance for each die to be a flight die (on top of the weapon and giant die chances). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom", meta = (ClampMin = "0", ClampMax = "1"))
+	float FlightDieChance = 0.1f;
+
 	static FLinearColor GetGiantColor() { return FLinearColor(0.3f, 0.95f, 1.f); }
+	static FLinearColor GetFlightColor() { return FLinearColor(1.f, 0.5f, 0.85f); }
 
 	/** Seconds for the gauge to fill once. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom")

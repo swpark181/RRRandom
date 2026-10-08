@@ -27,8 +27,8 @@ private:
 	void DrawAmmoBar(const ARRRandomCharacter& Brawler, float Left, float Top);
 	/** Draws the buff chips ending just above Bottom and returns the new top edge. */
 	float DrawBuffChips(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom, UFont* Font);
-	/** Draws the GIANT chip ending just above Bottom and returns the new top edge. */
-	float DrawGiantChip(const ARRRandomCharacter& Brawler, float CenterX, float Bottom, UFont* Font);
+	/** Draws power chips (GIANT, FLY) side by side ending just above Bottom and returns the new top edge. */
+	float DrawPowerChips(TArrayView<const FString> Labels, TArrayView<const FLinearColor> Colors, TArrayView<const float> Remaining, float CenterX, float Bottom, UFont* Font);
 	void DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom, UFont* Font);
 	void DrawDamagePopups(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer);
 	void DrawDicePanel(const ARRRandomCharacter& Viewer);

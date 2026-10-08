@@ -155,32 +155,58 @@ void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRand
 	DrawRect(Backing, Left, RowY, HealthBarWidth, GaugeBarHeight);
 	DrawRect(DiceColor, Left, RowY, HealthBarWidth * FMath::Clamp(Dice->GetGaugeProgress(), 0.f, 1.f), GaugeBarHeight);
 
-	// Above the health number: active buffs, the giant chip, then the latest roll
+	// Above the health number: active buffs, the power chips (giant, flight), then the latest roll
 	float ChipsTop = DrawBuffChips(*Dice, Head.X, HealthTextY - 2.f, Font);
+	TArray<FString, TInlineAllocator<2>> PowerLabels;
+	TArray<FLinearColor, TInlineAllocator<2>> PowerColors;
+	TArray<float, TInlineAllocator<2>> PowerRemaining;
 	if (Brawler.IsGiant())
 	{
-		ChipsTop = DrawGiantChip(Brawler, Head.X, ChipsTop, Font);
+		PowerLabels.Add(TEXT("GIANT"));
+		PowerColors.Add(URRRandomDiceBuffComponent::GetGiantColor());
+		PowerRemaining.Add(Brawler.GetGiantRemaining());
+	}
+	if (Brawler.CanFly())
+	{
+		PowerLabels.Add(TEXT("FLY"));
+		PowerColors.Add(URRRandomDiceBuffComponent::GetFlightColor());
+		PowerRemaining.Add(Brawler.GetFlightRemaining());
+	}
+	if (PowerLabels.Num() > 0)
+	{
+		ChipsTop = DrawPowerChips(PowerLabels, PowerColors, PowerRemaining, Head.X, ChipsTop, Font);
 	}
 	DrawRollPopup(*Dice, Head.X, ChipsTop, Font);
 }
 
-float ARRRandomHUD::DrawGiantChip(const ARRRandomCharacter& Brawler, float CenterX, float Bottom, UFont* Font)
+float ARRRandomHUD::DrawPowerChips(TArrayView<const FString> Labels, TArrayView<const FLinearColor> Colors, TArrayView<const float> Remaining, float CenterX, float Bottom, UFont* Font)
 {
-	const FString Label = TEXT("GIANT");
-	float Width = 0.f;
+	// Outlined chips side by side, e.g. [GIANT] [FLY]
+	constexpr float Gap = 4.f;
+	TArray<float, TInlineAllocator<2>> Widths;
+	float TotalWidth = 0.f;
 	float TextHeight = 0.f;
-	GetTextSize(Label, Width, TextHeight, Font);
-	Width += ChipPadding * 2.f;
-	const float ChipHeight = TextHeight + 2.f;
-	const float X = CenterX - Width * 0.5f;
-	const float Y = Bottom - ChipHeight;
+	for (const FString& Label : Labels)
+	{
+		float Width = 0.f;
+		GetTextSize(Label, Width, TextHeight, Font);
+		Widths.Add(Width + ChipPadding * 2.f);
+		TotalWidth += Widths.Last() + (Widths.Num() > 1 ? Gap : 0.f);
+	}
 
-	// Blinks like a buff when about to run out
-	const float Alpha = Brawler.GetGiantRemaining() < BuffBlinkTime ? 0.35f + 0.65f * (0.5f + 0.5f * FMath::Cos(GetWorld()->GetTimeSeconds() * 12.f)) : 1.f;
-	const FLinearColor Color = URRRandomDiceBuffComponent::GetGiantColor();
-	DrawRect(WithAlpha(Color, Alpha), X - 1.f, Y - 1.f, Width + 2.f, ChipHeight + 2.f);
-	DrawRect(Backing, X, Y, Width, ChipHeight);
-	DrawText(Label, WithAlpha(Color, Alpha), X + ChipPadding, Y + 1.f, Font);
+	const float ChipHeight = TextHeight + 2.f;
+	const float Y = Bottom - ChipHeight;
+	const float Blink = 0.35f + 0.65f * (0.5f + 0.5f * FMath::Cos(GetWorld()->GetTimeSeconds() * 12.f));
+	float X = CenterX - TotalWidth * 0.5f;
+	for (int32 Index = 0; Index < Labels.Num(); ++Index)
+	{
+		// Blinks like a buff when about to run out
+		const float Alpha = Remaining[Index] < BuffBlinkTime ? Blink : 1.f;
+		DrawRect(WithAlpha(Colors[Index], Alpha), X - 1.f, Y - 1.f, Widths[Index] + 2.f, ChipHeight + 2.f);
+		DrawRect(Backing, X, Y, Widths[Index], ChipHeight);
+		DrawText(Labels[Index], WithAlpha(Colors[Index], Alpha), X + ChipPadding, Y + 1.f, Font);
+		X += Widths[Index] + Gap;
+	}
 	return Y - 3.f;
 }
 
@@ -336,7 +362,7 @@ void ARRRandomHUD::DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float C
 	float TextHeight = 0.f;
 	for (const FRRDiceRoll& Die : Roll)
 	{
-		Parts.Add(FString::Printf(TEXT("%d %s"), Die.Face, Die.bWeapon ? TEXT("GUN") : Die.bGiant ? TEXT("GIANT") : *URRRandomDiceBuffComponent::GetStatShortName(Die.Stat)));
+		Parts.Add(FString::Printf(TEXT("%d %s"), Die.Face, Die.bWeapon ? TEXT("GUN") : Die.bGiant ? TEXT("GIANT") : Die.bFlight ? TEXT("FLY") : *URRRandomDiceBuffComponent::GetStatShortName(Die.Stat)));
 		float Width = 0.f;
 		GetTextSize(Parts.Last(), Width, TextHeight, Font);
 		TotalWidth += Width + (Parts.Num() > 1 ? Gap : 0.f);
@@ -348,7 +374,8 @@ void ARRRandomHUD::DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float C
 	for (int32 Index = 0; Index < Roll.Num(); ++Index)
 	{
 		const FLinearColor DieColor = Roll[Index].bWeapon ? WeaponDieColor
-			: Roll[Index].bGiant ? URRRandomDiceBuffComponent::GetGiantColor() : URRRandomDiceBuffComponent::GetStatColor(Roll[Index].Stat);
+			: Roll[Index].bGiant ? URRRandomDiceBuffComponent::GetGiantColor()
+			: Roll[Index].bFlight ? URRRandomDiceBuffComponent::GetFlightColor() : URRRandomDiceBuffComponent::GetStatColor(Roll[Index].Stat);
 		DrawShadowedText(Parts[Index], WithAlpha(DieColor, Alpha), X, Y, Font);
 		float Width = 0.f;
 		GetTextSize(Parts[Index], Width, TextHeight, Font);
@@ -395,8 +422,14 @@ void ARRRandomHUD::DrawDicePanel(const ARRRandomCharacter& Viewer)
 	const FLinearColor CountColor = Dice.GetCharges() > 0 ? FLinearColor::White : FLinearColor::Gray;
 	DrawText(FString::Printf(TEXT("DICE x%d  [E]"), Dice.GetCharges()), CountColor, Margin + BarWidth + 10.f, BarY, Font);
 
-	// Giant, then active buffs, stacked upward from the gauge
+	// Powers (flight, giant), then active buffs, stacked upward from the gauge
 	float LineY = BarY - LineHeight - 4.f;
+	if (Viewer.CanFly())
+	{
+		const FString Line = FString::Printf(TEXT("FLY  HOLD [SPACE] TO RISE  %.0fs"), FMath::CeilToFloat(Viewer.GetFlightRemaining()));
+		DrawText(Line, URRRandomDiceBuffComponent::GetFlightColor(), Margin, LineY, Font);
+		LineY -= LineHeight;
+	}
 	if (Viewer.IsGiant())
 	{
 		const FString Line = FString::Printf(TEXT("GIANT  ATK x%.1f  DMG TAKEN x%.1f  %.0fs"),
