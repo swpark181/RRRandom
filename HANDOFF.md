@@ -27,7 +27,7 @@
 
 ## 14차 — 복셀 섬 레벨 (임시 블록)
 
-- 아직 커밋 안 됨. **작업 중**: 첫 판을 띄워 사용자에게 보여 주는 단계.
+- 커밋 `4116a14` 에 포함 (8차 나머지~14차를 한 번에). **작업 중**: 첫 판을 띄워 사용자에게 보여 주는 단계.
 - `ARRRandomIsland`(복제, 항상 관련, 모든 기기가 같은 지도로 같은 섬): 26×26 칸(`CellSize` 180, 섬 4,680 각) 글자 지도 두 장 — 종류(`.` 잔디 바닥, `g` 잔디 언덕, `r` 바위, `s` 모래길, `w` 물, `d` 선착장, `F` 폭포)와 높이(숫자 × `LevelHeight` 80). 위 행 = 화면 위(+X), 왼쪽 열 = 화면 왼쪽(-Y), 액터가 가운데. 생성자에 지도가 있음(행 길이와 종류/높이 짝은 awk 로 검사함: 26×26, 어긋남 0).
   - 배치: 위쪽 바위 절벽(6~9단), 오른쪽 위 폭포(8→6→4)가 오른쪽 강으로, 왼쪽 아래 선착장 있는 만, 가장자리 낮은 잔디 언덕(1~3단), 두 팀 시작 줄(행 18 파랑, 행 7 빨강)을 모래길로, 가운데 세로 길. 기존 엄폐물 자리(행 10~15)와 시작 자리는 평지.
   - 충돌: 언덕/바위/폭포 = 숨긴 큐브 인스턴스(BlockAll, WorldStatic — 엄폐물과 같아서 총알/봇 시야/오르기 그대로; 1~2단 = 80~160 이라 올라갈 수 있고 3단부터 벽). 물 = 숨긴 벽(WorldDynamic, 폰만 막음 → 총알·봇 스윕·바닥 트레이스는 통과). 모래길/선착장 = 얇은 판(BlockAll, 한 걸음 올라섬). 섬 밖 바닥은 큰 물 평면 4장.
@@ -40,7 +40,7 @@
 
 ## 13차 — 잔디 바닥
 
-- 아직 커밋 안 됨.
+- 커밋 `4116a14` 에 포함 (8차 나머지~14차를 한 번에).
 - 출처: Tripo 웹에서 사용자가 만든 "grass block" 3종(기본 / 흰 꽃 큰 것 / 흰 꽃 작은 것) → `C:\work\char-pipeline\input\grass\a|b|c`. 흙 큐브 위에 잔디, 정사각형 아님(0.83×1, 0.76×1, 1×1), 가장자리에 풀이 삐져나오고 윗면이 가장자리에서 둥글게 내려감 → 그대로는 틈/겹침.
   - 처음 받은 건 덤불 하나(타일 아님) → 프롬프트를 "square flat grass floor tile ... grass reaches all four straight edges, perfectly flat even top surface ..." 식으로 다시 만들어 줌.
 - `scripts\blender_grass_tiles.py` → `output\grass\SM_GrassTile_A|B|C.fbx`, `tiles.json`, `tiles_preview.png`(무작위 3×3 위에서 본 것):
@@ -67,7 +67,7 @@
 
 ## 12차 — 라이플
 
-- 아직 커밋 안 됨.
+- 커밋 `4116a14` 에 포함 (8차 나머지~14차를 한 번에).
 - 출처: Tripo **웹**에서 사용자가 생성(프롬프트: stylized cartoon assault rifle ... dark gunmetal gray body with warm orange accents ...) → `C:\work\char-pipeline\input\rifle` (원본 FBX + PBR 텍스처). 짧은 AK 모양, 회색 + 주황, 18,476 삼각형.
   - API 로 하려고 `scripts\tripo_text_model.py`(텍스트 → 3D, `tripo_pipeline.py` 헬퍼 재사용)를 만들었지만 못 씀: 사용자 키(`tsk_`)는 v2 주소(`api.tripo3d.ai/v2/openapi`)에서만 인증되고 v3(`openapi.tripo3d.com/v3`, 두 스크립트가 쓰는 주소)는 401, 그리고 **API 크레딧 잔액 0**(웹 크레딧과 별개). 쓰려면 크레딧 충전 + 스크립트를 v2 형식(`POST /task {type: text_to_model}`)으로 바꿔야 함.
 - `scripts\blender_rifle.py` → `output\rifle\SM_Rifle.fbx`: 원점을 권총 손잡이 가운데(`GRIP` = 길이 대비 (-0.19, 0.255), 옆모습 렌더에 빨간 점으로 확인)로, 총구 +X, 위 +Z, 길이 100. `scripts\ue_import_rifle.py` → `/Game/Props/Rifle/SM_Rifle`, `M_Rifle`(베이스 컬러만, 거칠기 1, 스페큘러/금속 0 — `M_Fox`/`M_Dice` 와 같은 평평한 툰 규칙), `Textures/T_Rifle_BaseColor`.
@@ -85,7 +85,7 @@
 
 ## 11차 — 비행 날개
 
-- 아직 커밋 안 됨.
+- 커밋 `4116a14` 에 포함 (8차 나머지~14차를 한 번에).
 - 방식: 반투명 파티클은 툰 후처리에서 바닥 베이스 컬러로 다시 칠해질 위험이 있어서(9차 "남은 것" 참고), **언릿·불투명·양면 메시 날개**로 함. 언릿은 베이스 컬러가 0이라 툰 후처리가 그대로 통과시킴(외곽선 오버레이와 같은 원리) → 평평하게 빛나는 만화풍 모양.
 - 메시 `/Game/Effects/Wings/SM_Wing` (`C:\work\char-pipeline\scripts\blender_wing.py` → `output\wings\SM_Wing.fbx` → `ue_import_wing.py`, 로그 `output\ue_wing_rr.log`): 오른쪽 날개 하나, 뿌리 원점, +Y 로 142, 깃털은 -X. 끝이 뾰족한 타원 깃털 7장을 팔(뿌리→손목)을 따라 부채꼴로 겹치고(안쪽은 뒤로, 바깥은 바깥-뒤로, 바깥일수록 김) 그 위에 덮깃 띠(물결 모양 뒤 가장자리). 조각마다 inset 테두리: 정점 색 R=1 테두리, G=1 덮깃. UV U=뿌리→끝, V=앞→뒤. 623 삼각형.
   - Blender 함정: `bm.faces.new` 직후엔 면 법선이 0이라 inset 폭이 0이 됨 → `face.normal_update()` 먼저. bmesh 연산이 요소 tag 를 지우므로 조각 구분은 면 집합 차이로. 색을 안 준 코너는 흰색(=테두리+덮깃)이 됨.
@@ -106,7 +106,7 @@
 
 ## 10차 추가 — 머리 위 3D 주사위 + 하나씩 굴리기
 
-- 아직 커밋 안 됨.
+- 커밋 `4116a14` 에 포함 (8차 나머지~14차를 한 번에).
 - `URRRandomDiceBuffComponent::RollDice` 는 이제 주사위 하나만 씀(bool 반환). 굴리는 순간 눈/종류를 정해 복제하고(`LastRoll` 은 배열 → 구조체 하나), `RollSpinTime`(0.6초) 뒤 착지할 때(`TickComponent` → `ApplyRoll`) 효과 적용. 구르는 동안(`IsRolling`)은 다음 굴림 거부. `ClearBuffs`(KO)는 구르던 주사위도 취소. 여러 개일 때 "가장 높은 눈 한 번만" 규칙은 의미가 없어져 없앰.
 - `OnRep_RollCount` 는 `HasActorBegunPlay` 전(중간 참가 시 첫 복제)에는 무시 → 예전 굴림이 다시 튀어나오지 않음.
 - 새 `URRRandomOverheadDieComponent`(UStaticMeshComponent, 캐릭터의 `OverheadDie`): 모든 기기에서 각자 연출. 팝(0.15초, 오버슈트) → 화면 위쪽 호(`HopHeight` 45)를 그리며 `SpinTurns` 2.5바퀴, (1-t)³ 로 감속해 결과 면에서 정확히 멈춤(최종 회전 = 결과 면이 카메라를 보는 회전에 남은 각도만큼 랜덤 축 회전을 곱함) → 착지 바운스(1.18배, 0.18초) → `HoldTime` 1.3초 → `ExitTime` 0.3초 축소. 절대 위치/회전/스케일(거인이어도 크기 그대로), 충돌/그림자 없음, `DieScale` 0.55 (약 55).
@@ -121,7 +121,7 @@
 
 ## 10차 — 주사위 3D 모델 (에셋)
 
-- 아직 커밋 안 됨. 머리 위 연출에서 씀(위 "10차 추가"). 에셋: `/Game/Props/Dice` — `SM_Dice`, `M_Dice`, `M_DicePip`, `Textures/T_Dice_BaseColor`.
+- 커밋 `4116a14` 에 포함 (8차 나머지~14차를 한 번에). 머리 위 연출에서 씀(위 "10차 추가"). 에셋: `/Game/Props/Dice` — `SM_Dice`, `M_Dice`, `M_DicePip`, `Textures/T_Dice_BaseColor`.
 - 출처: Tripo 가 숫자를 제대로 못 그려서(깨지거나 1~6 이 아닌 숫자) 무늬 없는 컬러 큐브만 Tripo 로 만들고, 눈(점)은 Blender 에서 구 21개를 Boolean 으로 파냄. 마주보는 면 합 7 (+Z 1 / -Z 6, -Y 2 / +Y 5, +X 3 / -X 4, Blender 축 기준).
   - `C:\work\char-pipeline\scripts\blender_dice_pips.py` (원본 `input\dice`, 결과 `output\dice\SM_Dice.fbx`) → `ue_import_dice.py` (예전 FBX 임포터, 로그 `output\ue_dice_rr.log`).
   - 스크립트가 확인하는 것: 눈이 둥근 모서리가 아니라 평평한 면에 놓였는지(레이캐스트), 파인 자리가 정확히 21개인지, 메시가 닫혀 있는지.
@@ -133,7 +133,7 @@
 
 ## 9차 — 여우 캐릭터 (이동 / 사격 / 쓰러짐 애니메이션)
 
-- 아직 커밋 안 됨. 처음으로 프로젝트 에셋이 생김: `Content/Characters/Fox` (커밋하면 `.gitattributes` 대로 LFS).
+- 커밋 `4116a14` 에 포함 (8차 나머지~14차를 한 번에). 처음으로 프로젝트 에셋이 생김: `Content/Characters/Fox` (커밋하면 `.gitattributes` 대로 LFS).
 - 출처: Tripo 모델(18,890 삼각형, 2K PBR) → Mixamo 자동 리깅 + 애니메이션 5개(소총 대기/걷기/사격/연속 사격/뒤로 쓰러짐, 왼쪽 돌기). 에셋을 만드는 스크립트와 원본 FBX는 `C:\work\char-pipeline` (`scripts\ue_import_mixamo.py`, `scripts\ue_setup_fox.py`).
 - 에셋: `SK_Fox`(+`SK_Fox_Skeleton`), `M_Fox`, `Textures/T_Fox_*`, `Anims/A_Fox_Idle|Walk|Fire|FireBurst|Death|TurnLeft`. `FireBurst`, `TurnLeft` 는 아직 안 씀.
 - 임포트 메모: UE 5.8 Interchange FBX 는 `AssetImportTask` 옵션을 무시해서(애니메이션마다 스켈레톤/메시가 따로 생김) `-dpcvars=Interchange.FeatureFlags.Import.FBX=0` 로 예전 FBX 임포터를 씀. 스켈레톤 이름을 바꾸면 리다이렉터가 저장되지 않아 메시가 옛 스켈레톤을 찾음("has no skeleton") → 메시 FBX 이름을 처음부터 `SK_Fox` 로 해서 스켈레톤은 바꾸지 않음.
@@ -222,7 +222,7 @@
 
 ## 8차 추가 — 비행 중 대쉬 (Space 더블 탭) — 위 "변경"으로 대체됨
 
-- 아직 커밋 안 됨 (높이 상한과 함께).
+- 커밋 `4116a14` 에 포함 (8차 나머지~14차를 한 번에, 높이 상한과 함께).
 - `Jump()`: 비행 중이고 지난 누름에서 `DashDoubleTapTime`(0.3초) 안이면 `TryDash`. 성공하면 `JumpPressedTime` 을 지워서 세 번째 누름이 또 대쉬하지 않게 함. 실패(쿨다운 등)하면 보통 점프 처리(공중이라 효과 없음).
 - 네트워크는 오르기와 같은 방식: 조종하는 기기만 `TryDash` → `StartDash` + 클라이언트면 `ServerStartDash`. 서버는 원격 클라이언트의 속도를 건드리지 않고 `SetTrustClientMovement(true)`, 끝나고 `ClimbTrustMargin`(0.5초) 뒤 해제. 서버 쿨다운 검사는 `FireTimeSlack` 만큼 여유.
 - `UpdateDash`: 조종하는 기기에서 매 틱 `Velocity = 방향 × DashSpeed` (Z 0, 수평 유지). 끝나면 `MaxWalkSpeed`(300)로 줄임 → 공중엔 제동이 없어서 그 속도로 계속 흐르며 활공.
