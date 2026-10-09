@@ -33,8 +33,10 @@ namespace
 	// Opponents behind cover count as this much further away when picking a target
 	constexpr float HiddenOpponentPenalty = 600.f;
 
-	// Shots fly this far above the capsule center and are this wide (see the character's MuzzleOffset and the projectile)
-	constexpr float ShotHeight = 20.f;
+	// Shots fly this far above the capsule center, this far to the shooter's right (the rifle's muzzle in the fox's fire
+	// stance) and are this wide (see the character's MuzzleOffset and the projectile)
+	constexpr float ShotHeight = 2.f;
+	constexpr float ShotSide = 12.f;
 	constexpr float ShotRadius = 12.f;
 	// A cover spot must stay hidden for a shot this wide, so the bot's body doesn't stick out
 	constexpr float HiddenMargin = 30.f;
@@ -48,11 +50,13 @@ namespace
 	constexpr float AvoidProbeDistance = 120.f;
 	constexpr float AvoidAngles[] = { 35.f, 70.f, 105.f, 140.f };
 
-	/** Whether cover (anything world static) is between two capsule centers, at the height shots fly. */
+	/** Whether cover (anything world static) is between two capsule centers, along the line a shot from From would fly. */
 	bool SweepHitsCover(const UWorld* World, const FVector& From, const FVector& To, float Radius)
 	{
-		const FVector Up(0.f, 0.f, ShotHeight);
-		return World->SweepTestByObjectType(From + Up, To + Up, FQuat::Identity, FCollisionObjectQueryParams(ECC_WorldStatic),
+		// Level shots fly parallel to the line between the brawlers, from the muzzle beside the shooter
+		const FVector Ahead = (To - From).GetSafeNormal2D();
+		const FVector Offset = FVector(-Ahead.Y, Ahead.X, 0.f) * ShotSide + FVector(0.f, 0.f, ShotHeight);
+		return World->SweepTestByObjectType(From + Offset, To + Offset, FQuat::Identity, FCollisionObjectQueryParams(ECC_WorldStatic),
 			FCollisionShape::MakeSphere(Radius), FCollisionQueryParams(SCENE_QUERY_STAT(RRRandomCoverSweep), false));
 	}
 }
@@ -453,22 +457,29 @@ void ARRRandomAIController::UpdateDice(ARRRandomCharacter* Self, float Distance,
 	URRRandomDiceBuffComponent* Dice = Self->GetDiceBuffs();
 	if (Dice->GetCharges() <= 0)
 	{
+		// Spent them all: hold some back again next time
+		if (bSpendingDice)
+		{
+			bSpendingDice = false;
+			DiceHoldLimit = Stream.RandRange(DiceHoldRange.X, DiceHoldRange.Y);
+		}
 		return;
 	}
 
-	// Buffs run out, so save dice for a fight unless too many have piled up
+	// Buffs run out, so save dice for a fight unless too many have piled up.
+	// Once it starts, the bot throws them one after another until none are left.
 	const bool bEngaging = !bRetreating && Distance <= Self->GetAttackRange() * EngageRangeShare;
-	if (!bEngaging && Dice->GetCharges() < DiceHoldLimit)
+	if (!bSpendingDice && !bEngaging && Dice->GetCharges() < DiceHoldLimit)
 	{
 		DiceTimer = Stream.FRandRange(DiceReactionMin, DiceReactionMax);
 		return;
 	}
+	bSpendingDice = true;
 
+	// Each throw waits for the previous die to land, then a short reaction
 	DiceTimer -= DeltaSeconds;
-	if (DiceTimer <= 0.f)
+	if (DiceTimer <= 0.f && Dice->RollDice())
 	{
-		Dice->RollDice();
-		DiceHoldLimit = Stream.RandRange(DiceHoldRange.X, DiceHoldRange.Y);
 		DiceTimer = Stream.FRandRange(DiceReactionMin, DiceReactionMax);
 	}
 }

@@ -13,6 +13,9 @@ class UMaterialInterface;
 class USpringArmComponent;
 class URRRandomEventComponent;
 class URRRandomDiceBuffComponent;
+class URRRandomOverheadDieComponent;
+class URRRandomWingsComponent;
+class URRRandomGunComponent;
 
 /** A damage number floating over a brawler's head, drawn by the HUD. */
 struct FRRDamagePopup
@@ -30,7 +33,8 @@ struct FRRDamagePopup
  * turns giant for a while when a giant die comes up (bigger, more damage dealt, less taken),
  * flies for a while when a flight die comes up (hold jump to rise, let go to glide down), jumps and climbs onto cover,
  * and is knocked out at 0 health, getting back up at its starting spot after a delay.
- * Uses the engine's mannequin so it needs no project assets.
+ * Looks like the Mixamo-rigged fox in /Game/Characters/Fox (idle, walk, fire, death); without those assets it falls back
+ * to the engine's mannequin with idle and walk only.
  *
  * Networking: the server (host) owns health, ammo, the gun, dice and knockouts and replicates them.
  * The owning client predicts its fire cooldown and climbs locally, asking the server through RPCs.
@@ -49,6 +53,7 @@ public:
 
 	URRRandomEventComponent* GetRandomEvents() const { return RandomEvents; }
 	URRRandomDiceBuffComponent* GetDiceBuffs() const { return DiceBuffs; }
+	URRRandomOverheadDieComponent* GetOverheadDie() const { return OverheadDie; }
 
 	/**
 	 * Turns toward a target and shoots a projectile at it if the magazine has a round and the fire cooldown allows.
@@ -58,7 +63,7 @@ public:
 	 */
 	bool FireAt(const FVector& TargetLocation);
 
-	/** Spends every stored die. On a client, asks the server to roll. */
+	/** Throws one stored die (once the previous one has landed). On a client, asks the server to roll. */
 	void RollDice();
 
 	/** Climbs onto cover in front if its top is within reach, otherwise jumps. */
@@ -106,7 +111,21 @@ public:
 	bool CanFly() const { return bFlying; }
 	/** Seconds of flight left. */
 	float GetFlightRemaining() const { return FlightRemaining; }
+	bool IsDashing() const { return bDashing; }
+	/** False once this flight's dash is spent; landing gives it back. */
+	bool HasDash() const { return !bDashUsed; }
+
+	/** Ends a held dash when jump is let go. */
+	virtual void StopJumping() override;
+	virtual void Landed(const FHitResult& Hit) override;
 	const TArray<FRRDamagePopup>& GetDamagePopups() const { return DamagePopups; }
+
+	/** True for a moment after each shot (as long as the firing pose holds), on every machine. */
+	bool IsAiming() const;
+	/** Where shots appear, from the capsule center, turned with the brawler (forward, right, up). */
+	const FVector& GetMuzzleOffset() const { return MuzzleOffset; }
+	/** 0 facing ahead .. 1 turned into the fire animation's rifle stance, where the hands hold the gun on the line shots fly. */
+	float GetFireStanceAlpha() const { return FireStanceAlpha; }
 
 	/** How long damage numbers stay up. */
 	static constexpr float DamagePopupLifetime = 0.8f;
@@ -125,6 +144,18 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Random")
 	TObjectPtr<URRRandomDiceBuffComponent> DiceBuffs;
+
+	/** The 3D die that tumbles over the head on each roll. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Random")
+	TObjectPtr<URRRandomOverheadDieComponent> OverheadDie;
+
+	/** Glowing wings on the back while the flight power lasts. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Flight")
+	TObjectPtr<URRRandomWingsComponent> Wings;
+
+	/** The rifle held between the fox's hands (hidden on the mannequin). Every gun the dice give looks like this one for now. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	TObjectPtr<URRRandomGunComponent> Gun;
 
 	/** 0 is the blue team (starting at the player start), 1 the red team. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_Team, Category = "Team")
@@ -168,9 +199,12 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	float AttackRange = 1300.f;
 
-	/** Where shots appear relative to the capsule center: forward, right, up. */
+	/**
+	 * Where shots appear relative to the capsule center: forward, right, up. The tip of the rifle's muzzle in the fox's
+	 * fire stance (measured in game), so shots leave the barrel; the bots' line-of-fire sweeps use the same height and side.
+	 */
 	UPROPERTY(EditAnywhere, Category = "Combat")
-	FVector MuzzleOffset = FVector(70.f, 0.f, 20.f);
+	FVector MuzzleOffset = FVector(70.f, 12.f, 2.f);
 
 	/** Highest ledge, above the feet, the brawler can climb onto. */
 	UPROPERTY(EditAnywhere, Category = "Climb")
@@ -209,11 +243,26 @@ protected:
 
 	/** Upward speed while holding jump with the flight power. */
 	UPROPERTY(EditAnywhere, Category = "Flight", meta = (ClampMin = "0"))
-	float FlightRiseSpeed = 500.f;
+	float FlightRiseSpeed = 900.f;
 
-	/** Longest a held jump keeps rising with the flight power; with FlightRiseSpeed this caps the height (about 600). */
+	/** Longest a held jump keeps rising with the flight power; with FlightRiseSpeed this sets how high one lift goes (about 700). */
 	UPROPERTY(EditAnywhere, Category = "Flight", meta = (ClampMin = "0"))
-	float FlightMaxHoldTime = 1.2f;
+	float FlightMaxHoldTime = 0.75f;
+
+	/** Hard ceiling for flying: the feet never go higher above the arena floor than this many body heights (normal size). */
+	UPROPERTY(EditAnywhere, Category = "Flight", meta = (ClampMin = "0"))
+	float FlightMaxHeightInBodies = 5.f;
+
+	/**
+	 * While flying, a second jump press within this many seconds starts a dash that lasts as long as that press is held.
+	 * One dash per flight: after letting go, the next one comes after landing.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Flight|Dash", meta = (ClampMin = "0"))
+	float DashDoubleTapTime = 0.3f;
+
+	/** Speed of the dash, level, toward where the brawler is steering (or facing). */
+	UPROPERTY(EditAnywhere, Category = "Flight|Dash", meta = (ClampMin = "0"))
+	float DashSpeed = 1200.f;
 
 	/** Steering in the air while flying or gliding. */
 	UPROPERTY(EditAnywhere, Category = "Flight", meta = (ClampMin = "0", ClampMax = "1"))
@@ -244,9 +293,40 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Animation")
 	TObjectPtr<UAnimSequence> WalkAnimation;
 
+	/** Loops while standing and shooting; walking while shooting keeps the walk. */
+	UPROPERTY(EditAnywhere, Category = "Animation")
+	TObjectPtr<UAnimSequence> FireAnimation;
+
+	/** Played once on knockout, holding its last frame until getting back up. Without one the body goes ragdoll. */
+	UPROPERTY(EditAnywhere, Category = "Animation")
+	TObjectPtr<UAnimSequence> DeathAnimation;
+
+	/** Seconds after the last shot that the firing animation keeps playing. */
+	UPROPERTY(EditAnywhere, Category = "Animation")
+	float FireAnimationHold = 0.35f;
+
+	/**
+	 * The fire animation is a bladed rifle stance: the hands hold the rifle this many degrees left of where the body
+	 * faces. While it plays, the body turns right by this much so the rifle in its hands points where the shots go.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Animation")
+	float FireStanceYaw = 38.f;
+
+	/** How fast the body turns into and out of that stance (1 = a full turn takes a second). */
+	UPROPERTY(EditAnywhere, Category = "Animation")
+	float FireStanceSpeed = 8.f;
+
 	/** Skeletal-mesh-ready material with a "DiffuseColor" parameter for random events; the mannequin's own material has a fixed color. */
 	UPROPERTY(EditAnywhere, Category = "Body")
 	TObjectPtr<UMaterialInterface> BodyBaseMaterial;
+
+	/**
+	 * How much the team color tints a textured body ("TintStrength"). Off by default: the HUD's friend-or-foe marker
+	 * over the head tells the teams apart, and the tint muddied the fur.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Body", meta = (ClampMin = "0", ClampMax = "1"))
+	float BodyTeamTint = 0.f;
+
 
 	/** Ground speed at which the walk animation plays at its normal rate. */
 	UPROPERTY(EditAnywhere, Category = "Animation")
@@ -280,6 +360,13 @@ private:
 	void OnFlightDie(int32 Face);
 	/** Jump and glide settings for the flight power, on every machine so movement prediction agrees. */
 	void UpdateFlight();
+	/** Starts a dash if flying and this flight's dash is unused. Only where the brawler is controlled; tells the server when that is a client. */
+	bool TryDash();
+	void StartDash(const FVector& Direction);
+	/** Holds the dash speed level, steering with the movement input. */
+	void UpdateDash();
+	/** Slows to air speed and goes back to gliding. On a client, tells the server. */
+	void EndDash();
 	/** Starts climbing if cover is in front with a reachable top and room to stand there. Only where the brawler is controlled. */
 	bool TryClimb();
 	void StartClimb(const FVector& Destination, const FVector& WallFacing);
@@ -305,6 +392,12 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerStartClimb(FVector_NetQuantize Destination, FVector_NetQuantizeNormal WallFacing);
 
+	UFUNCTION(Server, Reliable)
+	void ServerStartDash(FVector_NetQuantizeNormal Direction);
+
+	UFUNCTION(Server, Reliable)
+	void ServerEndDash();
+
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastDamagePopup(float Amount);
 
@@ -314,8 +407,25 @@ private:
 	UFUNCTION()
 	void OnRep_Alive();
 
+	UFUNCTION()
+	void OnRep_ShotCount();
+
+	/** Plays one animation on the body, from the start, at the given rate. */
+	void PlayBodyAnimation(UAnimSequence* Animation, bool bLoop, float PlayRate = 1.f);
+
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimSequence> CurrentAnimation;
+
+	/** 0 facing ahead .. 1 turned into the fire animation's bladed stance (FireStanceYaw). */
+	float FireStanceAlpha = 0.f;
+
+
+	/** Counts shots so every machine can play the firing animation; only the change matters. */
+	UPROPERTY(ReplicatedUsing = OnRep_ShotCount)
+	uint8 ShotCount = 0;
+
+	/** When this machine last saw the brawler shoot. */
+	float LastShotTime = -UE_BIG_NUMBER;
 
 	TArray<FRRDamagePopup> DamagePopups;
 
@@ -369,6 +479,11 @@ private:
 
 	UPROPERTY(Replicated)
 	float FlightRemaining = 0.f;
+
+	bool bDashing = false;
+	/** Set when a dash starts, cleared on landing: one dash per flight. */
+	bool bDashUsed = false;
+	FVector DashDirection = FVector::ForwardVector;
 
 	float BaseJumpZVelocity = 0.f;
 	float BaseJumpMaxHoldTime = 0.f;

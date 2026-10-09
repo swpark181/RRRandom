@@ -57,6 +57,18 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Cover")
 	TSubclassOf<ARRRandomCover> CoverClass;
 
+	/** Builds the voxel island (cliffs, waterfall, river, bay, hills, paths) around the arena when the level has none (ARRRandomIsland). */
+	UPROPERTY(EditAnywhere, Category = "Island")
+	bool bSpawnIsland = true;
+
+	/** Covers the floor with grass tiles when the level has none of its own (ARRRandomGrassFloor). */
+	UPROPERTY(EditAnywhere, Category = "Grass")
+	bool bSpawnGrassFloor = true;
+
+	/** Which random tiles the grass gets; every machine lays the same ones from it. */
+	UPROPERTY(EditAnywhere, Category = "Grass")
+	int32 GrassSeed = 7;
+
 	/** Blocks of cover relative to the player start. The default is symmetric so both teams get the same. */
 	UPROPERTY(EditAnywhere, Category = "Cover")
 	TArray<FRRCoverPlacement> CoverLayout;
@@ -95,6 +107,8 @@ private:
 	void FillEmptySlotsWithBots();
 	void SpawnDummiesIfNoneExist();
 	void SpawnCoverIfNoneExists();
+	void SpawnGrassFloorIfNoneExists();
+	void SpawnIslandIfNoneExists();
 	FVector GetPlayerStartLocation() const;
 
 	/** Places a point on the floor beneath it, or returns false if there is no floor there. */

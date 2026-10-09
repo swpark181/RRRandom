@@ -3,9 +3,12 @@
 #include "RRRandomCover.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomEventComponent.h"
+#include "RRRandomGunComponent.h"
 #include "RRRandomGameMode.h"
 #include "RRRandomMovementComponent.h"
+#include "RRRandomOverheadDieComponent.h"
 #include "RRRandomProjectile.h"
+#include "RRRandomWingsComponent.h"
 #include "Animation/AnimSequence.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -25,7 +28,23 @@ namespace
 	// Below this ground speed the character counts as standing still
 	constexpr float WalkAnimationThreshold = 10.f;
 
+	// The fox is 100 units tall from its feet to the tips of its ears; this fills the capsule (192) the way the mannequin did
+	constexpr float FoxMeshScale = 1.8f;
+	// The fox's walk covers 79 units a second at scale 1 (measured from its hips before it was made to walk in place)
+	constexpr float FoxWalkSpeedPerScale = 79.f;
+
+	// A narrow, far-away (telephoto) camera nearly removes perspective for a flat, 2.5D look:
+	// cover walls stand parallel and brawlers look the same size anywhere on screen
+	constexpr float CameraFieldOfView = 20.f;
+	// The 90 degree camera 1400 away that this replaces; the arm grows so the same stretch of arena fits on screen
+	constexpr float FramingFieldOfView = 90.f;
+	constexpr float FramingArmLength = 1400.f;
+
 	const FName ColorParameter(TEXT("DiffuseColor"));
+	// The fox material's share of DiffuseColor; the mannequin's material has no such parameter and ignores it
+	const FName TintStrengthParameter(TEXT("TintStrength"));
+	// Any nonzero custom stencil marks a character for the toon post process's silhouette line
+	constexpr int32 CharacterStencil = 1;
 	const FName RagdollProfile(TEXT("Ragdoll"));
 
 	// Shots between brawlers less than this far apart in height fly level
@@ -77,47 +96,96 @@ ARRRandomCharacter::ARRRandomCharacter(const FObjectInitializer& ObjectInitializ
 	// The view stays put when the brawler turns giant
 	CameraBoom->SetUsingAbsoluteScale(true);
 	CameraBoom->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f));
-	CameraBoom->TargetArmLength = 1400.f;
+	CameraBoom->TargetArmLength = FramingArmLength * FMath::Tan(FMath::DegreesToRadians(FramingFieldOfView * 0.5f))
+		/ FMath::Tan(FMath::DegreesToRadians(CameraFieldOfView * 0.5f));
 	CameraBoom->bDoCollisionTest = false;
 
 	TopDownCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("TopDownCamera"));
 	TopDownCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	TopDownCamera->bUsePawnControlRotation = false;
+	TopDownCamera->SetFieldOfView(CameraFieldOfView);
 
+	// Cartoon look: the post process cuts lighting into flat bands and inks the edges.
+	// The instance is where its values are tuned in the editor (live while playing in the editor).
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ToonPostProcess(TEXT("/Game/PostProcess/MI_PP_Toon.MI_PP_Toon"));
+	if (ToonPostProcess.Succeeded())
+	{
+		FPostProcessSettings& Post = TopDownCamera->PostProcessSettings;
+		Post.WeightedBlendables.Array.Add(FWeightedBlendable(1.f, ToonPostProcess.Object));
+		// Ambient occlusion darkens creases in a realistic way that muddies the flat colors
+		Post.bOverride_AmbientOcclusionIntensity = true;
+		Post.AmbientOcclusionIntensity = 0.f;
+		// Motion blur smears moving brawlers' ink and silhouette lines
+		Post.bOverride_MotionBlurAmount = true;
+		Post.MotionBlurAmount = 0.f;
+		// A little more color, for the bright anime (Genshin-like) look
+		Post.bOverride_ColorSaturation = true;
+		Post.ColorSaturation = FVector4(1.15f, 1.15f, 1.15f, 1.f);
+	}
+
+	// The fox (Tripo model, Mixamo rig and animations); its material tints the fur toward "DiffuseColor"
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> FoxMesh(TEXT("/Game/Characters/Fox/SK_Fox.SK_Fox"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FoxMaterial(TEXT("/Game/Characters/Fox/M_Fox.M_Fox"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> FoxIdle(TEXT("/Game/Characters/Fox/Anims/A_Fox_Idle.A_Fox_Idle"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> FoxWalk(TEXT("/Game/Characters/Fox/Anims/A_Fox_Walk.A_Fox_Walk"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> FoxFire(TEXT("/Game/Characters/Fox/Anims/A_Fox_Fire.A_Fox_Fire"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> FoxDeath(TEXT("/Game/Characters/Fox/Anims/A_Fox_Death.A_Fox_Death"));
+	// Fallback when the project's fox assets are missing
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MannequinMesh(TEXT("/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP.TutorialTPP"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> IdleAnim(TEXT("/Engine/Tutorial/SubEditors/TutorialAssets/Character/Tutorial_Idle.Tutorial_Idle"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> WalkAnim(TEXT("/Engine/Tutorial/SubEditors/TutorialAssets/Character/Tutorial_Walk_Fwd.Tutorial_Walk_Fwd"));
 	// Engine material that works on skeletal meshes and has a "DiffuseColor" parameter
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TintableMaterial(TEXT("/Engine/TemplateResources/M_Template_Master.M_Template_Master"));
 
-	// The mannequin's feet sit at the bottom of the capsule and it faces +X
+	// Both bodies have their feet at the bottom of the capsule and face +X after this turn
 	USkeletalMeshComponent* BodyMesh = GetMesh();
 	BodyMesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -96.f), FRotator(0.f, -90.f, 0.f));
-	if (MannequinMesh.Succeeded())
+	const bool bFox = FoxMesh.Succeeded() && FoxMaterial.Succeeded() && FoxIdle.Succeeded() && FoxWalk.Succeeded();
+	if (bFox)
 	{
-		BodyMesh->SetSkeletalMeshAsset(MannequinMesh.Object);
+		BodyMesh->SetSkeletalMeshAsset(FoxMesh.Object);
+		BodyMesh->SetRelativeScale3D(FVector(FoxMeshScale));
+		BodyBaseMaterial = FoxMaterial.Object;
+		IdleAnimation = FoxIdle.Object;
+		WalkAnimation = FoxWalk.Object;
+		WalkAnimationSpeed = FoxWalkSpeedPerScale * FoxMeshScale;
+		FireAnimation = FoxFire.Succeeded() ? FoxFire.Object : nullptr;
+		DeathAnimation = FoxDeath.Succeeded() ? FoxDeath.Object : nullptr;
 	}
-	if (TintableMaterial.Succeeded())
+	else
 	{
-		BodyBaseMaterial = TintableMaterial.Object;
+		if (MannequinMesh.Succeeded())
+		{
+			BodyMesh->SetSkeletalMeshAsset(MannequinMesh.Object);
+		}
+		if (TintableMaterial.Succeeded())
+		{
+			BodyBaseMaterial = TintableMaterial.Object;
+		}
+		IdleAnimation = IdleAnim.Succeeded() ? IdleAnim.Object : nullptr;
+		WalkAnimation = WalkAnim.Succeeded() ? WalkAnim.Object : nullptr;
 	}
-	if (IdleAnim.Succeeded())
+	if (IdleAnimation)
 	{
-		IdleAnimation = IdleAnim.Object;
 		BodyMesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 		BodyMesh->AnimationData.AnimToPlay = IdleAnimation;
 		BodyMesh->AnimationData.bSavedLooping = true;
 		BodyMesh->AnimationData.bSavedPlaying = true;
-	}
-	if (WalkAnim.Succeeded())
-	{
-		WalkAnimation = WalkAnim.Object;
 	}
 
 	ProjectileClass = ARRRandomProjectile::StaticClass();
 	RandomEvents = CreateDefaultSubobject<URRRandomEventComponent>(TEXT("RandomEvents"));
 	RandomEvents->ColorParameterName = TEXT("DiffuseColor");
 	DiceBuffs = CreateDefaultSubobject<URRRandomDiceBuffComponent>(TEXT("DiceBuffs"));
+	OverheadDie = CreateDefaultSubobject<URRRandomOverheadDieComponent>(TEXT("OverheadDie"));
+	OverheadDie->SetupAttachment(RootComponent);
+	Wings = CreateDefaultSubobject<URRRandomWingsComponent>(TEXT("Wings"));
+	Wings->SetupAttachment(RootComponent);
+	// Between the shoulder blades of a body without the fox's spine bone; on the fox the wings follow that bone
+	Wings->SetRelativeLocation(FVector(-20.f, 0.f, 10.f));
+	// Held between the hands every frame (hidden on the mannequin, which lacks the fox's hand bones)
+	Gun = CreateDefaultSubobject<URRRandomGunComponent>(TEXT("Gun"));
+	Gun->SetupAttachment(BodyMesh);
 }
 
 void ARRRandomCharacter::BeginPlay()
@@ -130,6 +198,15 @@ void ARRRandomCharacter::BeginPlay()
 		{
 			BodyMesh->SetMaterial(Slot, BodyBaseMaterial);
 		}
+	}
+	// The toon post process finds the body in custom depth to draw its silhouette line
+	BodyMesh->SetRenderCustomDepth(true);
+	BodyMesh->SetCustomDepthStencilValue(CharacterStencil);
+	// The gun in its hand belongs to the silhouette too
+	if (Gun)
+	{
+		Gun->SetRenderCustomDepth(true);
+		Gun->SetCustomDepthStencilValue(CharacterStencil);
 	}
 
 	Super::BeginPlay();
@@ -182,6 +259,7 @@ void ARRRandomCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ARRRandomCharacter, GiantRemaining);
 	DOREPLIFETIME(ARRRandomCharacter, bFlying);
 	DOREPLIFETIME(ARRRandomCharacter, FlightRemaining);
+	DOREPLIFETIME(ARRRandomCharacter, ShotCount);
 }
 
 FLinearColor ARRRandomCharacter::GetTeamColor(int32 InTeam)
@@ -197,6 +275,7 @@ void ARRRandomCharacter::ApplyTeamColor()
 		if (UMaterialInstanceDynamic* Material = Cast<UMaterialInstanceDynamic>(BodyMesh->GetMaterial(Slot)))
 		{
 			Material->SetVectorParameterValue(ColorParameter, GetTeamColor(Team));
+			Material->SetScalarParameterValue(TintStrengthParameter, BodyTeamTint);
 		}
 	}
 }
@@ -275,6 +354,11 @@ void ARRRandomCharacter::UpdateFlight()
 		const bool bStillInAir = RandomMovement->bGliding && Movement->IsFalling() && GetActorLocation().Z > HomeLocation.Z - GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
 		RandomMovement->bGliding = bFlying || bStillInAir;
 		Movement->AirControl = RandomMovement->bGliding ? FlightAirControl : BaseAirControl;
+
+		// Feet at most FlightMaxHeightInBodies normal body heights above the arena floor (where the brawler started)
+		const UCapsuleComponent* Capsule = GetCapsuleComponent();
+		const float FloorZ = HomeLocation.Z - Capsule->GetUnscaledCapsuleHalfHeight();
+		RandomMovement->FlightCeilingZ = FloorZ + FlightMaxHeightInBodies * Capsule->GetUnscaledCapsuleHalfHeight() * 2.f + Capsule->GetScaledCapsuleHalfHeight();
 	}
 }
 
@@ -366,6 +450,10 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 		}
 	}
 
+	if (bDashing)
+	{
+		UpdateDash();
+	}
 	if (bClimbing)
 	{
 		UpdateClimb(DeltaSeconds);
@@ -388,7 +476,15 @@ void ARRRandomCharacter::Jump()
 	{
 		return;
 	}
-	JumpPressedTime = GetWorld()->GetTimeSeconds();
+	// Flying, a quick second press dashes for as long as it is held (StopJumping ends it)
+	const float Now = GetWorld()->GetTimeSeconds();
+	const bool bDoubleTap = bFlying && Now - JumpPressedTime <= DashDoubleTapTime;
+	JumpPressedTime = Now;
+	if (bDoubleTap && TryDash())
+	{
+		JumpPressedTime = -UE_BIG_NUMBER;
+		return;
+	}
 	// With the flight power the jump is the lift-off; holding it keeps rising
 	if (bFlying || !TryClimb())
 	{
@@ -484,6 +580,122 @@ void ARRRandomCharacter::ServerStartClimb_Implementation(FVector_NetQuantize Des
 	SetTrustClientMovement(true);
 }
 
+bool ARRRandomCharacter::TryDash()
+{
+	// Like climbing, only the controlling machine decides; a remote player's server hears about it through ServerStartDash
+	if (!IsLocallyControlled() || !bAlive || !bFlying || bClimbing || bDashing || bDashUsed)
+	{
+		return false;
+	}
+
+	// Toward where the brawler is trying to go, or where it faces when not steering
+	FVector Direction = GetLastMovementInputVector().GetSafeNormal2D();
+	if (Direction.IsNearlyZero())
+	{
+		Direction = GetActorForwardVector().GetSafeNormal2D();
+	}
+	StartDash(Direction);
+	if (!HasAuthority())
+	{
+		ServerStartDash(Direction);
+	}
+	return true;
+}
+
+void ARRRandomCharacter::ServerStartDash_Implementation(FVector_NetQuantizeNormal Direction)
+{
+	if (!bAlive || !bFlying || bClimbing || bDashing || bDashUsed)
+	{
+		return;
+	}
+	StartDash(FVector(Direction).GetSafeNormal2D());
+	SetTrustClientMovement(true);
+}
+
+void ARRRandomCharacter::ServerEndDash_Implementation()
+{
+	EndDash();
+}
+
+void ARRRandomCharacter::StartDash(const FVector& Direction)
+{
+	bDashing = true;
+	bDashUsed = true;
+	DashDirection = Direction.IsNearlyZero() ? GetActorForwardVector().GetSafeNormal2D() : Direction;
+	SetActorRotation(DashDirection.Rotation());
+	// The server leaves a remote dasher's movement alone: that client moves itself and the server follows its position
+	if (IsLocallyControlled())
+	{
+		UCharacterMovementComponent* Movement = GetCharacterMovement();
+		if (Movement->IsMovingOnGround())
+		{
+			Movement->SetMovementMode(MOVE_Falling);
+		}
+		Movement->Velocity = DashDirection * DashSpeed;
+	}
+}
+
+void ARRRandomCharacter::UpdateDash()
+{
+	// The flight power running out ends the dash too
+	if (!bFlying)
+	{
+		EndDash();
+		return;
+	}
+	// Level and at full speed while the key is held, turning toward the movement keys
+	if (IsLocallyControlled())
+	{
+		const FVector Steer = GetLastMovementInputVector().GetSafeNormal2D();
+		if (!Steer.IsNearlyZero())
+		{
+			DashDirection = Steer;
+		}
+		GetCharacterMovement()->Velocity = DashDirection * DashSpeed;
+	}
+}
+
+void ARRRandomCharacter::EndDash()
+{
+	if (!bDashing)
+	{
+		return;
+	}
+	bDashing = false;
+	if (IsLocallyControlled())
+	{
+		// Back to air speed, then gliding as before
+		UCharacterMovementComponent* Movement = GetCharacterMovement();
+		Movement->Velocity = DashDirection * FMath::Min<float>(DashSpeed, Movement->MaxWalkSpeed);
+		if (!HasAuthority())
+		{
+			ServerEndDash();
+		}
+	}
+	else if (HasAuthority())
+	{
+		// Keep trusting the client a little longer, until its first moves after the dash have arrived
+		ClientTrustRemaining = FMath::Max(ClimbTrustMargin, KINDA_SMALL_NUMBER);
+	}
+}
+
+void ARRRandomCharacter::StopJumping()
+{
+	Super::StopJumping();
+	// Letting go of the second press ends the dash
+	if (bDashing && IsLocallyControlled())
+	{
+		EndDash();
+	}
+}
+
+void ARRRandomCharacter::Landed(const FHitResult& Hit)
+{
+	Super::Landed(Hit);
+	// Back on the ground: the next flight gets its dash
+	bDashUsed = false;
+}
+
 void ARRRandomCharacter::SetTrustClientMovement(bool bTrust)
 {
 	UCharacterMovementComponent* Movement = GetCharacterMovement();
@@ -575,16 +787,43 @@ void ARRRandomCharacter::UpdateWalkSpeed()
 void ARRRandomCharacter::UpdateLocomotionAnimation()
 {
 	const float Speed = GetVelocity().Size2D();
-	UAnimSequence* Wanted = Speed > WalkAnimationThreshold ? WalkAnimation : IdleAnimation;
+	const bool bShooting = FireAnimation && IsAiming();
+	UAnimSequence* Wanted = Speed > WalkAnimationThreshold ? WalkAnimation : (bShooting ? FireAnimation : IdleAnimation);
 	if (Wanted && Wanted != CurrentAnimation)
 	{
-		GetMesh()->PlayAnimation(Wanted, true);
-		CurrentAnimation = Wanted;
+		PlayBodyAnimation(Wanted, true);
 	}
 	if (CurrentAnimation == WalkAnimation)
 	{
 		GetMesh()->SetPlayRate(FMath::Clamp(Speed / WalkAnimationSpeed, 0.5f, 3.f));
 	}
+
+	// Standing and shooting: turn the body into the bladed stance so the rifle in its hands points down the line of fire
+	const float Stance = CurrentAnimation == FireAnimation ? 1.f : 0.f;
+	if (FireStanceAlpha != Stance)
+	{
+		FireStanceAlpha = FMath::FInterpConstantTo(FireStanceAlpha, Stance, GetWorld()->GetDeltaSeconds(), FireStanceSpeed);
+		GetMesh()->SetRelativeRotation(MeshRelativeRotation + FRotator(0.f, FireStanceYaw * FireStanceAlpha, 0.f));
+	}
+}
+
+void ARRRandomCharacter::PlayBodyAnimation(UAnimSequence* Animation, bool bLoop, float PlayRate)
+{
+	USkeletalMeshComponent* BodyMesh = GetMesh();
+	BodyMesh->PlayAnimation(Animation, bLoop);
+	// The walk's speed-matched rate would otherwise carry over to the next animation
+	BodyMesh->SetPlayRate(PlayRate);
+	CurrentAnimation = Animation;
+}
+
+bool ARRRandomCharacter::IsAiming() const
+{
+	return GetWorld()->GetTimeSeconds() - LastShotTime < FireAnimationHold;
+}
+
+void ARRRandomCharacter::OnRep_ShotCount()
+{
+	LastShotTime = GetWorld()->GetTimeSeconds();
 }
 
 float ARRRandomCharacter::GetFireInterval() const
@@ -619,6 +858,7 @@ bool ARRRandomCharacter::FireAt(const FVector& TargetLocation)
 		return false;
 	}
 	NextFireTime = Now + GetFireInterval();
+	LastShotTime = Now;
 	FaceToward(TargetLocation);
 	ServerFireAt(TargetLocation);
 	return true;
@@ -645,6 +885,9 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 	NextFireTime = Now + GetFireInterval();
 	--Ammo;
 	LastCombatTime = Now;
+	LastShotTime = Now;
+	// Other machines play the firing animation when this changes
+	++ShotCount;
 	// Like an FPS, an empty magazine reloads by itself
 	if (Ammo <= 0)
 	{
@@ -786,11 +1029,29 @@ void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharact
 void ARRRandomCharacter::ApplyKnockedOutBody()
 {
 	bClimbing = false;
+	bDashing = false;
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	GetCharacterMovement()->StopMovementImmediately();
 	GetCharacterMovement()->DisableMovement();
 
 	USkeletalMeshComponent* BodyMesh = GetMesh();
+	// Out of the rifle stance, so the fall lines up with the shot that dropped it
+	FireStanceAlpha = 0.f;
+	BodyMesh->SetRelativeRotation(MeshRelativeRotation);
+	if (DeathAnimation)
+	{
+		// The death animation falls backward, so face against the final shot to fall the way it pushed
+		const FVector Facing = -FVector(KnockdownDirection);
+		if (!Facing.IsNearlyZero())
+		{
+			SetActorRotation(Facing.Rotation());
+		}
+		// Shots fly over the fallen body instead of being soaked up by it
+		BodyMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
+		PlayBodyAnimation(DeathAnimation, false);
+		return;
+	}
+
 	BodyMesh->SetCollisionProfileName(RagdollProfile);
 	// Shots fly over the fallen body instead of being soaked up by it
 	BodyMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
@@ -810,8 +1071,7 @@ void ARRRandomCharacter::ApplyStandingBody()
 	BodyMesh->SetRelativeLocationAndRotation(MeshRelativeLocation, MeshRelativeRotation);
 	if (IdleAnimation)
 	{
-		BodyMesh->PlayAnimation(IdleAnimation, true);
-		CurrentAnimation = IdleAnimation;
+		PlayBodyAnimation(IdleAnimation, true);
 	}
 
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);

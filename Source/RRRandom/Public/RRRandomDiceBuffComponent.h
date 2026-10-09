@@ -30,7 +30,7 @@ struct FRRDiceBuff
 	float RemainingTime = 0.f;
 };
 
-/** One die from the latest roll, kept briefly so it can be shown over the roller's head. */
+/** The latest roll, kept so it can be shown over the roller's head. */
 USTRUCT(BlueprintType)
 struct FRRDiceRoll
 {
@@ -55,20 +55,20 @@ struct FRRDiceRoll
 	bool bFlight = false;
 };
 
-/** Fired once per roll that had weapon dice, with the best weapon die's face. */
+/** Fired when a weapon die lands, with its face. */
 DECLARE_MULTICAST_DELEGATE_OneParam(FRRWeaponDieSignature, int32 /*Face*/);
 
-/** Fired once per roll that had giant dice, with the best giant die's face. */
+/** Fired when a giant die lands, with its face. */
 DECLARE_MULTICAST_DELEGATE_OneParam(FRRGiantDieSignature, int32 /*Face*/);
 
-/** Fired once per roll that had flight dice, with the best flight die's face. */
+/** Fired when a flight die lands, with its face. */
 DECLARE_MULTICAST_DELEGATE_OneParam(FRRFlightDieSignature, int32 /*Face*/);
 
 /**
- * A gauge fills over time; each full gauge stores one die. Rolling spends every stored die,
- * and each die grants a timed bonus to attack power, attack speed or move speed sized by its face,
- * or now and then comes up as a weapon die that hands its owner a new random gun,
- * or a giant die that makes its owner bigger, harder hitting and harder to hurt for a while,
+ * A gauge fills over time; each full gauge stores one die. Rolling spends one stored die, which tumbles
+ * for RollSpinTime over its owner's head and takes effect when it lands: a timed bonus to attack power,
+ * attack speed or move speed sized by its face, or now and then a weapon die that hands its owner a new random gun,
+ * a giant die that makes its owner bigger, harder hitting and harder to hurt for a while,
  * or a flight die that lets its owner rise while holding jump and glide down for a while.
  */
 UCLASS(ClassGroup = (RRRandom), meta = (BlueprintSpawnableComponent))
@@ -79,9 +79,16 @@ class RRRANDOM_API URRRandomDiceBuffComponent : public UActorComponent
 public:
 	URRRandomDiceBuffComponent();
 
-	/** Rolls one die per stored charge and applies the results. */
+	/**
+	 * Server only: spends one stored die and throws it; it takes effect after RollSpinTime, when it lands.
+	 * Returns false without a stored die or while the previous one is still in the air.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "RRRandom")
-	void RollDice();
+	bool RollDice();
+
+	/** True while the latest die is still tumbling. */
+	UFUNCTION(BlueprintPure, Category = "RRRandom")
+	bool IsRolling() const { return GetTimeSinceLastRoll() < RollSpinTime; }
 
 	/** 1 plus the summed bonuses of every active buff on that stat. */
 	UFUNCTION(BlueprintPure, Category = "RRRandom")
@@ -96,14 +103,17 @@ public:
 
 	const TArray<FRRDiceBuff>& GetActiveBuffs() const { return ActiveBuffs; }
 
-	/** Every die from the most recent roll. */
-	const TArray<FRRDiceRoll>& GetLastRoll() const { return LastRoll; }
+	/** The most recent die, known as soon as it is thrown (the face it will land on). */
+	const FRRDiceRoll& GetLastRoll() const { return LastRoll; }
 
-	/** Seconds since the most recent roll; very large if there hasn't been one. */
+	/** Goes up by one per roll, so a new throw can be told from the last even when the faces match. */
+	int32 GetRollCount() const { return RollCount; }
+
+	/** Seconds since the most recent roll was thrown; very large if there hasn't been one. */
 	float GetTimeSinceLastRoll() const;
 
-	/** Drops every active buff, keeping stored dice. Used when the owner is knocked out. */
-	void ClearBuffs() { ActiveBuffs.Reset(); }
+	/** Drops every active buff and a die still in the air, keeping stored dice. Used when the owner is knocked out. */
+	void ClearBuffs();
 
 	static FText GetStatName(ERRDiceBuffStat Stat);
 
@@ -136,13 +146,21 @@ public:
 	static FLinearColor GetGiantColor() { return FLinearColor(0.3f, 0.95f, 1.f); }
 	static FLinearColor GetFlightColor() { return FLinearColor(1.f, 0.5f, 0.85f); }
 
-	/** Seconds for the gauge to fill once. */
+	/** Seconds for the gauge to fill once (one more stored die). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom")
-	float GaugeFillTime = 5.f;
+	float GaugeFillTime = 15.f;
 
-	/** How long each die's buff lasts. */
+	/** Dice stored when play begins. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom", meta = (ClampMin = "0"))
+	int32 StartingCharges = 3;
+
+	/** Each die's buff lasts a random number of seconds in this range (min, max). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom")
-	float BuffDuration = 15.f;
+	FVector2D BuffDurationRange = FVector2D(10.f, 30.f);
+
+	/** Seconds a thrown die tumbles before it lands and takes effect. The next die can be thrown once it lands. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom", meta = (ClampMin = "0"))
+	float RollSpinTime = 0.6f;
 
 	/** Bonus per pip on the die: a 6 with 0.05 gives +30%. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom")
@@ -163,6 +181,9 @@ private:
 	UFUNCTION()
 	void OnRep_RollCount();
 
+	/** Server: the landed die's buff or power. */
+	void ApplyRoll(const FRRDiceRoll& Roll);
+
 	// The server fills the gauge, rolls and runs the buffs down; clients only show the replicated results
 
 	FRandomStream Stream;
@@ -171,7 +192,10 @@ private:
 	TArray<FRRDiceBuff> ActiveBuffs;
 
 	UPROPERTY(Replicated)
-	TArray<FRRDiceRoll> LastRoll;
+	FRRDiceRoll LastRoll;
+
+	/** Server: the latest die is in the air and hasn't taken effect yet. */
+	bool bRollPending = false;
 
 	/** Counts rolls so clients notice a new one even when it matches the last. */
 	UPROPERTY(ReplicatedUsing = OnRep_RollCount)

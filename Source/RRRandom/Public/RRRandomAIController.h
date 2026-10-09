@@ -84,7 +84,7 @@ protected:
 
 	/** ...holding jump this long, so it rises to a random height and glides down shooting. */
 	UPROPERTY(EditAnywhere, Category = "AI")
-	FVector2D FlightHoldTime = FVector2D(0.4f, 1.2f);
+	FVector2D FlightHoldTime = FVector2D(0.25f, 0.75f);
 
 	/** 0 picks a new seed each play session. */
 	UPROPERTY(EditAnywhere, Category = "AI")
@@ -127,6 +127,8 @@ private:
 	float LastHealth = 0.f;
 	float DiceTimer = 0.f;
 	int32 DiceHoldLimit = 3;
+	/** Throwing stored dice one by one until none are left. */
+	bool bSpendingDice = false;
 	float FlightHopTimer = 0.f;
 	/** Seconds left holding jump; 0 when not holding. */
 	float FlightHoldRemaining = 0.f;

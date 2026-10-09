@@ -19,7 +19,9 @@ public class RRRandom : ModuleRules
 			"GameplayTasks",
 			"Niagara",
 			"OnlineSubsystem",
-			"OnlineSubsystemUtils"
+			"OnlineSubsystemUtils",
+			// GWhiteTexture for the HUD's canvas triangles
+			"RenderCore"
 		});
 	}
 }

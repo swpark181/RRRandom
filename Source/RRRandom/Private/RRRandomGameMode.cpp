@@ -2,6 +2,8 @@
 #include "RRRandomAIController.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomDummy.h"
+#include "RRRandomGrassFloor.h"
+#include "RRRandomIsland.h"
 #include "RRRandomGameState.h"
 #include "RRRandomHUD.h"
 #include "RRRandomPlayerController.h"
@@ -51,6 +53,15 @@ void ARRRandomGameMode::StartPlay()
 	Super::StartPlay();
 
 	// Before the bots, whose floor traces must not land on top of a block
+	// The island's hills and walls go up before the cover and the bots, whose floor traces must land beside them
+	if (bSpawnIsland)
+	{
+		SpawnIslandIfNoneExists();
+	}
+	if (bSpawnGrassFloor)
+	{
+		SpawnGrassFloorIfNoneExists();
+	}
 	if (bSpawnCover)
 	{
 		SpawnCoverIfNoneExists();
@@ -285,6 +296,33 @@ void ARRRandomGameMode::SpawnCoverIfNoneExists()
 			Cover->SetSize(Placement.Size);
 			Cover->FinishSpawning(SpawnTransform);
 		}
+	}
+}
+
+void ARRRandomGameMode::SpawnIslandIfNoneExists()
+{
+	UWorld* World = GetWorld();
+	if (TActorIterator<ARRRandomIsland>(World))
+	{
+		return;
+	}
+	// Centered halfway between the teams; its map puts each team's start on a sand path
+	World->SpawnActor<ARRRandomIsland>(ARRRandomIsland::StaticClass(), FTransform(GetPlayerStartLocation() + FVector(TeamSpawnDistance * 0.5f, 0.f, 0.f)));
+}
+
+void ARRRandomGameMode::SpawnGrassFloorIfNoneExists()
+{
+	UWorld* World = GetWorld();
+	if (TActorIterator<ARRRandomGrassFloor>(World))
+	{
+		return;
+	}
+	// Over the middle of the arena, halfway between the teams; it finds the floor under itself
+	const FTransform SpawnTransform(GetPlayerStartLocation() + FVector(TeamSpawnDistance * 0.5f, 0.f, 0.f));
+	if (ARRRandomGrassFloor* Grass = World->SpawnActorDeferred<ARRRandomGrassFloor>(ARRRandomGrassFloor::StaticClass(), SpawnTransform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+	{
+		Grass->Seed = GrassSeed;
+		Grass->FinishSpawning(SpawnTransform);
 	}
 }
 

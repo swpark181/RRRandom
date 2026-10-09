@@ -2,7 +2,10 @@
 #include "RRRandomCharacter.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomGameState.h"
+#include "RRRandomOverheadDieComponent.h"
 #include "RRRandomSessionSubsystem.h"
+#include "Camera/PlayerCameraManager.h"
+#include "CanvasItem.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
@@ -10,6 +13,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerState.h"
+#include "GlobalRenderResources.h"
 
 namespace
 {
@@ -28,9 +32,14 @@ namespace
 	constexpr float AmmoBarHeight = 5.f;
 	constexpr float GaugeBarHeight = 3.f;
 	constexpr float DiceBoxSize = 15.f;
+	// Friend-or-foe marker: a downward triangle between the bars and the head
+	constexpr float MarkerWidth = 16.f;
+	constexpr float MarkerHeight = 10.f;
+	constexpr float MarkerBorder = 2.f;
 	constexpr float ChipPadding = 3.f;
-	constexpr float RollPopupTime = 1.6f;
-	constexpr float RollPopupFadeTime = 0.4f;
+	// The roll's result label, from the moment its die lands; it goes when the die does
+	constexpr float RollPopupTime = URRRandomOverheadDieComponent::HoldTime + URRRandomOverheadDieComponent::ExitTime;
+	constexpr float RollPopupFadeTime = URRRandomOverheadDieComponent::ExitTime;
 	// Buffs about to run out blink
 	constexpr float BuffBlinkTime = 3.f;
 	constexpr float DamagePopupRiseSpeed = 70.f;
@@ -97,6 +106,23 @@ void ARRRandomHUD::DrawShadowedText(const FString& Text, const FLinearColor& Col
 	DrawText(Text, Color, X, Y, Font);
 }
 
+void ARRRandomHUD::DrawFriendOrFoeMarker(float CenterX, float Top, const FLinearColor& Color)
+{
+	const float HalfWidth = MarkerWidth * 0.5f;
+	// Border: the same triangle grown by MarkerBorder on every side, drawn first
+	FCanvasTriangleItem Border(FVector2D(CenterX - HalfWidth - MarkerBorder * 1.7f, Top - MarkerBorder),
+		FVector2D(CenterX + HalfWidth + MarkerBorder * 1.7f, Top - MarkerBorder),
+		FVector2D(CenterX, Top + MarkerHeight + MarkerBorder * 1.9f), GWhiteTexture);
+	Border.SetColor(Backing);
+	Border.BlendMode = SE_BLEND_Translucent;
+	Canvas->DrawItem(Border);
+
+	FCanvasTriangleItem Fill(FVector2D(CenterX - HalfWidth, Top), FVector2D(CenterX + HalfWidth, Top),
+		FVector2D(CenterX, Top + MarkerHeight), GWhiteTexture);
+	Fill.SetColor(Color);
+	Canvas->DrawItem(Fill);
+}
+
 void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer)
 {
 	DrawDamagePopups(Brawler, Viewer);
@@ -106,7 +132,8 @@ void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRand
 	}
 
 	const float HalfHeight = Brawler.GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
-	const FVector Head = Project(Brawler.GetActorLocation() + FVector(0.f, 0.f, HalfHeight + HeadClearance));
+	const FVector HeadWorld = Brawler.GetActorLocation() + FVector(0.f, 0.f, HalfHeight + HeadClearance);
+	const FVector Head = Project(HeadWorld);
 	if (Head.Z <= 0.f)
 	{
 		return;
@@ -155,6 +182,9 @@ void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRand
 	DrawRect(Backing, Left, RowY, HealthBarWidth, GaugeBarHeight);
 	DrawRect(DiceColor, Left, RowY, HealthBarWidth * FMath::Clamp(Dice->GetGaugeProgress(), 0.f, 1.f), GaugeBarHeight);
 
+	// Below everything, pointing at the head: blue for the player and allies, red for opponents
+	DrawFriendOrFoeMarker(Head.X, RowY + GaugeBarHeight + 3.f, bIsAlly ? AllyHealthColor : EnemyHealthColor);
+
 	// Above the health number: active buffs, the power chips (giant, flight), then the latest roll
 	float ChipsTop = DrawBuffChips(*Dice, Head.X, HealthTextY - 2.f, Font);
 	TArray<FString, TInlineAllocator<2>> PowerLabels;
@@ -176,7 +206,19 @@ void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRand
 	{
 		ChipsTop = DrawPowerChips(PowerLabels, PowerColors, PowerRemaining, Head.X, ChipsTop, Font);
 	}
-	DrawRollPopup(*Dice, Head.X, ChipsTop, Font);
+	ChipsTop = DrawRollPopup(*Dice, Head.X, ChipsTop, Font);
+
+	// The 3D die floats on top of all this: hand it the stack's top edge, carried from the screen back into the
+	// world along the camera's up (the camera is nearly orthographic, so one scale factor fits the whole stack)
+	if (URRRandomOverheadDieComponent* Die = Brawler.GetOverheadDie(); Die && PlayerOwner && PlayerOwner->PlayerCameraManager)
+	{
+		const FVector ScreenUp = PlayerOwner->PlayerCameraManager->GetCameraRotation().Quaternion().GetUpVector();
+		const float PixelsPerUnit = (Head.Y - Project(HeadWorld + ScreenUp * 100.f).Y) / 100.f;
+		if (PixelsPerUnit > KINDA_SMALL_NUMBER)
+		{
+			Die->SetStackTop(HeadWorld + ScreenUp * ((Head.Y - ChipsTop) / PixelsPerUnit));
+		}
+	}
 }
 
 float ARRRandomHUD::DrawPowerChips(TArrayView<const FString> Labels, TArrayView<const FLinearColor> Colors, TArrayView<const float> Remaining, float CenterX, float Bottom, UFont* Font)
@@ -346,41 +388,30 @@ float ARRRandomHUD::DrawBuffChips(const URRRandomDiceBuffComponent& Dice, float 
 	return ChipY - 2.f;
 }
 
-void ARRRandomHUD::DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom, UFont* Font)
+float ARRRandomHUD::DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom, UFont* Font)
 {
-	const float Age = Dice.GetTimeSinceLastRoll();
-	const TArray<FRRDiceRoll>& Roll = Dice.GetLastRoll();
-	if (Age >= RollPopupTime || Roll.Num() == 0)
+	// While the 3D die is up its result gets a row: empty while it tumbles, "5 ATK" (colored by stat) once it lands
+	const float Landed = Dice.GetTimeSinceLastRoll() - Dice.RollSpinTime;
+	if (Landed >= RollPopupTime)
 	{
-		return;
+		return Bottom;
 	}
 
-	// Each die as "5 ATK", colored by stat, drifting up and fading at the end
-	constexpr float Gap = 8.f;
-	TArray<FString> Parts;
-	float TotalWidth = 0.f;
+	const FRRDiceRoll& Die = Dice.GetLastRoll();
+	const FString Text = FString::Printf(TEXT("%d %s"), Die.Face, Die.bWeapon ? TEXT("GUN") : Die.bGiant ? TEXT("GIANT") : Die.bFlight ? TEXT("FLY") : *URRRandomDiceBuffComponent::GetStatShortName(Die.Stat));
+	float Width = 0.f;
 	float TextHeight = 0.f;
-	for (const FRRDiceRoll& Die : Roll)
+	GetTextSize(Text, Width, TextHeight, Font);
+	const float Y = Bottom - TextHeight;
+	if (Landed >= 0.f)
 	{
-		Parts.Add(FString::Printf(TEXT("%d %s"), Die.Face, Die.bWeapon ? TEXT("GUN") : Die.bGiant ? TEXT("GIANT") : Die.bFlight ? TEXT("FLY") : *URRRandomDiceBuffComponent::GetStatShortName(Die.Stat)));
-		float Width = 0.f;
-		GetTextSize(Parts.Last(), Width, TextHeight, Font);
-		TotalWidth += Width + (Parts.Num() > 1 ? Gap : 0.f);
+		const FLinearColor DieColor = Die.bWeapon ? WeaponDieColor
+			: Die.bGiant ? URRRandomDiceBuffComponent::GetGiantColor()
+			: Die.bFlight ? URRRandomDiceBuffComponent::GetFlightColor() : URRRandomDiceBuffComponent::GetStatColor(Die.Stat);
+		const float Alpha = FMath::Clamp((RollPopupTime - Landed) / RollPopupFadeTime, 0.f, 1.f);
+		DrawShadowedText(Text, WithAlpha(DieColor, Alpha), CenterX - Width * 0.5f, Y, Font);
 	}
-
-	const float Alpha = FMath::Clamp((RollPopupTime - Age) / RollPopupFadeTime, 0.f, 1.f);
-	const float Y = Bottom - TextHeight - Age * 15.f;
-	float X = CenterX - TotalWidth * 0.5f;
-	for (int32 Index = 0; Index < Roll.Num(); ++Index)
-	{
-		const FLinearColor DieColor = Roll[Index].bWeapon ? WeaponDieColor
-			: Roll[Index].bGiant ? URRRandomDiceBuffComponent::GetGiantColor()
-			: Roll[Index].bFlight ? URRRandomDiceBuffComponent::GetFlightColor() : URRRandomDiceBuffComponent::GetStatColor(Roll[Index].Stat);
-		DrawShadowedText(Parts[Index], WithAlpha(DieColor, Alpha), X, Y, Font);
-		float Width = 0.f;
-		GetTextSize(Parts[Index], Width, TextHeight, Font);
-		X += Width + Gap;
-	}
+	return Y - 2.f;
 }
 
 void ARRRandomHUD::DrawDamagePopups(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer)
@@ -426,7 +457,8 @@ void ARRRandomHUD::DrawDicePanel(const ARRRandomCharacter& Viewer)
 	float LineY = BarY - LineHeight - 4.f;
 	if (Viewer.CanFly())
 	{
-		const FString Line = FString::Printf(TEXT("FLY  HOLD [SPACE] TO RISE  %.0fs"), FMath::CeilToFloat(Viewer.GetFlightRemaining()));
+		const TCHAR* Dash = Viewer.IsDashing() ? TEXT("DASHING") : Viewer.HasDash() ? TEXT("[SPACE x2 HOLD] DASH") : TEXT("DASH AFTER LANDING");
+		const FString Line = FString::Printf(TEXT("FLY  HOLD [SPACE] RISE  %s  %.0fs"), Dash, FMath::CeilToFloat(Viewer.GetFlightRemaining()));
 		DrawText(Line, URRRandomDiceBuffComponent::GetFlightColor(), Margin, LineY, Font);
 		LineY -= LineHeight;
 	}

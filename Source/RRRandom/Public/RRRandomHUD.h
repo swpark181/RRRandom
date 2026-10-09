@@ -10,7 +10,7 @@ class URRRandomDiceBuffComponent;
 
 /**
  * Plain canvas HUD. Over every brawler: health bar, stored dice count, dice gauge, active buffs,
- * the latest dice roll and damage numbers (plus ammo over the player's own brawler).
+ * the latest dice roll, damage numbers and a friend-or-foe marker (plus ammo over the player's own brawler).
  * On screen: team score, the player's dice gauge and buff list, magazine count, a respawn countdown,
  * and the online status with its keys in the top-left corner.
  */
@@ -29,7 +29,8 @@ private:
 	float DrawBuffChips(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom, UFont* Font);
 	/** Draws power chips (GIANT, FLY) side by side ending just above Bottom and returns the new top edge. */
 	float DrawPowerChips(TArrayView<const FString> Labels, TArrayView<const FLinearColor> Colors, TArrayView<const float> Remaining, float CenterX, float Bottom, UFont* Font);
-	void DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom, UFont* Font);
+	/** The latest roll's result under its 3D die, ending just above Bottom; returns the new top edge (where the die goes). */
+	float DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom, UFont* Font);
 	void DrawDamagePopups(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer);
 	void DrawDicePanel(const ARRRandomCharacter& Viewer);
 	void DrawAmmoPanel(const ARRRandomCharacter& Brawler);
@@ -42,4 +43,6 @@ private:
 
 	/** Text with a dark drop shadow so it reads over any background. */
 	void DrawShadowedText(const FString& Text, const FLinearColor& Color, float X, float Y, UFont* Font);
+	/** A downward triangle with a dark border, its top edge at Top, centered on CenterX. */
+	void DrawFriendOrFoeMarker(float CenterX, float Top, const FLinearColor& Color);
 };

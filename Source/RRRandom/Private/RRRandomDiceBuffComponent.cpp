@@ -24,7 +24,11 @@ void URRRandomDiceBuffComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProp
 
 void URRRandomDiceBuffComponent::OnRep_RollCount()
 {
-	LastRollTime = GetWorld()->GetTimeSeconds();
+	// The first replication of a brawler that joins mid-game brings an old roll along; don't throw it again
+	if (GetOwner()->HasActorBegunPlay())
+	{
+		LastRollTime = GetWorld()->GetTimeSeconds();
+	}
 }
 
 void URRRandomDiceBuffComponent::BeginPlay()
@@ -38,6 +42,11 @@ void URRRandomDiceBuffComponent::BeginPlay()
 	else
 	{
 		Stream.GenerateNewSeed();
+	}
+
+	if (GetOwner()->HasAuthority())
+	{
+		Charges = StartingCharges;
 	}
 }
 
@@ -62,67 +71,74 @@ void URRRandomDiceBuffComponent::TickComponent(float DeltaTime, ELevelTick TickT
 		Buff.RemainingTime -= DeltaTime;
 	}
 	ActiveBuffs.RemoveAll([](const FRRDiceBuff& Buff) { return Buff.RemainingTime <= 0.f; });
+
+	if (bRollPending && !IsRolling())
+	{
+		bRollPending = false;
+		ApplyRoll(LastRoll);
+	}
 }
 
-void URRRandomDiceBuffComponent::RollDice()
+bool URRRandomDiceBuffComponent::RollDice()
 {
-	if (Charges <= 0 || !GetOwner()->HasAuthority())
+	if (Charges <= 0 || IsRolling() || !GetOwner()->HasAuthority())
 	{
-		return;
+		return false;
 	}
 
-	LastRoll.Reset();
+	// Everything is decided now so every machine can tumble the die onto the face it will show
+	--Charges;
+	LastRoll = FRRDiceRoll();
+	LastRoll.Face = Stream.RandRange(1, 6);
+	// One draw picks the kind: weapon, giant, flight, or else a buff
+	const float Kind = Stream.FRand();
+	LastRoll.bWeapon = Kind < WeaponDieChance;
+	LastRoll.bGiant = !LastRoll.bWeapon && Kind < WeaponDieChance + GiantDieChance;
+	LastRoll.bFlight = !LastRoll.bWeapon && !LastRoll.bGiant && Kind < WeaponDieChance + GiantDieChance + FlightDieChance;
+	if (!LastRoll.bWeapon && !LastRoll.bGiant && !LastRoll.bFlight)
+	{
+		LastRoll.Stat = static_cast<ERRDiceBuffStat>(Stream.RandRange(0, 2));
+	}
 	LastRollTime = GetWorld()->GetTimeSeconds();
 	++RollCount;
-	int32 BestWeaponFace = 0;
-	int32 BestGiantFace = 0;
-	int32 BestFlightFace = 0;
-	for (; Charges > 0; --Charges)
-	{
-		FRRDiceRoll& Roll = LastRoll.AddDefaulted_GetRef();
-		Roll.Face = Stream.RandRange(1, 6);
-		// One draw picks the kind: weapon, giant, flight, or else a buff
-		const float Kind = Stream.FRand();
-		Roll.bWeapon = Kind < WeaponDieChance;
-		Roll.bGiant = !Roll.bWeapon && Kind < WeaponDieChance + GiantDieChance;
-		Roll.bFlight = !Roll.bWeapon && !Roll.bGiant && Kind < WeaponDieChance + GiantDieChance + FlightDieChance;
-		if (Roll.bWeapon)
-		{
-			BestWeaponFace = FMath::Max(BestWeaponFace, Roll.Face);
-			continue;
-		}
-		if (Roll.bGiant)
-		{
-			BestGiantFace = FMath::Max(BestGiantFace, Roll.Face);
-			continue;
-		}
-		if (Roll.bFlight)
-		{
-			BestFlightFace = FMath::Max(BestFlightFace, Roll.Face);
-			continue;
-		}
-		Roll.Stat = static_cast<ERRDiceBuffStat>(Stream.RandRange(0, 2));
 
+	// It takes effect when it lands (TickComponent)
+	bRollPending = true;
+	if (RollSpinTime <= 0.f)
+	{
+		bRollPending = false;
+		ApplyRoll(LastRoll);
+	}
+	return true;
+}
+
+void URRRandomDiceBuffComponent::ApplyRoll(const FRRDiceRoll& Roll)
+{
+	if (Roll.bWeapon)
+	{
+		OnWeaponDie.Broadcast(Roll.Face);
+	}
+	else if (Roll.bGiant)
+	{
+		OnGiantDie.Broadcast(Roll.Face);
+	}
+	else if (Roll.bFlight)
+	{
+		OnFlightDie.Broadcast(Roll.Face);
+	}
+	else
+	{
 		FRRDiceBuff& Buff = ActiveBuffs.AddDefaulted_GetRef();
 		Buff.Stat = Roll.Stat;
 		Buff.Bonus = Roll.Face * BonusPerPip;
-		Buff.RemainingTime = BuffDuration;
+		Buff.RemainingTime = Stream.FRandRange(BuffDurationRange.X, BuffDurationRange.Y);
 	}
+}
 
-	// Several weapon dice still give one gun, the best one
-	if (BestWeaponFace > 0)
-	{
-		OnWeaponDie.Broadcast(BestWeaponFace);
-	}
-	// Likewise one giant spell and one flight, as long as the best die of each gives
-	if (BestGiantFace > 0)
-	{
-		OnGiantDie.Broadcast(BestGiantFace);
-	}
-	if (BestFlightFace > 0)
-	{
-		OnFlightDie.Broadcast(BestFlightFace);
-	}
+void URRRandomDiceBuffComponent::ClearBuffs()
+{
+	ActiveBuffs.Reset();
+	bRollPending = false;
 }
 
 float URRRandomDiceBuffComponent::GetTimeSinceLastRoll() const
