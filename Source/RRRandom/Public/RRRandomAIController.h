@@ -125,6 +125,12 @@ private:
 	int32 BurstRemaining = 0;
 	float UnderFireTimer = 0.f;
 	float LastHealth = 0.f;
+	/** Where the opponent was last in the team's sight, and for how much longer to go look there. */
+	FVector LastSeenLocation = FVector::ZeroVector;
+	float LastSeenTimer = 0.f;
+	/** Where the bot roams to while nobody is in sight, and how long until it picks another spot. */
+	FVector PatrolGoal = FVector::ZeroVector;
+	float PatrolTimer = 0.f;
 	float DiceTimer = 0.f;
 	int32 DiceHoldLimit = 3;
 	/** Throwing stored dice one by one until none are left. */

@@ -23,38 +23,50 @@ namespace
 	constexpr int32 PlanksPerCell = 3;
 	constexpr float PlankGap = 0.12f;
 	constexpr float PlankThickness = 8.f;
-	// Rock blocks in a cliff vary this much in width and sit this far off center, so the stack reads as rocks
-	constexpr float RockShrink = 0.06f;
-	constexpr float RockJitter = 5.f;
 	constexpr int32 LookSeed = 4242;
+	// Props (char-pipeline/scripts/blender_props.py, ue_import_props.py; Tripo models): the letters PropRows uses, in the
+	// order of PropMeshes, how small to how big each kind comes, and how many of it stand on one cell (a cluster is a
+	// patch of cells with the same letter, so a wood is several trees to a cell)
+	const TCHAR* const PropLetters = TEXT("PTBRL");
+	const FVector2D PropScales[] = { FVector2D(0.7f, 1.15f), FVector2D(0.65f, 1.f), FVector2D(0.55f, 1.05f), FVector2D(0.45f, 1.05f), FVector2D(0.55f, 0.95f) };
+	const FIntPoint PropCounts[] = { FIntPoint(2, 2), FIntPoint(1, 2), FIntPoint(2, 3), FIntPoint(1, 2), FIntPoint(1, 2) };
+	// Props on a cell stand up to this share of a cell off its center, at least PropSpacing (a share of a cell, times
+	// their size) apart where it can manage; boulders in water sit BoulderSink deep
+	constexpr float PropJitter = 0.4f;
+	constexpr float PropSpacing = 0.35f;
+	constexpr int32 PropTries = 8;
+	constexpr float BoulderSink = 40.f;
+	constexpr int32 PropSeed = 777;
 }
 
 ARRRandomIsland::ARRRandomIsland()
 {
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 
-	// The map: rock cliffs and a waterfall (F) at the top, a river down the right, a bay with docks at the bottom,
-	// low grass hills (g) and sand paths (s) around a flat middle. Blue starts on the bottom sand path (row 18),
-	// red on the top one (row 7); the game mode's cover stands on flat cells in rows 10 to 15.
+	// The map: grass cliffs stepping up along the top (a low terrace, then a wall at least three levels higher, then
+	// uneven peaks) and down the left, a waterfall (F) at the top right into a river down the right, a bay with docks at
+	// the bottom, a few low hills (g) and sand paths (s) around a flat middle. Each step up out of the middle is at most
+	// two levels, but the wall behind a terrace is three or more, so nobody climbs off the island. Blue starts on the
+	// bottom sand path (row 18), red on the top one (row 7); the game mode's cover stands on flat cells in rows 10 to 15.
 	TypeRows = {
-		TEXT("rrrrrrrrrrrrrrrrrrrrFwwwww"),
-		TEXT("rrrrrrrrrrrrrrrrrrrrFwwwww"),
-		TEXT("rrrrgggrrrrrrgggrrrrFwwwww"),
-		TEXT("rrrg...ggrrgg...grrrwwwwww"),
-		TEXT("rrg..............grr.wwwww"),
-		TEXT("rr................g..swwww"),
-		TEXT("rr...ss..........g...swwww"),
-		TEXT("rg....sssssssssss.....dwww"),
-		TEXT("rg.........s.........s.www"),
-		TEXT("r..........s.........s.www"),
-		TEXT("r..g.......s.........s..ww"),
-		TEXT("r..g.......s.........s..ww"),
-		TEXT("rr.........s......g..s..ww"),
-		TEXT("rr.........s......g..s..ww"),
-		TEXT("rg.........s.........s..ww"),
-		TEXT("rg.........s.........s.www"),
-		TEXT("r..........s.........s.www"),
-		TEXT("r..........s.........s.www"),
+		TEXT("ggggggggggggggggggggFwwwww"),
+		TEXT("ggggggggggggggggggggFwwwww"),
+		TEXT("ggggggggggggggggggggFwwwww"),
+		TEXT("gggg.gggg.gggg.gggggwwwwww"),
+		TEXT("ggg..............ggg.wwwww"),
+		TEXT("gg................g..swwww"),
+		TEXT("gg...ss..........g...swwww"),
+		TEXT("gg....sssssssssss.....dwww"),
+		TEXT("gg.........s.........s.www"),
+		TEXT("g..........s.........s.www"),
+		TEXT("g..g.......s.........s..ww"),
+		TEXT("gg.g.......s.........s..ww"),
+		TEXT("gg.........s......g..s..ww"),
+		TEXT("gg.........s......g..s..ww"),
+		TEXT("g..........s.........s..ww"),
+		TEXT("gg.........s.........s.www"),
+		TEXT("g..........s.........s.www"),
+		TEXT("g..........s.........s.www"),
 		TEXT("w..ssssssssssssssssss..www"),
 		TEXT("ww..................wwwwww"),
 		TEXT("wwd..g...........g..wwwwww"),
@@ -65,22 +77,22 @@ ARRRandomIsland::ARRRandomIsland()
 		TEXT("wwwwwwwwwwwwwwwwwwwwwwwwww"),
 	};
 	HeightRows = {
-		TEXT("98999899989999899999800000"),
-		TEXT("87888778887788878888600000"),
-		TEXT("77663337666773336677400000"),
-		TEXT("65520002244220002455000000"),
-		TEXT("54200000000000000133000000"),
-		TEXT("43000000000000000010000000"),
-		TEXT("43000000000000000100000000"),
-		TEXT("42000000000000000000000000"),
-		TEXT("32000000000000000000000000"),
+		TEXT("89987899879878999999800000"),
+		TEXT("78765787656765677889600000"),
+		TEXT("66544565444554445678400000"),
+		TEXT("33210232101221012345000000"),
+		TEXT("63100000000000000123000000"),
+		TEXT("52000000000000000010000000"),
+		TEXT("41000000000000000100000000"),
+		TEXT("51000000000000000000000000"),
+		TEXT("52000000000000000000000000"),
 		TEXT("30000000000000000000000000"),
-		TEXT("30010000000000000000000000"),
-		TEXT("30010000000000000000000000"),
-		TEXT("32000000000000000010000000"),
-		TEXT("32000000000000000010000000"),
-		TEXT("32000000000000000000000000"),
-		TEXT("32000000000000000000000000"),
+		TEXT("40010000000000000000000000"),
+		TEXT("41010000000000000000000000"),
+		TEXT("52000000000000000010000000"),
+		TEXT("51000000000000000010000000"),
+		TEXT("30000000000000000000000000"),
+		TEXT("41000000000000000000000000"),
 		TEXT("30000000000000000000000000"),
 		TEXT("30000000000000000000000000"),
 		TEXT("00000000000000000000000000"),
@@ -91,6 +103,37 @@ ARRRandomIsland::ARRRandomIsland()
 		TEXT("00000000000000000000000000"),
 		TEXT("00000000000000000000000000"),
 		TEXT("00000000000000000000000000"),
+	};
+	// Scenery (see PropRows), in clusters: woods of pines and round trees on the top cliffs and down the left wall,
+	// bushes along the terraces and on the hills, boulders where the waterfall lands and around the docks, reed beds along
+	// the shores of the river and the bay (low things only near the camera)
+	PropRows = {
+		TEXT("PTPPTPP...PPP.TPPTP......."),
+		TEXT("TPPT.PT.....PPT..PP......."),
+		TEXT("PT.B.......B..BB...R.R...."),
+		TEXT(".BBB...BB.......BBB.RL...."),
+		TEXT("TB...............BB..L...."),
+		TEXT("PB........................"),
+		TEXT("T........................."),
+		TEXT("PB........................"),
+		TEXT("TT.....................L.."),
+		TEXT(".......................L.."),
+		TEXT("T........................."),
+		TEXT("PB........................"),
+		TEXT("TT........................"),
+		TEXT("PB........................"),
+		TEXT("B.......................L."),
+		TEXT("RB.....................L.."),
+		TEXT(".........................."),
+		TEXT("T........................."),
+		TEXT("L........................."),
+		TEXT("LL..................LR...."),
+		TEXT("R....B...........B..LR...."),
+		TEXT("L..................L......"),
+		TEXT(".L.......LLLL.....R......."),
+		TEXT(".........................."),
+		TEXT(".........................."),
+		TEXT(".........................."),
 	};
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> GrassA(TEXT("/Game/Environment/Grass/SM_GrassBlock_A.SM_GrassBlock_A"));
@@ -103,15 +146,33 @@ ARRRandomIsland::ARRRandomIsland()
 			GrassBlocks.Add(Finder->Object);
 		}
 	}
+	// The grass blocks' soil alone (char-pipeline/scripts/blender_soil_blocks.py), stacked under them
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SoilA(TEXT("/Game/Environment/Grass/SM_SoilBlock_A.SM_SoilBlock_A"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SoilB(TEXT("/Game/Environment/Grass/SM_SoilBlock_B.SM_SoilBlock_B"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SoilC(TEXT("/Game/Environment/Grass/SM_SoilBlock_C.SM_SoilBlock_C"));
+	for (const ConstructorHelpers::FObjectFinder<UStaticMesh>* Finder : { &SoilA, &SoilB, &SoilC })
+	{
+		if (Finder->Succeeded())
+		{
+			SoilBlocks.Add(Finder->Object);
+		}
+	}
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Pine(TEXT("/Game/Environment/Props/SM_PineTree.SM_PineTree"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> RoundTree(TEXT("/Game/Environment/Props/SM_RoundTree.SM_RoundTree"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Bush(TEXT("/Game/Environment/Props/SM_FlowerBush.SM_FlowerBush"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Boulders(TEXT("/Game/Environment/Props/SM_Boulders.SM_Boulders"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Pond(TEXT("/Game/Environment/Props/SM_PondPlants.SM_PondPlants"));
+	for (const ConstructorHelpers::FObjectFinder<UStaticMesh>* Finder : { &Pine, &RoundTree, &Bush, &Boulders, &Pond })
+	{
+		PropMeshes.Add(Finder->Succeeded() ? Finder->Object : nullptr);
+	}
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneMesh(TEXT("/Engine/BasicShapes/Plane.Plane"));
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Rock(TEXT("/Game/Environment/Island/M_IslandRock.M_IslandRock"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Sand(TEXT("/Game/Environment/Island/M_IslandSand.M_IslandSand"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Wood(TEXT("/Game/Environment/Island/M_IslandWood.M_IslandWood"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Water(TEXT("/Game/Environment/Island/M_IslandWater.M_IslandWater"));
 	Cube = CubeMesh.Succeeded() ? CubeMesh.Object : nullptr;
 	Plane = PlaneMesh.Succeeded() ? PlaneMesh.Object : nullptr;
-	RockMaterial = Rock.Succeeded() ? Rock.Object : nullptr;
 	SandMaterial = Sand.Succeeded() ? Sand.Object : nullptr;
 	WoodMaterial = Wood.Succeeded() ? Wood.Object : nullptr;
 	WaterMaterial = Water.Succeeded() ? Water.Object : nullptr;
@@ -119,6 +180,26 @@ ARRRandomIsland::ARRRandomIsland()
 	// The host spawns it; clients build the same island from the same map (they need its walls to move)
 	bReplicates = true;
 	bAlwaysRelevant = true;
+}
+
+FBox2D ARRRandomIsland::GetMapBounds() const
+{
+	const int32 Rows = TypeRows.Num();
+	const int32 Cols = Rows > 0 ? TypeRows[0].Len() : 0;
+	const FVector2D Center(GetActorLocation().X, GetActorLocation().Y);
+	const FVector2D Half(Rows * CellSize * 0.5f, Cols * CellSize * 0.5f);
+	return FBox2D(Center - Half, Center + Half);
+}
+
+bool ARRRandomIsland::GetCellAt(const FVector2D& WorldLocation, int32& OutRow, int32& OutCol) const
+{
+	const FBox2D Bounds = GetMapBounds();
+	const int32 Rows = TypeRows.Num();
+	const int32 Cols = Rows > 0 ? TypeRows[0].Len() : 0;
+	// Row 0 is the far end (+X), column 0 the left (-Y)
+	OutRow = FMath::FloorToInt((Bounds.Max.X - WorldLocation.X) / CellSize);
+	OutCol = FMath::FloorToInt((WorldLocation.Y - Bounds.Min.Y) / CellSize);
+	return OutRow >= 0 && OutRow < Rows && OutCol >= 0 && OutCol < Cols && HeightRows.IsValidIndex(OutRow) && TypeRows[OutRow].Len() == Cols;
 }
 
 void ARRRandomIsland::BeginPlay()
@@ -190,7 +271,11 @@ void ARRRandomIsland::Build()
 	{
 		Grass.Add(MakeInstances(Mesh, nullptr, false));
 	}
-	UInstancedStaticMeshComponent* Rocks = MakeInstances(Cube, RockMaterial, false, 1);
+	TArray<UInstancedStaticMeshComponent*> Soil;
+	for (UStaticMesh* Mesh : SoilBlocks)
+	{
+		Soil.Add(MakeInstances(Mesh, nullptr, false));
+	}
 	// Sand paths and dock planks are walked on (a step up from the floor), the rest only seen
 	UInstancedStaticMeshComponent* Sand = MakeInstances(Cube, SandMaterial, true);
 	UInstancedStaticMeshComponent* Planks = MakeInstances(Cube, WoodMaterial, true);
@@ -233,21 +318,18 @@ void ARRRandomIsland::Build()
 				++Counts[0];
 			}
 
-			if (Type == TEXT('g') && Levels > 0 && Grass.Num() > 0)
+			if ((Type == TEXT('g') || Type == TEXT('r')) && Levels > 0 && Grass.Num() > 0)
 			{
-				// One grass block stretched to the hill's height, a random one of the set, any quarter turn
-				const FRotator Turn(0.f, 90.f * Stream.RandRange(0, 3), 0.f);
-				Grass[Stream.RandRange(0, Grass.Num() - 1)]->AddInstance(FTransform(Turn, Base, FVector(CellScale * GrassOverlap, CellScale * GrassOverlap, Height / BasicSize)));
-			}
-			else if (Type == TEXT('r') && Levels > 0)
-			{
-				// A stack of rocks, one per level, each a little narrower or off center and its own shade
-				for (int32 Level = 0; Level < Levels; ++Level)
+				// Soil blocks, one per level, under a grass block on top (its grass skirt hangs over the seam); each a random
+				// one of its set at any quarter turn. Without soil blocks, one grass block stretched to the full height.
+				const int32 Pieces = Soil.Num() > 0 ? Levels : 1;
+				const float PieceHeight = Height / Pieces;
+				for (int32 Piece = 0; Piece < Pieces; ++Piece)
 				{
-					const float Width = CellScale * (1.f - Stream.FRandRange(0.f, RockShrink));
-					const FVector Offset(Stream.FRandRange(-RockJitter, RockJitter), Stream.FRandRange(-RockJitter, RockJitter), (Level + 0.5f) * LevelHeight);
-					const int32 Index = Rocks->AddInstance(FTransform(FRotator::ZeroRotator, Base + Offset, FVector(Width, Width, LevelHeight / BasicSize)));
-					Rocks->SetCustomDataValue(Index, 0, Stream.FRand());
+					const TArray<UInstancedStaticMeshComponent*>& Set = Piece == Pieces - 1 ? Grass : Soil;
+					const FRotator Turn(0.f, 90.f * Stream.RandRange(0, 3), 0.f);
+					Set[Stream.RandRange(0, Set.Num() - 1)]->AddInstance(FTransform(Turn, Base + FVector(0.f, 0.f, Piece * PieceHeight),
+						FVector(CellScale * GrassOverlap, CellScale * GrassOverlap, PieceHeight / BasicSize)));
 				}
 			}
 			else if (Type == TEXT('F') && Levels > 0)
@@ -282,6 +364,71 @@ void ARRRandomIsland::Build()
 		}
 	}
 
+	// Scenery on top of it all
+	TArray<UInstancedStaticMeshComponent*> Props;
+	for (UStaticMesh* Mesh : PropMeshes)
+	{
+		Props.Add(Mesh ? MakeInstances(Mesh, nullptr, false) : nullptr);
+	}
+	FRandomStream PropStream(PropSeed);
+	int32 PropCount = 0;
+	const FString Letters(PropLetters);
+	for (int32 Row = 0; Row < FMath::Min(Rows, PropRows.Num()); ++Row)
+	{
+		for (int32 Col = 0; Col < FMath::Min(Cols, PropRows[Row].Len()); ++Col)
+		{
+			int32 Kind = INDEX_NONE;
+			if (!Letters.FindChar(PropRows[Row][Col], Kind) || !Props.IsValidIndex(Kind) || !Props[Kind])
+			{
+				continue;
+			}
+			// The cell's top: a hill or cliff, sand, a dock, the water's surface or the floor
+			const TCHAR Type = TypeRows[Row][Col];
+			const TCHAR Digit = HeightRows[Row][Col];
+			const int32 Levels = FChar::IsDigit(Digit) ? Digit - TEXT('0') : 0;
+			float Top = 0.f;
+			switch (Type)
+			{
+			case TEXT('g'):
+			case TEXT('r'):
+			case TEXT('F'):
+				Top = Levels * LevelHeight;
+				break;
+			case TEXT('s'):
+				Top = SandTop;
+				break;
+			case TEXT('d'):
+				Top = WaterLift + DockLift;
+				break;
+			case TEXT('w'):
+				Top = WaterLift - (PropLetters[Kind] == TEXT('R') ? BoulderSink : 0.f);
+				break;
+			default:
+				break;
+			}
+			// A few to the cell, spread out (bigger ones further apart), each turned and sized its own way
+			TArray<FVector2D, TInlineAllocator<4>> Taken;
+			const int32 Count = PropStream.RandRange(PropCounts[Kind].X, PropCounts[Kind].Y);
+			for (int32 Item = 0; Item < Count; ++Item)
+			{
+				const float Size = PropStream.FRandRange(PropScales[Kind].X, PropScales[Kind].Y);
+				FVector2D Spot = FVector2D::ZeroVector;
+				for (int32 Try = 0; Try < PropTries; ++Try)
+				{
+					Spot = FVector2D(PropStream.FRandRange(-PropJitter, PropJitter), PropStream.FRandRange(-PropJitter, PropJitter));
+					if (!Taken.ContainsByPredicate([&Spot, Size](const FVector2D& Other) { return FVector2D::Distance(Spot, Other) < PropSpacing * Size; }))
+					{
+						break;
+					}
+				}
+				Taken.Add(Spot);
+				const FRotator Turn(0.f, PropStream.FRandRange(0.f, 360.f), 0.f);
+				Props[Kind]->AddInstance(FTransform(Turn, CellCenter(Row, Col) + FVector(Spot.X * CellSize, Spot.Y * CellSize, Top), FVector(Size)));
+				++PropCount;
+			}
+		}
+	}
+
 	// Water over the rest of the floor around the island, so its edge is a shore and not the end of the world
 	const FBox Floor = Hit.GetComponent()->Bounds.GetBox();
 	const FVector2D IslandMin(Center.X - Rows * CellSize * 0.5f, Center.Y - Cols * CellSize * 0.5f);
@@ -299,5 +446,5 @@ void ARRRandomIsland::Build()
 	Sea(IslandMin.X, IslandMax.X, Floor.Min.Y, IslandMin.Y);
 	Sea(IslandMin.X, IslandMax.X, IslandMax.Y, Floor.Max.Y);
 
-	UE_LOG(LogTemp, Log, TEXT("RRRandom: island %d x %d cells: %d solid, %d sand, %d water, %d dock."), Cols, Rows, Counts[0], Counts[1], Counts[2], Counts[3]);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: island %d x %d cells: %d solid, %d sand, %d water, %d dock, %d props."), Cols, Rows, Counts[0], Counts[1], Counts[2], Counts[3], PropCount);
 }

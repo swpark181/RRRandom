@@ -1,10 +1,12 @@
 #include "RRRandomCharacter.h"
 #include "RRRandomAIController.h"
+#include "RRRandomBodyAnimInstance.h"
 #include "RRRandomCover.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomEventComponent.h"
 #include "RRRandomGunComponent.h"
 #include "RRRandomGameMode.h"
+#include "RRRandomGameState.h"
 #include "RRRandomMovementComponent.h"
 #include "RRRandomOverheadDieComponent.h"
 #include "RRRandomProjectile.h"
@@ -16,6 +18,7 @@
 #include "Engine/DamageEvents.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -130,6 +133,8 @@ ARRRandomCharacter::ARRRandomCharacter(const FObjectInitializer& ObjectInitializ
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> FoxWalk(TEXT("/Game/Characters/Fox/Anims/A_Fox_Walk.A_Fox_Walk"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> FoxFire(TEXT("/Game/Characters/Fox/Anims/A_Fox_Fire.A_Fox_Fire"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> FoxDeath(TEXT("/Game/Characters/Fox/Anims/A_Fox_Death.A_Fox_Death"));
+	// Mixamo "House Dancing" (char-pipeline/scripts/ue_import_fox_anim.py)
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> FoxVictory(TEXT("/Game/Characters/Fox/Anims/A_Fox_Victory.A_Fox_Victory"));
 	// Fallback when the project's fox assets are missing
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MannequinMesh(TEXT("/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP.TutorialTPP"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> IdleAnim(TEXT("/Engine/Tutorial/SubEditors/TutorialAssets/Character/Tutorial_Idle.Tutorial_Idle"));
@@ -151,6 +156,7 @@ ARRRandomCharacter::ARRRandomCharacter(const FObjectInitializer& ObjectInitializ
 		WalkAnimationSpeed = FoxWalkSpeedPerScale * FoxMeshScale;
 		FireAnimation = FoxFire.Succeeded() ? FoxFire.Object : nullptr;
 		DeathAnimation = FoxDeath.Succeeded() ? FoxDeath.Object : nullptr;
+		VictoryAnimation = FoxVictory.Succeeded() ? FoxVictory.Object : nullptr;
 	}
 	else
 	{
@@ -167,10 +173,9 @@ ARRRandomCharacter::ARRRandomCharacter(const FObjectInitializer& ObjectInitializ
 	}
 	if (IdleAnimation)
 	{
-		BodyMesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
-		BodyMesh->AnimationData.AnimToPlay = IdleAnimation;
-		BodyMesh->AnimationData.bSavedLooping = true;
-		BodyMesh->AnimationData.bSavedPlaying = true;
+		// One animation at a time (PlayBodyAnimation), with the tail bent on top by code
+		BodyMesh->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+		BodyMesh->SetAnimInstanceClass(URRRandomBodyAnimInstance::StaticClass());
 	}
 
 	ProjectileClass = ARRRandomProjectile::StaticClass();
@@ -253,6 +258,7 @@ void ARRRandomCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ARRRandomCharacter, bReloading);
 	DOREPLIFETIME_CONDITION(ARRRandomCharacter, ReloadRemaining, COND_OwnerOnly);
 	DOREPLIFETIME(ARRRandomCharacter, bAlive);
+	DOREPLIFETIME(ARRRandomCharacter, Kills);
 	DOREPLIFETIME(ARRRandomCharacter, KnockdownDirection);
 	DOREPLIFETIME_CONDITION(ARRRandomCharacter, RespawnRemaining, COND_OwnerOnly);
 	DOREPLIFETIME(ARRRandomCharacter, bGiant);
@@ -320,24 +326,34 @@ void ARRRandomCharacter::OnWeaponDie(int32 Face)
 
 void ARRRandomCharacter::OnGiantDie(int32 Face)
 {
+	StartGiant(GiantBaseDuration + Face * GiantSecondsPerPip);
+}
+
+void ARRRandomCharacter::StartGiant(float Seconds)
+{
 	if (!bAlive)
 	{
 		return;
 	}
 	// Another giant die while giant tops the time up rather than adding to it
 	bGiant = true;
-	GiantRemaining = FMath::Max(GiantRemaining, GiantBaseDuration + Face * GiantSecondsPerPip);
+	GiantRemaining = FMath::Max(GiantRemaining, Seconds);
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) turns giant for %.0f s."), *GetName(), Team, GiantRemaining);
 }
 
 void ARRRandomCharacter::OnFlightDie(int32 Face)
+{
+	StartFlight(FlightBaseDuration + Face * FlightSecondsPerPip);
+}
+
+void ARRRandomCharacter::StartFlight(float Seconds)
 {
 	if (!bAlive)
 	{
 		return;
 	}
 	bFlying = true;
-	FlightRemaining = FMath::Max(FlightRemaining, FlightBaseDuration + Face * FlightSecondsPerPip);
+	FlightRemaining = FMath::Max(FlightRemaining, Seconds);
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) can fly for %.0f s."), *GetName(), Team, FlightRemaining);
 }
 
@@ -401,7 +417,8 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 	UpdateDamagePopups(DeltaSeconds);
 	if (!bAlive)
 	{
-		if (HasAuthority())
+		// Nobody gets back up once the match is over
+		if (HasAuthority() && !ARRRandomGameState::IsMatchOver(this))
 		{
 			RespawnRemaining -= DeltaSeconds;
 			if (RespawnRemaining <= 0.f)
@@ -789,6 +806,11 @@ void ARRRandomCharacter::UpdateLocomotionAnimation()
 	const float Speed = GetVelocity().Size2D();
 	const bool bShooting = FireAnimation && IsAiming();
 	UAnimSequence* Wanted = Speed > WalkAnimationThreshold ? WalkAnimation : (bShooting ? FireAnimation : IdleAnimation);
+
+	if (IsCelebrating())
+	{
+		Wanted = VictoryAnimation;
+	}
 	if (Wanted && Wanted != CurrentAnimation)
 	{
 		PlayBodyAnimation(Wanted, true);
@@ -807,13 +829,67 @@ void ARRRandomCharacter::UpdateLocomotionAnimation()
 	}
 }
 
+bool ARRRandomCharacter::IsCelebrating() const
+{
+	// The match is over: the winners (and the MVP, whichever team) dance
+	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
+	return VictoryAnimation && bAlive && State && State->IsMatchOver() && (Team == State->GetWinningTeam() || State->GetMVP() == this);
+}
+
 void ARRRandomCharacter::PlayBodyAnimation(UAnimSequence* Animation, bool bLoop, float PlayRate)
 {
 	USkeletalMeshComponent* BodyMesh = GetMesh();
-	BodyMesh->PlayAnimation(Animation, bLoop);
+	// The body instance is a single-node one; the component's PlayAnimation would swap it for a plain one (no tail)
+	if (UAnimSingleNodeInstance* Instance = BodyMesh->GetSingleNodeInstance())
+	{
+		Instance->SetAnimationAsset(Animation, bLoop, PlayRate);
+		Instance->SetPlaying(true);
+	}
+	else
+	{
+		BodyMesh->PlayAnimation(Animation, bLoop);
+	}
 	// The walk's speed-matched rate would otherwise carry over to the next animation
 	BodyMesh->SetPlayRate(PlayRate);
 	CurrentAnimation = Animation;
+}
+
+FVector ARRRandomCharacter::GetEyeLocation() const
+{
+	// Half the brawler's height (the capsule's middle): what stands taller than that blocks its view. A giant, or a brawler
+	// standing on cover or flying, sees over more.
+	return GetActorLocation();
+}
+
+float ARRRandomCharacter::GetSightDistance(const UWorld* World, const FVector& Eye, const FVector& Direction, float MaxDistance)
+{
+	// Level at eye height: anything in the way there is taller than half the one looking (cover is, low hills aren't)
+	FHitResult Hit;
+	const FVector Flat = FVector(Direction.X, Direction.Y, 0.f).GetSafeNormal();
+	if (World->LineTraceSingleByObjectType(Hit, Eye, Eye + Flat * MaxDistance, FCollisionObjectQueryParams(ECC_WorldStatic),
+		FCollisionQueryParams(SCENE_QUERY_STAT(RRRandomSight), false)))
+	{
+		return Hit.Distance;
+	}
+	return MaxDistance;
+}
+
+bool ARRRandomCharacter::IsSeenByTeam(const UWorld* World, int32 InTeam, const FVector& Location)
+{
+	for (TActorIterator<ARRRandomCharacter> It(World); It; ++It)
+	{
+		if (It->GetTeam() != InTeam || !It->IsAlive())
+		{
+			continue;
+		}
+		const FVector Eye = It->GetEyeLocation();
+		const float Distance = FVector::Dist2D(Eye, Location);
+		if (Distance <= It->GetVisionRadius() && GetSightDistance(World, Eye, Location - Eye, Distance) >= Distance)
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 bool ARRRandomCharacter::IsAiming() const
@@ -873,7 +949,7 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 {
 	UWorld* World = GetWorld();
 	const float Now = World->GetTimeSeconds();
-	if (!bAlive || !ProjectileClass || bReloading || bClimbing || Now + CooldownSlack < NextFireTime)
+	if (!bAlive || !ProjectileClass || bReloading || bClimbing || Now + CooldownSlack < NextFireTime || ARRRandomGameState::IsPlayLocked(this))
 	{
 		return false;
 	}
@@ -942,7 +1018,7 @@ void ARRRandomCharacter::ServerStartReload_Implementation()
 
 void ARRRandomCharacter::RollDice()
 {
-	if (!bAlive)
+	if (!bAlive || ARRRandomGameState::IsPlayLocked(this))
 	{
 		return;
 	}
@@ -975,7 +1051,8 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 {
 	// Shots only hit on the server
 	ARRRandomCharacter* Attacker = DamageCauser ? Cast<ARRRandomCharacter>(DamageCauser->GetInstigator()) : nullptr;
-	if (!HasAuthority() || !bAlive || (Attacker && Attacker != this && Attacker->GetTeam() == Team))
+	// Shots still in the air when the match ends do nothing
+	if (!HasAuthority() || !bAlive || ARRRandomGameState::IsPlayLocked(this) || (Attacker && Attacker != this && Attacker->GetTeam() == Team))
 	{
 		return 0.f;
 	}
@@ -1076,6 +1153,15 @@ void ARRRandomCharacter::ApplyStandingBody()
 
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+}
+
+void ARRRandomCharacter::ReviveNow()
+{
+	if (HasAuthority() && !bAlive)
+	{
+		RespawnRemaining = 0.f;
+		Respawn();
+	}
 }
 
 void ARRRandomCharacter::Respawn()

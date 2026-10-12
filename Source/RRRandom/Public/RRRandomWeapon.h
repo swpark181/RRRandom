@@ -61,6 +61,16 @@ struct RRRANDOM_API FRRWeapon
 	 */
 	static FRRWeapon Roll(FRandomStream& Stream, int32 Quality, int32 BaseMagazineSize);
 
+	/**
+	 * One gun type with no random spread (cheats): type 0 is the starting pistol, 1 and up the types Roll picks from,
+	 * in GetTypeName order. Quality as in Roll.
+	 */
+	static FRRWeapon Make(int32 Type, int32 Quality, int32 BaseMagazineSize);
+	/** How many types Make knows, the pistol included. */
+	static int32 GetTypeCount();
+	/** Upper-case name of a Make type, e.g. "CANNON". */
+	static FString GetTypeName(int32 Type);
+
 	static ERRWeaponTier GetTierForDamage(float DamageMultiplier);
 	static FLinearColor GetTierColor(ERRWeaponTier Tier);
 	static FString GetTierName(ERRWeaponTier Tier);

@@ -34,7 +34,8 @@ void URRRandomGunComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	const USkeletalMeshComponent* Body = Brawler ? Brawler->GetMesh() : nullptr;
 	const bool bHands = Body && Body->GetBoneIndex(RightHandBone) != INDEX_NONE && Body->GetBoneIndex(RightPalmBone) != INDEX_NONE
 		&& Body->GetBoneIndex(LeftHandBone) != INDEX_NONE;
-	const bool bShow = bHands && Brawler->IsAlive();
+	// Put away while knocked out and while dancing after a win
+	const bool bShow = bHands && Brawler->IsAlive() && !Brawler->IsCelebrating();
 	if (IsVisible() != bShow)
 	{
 		SetVisibility(bShow);
