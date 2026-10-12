@@ -4,15 +4,35 @@
 #include "GameFramework/HUD.h"
 #include "RRRandomHUD.generated.h"
 
+/** The results screen's and the pause menu's buttons. */
+enum class ERRResultsButton : uint8
+{
+	None,
+	NewGame,
+	Title,
+	Resume,
+};
+
 class ARRRandomCharacter;
+class ARRRandomGameState;
 class UFont;
 class URRRandomDiceBuffComponent;
+class UTexture2D;
 
 /**
  * Plain canvas HUD. Over every brawler: health bar, stored dice count, dice gauge, active buffs,
  * the latest dice roll, damage numbers and a friend-or-foe marker (plus ammo over the player's own brawler).
- * On screen: team score, the player's dice gauge and buff list, magazine count, a respawn countdown,
- * and the online status with its keys in the top-left corner.
+ * On screen: team score, the player's dice gauge and buff list, magazine count, a respawn countdown, the online status
+ * with its keys under the minimap, and:
+ * - a 5-4-3-2-1-GO countdown in the middle until play starts,
+ * - top left, a minimap of the island (terrain, cover, woods) darkened where the team has never looked or doesn't look
+ *   now, with markers for the player (an arrow), teammates and the opponents the team can see; a click on it (or M)
+ *   shows it full screen,
+ * - bottom right over the ammo, a card per teammate: portrait in the team color, name, health and what it has going
+ *   (dice, giant, flight, gun, reloading; greyed out while knocked out).
+ * Once the match is over, only the results screen: VICTORY or DEFEAT, the final score, each team's brawlers by
+ * knockouts, the MVP, and NEW GAME / TITLE buttons, over letterbox bars (the 3D show is ARRRandomResultsDirector's).
+ * With the pause menu open (Esc): a dimmed screen with RESUME / TITLE on top of the game.
  */
 UCLASS()
 class RRRANDOM_API ARRRandomHUD : public AHUD
@@ -20,7 +40,23 @@ class RRRANDOM_API ARRRandomHUD : public AHUD
 	GENERATED_BODY()
 
 public:
+	ARRRandomHUD();
+
 	virtual void DrawHUD() override;
+
+	/** A click on the map: opens it full screen from the corner, or closes it. False when the click wasn't the map's. */
+	bool HandleMapClick(const FVector2D& ScreenPoint);
+	/** Whether a screen point belongs to the map (on the corner map, or anywhere while it fills the screen). */
+	bool IsPointOnMap(const FVector2D& ScreenPoint) const;
+	void ToggleMap() { bMapExpanded = !bMapExpanded; }
+	bool IsMapExpanded() const { return bMapExpanded; }
+
+	/** The corner map's side, and its distance from the screen edges. */
+	static constexpr float MinimapSize = 220.f;
+	static constexpr float MinimapMargin = 20.f;
+
+	/** The enabled results or pause menu button under a screen point (None when there is none). */
+	ERRResultsButton GetResultsButtonAt(const FVector2D& ScreenPoint) const;
 
 private:
 	void DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer);
@@ -40,9 +76,53 @@ private:
 	/** Online role (solo, hosting, joined), the host/join/leave keys and the latest online status. */
 	void DrawOnlinePanel();
 	void DrawRespawnCountdown(const ARRRandomCharacter& Viewer);
+	void DrawResults(const ARRRandomGameState& State, const ARRRandomCharacter* Viewer);
+	void DrawPauseMenu();
+	void DrawCountdown(const ARRRandomGameState& State);
+	/** The teammates' cards, stacked up from over the ammo panel. */
+	void DrawTeamPanel(const ARRRandomCharacter& Viewer);
+	void DrawTeamCard(const ARRRandomCharacter& Mate, const ARRRandomCharacter& Viewer, float Left, float Top);
+	void DrawMinimap(const ARRRandomCharacter* Viewer);
+	void DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* Viewer);
+	/** The map's terrain colors, once (again when cover turns up later). False while there is no island. */
+	bool BuildMinimapBase();
+	/** The terrain colors shaded by the fog of war, into MapTexture. */
+	void RefreshMinimap();
+	FVector2D MapPixelToWorld(int32 X, int32 Y) const;
+	/** One team's brawlers by knockouts, from Top; returns the bottom edge. */
+	float DrawTeamBoard(int32 Team, const ARRRandomCharacter* Viewer, const ARRRandomCharacter* MVP, float X, float Top, float Width, float Alpha, float Scale);
+	/** Text centered across the screen, with a shadow; returns its height. */
+	float DrawCenteredText(const FString& Text, const FLinearColor& Color, float Y, UFont* Font, float Scale);
 
 	/** Text with a dark drop shadow so it reads over any background. */
 	void DrawShadowedText(const FString& Text, const FLinearColor& Color, float X, float Y, UFont* Font);
 	/** A downward triangle with a dark border, its top edge at Top, centered on CenterX. */
 	void DrawFriendOrFoeMarker(float CenterX, float Top, const FLinearColor& Color);
+
+	/** Real time the results screen first showed (negative while playing). */
+	float ResultsShownAt = -1.f;
+	struct FResultsButtonRect
+	{
+		ERRResultsButton Button = ERRResultsButton::None;
+		FBox2D Rect;
+		bool bEnabled = true;
+	};
+	TArray<FResultsButtonRect> ResultsButtons;
+	/** One of ResultsButtons, gold when the mouse is over it, faded when disabled. */
+	void DrawMenuButton(const FResultsButtonRect& Button, const FString& Label, float Alpha, float Scale);
+
+	/** Head-and-shoulders picture for the team cards (char-pipeline/scripts/blender_portrait.py). */
+	UPROPERTY()
+	TObjectPtr<UTexture2D> Portrait;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTexture2D> MapTexture;
+	/** The island's area, its terrain colors, how many cover blocks they include, and when the fog shading is next due. */
+	FBox2D MapBounds = FBox2D(ForceInit);
+	TArray<FColor> MapBase;
+	int32 MapCoverCount = INDEX_NONE;
+	float MapRefreshTimer = 0.f;
+	bool bMapExpanded = false;
+	/** Where the corner map was last drawn. */
+	FBox2D MinimapRect = FBox2D(ForceInit);
 };

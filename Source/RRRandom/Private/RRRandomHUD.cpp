@@ -3,6 +3,7 @@
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomGameState.h"
 #include "RRRandomOverheadDieComponent.h"
+#include "RRRandomPlayerController.h"
 #include "RRRandomSessionSubsystem.h"
 #include "Camera/PlayerCameraManager.h"
 #include "CanvasItem.h"
@@ -79,6 +80,15 @@ void ARRRandomHUD::DrawHUD()
 	}
 
 	const ARRRandomCharacter* Viewer = Cast<ARRRandomCharacter>(GetOwningPawn());
+	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
+	if (State && State->IsMatchOver())
+	{
+		DrawResults(*State, Viewer);
+		return;
+	}
+	ResultsShownAt = -1.f;
+	ResultsButtons.Reset();
+
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{
 		DrawOverhead(**It, Viewer);
@@ -89,6 +99,7 @@ void ARRRandomHUD::DrawHUD()
 	if (Viewer)
 	{
 		DrawDicePanel(*Viewer);
+		DrawTeamPanel(*Viewer);
 		if (Viewer->IsAlive())
 		{
 			DrawAmmoPanel(*Viewer);
@@ -97,6 +108,18 @@ void ARRRandomHUD::DrawHUD()
 		{
 			DrawRespawnCountdown(*Viewer);
 		}
+	}
+	if (State)
+	{
+		DrawCountdown(*State);
+	}
+	// Last, so the full-screen map covers the rest
+	DrawMinimap(Viewer);
+
+	const ARRRandomPlayerController* Controller = Cast<ARRRandomPlayerController>(PlayerOwner);
+	if (Controller && Controller->IsPauseMenuOpen())
+	{
+		DrawPauseMenu();
 	}
 }
 
@@ -125,6 +148,11 @@ void ARRRandomHUD::DrawFriendOrFoeMarker(float CenterX, float Top, const FLinear
 
 void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer)
 {
+	// Hidden in the fog of war on this screen (ARRRandomFogOfWar): nothing over it either
+	if (Brawler.GetMesh()->bHiddenInGame)
+	{
+		return;
+	}
 	DrawDamagePopups(Brawler, Viewer);
 	if (!Brawler.IsAlive())
 	{
@@ -480,7 +508,7 @@ void ARRRandomHUD::DrawDicePanel(const ARRRandomCharacter& Viewer)
 
 void ARRRandomHUD::DrawOnlinePanel()
 {
-	// Top left: how this game is connected, the keys, and the last thing the online code did
+	// Top left under the minimap: how this game is connected, the keys, and the last thing the online code did
 	const URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>();
 	if (!Sessions)
 	{
@@ -499,11 +527,15 @@ void ARRRandomHUD::DrawOnlinePanel()
 	}
 
 	UFont* Font = GEngine->GetSmallFont();
-	float Y = Margin;
+	float Y = MinimapMargin + MinimapSize + 26.f;
 	DrawShadowedText(Connection, FLinearColor::White, Margin, Y, Font);
 	Y += LineHeight;
-	DrawShadowedText(TEXT("[F1] HOST   [F2] JOIN   [F3] LEAVE   [ESC] TITLE"), FLinearColor::Gray, Margin, Y, Font);
+	DrawShadowedText(TEXT("[F1] HOST   [F2] JOIN   [F3] LEAVE   [ESC] MENU   [M] MAP"), FLinearColor::Gray, Margin, Y, Font);
 	Y += LineHeight;
+#if !UE_BUILD_SHIPPING
+	DrawShadowedText(TEXT("CHEATS  [F6] WIN   [F7] GIANT   [F8] FLY   [1-6] PISTOL MINIGUN SMG RIFLE BLASTER CANNON"), FLinearColor::Gray, Margin, Y, Font);
+	Y += LineHeight;
+#endif
 	if (!Sessions->GetStatus().IsEmpty())
 	{
 		DrawShadowedText(Sessions->GetStatus(), FLinearColor(1.f, 0.85f, 0.4f), Margin, Y, Font);
@@ -539,6 +571,17 @@ void ARRRandomHUD::DrawScore()
 		DrawText(Parts[Index], Colors[Index], X, Margin, Font);
 		X += Widths[Index];
 	}
+
+	// What wins, under the score
+	if (State->GetScoreToWin() > 0)
+	{
+		UFont* Small = GEngine->GetSmallFont();
+		const FString Goal = FString::Printf(TEXT("FIRST TO %d"), State->GetScoreToWin());
+		float GoalWidth;
+		float GoalHeight;
+		GetTextSize(Goal, GoalWidth, GoalHeight, Small);
+		DrawShadowedText(Goal, FLinearColor(0.8f, 0.8f, 0.8f), (Canvas->ClipX - GoalWidth) * 0.5f, Margin + Height + 6.f, Small);
+	}
 }
 
 void ARRRandomHUD::DrawRespawnCountdown(const ARRRandomCharacter& Viewer)
@@ -549,4 +592,281 @@ void ARRRandomHUD::DrawRespawnCountdown(const ARRRandomCharacter& Viewer)
 	float Height = 0.f;
 	GetTextSize(Text, Width, Height, Font);
 	DrawShadowedText(Text, FLinearColor::White, (Canvas->ClipX - Width) * 0.5f, Canvas->ClipY * 0.3f, Font);
+}
+
+namespace
+{
+	// Results screen, sized for a 720 pixel tall screen and scaled with it
+	constexpr float ResultsReferenceHeight = 720.f;
+	constexpr float LetterboxShare = 0.07f;
+	constexpr float LetterboxTime = 0.8f;
+	// The text and buttons fade in once the camera has mostly closed in
+	constexpr float ResultsTextDelay = 0.9f;
+	constexpr float ResultsFadeTime = 0.6f;
+	constexpr float ResultsButtonWidth = 230.f;
+	constexpr float ResultsButtonHeight = 40.f;
+	constexpr float ResultsButtonGap = 24.f;
+	constexpr float BoardWidth = 230.f;
+	constexpr float BoardRowHeight = 26.f;
+	const FLinearColor VictoryColor = FLinearColor::FromSRGBColor(FColor(255, 196, 56));
+	const FLinearColor DefeatColor = FLinearColor::FromSRGBColor(FColor(235, 90, 80));
+	const FLinearColor ButtonFill = FLinearColor::FromSRGBColor(FColor(30, 33, 44));
+	const FLinearColor ButtonEdge = FLinearColor::FromSRGBColor(FColor(72, 78, 96));
+	const FLinearColor HoveredText = FLinearColor::FromSRGBColor(FColor(24, 18, 6));
+	const FLinearColor Muted = FLinearColor::FromSRGBColor(FColor(150, 156, 172));
+
+	float EaseOut(float T)
+	{
+		T = FMath::Clamp(T, 0.f, 1.f);
+		return 1.f - FMath::Square(1.f - T);
+	}
+
+	/** A team's brawlers, numbered bots in a fixed order (by name), then sorted by knockouts. */
+	TArray<TPair<const ARRRandomCharacter*, FString>> GetTeamBoard(const UWorld* World, int32 Team, const ARRRandomCharacter* Viewer)
+	{
+		TArray<const ARRRandomCharacter*> Members;
+		for (TActorIterator<ARRRandomCharacter> It(World); It; ++It)
+		{
+			if (It->GetTeam() == Team)
+			{
+				Members.Add(*It);
+			}
+		}
+		Members.Sort([](const ARRRandomCharacter& A, const ARRRandomCharacter& B) { return A.GetName() < B.GetName(); });
+		TArray<TPair<const ARRRandomCharacter*, FString>> Board;
+		int32 Bots = 0;
+		for (const ARRRandomCharacter* Member : Members)
+		{
+			// Players have a player state, bots have none
+			FString Label;
+			if (Member == Viewer)
+			{
+				Label = TEXT("YOU");
+			}
+			else if (const APlayerState* Player = Member->GetPlayerState())
+			{
+				Label = Player->GetPlayerName().Left(14).ToUpper();
+			}
+			else
+			{
+				Label = FString::Printf(TEXT("BOT %d"), ++Bots);
+			}
+			Board.Emplace(Member, Label);
+		}
+		Board.StableSort([](const TPair<const ARRRandomCharacter*, FString>& A, const TPair<const ARRRandomCharacter*, FString>& B)
+		{
+			return A.Key->GetKills() > B.Key->GetKills();
+		});
+		return Board;
+	}
+}
+
+float ARRRandomHUD::DrawCenteredText(const FString& Text, const FLinearColor& Color, float Y, UFont* Font, float Scale)
+{
+	float Width;
+	float Height;
+	GetTextSize(Text, Width, Height, Font, Scale);
+	const float X = (Canvas->ClipX - Width) * 0.5f;
+	const float Shadow = FMath::Max(1.f, Scale);
+	DrawText(Text, FLinearColor(0.f, 0.f, 0.f, Color.A * 0.8f), X + Shadow, Y + Shadow, Font, Scale);
+	DrawText(Text, Color, X, Y, Font, Scale);
+	return Height;
+}
+
+ERRResultsButton ARRRandomHUD::GetResultsButtonAt(const FVector2D& ScreenPoint) const
+{
+	for (const FResultsButtonRect& Button : ResultsButtons)
+	{
+		if (Button.bEnabled && Button.Rect.IsInside(ScreenPoint))
+		{
+			return Button.Button;
+		}
+	}
+	return ERRResultsButton::None;
+}
+
+float ARRRandomHUD::DrawTeamBoard(int32 Team, const ARRRandomCharacter* Viewer, const ARRRandomCharacter* MVP, float X, float Top, float Width, float Alpha, float Scale)
+{
+	UFont* Font = GEngine->GetMediumFont();
+	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
+	const TArray<TPair<const ARRRandomCharacter*, FString>> Board = GetTeamBoard(GetWorld(), Team, Viewer);
+	const float Row = BoardRowHeight * Scale;
+	const float Pad = 10.f * Scale;
+
+	// Header: team name and its score
+	DrawRect(WithAlpha(FLinearColor(0.f, 0.f, 0.f, 0.55f), Alpha), X, Top, Width, Row * (Board.Num() + 1) + Pad);
+	DrawRect(WithAlpha(ScoreColor(Team), Alpha), X, Top, Width, 3.f * Scale);
+	const FString Header = Team == 0 ? TEXT("BLUE") : TEXT("RED");
+	DrawText(Header, WithAlpha(ScoreColor(Team), Alpha), X + Pad, Top + 6.f * Scale, Font, Scale);
+	const FString Score = FString::FromInt(State ? State->GetTeamScore(Team) : 0);
+	float W;
+	float H;
+	GetTextSize(Score, W, H, Font, Scale);
+	DrawText(Score, WithAlpha(FLinearColor::White, Alpha), X + Width - Pad - W, Top + 6.f * Scale, Font, Scale);
+
+	// One row per brawler: name (MVP tagged), knockouts
+	float Y = Top + Row + 4.f * Scale;
+	for (const TPair<const ARRRandomCharacter*, FString>& Entry : Board)
+	{
+		const bool bIsMVP = Entry.Key == MVP;
+		const FLinearColor NameColor = Entry.Key == Viewer ? FLinearColor(0.55f, 1.f, 0.55f) : FLinearColor::White;
+		FString Name = Entry.Value;
+		if (bIsMVP)
+		{
+			Name += TEXT("  MVP");
+		}
+		DrawText(Name, WithAlpha(bIsMVP ? VictoryColor : NameColor, Alpha), X + Pad, Y, Font, Scale);
+		const FString Kills = FString::Printf(TEXT("%d KO"), Entry.Key->GetKills());
+		GetTextSize(Kills, W, H, Font, Scale);
+		DrawText(Kills, WithAlpha(FLinearColor(0.85f, 0.85f, 0.85f), Alpha), X + Width - Pad - W, Y, Font, Scale);
+		Y += Row;
+	}
+	return Y;
+}
+
+void ARRRandomHUD::DrawResults(const ARRRandomGameState& State, const ARRRandomCharacter* Viewer)
+{
+	const float Now = GetWorld()->GetRealTimeSeconds();
+	if (ResultsShownAt < 0.f)
+	{
+		ResultsShownAt = Now;
+	}
+	const float Age = Now - ResultsShownAt;
+	const float ScreenW = Canvas->ClipX;
+	const float ScreenH = Canvas->ClipY;
+	const float S = ScreenH / ResultsReferenceHeight;
+	UFont* LargeFont = GEngine->GetLargeFont();
+	UFont* MediumFont = GEngine->GetMediumFont();
+	UFont* SmallFont = GEngine->GetSmallFont();
+
+	// Letterbox bars slide in like a cutscene
+	const float Bar = ScreenH * LetterboxShare * EaseOut(Age / LetterboxTime);
+	DrawRect(FLinearColor::Black, 0.f, 0.f, ScreenW, Bar);
+	DrawRect(FLinearColor::Black, 0.f, ScreenH - Bar, ScreenW, Bar);
+
+	const float Fade = EaseOut((Age - ResultsTextDelay) / ResultsFadeTime);
+	if (Fade <= 0.f)
+	{
+		ResultsButtons.Reset();
+		return;
+	}
+
+	// Headline: how it went for this screen's team (or who won, for a screen without a brawler)
+	const int32 Winner = State.GetWinningTeam();
+	const bool bWon = Viewer && Viewer->GetTeam() == Winner;
+	const FString Headline = Viewer ? (bWon ? TEXT("VICTORY") : TEXT("DEFEAT")) : (Winner == 0 ? TEXT("BLUE WINS") : TEXT("RED WINS"));
+	const float Pop = 1.f + 0.35f * (1.f - Fade);
+	float Y = ScreenH * 0.12f;
+	Y += DrawCenteredText(Headline, WithAlpha(Viewer && !bWon ? DefeatColor : VictoryColor, Fade), Y, LargeFont, 3.2f * S * Pop);
+	const FString Result = FString::Printf(TEXT("%s TEAM WINS   %d : %d"), Winner == 0 ? TEXT("BLUE") : TEXT("RED"), State.GetTeamScore(0), State.GetTeamScore(1));
+	DrawCenteredText(Result, WithAlpha(ScoreColor(Winner), Fade), Y + 4.f * S, MediumFont, 1.1f * S);
+
+	// The teams on either side, the MVP in the middle of the screen between them
+	const ARRRandomCharacter* MVP = State.GetMVP();
+	const float BoardTop = ScreenH * 0.3f;
+	DrawTeamBoard(0, Viewer, MVP, 30.f * S, BoardTop, BoardWidth * S, Fade, S);
+	DrawTeamBoard(1, Viewer, MVP, ScreenW - (30.f + BoardWidth) * S, BoardTop, BoardWidth * S, Fade, S);
+
+	// MVP banner under the hero
+	if (MVP)
+	{
+		FString MVPName;
+		for (const TPair<const ARRRandomCharacter*, FString>& Entry : GetTeamBoard(GetWorld(), MVP->GetTeam(), Viewer))
+		{
+			if (Entry.Key == MVP)
+			{
+				MVPName = Entry.Value;
+			}
+		}
+		const FString Banner = FString::Printf(TEXT("MVP   %s   %d KO"), *MVPName, MVP->GetKills());
+		float W;
+		float H;
+		GetTextSize(Banner, W, H, LargeFont, 1.3f * S);
+		const float BannerY = ScreenH * 0.76f;
+		const float PadX = 18.f * S;
+		DrawRect(WithAlpha(FLinearColor(0.f, 0.f, 0.f, 0.6f), Fade), (ScreenW - W) * 0.5f - PadX, BannerY - 6.f * S, W + PadX * 2.f, H + 12.f * S);
+		DrawRect(WithAlpha(VictoryColor, Fade), (ScreenW - W) * 0.5f - PadX, BannerY - 6.f * S, W + PadX * 2.f, 3.f * S);
+		DrawCenteredText(Banner, WithAlpha(ScoreColor(MVP->GetTeam()), Fade), BannerY, LargeFont, 1.3f * S);
+	}
+
+	// Buttons: a new game (the host decides on a network game) and back to the title
+	const bool bCanRestart = GetWorld()->GetAuthGameMode() != nullptr;
+	ResultsButtons.Reset();
+	const float ButtonW = ResultsButtonWidth * S;
+	const float ButtonH = ResultsButtonHeight * S;
+	const float Left = (ScreenW - ButtonW * 2.f - ResultsButtonGap * S) * 0.5f;
+	const float Top = ScreenH * 0.85f;
+	ResultsButtons.Add({ ERRResultsButton::NewGame, FBox2D(FVector2D(Left, Top), FVector2D(Left + ButtonW, Top + ButtonH)), bCanRestart });
+	const float Right = Left + ButtonW + ResultsButtonGap * S;
+	ResultsButtons.Add({ ERRResultsButton::Title, FBox2D(FVector2D(Right, Top), FVector2D(Right + ButtonW, Top + ButtonH)), true });
+
+	for (const FResultsButtonRect& Button : ResultsButtons)
+	{
+		DrawMenuButton(Button, Button.Button == ERRResultsButton::NewGame ? (bCanRestart ? TEXT("NEW GAME") : TEXT("WAITING FOR HOST")) : TEXT("TITLE"), Fade, S);
+	}
+
+	const FString Keys = bCanRestart ? TEXT("[ENTER] NEW GAME      [ESC] TITLE") : TEXT("[ESC] TITLE");
+	float W;
+	float H;
+	GetTextSize(Keys, W, H, SmallFont, S);
+	DrawText(Keys, WithAlpha(Muted, Fade), (ScreenW - W) * 0.5f, ScreenH - Bar + (Bar - H) * 0.5f, SmallFont, S);
+}
+
+void ARRRandomHUD::DrawMenuButton(const FResultsButtonRect& Button, const FString& Label, float Alpha, float Scale)
+{
+	float MouseX = -1.f;
+	float MouseY = -1.f;
+	if (PlayerOwner)
+	{
+		PlayerOwner->GetMousePosition(MouseX, MouseY);
+	}
+	UFont* Font = GEngine->GetLargeFont();
+	const FVector2D Size = Button.Rect.GetSize();
+	const bool bHovered = Button.bEnabled && Button.Rect.IsInside(FVector2D(MouseX, MouseY));
+	const float ButtonAlpha = Alpha * (Button.bEnabled ? 1.f : 0.45f);
+	const float Border = 2.f * Scale;
+	DrawRect(WithAlpha(bHovered ? VictoryColor : ButtonEdge, ButtonAlpha), Button.Rect.Min.X, Button.Rect.Min.Y, Size.X, Size.Y);
+	if (!bHovered)
+	{
+		DrawRect(WithAlpha(ButtonFill, ButtonAlpha), Button.Rect.Min.X + Border, Button.Rect.Min.Y + Border, Size.X - Border * 2.f, Size.Y - Border * 2.f);
+	}
+	const float LabelScale = (Button.bEnabled ? 1.1f : 0.8f) * Scale;
+	float W;
+	float H;
+	GetTextSize(Label, W, H, Font, LabelScale);
+	DrawText(Label, WithAlpha(bHovered ? HoveredText : FLinearColor::White, ButtonAlpha), Button.Rect.Min.X + (Size.X - W) * 0.5f, Button.Rect.Min.Y + (Size.Y - H) * 0.5f, Font, LabelScale);
+}
+
+void ARRRandomHUD::DrawPauseMenu()
+{
+	const float ScreenW = Canvas->ClipX;
+	const float ScreenH = Canvas->ClipY;
+	const float S = ScreenH / ResultsReferenceHeight;
+
+	// The game dimmed behind the menu
+	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.6f), 0.f, 0.f, ScreenW, ScreenH);
+	float Y = ScreenH * 0.3f;
+	Y += DrawCenteredText(TEXT("PAUSED"), VictoryColor, Y, GEngine->GetLargeFont(), 2.6f * S);
+	// An online game can't stop for one player
+	if (GetWorld()->GetNetMode() != NM_Standalone)
+	{
+		DrawCenteredText(TEXT("ONLINE GAME KEEPS RUNNING"), Muted, Y + 6.f * S, GEngine->GetMediumFont(), S);
+	}
+
+	const float ButtonW = ResultsButtonWidth * S;
+	const float ButtonH = ResultsButtonHeight * S;
+	const float Left = (ScreenW - ButtonW) * 0.5f;
+	const float Top = ScreenH * 0.48f;
+	ResultsButtons.Reset();
+	ResultsButtons.Add({ ERRResultsButton::Resume, FBox2D(FVector2D(Left, Top), FVector2D(Left + ButtonW, Top + ButtonH)), true });
+	const float Second = Top + ButtonH + 14.f * S;
+	ResultsButtons.Add({ ERRResultsButton::Title, FBox2D(FVector2D(Left, Second), FVector2D(Left + ButtonW, Second + ButtonH)), true });
+	DrawMenuButton(ResultsButtons[0], TEXT("RESUME"), 1.f, S);
+	DrawMenuButton(ResultsButtons[1], TEXT("TITLE"), 1.f, S);
+
+	float W;
+	float H;
+	const FString Keys = TEXT("[ESC] RESUME      [ENTER] TITLE");
+	GetTextSize(Keys, W, H, GEngine->GetSmallFont(), S);
+	DrawText(Keys, Muted, (ScreenW - W) * 0.5f, Second + ButtonH + 24.f * S, GEngine->GetSmallFont(), S);
 }

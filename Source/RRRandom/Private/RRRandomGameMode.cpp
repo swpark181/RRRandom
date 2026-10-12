@@ -52,6 +52,15 @@ void ARRRandomGameMode::StartPlay()
 {
 	Super::StartPlay();
 
+	// -RRScoreToWin=N on the command line, for quick tests of the end of a match
+	FParse::Value(FCommandLine::Get(), TEXT("RRScoreToWin="), ScoreToWin);
+	ScoreToWin = FMath::Max(1, ScoreToWin);
+	if (ARRRandomGameState* State = GetGameState<ARRRandomGameState>())
+	{
+		State->SetScoreToWin(ScoreToWin);
+		State->SetPlayStartTime(GetWorld()->GetTimeSeconds() + StartCountdown);
+	}
+
 	// Before the bots, whose floor traces must not land on top of a block
 	// The island's hills and walls go up before the cover and the bots, whose floor traces must land beside them
 	if (bSpawnIsland)
@@ -76,12 +85,72 @@ void ARRRandomGameMode::StartPlay()
 
 void ARRRandomGameMode::OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRandomCharacter* Attacker)
 {
+	ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
+	if (State && State->IsMatchOver())
+	{
+		return;
+	}
 	// A knockout without an opposing attacker still goes to the other team
 	const int32 ScoringTeam = Attacker && Attacker->GetTeam() != Victim->GetTeam() ? Attacker->GetTeam() : 1 - Victim->GetTeam();
-	if (ARRRandomGameState* State = GetGameState<ARRRandomGameState>())
+	if (Attacker && Attacker->GetTeam() != Victim->GetTeam())
+	{
+		Attacker->AddKill();
+	}
+	if (State)
 	{
 		State->AddTeamScore(ScoringTeam);
 	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) knocked out by %s; point to team %d."), *Victim->GetName(), Victim->GetTeam(),
+		Attacker ? *Attacker->GetName() : TEXT("a fall"), ScoringTeam);
+	if (State && State->GetTeamScore(ScoringTeam) >= ScoreToWin)
+	{
+		EndMatch(ScoringTeam);
+	}
+}
+
+void ARRRandomGameMode::EndMatch(int32 Winner)
+{
+	// MVP: the most knockouts; on a tie the winning team's, then whoever is still standing
+	ARRRandomCharacter* MVP = nullptr;
+	auto Rank = [Winner](const ARRRandomCharacter* Brawler)
+	{
+		return Brawler->GetKills() * 4 + (Brawler->GetTeam() == Winner ? 2 : 0) + (Brawler->IsAlive() ? 1 : 0);
+	};
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		if (!MVP || Rank(*It) > Rank(MVP))
+		{
+			MVP = *It;
+		}
+	}
+	// The camera closes in on the MVP, so it stands up for it
+	if (MVP)
+	{
+		MVP->ReviveNow();
+	}
+	if (ARRRandomGameState* State = GetGameState<ARRRandomGameState>())
+	{
+		State->EndMatch(Winner, MVP);
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: match over, team %d wins; MVP %s with %d knockouts."), Winner, MVP ? *MVP->GetName() : TEXT("nobody"), MVP ? MVP->GetKills() : 0);
+}
+
+void ARRRandomGameMode::CheatWin(int32 Team)
+{
+	ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
+	if (State && !State->IsMatchOver() && (Team == 0 || Team == 1))
+	{
+		State->SetTeamScore(Team, FMath::Max(State->GetTeamScore(Team), ScoreToWin));
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, team %d wins."), Team);
+		EndMatch(Team);
+	}
+}
+
+void ARRRandomGameMode::RestartMatch()
+{
+	// The same map from scratch (a listen server keeps listening and brings its clients along)
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: new match."));
+	GetWorld()->ServerTravel(TEXT("?Restart"), false);
 }
 
 void ARRRandomGameMode::EnsureSlots()

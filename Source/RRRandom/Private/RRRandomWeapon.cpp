@@ -49,6 +49,37 @@ FRRWeapon FRRWeapon::Roll(FRandomStream& Stream, int32 Quality, int32 BaseMagazi
 	return Weapon;
 }
 
+FRRWeapon FRRWeapon::Make(int32 Type, int32 Quality, int32 BaseMagazineSize)
+{
+	if (Type <= 0 || Type > UE_ARRAY_COUNT(WeaponTypes))
+	{
+		return FRRWeapon();
+	}
+	// Roll with every spread at its middle
+	const FRRWeaponType& Picked = WeaponTypes[Type - 1];
+	FRRWeapon Weapon;
+	Weapon.Name = Picked.Name;
+	Weapon.bIsDefault = false;
+	Weapon.DamageMultiplier = Picked.Damage * (0.85f + 0.06f * Quality);
+	Weapon.MagazineSize = FMath::Max(1, FMath::RoundToInt(BaseMagazineSize * Picked.MagazineShare));
+	Weapon.FireIntervalMultiplier = Picked.FireInterval;
+	Weapon.ReloadTimeMultiplier = Picked.ReloadTime;
+	Weapon.ProjectileSpeedMultiplier = Picked.ProjectileSpeed;
+	Weapon.ProjectileScale = Picked.ProjectileScale;
+	Weapon.Tier = GetTierForDamage(Weapon.DamageMultiplier);
+	return Weapon;
+}
+
+int32 FRRWeapon::GetTypeCount()
+{
+	return UE_ARRAY_COUNT(WeaponTypes) + 1;
+}
+
+FString FRRWeapon::GetTypeName(int32 Type)
+{
+	return Type > 0 && Type <= UE_ARRAY_COUNT(WeaponTypes) ? FString(WeaponTypes[Type - 1].Name) : FRRWeapon().Name;
+}
+
 ERRWeaponTier FRRWeapon::GetTierForDamage(float DamageMultiplier)
 {
 	if (DamageMultiplier >= LegendaryDamage)

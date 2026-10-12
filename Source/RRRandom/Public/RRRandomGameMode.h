@@ -12,7 +12,8 @@ class ARRRandomDummy;
  * Team brawl: blue (team 0) starts at the player start, red (team 1) further up the screen.
  * Each team has TeamSize spots. Players take spots first (alternating teams, or all on blue), bots fill the rest,
  * a player joining mid-game takes a bot's spot and a bot takes over when a player leaves.
- * Every knockout scores a point for the other team.
+ * Every knockout scores a point for the other team; the first team to ScoreToWin ends the match (the results screen:
+ * winner, MVP, a new game or back to the title).
  * Exists only on the server (the host); clients see the result through replication.
  */
 UCLASS()
@@ -30,7 +31,21 @@ public:
 	/** Called by a brawler when it is knocked out. Attacker may be null. */
 	void OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRandomCharacter* Attacker);
 
+	/** Starts a fresh match on the same map, taking everyone connected along. */
+	void RestartMatch();
+
+	/** Cheat: the team wins now with a full score (straight to the results screen). */
+	void CheatWin(int32 Team);
+
 protected:
+	/** Seconds of countdown once the arena has loaded before anybody can move or shoot. */
+	UPROPERTY(EditAnywhere, Category = "Match", meta = (ClampMin = "0"))
+	float StartCountdown = 5.f;
+
+	/** Knockouts a team needs to win the match (-RRScoreToWin=N on the command line overrides it). */
+	UPROPERTY(EditAnywhere, Category = "Match", meta = (ClampMin = "1"))
+	int32 ScoreToWin = 10;
+
 	UPROPERTY(EditAnywhere, Category = "Bots")
 	TSubclassOf<ARRRandomCharacter> BotClass;
 
@@ -93,6 +108,7 @@ private:
 		TWeakObjectPtr<AController> Player;
 	};
 
+	void EndMatch(int32 Winner);
 	void EnsureSlots();
 	/** The team a new player joins, or INDEX_NONE when both are full of players. */
 	int32 ChooseTeamForPlayer() const;

@@ -2,6 +2,7 @@
 #include "RRRandomCharacter.h"
 #include "RRRandomCover.h"
 #include "RRRandomDiceBuffComponent.h"
+#include "RRRandomGameState.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -26,6 +27,15 @@ namespace
 	constexpr float RetreatShootRangeShare = 0.5f;
 	// Seconds a hit keeps the bot thinking it is under fire
 	constexpr float UnderFireMemory = 1.5f;
+	// Seconds a bot keeps heading for where it last saw an opponent that slipped into the fog of war
+	constexpr float SearchTime = 4.f;
+	// With nobody in sight, bots roam between random spots this far from the arena center, picking the next one on
+	// arrival or after this many seconds (cover taller than half a brawler hides the other side, so standing still in the
+	// middle could leave both teams staring at the same block)
+	constexpr float PatrolRadiusMin = 300.f;
+	constexpr float PatrolRadiusMax = 1300.f;
+	constexpr float PatrolTimeMin = 3.f;
+	constexpr float PatrolTimeMax = 6.f;
 	// Between bursts with this few rounds left, the bot reloads instead of running dry mid-fight
 	constexpr int32 LowAmmo = 3;
 	// BurstSize is meant for a magazine this big; other guns scale it
@@ -95,6 +105,12 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 	ARRRandomCharacter* Self = Cast<ARRRandomCharacter>(GetPawn());
+	// Counting down to the start, or the match is over: stand still
+	if (Self && ARRRandomGameState::IsPlayLocked(this))
+	{
+		Self->StopJumping();
+		return;
+	}
 	if (!Self || !Self->IsAlive())
 	{
 		Opponent = nullptr;
@@ -108,11 +124,31 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		return;
 	}
 
+	// Bots go by the fog of war like players: an opponent out of the team's sight is lost (remembered where last seen)
+	if (Opponent.IsValid() && !ARRRandomCharacter::IsSeenByTeam(GetWorld(), Self->GetTeam(), Opponent->GetActorLocation()))
+	{
+		Opponent = nullptr;
+	}
 	RetargetTimer -= DeltaSeconds;
 	if (RetargetTimer <= 0.f || !Opponent.IsValid() || !Opponent->IsAlive())
 	{
 		Opponent = FindBestOpponent(Self);
 		RetargetTimer = RetargetInterval;
+	}
+	if (Opponent.IsValid())
+	{
+		LastSeenLocation = Opponent->GetActorLocation();
+		LastSeenTimer = SearchTime;
+	}
+	LastSeenTimer -= DeltaSeconds;
+
+	// Nobody in sight and no trail to follow: roam the middle until someone shows up
+	PatrolTimer -= DeltaSeconds;
+	if (!Opponent.IsValid() && LastSeenTimer <= 0.f && bHasArenaCenter
+		&& (PatrolTimer <= 0.f || FVector::Dist2D(Self->GetActorLocation(), PatrolGoal) <= ArenaCenterArriveRadius))
+	{
+		PatrolGoal = ArenaCenter + FVector(Stream.FRandRange(PatrolRadiusMin, PatrolRadiusMax), 0.f, 0.f).RotateAngleAxis(Stream.FRandRange(0.f, 360.f), FVector::UpVector);
+		PatrolTimer = Stream.FRandRange(PatrolTimeMin, PatrolTimeMax);
 	}
 
 	// Getting hit: dodge the other way right away, and stay wary for a moment
@@ -215,7 +251,8 @@ ARRRandomCharacter* ARRRandomAIController::FindBestOpponent(const ARRRandomChara
 	float BestScore = UE_BIG_NUMBER;
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{
-		if (It->GetTeam() == Self->GetTeam() || !It->IsAlive())
+		// Only opponents the team can see through the fog of war
+		if (It->GetTeam() == Self->GetTeam() || !It->IsAlive() || !ARRRandomCharacter::IsSeenByTeam(GetWorld(), Self->GetTeam(), It->GetActorLocation()))
 		{
 			continue;
 		}
@@ -237,8 +274,10 @@ FVector ARRRandomAIController::ChooseFightDirection(const ARRRandomCharacter* Se
 {
 	if (!Target)
 	{
-		const FVector ToCenter = (bHasArenaCenter ? ArenaCenter : Self->GetActorLocation()) - Self->GetActorLocation();
-		return ToCenter.Size2D() > ArenaCenterArriveRadius ? ToCenter.GetSafeNormal2D() : FVector::ZeroVector;
+		// Lost in the fog: look where it was last seen for a while, then roam the middle again
+		const FVector Goal = LastSeenTimer > 0.f ? LastSeenLocation : (bHasArenaCenter ? PatrolGoal : Self->GetActorLocation());
+		const FVector ToGoal = Goal - Self->GetActorLocation();
+		return ToGoal.Size2D() > ArenaCenterArriveRadius ? ToGoal.GetSafeNormal2D() : FVector::ZeroVector;
 	}
 
 	const FVector Toward = (Target->GetActorLocation() - Self->GetActorLocation()).GetSafeNormal2D();

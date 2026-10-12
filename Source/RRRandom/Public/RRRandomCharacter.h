@@ -79,12 +79,16 @@ public:
 	static FLinearColor GetTeamColor(int32 InTeam);
 
 	bool IsAlive() const { return bAlive; }
+	/** Dancing the victory animation after the match (the winners and the MVP); the gun is put away meanwhile. */
+	bool IsCelebrating() const;
 	float GetHealth() const { return Health; }
 	float GetMaxHealth() const { return MaxHealth; }
 	/** Rounds left in the magazine. */
 	int32 GetAmmo() const { return Ammo; }
 	/** The current gun's magazine size. */
 	int32 GetMaxAmmo() const { return Weapon.MagazineSize > 0 ? Weapon.MagazineSize : MaxAmmo; }
+	/** The starting pistol's magazine size, which other guns' magazines are shares of. */
+	int32 GetDefaultMagazineSize() const { return MaxAmmo; }
 	bool IsReloading() const { return bReloading; }
 	/** Seconds to reload the current gun, before attack speed buffs. */
 	float GetReloadTime() const { return ReloadTime * Weapon.ReloadTimeMultiplier; }
@@ -95,13 +99,39 @@ public:
 	/** Swaps to another gun with a full magazine. */
 	void EquipWeapon(const FRRWeapon& NewWeapon);
 	float GetAttackRange() const { return AttackRange; }
+	float GetVisionRadius() const { return VisionRadius; }
+	/**
+	 * Whether a spot is inside the team's shared sight: within VisionRadius of any of its brawlers still standing,
+	 * with nothing taller than half that brawler in between (see GetSightDistance).
+	 * The fog of war draws exactly this, and bots only notice opponents it lets them see.
+	 */
+	static bool IsSeenByTeam(const UWorld* World, int32 InTeam, const FVector& Location);
+	/** Where this brawler looks from for the fog of war: half its height (the capsule's middle). */
+	FVector GetEyeLocation() const;
+	/**
+	 * How far one can see from an eye along a flat direction, up to MaxDistance: the line runs level at eye height, so
+	 * world-static things taller than half the one looking cut it short (for the fox, 96: cover, hills of 2 levels and up,
+	 * cliffs, the waterfall); a 1-level hill, sand and docks don't. Shots fly at about this height too, so what hides
+	 * someone also stops shots at them. Used for both the fog of war's picture and the shared sight test, so they agree.
+	 */
+	static float GetSightDistance(const UWorld* World, const FVector& Eye, const FVector& Direction, float MaxDistance);
 	float GetProjectileSpeed() const;
 	/** Seconds until a knocked-out brawler gets back up. */
 	float GetRespawnRemaining() const { return RespawnRemaining; }
+	/** Opponents this brawler has knocked out this match. */
+	int32 GetKills() const { return Kills; }
+	/** Server only: counts a knockout of an opponent. */
+	void AddKill() { ++Kills; }
+	/** Server only: back on its feet at its starting spot right away (the match's MVP when the match ends). */
+	void ReviveNow();
 
 	bool IsGiant() const { return bGiant; }
 	/** Seconds of giant left. */
 	float GetGiantRemaining() const { return GiantRemaining; }
+	/** Server only: turns giant for at least this many seconds (what a giant die does). */
+	void StartGiant(float Seconds);
+	/** Server only: can fly for at least this many seconds (what a flight die does). */
+	void StartFlight(float Seconds);
 	/** Damage dealt while giant, as a factor. */
 	float GetGiantDamageMultiplier() const { return GiantDamageMultiplier; }
 	/** Damage taken while giant, as a factor. */
@@ -199,6 +229,10 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	float AttackRange = 1300.f;
 
+	/** How far this brawler sees through the fog of war; its whole team shares what it sees (ARRRandomFogOfWar, bots). */
+	UPROPERTY(EditAnywhere, Category = "Vision", meta = (ClampMin = "0"))
+	float VisionRadius = 800.f;
+
 	/**
 	 * Where shots appear relative to the capsule center: forward, right, up. The tip of the rifle's muzzle in the fox's
 	 * fire stance (measured in game), so shots leave the barrel; the bots' line-of-fire sweeps use the same height and side.
@@ -218,9 +252,10 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Climb")
 	float ClimbDuration = 0.45f;
 
-	/** Body size while giant. Everything grows, the capsule included, so cover hides less of a giant. */
+	/** Body size while giant. Everything grows, the capsule included, so cover hides less of a giant. At 2 the eye (capsule
+	 * middle, 96 x 2 = 192) clears the 160 cover and two-level hills, so a giant sees over them (see GetEyeLocation). */
 	UPROPERTY(EditAnywhere, Category = "Giant", meta = (ClampMin = "1"))
-	float GiantScale = 1.5f;
+	float GiantScale = 2.f;
 
 	/** Damage dealt while giant, as a factor (power). Stacks with attack power buffs and the gun. */
 	UPROPERTY(EditAnywhere, Category = "Giant", meta = (ClampMin = "0"))
@@ -300,6 +335,10 @@ protected:
 	/** Played once on knockout, holding its last frame until getting back up. Without one the body goes ragdoll. */
 	UPROPERTY(EditAnywhere, Category = "Animation")
 	TObjectPtr<UAnimSequence> DeathAnimation;
+
+	/** Loops once the match is over, for the winning team and the MVP (the gun is put away meanwhile). */
+	UPROPERTY(EditAnywhere, Category = "Animation")
+	TObjectPtr<UAnimSequence> VictoryAnimation;
 
 	/** Seconds after the last shot that the firing animation keeps playing. */
 	UPROPERTY(EditAnywhere, Category = "Animation")
@@ -457,6 +496,9 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_Alive)
 	bool bAlive = true;
+
+	UPROPERTY(Replicated)
+	int32 Kills = 0;
 
 	/** Which way the final shot threw the body, so every machine drops the ragdoll the same way. */
 	UPROPERTY(Replicated)
