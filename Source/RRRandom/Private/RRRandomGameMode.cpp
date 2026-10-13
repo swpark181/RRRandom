@@ -1,4 +1,6 @@
 #include "RRRandomGameMode.h"
+#include "RRRandomSessionSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "RRRandomAIController.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomDummy.h"
@@ -7,6 +9,7 @@
 #include "RRRandomGameState.h"
 #include "RRRandomHUD.h"
 #include "RRRandomPlayerController.h"
+#include "RRRandomVehicle.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -25,8 +28,10 @@ ARRRandomGameMode::ARRRandomGameMode()
 	// A row in front of the player (screen up is +X)
 	DummyOffsets = { FVector(500.f, -300.f, 0.f), FVector(600.f, 0.f, 0.f), FVector(500.f, 300.f, 0.f) };
 
-	// Between the two teams (the opponents start TeamSpawnDistance up the screen), clear of both starting rows.
-	// 160 tall: above the height shots fly at, low enough to see brawlers behind it from the tilted camera.
+	// In the field between the two village roads (the teams start TeamSpawnDistance apart, either side of the middle),
+	// off the main road and the ring road (the island's map: main road |Y| < 180, west lane Y -1980..-1800, east lane
+	// Y 1620..1800) and clear of the field's low hills and solid props. 160 tall: above the height shots fly at, low
+	// enough to see brawlers behind it from the tilted camera.
 	CoverClass = ARRRandomCover::StaticClass();
 	auto AddCover = [this](float X, float Y, float SizeX, float SizeY)
 	{
@@ -34,18 +39,19 @@ ARRRandomGameMode::ARRRandomGameMode()
 		Placement.Offset = FVector2D(X, Y);
 		Placement.Size = FVector(SizeX, SizeY, 160.f);
 	};
-	// Middle line: a wall across the center lane and one on each side
-	AddCover(1000.f, 0.f, 120.f, 400.f);
-	AddCover(1000.f, -850.f, 120.f, 320.f);
-	AddCover(1000.f, 850.f, 120.f, 320.f);
+	// Middle line: a wall on each side of the main road, and one further out on each side
+	AddCover(0.f, -650.f, 120.f, 360.f);
+	AddCover(0.f, 650.f, 120.f, 360.f);
+	AddCover(0.f, -1500.f, 120.f, 320.f);
+	AddCover(0.f, 1350.f, 120.f, 320.f);
 	// A pair of pillars in front of each team
-	AddCover(550.f, -450.f, 160.f, 160.f);
-	AddCover(550.f, 450.f, 160.f, 160.f);
-	AddCover(1450.f, -450.f, 160.f, 160.f);
-	AddCover(1450.f, 450.f, 160.f, 160.f);
-	// Long walls along the flanks
-	AddCover(1000.f, -1400.f, 500.f, 120.f);
-	AddCover(1000.f, 1400.f, 500.f, 120.f);
+	AddCover(750.f, -400.f, 160.f, 160.f);
+	AddCover(750.f, 400.f, 160.f, 160.f);
+	AddCover(-750.f, -400.f, 160.f, 160.f);
+	AddCover(-750.f, 400.f, 160.f, 160.f);
+	// Long walls across the field, one on each team's side (each opposite a low hill)
+	AddCover(800.f, 1100.f, 360.f, 120.f);
+	AddCover(-800.f, -1250.f, 360.f, 120.f);
 }
 
 void ARRRandomGameMode::StartPlay()
@@ -58,22 +64,31 @@ void ARRRandomGameMode::StartPlay()
 	if (ARRRandomGameState* State = GetGameState<ARRRandomGameState>())
 	{
 		State->SetScoreToWin(ScoreToWin);
+		// Third person or the top view, as picked on this machine's title (or -RRThirdPerson)
+		const URRRandomSessionSubsystem* Sessions = GetGameInstance() ? GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>() : nullptr;
+		State->SetThirdPersonMode(Sessions && Sessions->IsThirdPersonMode());
 		State->SetPlayStartTime(GetWorld()->GetTimeSeconds() + StartCountdown);
 	}
 
-	// Before the bots, whose floor traces must not land on top of a block
+	// Found on the bare level, before anything is built on its floor
+	GetArenaCenter();
+	// The grass first: it looks for the level's floor under the middle, where the island puts a road
+	if (bSpawnGrassFloor)
+	{
+		SpawnGrassFloorIfNoneExists();
+	}
 	// The island's hills and walls go up before the cover and the bots, whose floor traces must land beside them
 	if (bSpawnIsland)
 	{
 		SpawnIslandIfNoneExists();
 	}
-	if (bSpawnGrassFloor)
-	{
-		SpawnGrassFloorIfNoneExists();
-	}
 	if (bSpawnCover)
 	{
 		SpawnCoverIfNoneExists();
+	}
+	if (bSpawnVehicles)
+	{
+		SpawnVehiclesIfNoneExist();
 	}
 	// The host's own brawler may already hold a spot; bots take the rest
 	FillEmptySlotsWithBots();
@@ -191,8 +206,8 @@ int32 ARRRandomGameMode::FindSlotForPlayer(int32 Team) const
 
 bool ARRRandomGameMode::GetSlotTransform(int32 Team, int32 Slot, float HalfHeight, FTransform& OutTransform) const
 {
-	// Red lines up across from blue, facing down the screen
-	const FVector Origin = GetPlayerStartLocation() + (Team == 1 ? FVector(TeamSpawnDistance, 0.f, 0.f) : FVector::ZeroVector);
+	// Blue below the middle, red above it across from blue, facing down the screen
+	const FVector Origin = GetArenaCenter() + FVector(TeamSpawnDistance * (Team == 1 ? 0.5f : -0.5f), 0.f, 0.f);
 	// The middle spot first (the first player's), then alternating right and left of it
 	const float Side = Slot % 2 == 1 ? 1.f : -1.f;
 	const FVector Spot = Origin + FVector(0.f, Side * ((Slot + 1) / 2) * SpawnSpacing, 0.f);
@@ -299,6 +314,25 @@ FVector ARRRandomGameMode::GetPlayerStartLocation() const
 	return PlayerStart ? PlayerStart->GetActorLocation() : FVector::ZeroVector;
 }
 
+FVector ARRRandomGameMode::GetArenaCenter() const
+{
+	if (!ArenaCenter.IsSet())
+	{
+		// The level's floor under the player start: its middle, so the island fits on it with sea all round
+		const FVector Start = GetPlayerStartLocation();
+		FHitResult Floor;
+		FVector Center = Start;
+		if (GetWorld()->LineTraceSingleByChannel(Floor, Start + FVector(0.f, 0.f, 500.f), Start - FVector(0.f, 0.f, 2000.f), ECC_Visibility) && Floor.GetComponent())
+		{
+			const FVector Middle = Floor.GetComponent()->Bounds.Origin;
+			Center = FVector(Middle.X, Middle.Y, Start.Z);
+		}
+		ArenaCenter = Center;
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: arena center %s (player start %s)."), *Center.ToString(), *Start.ToString());
+	}
+	return ArenaCenter.GetValue();
+}
+
 bool ARRRandomGameMode::FindFloorSpot(const FVector& Spot, float HalfHeight, FVector& OutLocation) const
 {
 	FHitResult Floor;
@@ -318,7 +352,7 @@ void ARRRandomGameMode::FillEmptySlotsWithBots()
 	}
 	EnsureSlots();
 
-	const FVector ArenaCenter = GetPlayerStartLocation() + FVector(TeamSpawnDistance * 0.5f, 0.f, 0.f);
+	const FVector Center = GetArenaCenter();
 	for (int32 Team = 0; Team < 2; ++Team)
 	{
 		for (int32 Slot = 0; Slot < TeamSlots[Team].Num(); ++Slot)
@@ -335,7 +369,7 @@ void ARRRandomGameMode::FillEmptySlotsWithBots()
 			Bot->SpawnDefaultController();
 			if (ARRRandomAIController* AI = Cast<ARRRandomAIController>(Bot->GetController()))
 			{
-				AI->SetArenaCenter(ArenaCenter);
+				AI->SetArenaCenter(Center);
 			}
 		}
 	}
@@ -349,7 +383,7 @@ void ARRRandomGameMode::SpawnCoverIfNoneExists()
 		return;
 	}
 
-	const FVector Origin = GetPlayerStartLocation();
+	const FVector Origin = GetArenaCenter();
 	for (const FRRCoverPlacement& Placement : CoverLayout)
 	{
 		// The block's pivot is at its bottom, so it goes straight onto the floor; no floor, no block
@@ -368,6 +402,49 @@ void ARRRandomGameMode::SpawnCoverIfNoneExists()
 	}
 }
 
+void ARRRandomGameMode::SpawnVehiclesIfNoneExist()
+{
+	UWorld* World = GetWorld();
+	if (TActorIterator<ARRRandomVehicle>(World))
+	{
+		return;
+	}
+	struct FParking
+	{
+		ERRVehicleKind Kind;
+		FVector2D Offset;
+		float Yaw;
+	};
+	// From the arena's center (X up the screen, Y right): each team's kickboard and motorbike just ahead of its village
+	// road, on opposite sides, facing the field; a car on each side lane of the ring road, halfway, pointing opposite ways
+	const float Near = TeamSpawnDistance * 0.5f - 230.f;
+	const FParking Spots[] =
+	{
+		{ ERRVehicleKind::Kickboard, FVector2D(-Near, -900.f), 0.f },
+		{ ERRVehicleKind::Motorbike, FVector2D(-Near, 900.f), 0.f },
+		{ ERRVehicleKind::Kickboard, FVector2D(Near, 900.f), 180.f },
+		{ ERRVehicleKind::Motorbike, FVector2D(Near, -900.f), 180.f },
+		{ ERRVehicleKind::Car, FVector2D(90.f, -1890.f), 0.f },
+		{ ERRVehicleKind::Car, FVector2D(-90.f, 1710.f), 180.f },
+	};
+	const FVector Origin = GetArenaCenter();
+	for (const FParking& Spot : Spots)
+	{
+		// Its pivot is the middle of its bottom, so it goes straight onto the floor; no floor, no vehicle
+		FVector Location;
+		if (!FindFloorSpot(Origin + FVector(Spot.Offset, 0.f), 0.f, Location))
+		{
+			continue;
+		}
+		const FTransform SpawnTransform(FRotator(0.f, Spot.Yaw, 0.f), Location);
+		if (ARRRandomVehicle* Vehicle = World->SpawnActorDeferred<ARRRandomVehicle>(ARRRandomVehicle::StaticClass(), SpawnTransform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+		{
+			Vehicle->SetKind(Spot.Kind);
+			Vehicle->FinishSpawning(SpawnTransform);
+		}
+	}
+}
+
 void ARRRandomGameMode::SpawnIslandIfNoneExists()
 {
 	UWorld* World = GetWorld();
@@ -375,8 +452,8 @@ void ARRRandomGameMode::SpawnIslandIfNoneExists()
 	{
 		return;
 	}
-	// Centered halfway between the teams; its map puts each team's start on a sand path
-	World->SpawnActor<ARRRandomIsland>(ARRRandomIsland::StaticClass(), FTransform(GetPlayerStartLocation() + FVector(TeamSpawnDistance * 0.5f, 0.f, 0.f)));
+	// Around the arena's center, halfway between the teams; its map puts each team's start on a village road
+	World->SpawnActor<ARRRandomIsland>(ARRRandomIsland::StaticClass(), FTransform(GetArenaCenter()));
 }
 
 void ARRRandomGameMode::SpawnGrassFloorIfNoneExists()
@@ -387,7 +464,7 @@ void ARRRandomGameMode::SpawnGrassFloorIfNoneExists()
 		return;
 	}
 	// Over the middle of the arena, halfway between the teams; it finds the floor under itself
-	const FTransform SpawnTransform(GetPlayerStartLocation() + FVector(TeamSpawnDistance * 0.5f, 0.f, 0.f));
+	const FTransform SpawnTransform(GetArenaCenter());
 	if (ARRRandomGrassFloor* Grass = World->SpawnActorDeferred<ARRRandomGrassFloor>(ARRRandomGrassFloor::StaticClass(), SpawnTransform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
 	{
 		Grass->Seed = GrassSeed;
@@ -403,7 +480,8 @@ void ARRRandomGameMode::SpawnDummiesIfNoneExist()
 		return;
 	}
 
-	const FVector Origin = GetPlayerStartLocation();
+	// In front of blue's starting row
+	const FVector Origin = GetArenaCenter() - FVector(TeamSpawnDistance * 0.5f, 0.f, 0.f);
 	const float HalfHeight = DummyClass->GetDefaultObject<ARRRandomDummy>()->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
 
 	FActorSpawnParameters Params;

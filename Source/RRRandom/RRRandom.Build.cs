@@ -20,6 +20,8 @@ public class RRRandom : ModuleRules
 			"Niagara",
 			"OnlineSubsystem",
 			"OnlineSubsystemUtils",
+			// Whether the game's window is the one in use (third person gives the mouse back otherwise)
+			"ApplicationCore",
 			// GWhiteTexture for the HUD's canvas triangles
 			"RenderCore"
 		});

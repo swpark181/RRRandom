@@ -61,6 +61,14 @@ public:
 
 	bool IsBusy() const { return Pending != EPendingAction::None; }
 
+	/**
+	 * How the next games this machine starts (solo or hosted) are played: third person (over the shoulder, no fog of war) or
+	 * the top view. Picked on the title; kept across levels, so new games and F1 hosting keep it. -RRThirdPerson on the
+	 * command line sets it too. Joiners play the host's way (ARRRandomGameState::IsThirdPersonMode).
+	 */
+	void SetThirdPersonMode(bool bOn) { bThirdPersonMode = bOn; }
+	bool IsThirdPersonMode() const { return bThirdPersonMode; }
+
 	/** True when online play goes through Epic Online Services, false for LAN. */
 	bool IsUsingEOS() const;
 
@@ -153,6 +161,7 @@ private:
 	EAfterLeave AfterLeave = EAfterLeave::Nothing;
 	bool bDelegatesBound = false;
 	bool bStartupCommandDone = false;
+	bool bThirdPersonMode = false;
 	int32 JoinRetriesLeft = 0;
 	FString Status;
 	TSharedPtr<FOnlineSessionSearch> Search;

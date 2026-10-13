@@ -6,10 +6,13 @@
 #include "RRRandomHUD.h"
 #include "RRRandomResultsDirector.h"
 #include "RRRandomSessionSubsystem.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/GameInstance.h"
+#include "Engine/GameViewportClient.h"
+#include "HAL/PlatformApplicationMisc.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -24,6 +27,10 @@ namespace
 	constexpr float MinStandableNormalZ = 0.7f;
 	// The cursor counts as on a brawler this far outside its capsule radius
 	constexpr float CursorPickSlack = 30.f;
+	// Third person: how far the crosshair looks for something to aim at
+	constexpr float CrosshairRange = 20000.f;
+	// Third person: the most one frame's mouse movement turns the camera (in mouse counts)
+	constexpr float MaxLookDelta = 60.f;
 }
 
 ARRRandomPlayerController::ARRRandomPlayerController()
@@ -58,6 +65,11 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 	{
 		ReloadAction = NewObject<UInputAction>(this, TEXT("IA_Reload"));
 		ReloadAction->ValueType = EInputActionValueType::Boolean;
+	}
+	if (!RideAction)
+	{
+		RideAction = NewObject<UInputAction>(this, TEXT("IA_Ride"));
+		RideAction->ValueType = EInputActionValueType::Boolean;
 	}
 	if (!HostAction)
 	{
@@ -104,6 +116,31 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 		CheatFlyAction = NewObject<UInputAction>(this, TEXT("IA_CheatFly"));
 		CheatFlyAction->ValueType = EInputActionValueType::Boolean;
 	}
+	if (!CheatGodAction)
+	{
+		CheatGodAction = NewObject<UInputAction>(this, TEXT("IA_CheatGod"));
+		CheatGodAction->ValueType = EInputActionValueType::Boolean;
+	}
+	if (!CheatThirdPersonAction)
+	{
+		CheatThirdPersonAction = NewObject<UInputAction>(this, TEXT("IA_CheatThirdPerson"));
+		CheatThirdPersonAction->ValueType = EInputActionValueType::Boolean;
+	}
+	if (!LookAction)
+	{
+		LookAction = NewObject<UInputAction>(this, TEXT("IA_Look"));
+		LookAction->ValueType = EInputActionValueType::Axis2D;
+	}
+	if (!FreeCursorAction)
+	{
+		FreeCursorAction = NewObject<UInputAction>(this, TEXT("IA_FreeCursor"));
+		FreeCursorAction->ValueType = EInputActionValueType::Boolean;
+	}
+	if (!AimAction)
+	{
+		AimAction = NewObject<UInputAction>(this, TEXT("IA_Aim"));
+		AimAction->ValueType = EInputActionValueType::Boolean;
+	}
 	if (CheatGunActions.IsEmpty())
 	{
 		for (int32 Type = 0; Type < FRRWeapon::GetTypeCount(); ++Type)
@@ -128,14 +165,23 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 	MappingContext->MapKey(JumpAction, EKeys::SpaceBar);
 	MappingContext->MapKey(DiceAction, EKeys::E);
 	MappingContext->MapKey(ReloadAction, EKeys::R);
+	MappingContext->MapKey(RideAction, EKeys::F);
 	MappingContext->MapKey(HostAction, EKeys::F1);
 	MappingContext->MapKey(JoinAction, EKeys::F2);
 	MappingContext->MapKey(LeaveAction, EKeys::F3);
 	MappingContext->MapKey(TitleAction, EKeys::Escape);
 	MappingContext->MapKey(ConfirmAction, EKeys::Enter);
 	MappingContext->MapKey(MapAction, EKeys::M);
+	// Third person: the mouse looks, the right button aims down the sights
+	MappingContext->MapKey(LookAction, EKeys::Mouse2D);
+	MappingContext->MapKey(AimAction, EKeys::RightMouseButton);
+	// Third person: hold Left Alt to get the cursor back (to click the map, or leave the game window)
+	MappingContext->MapKey(FreeCursorAction, EKeys::LeftAlt);
 #if !UE_BUILD_SHIPPING
 	MappingContext->MapKey(CheatGiantAction, EKeys::F7);
+	// F9 is the engine's screenshot key; F10 is free
+	MappingContext->MapKey(CheatGodAction, EKeys::F10);
+	MappingContext->MapKey(CheatThirdPersonAction, EKeys::F9);
 	MappingContext->MapKey(CheatFlyAction, EKeys::F8);
 	MappingContext->MapKey(CheatWinAction, EKeys::F6);
 	const FKey GunKeys[] = { EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine };
@@ -174,8 +220,9 @@ void ARRRandomPlayerController::BeginPlay()
 		{
 			Sessions->OnArenaReady();
 		}
-		// Fog of war for this screen only
-		if (bFogOfWar)
+		// Fog of war for this screen only (none in a third-person game: PlayerTick also takes it away if the game state
+		// says so only after this)
+		if (bFogOfWar && !ARRRandomGameState::IsThirdPersonMode(this))
 		{
 			FActorSpawnParameters FogParams;
 			FogParams.Owner = this;
@@ -206,12 +253,20 @@ void ARRRandomPlayerController::SetupInputComponent()
 	EnhancedInput->BindAction(JumpAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnStopJumping);
 	EnhancedInput->BindAction(DiceAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnRollDice);
 	EnhancedInput->BindAction(ReloadAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnReload);
+	EnhancedInput->BindAction(RideAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnRide);
 	EnhancedInput->BindAction(HostAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRHost);
 	EnhancedInput->BindAction(JoinAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRJoin);
 	EnhancedInput->BindAction(LeaveAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRLeave);
 	EnhancedInput->BindAction(TitleAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnEscape);
 	EnhancedInput->BindAction(CheatWinAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRWin);
 	EnhancedInput->BindAction(CheatGiantAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRGiant);
+	EnhancedInput->BindAction(CheatGodAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRGod);
+	EnhancedInput->BindAction(CheatThirdPersonAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRThirdPerson);
+	EnhancedInput->BindAction(LookAction, ETriggerEvent::Triggered, this, &ARRRandomPlayerController::OnLook);
+	EnhancedInput->BindAction(AimAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnAimStart);
+	EnhancedInput->BindAction(AimAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnAimStop);
+	EnhancedInput->BindAction(FreeCursorAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnFreeCursorStart);
+	EnhancedInput->BindAction(FreeCursorAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnFreeCursorStop);
 	EnhancedInput->BindAction(CheatFlyAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRFly);
 	for (int32 Type = 0; Type < CheatGunActions.Num(); ++Type)
 	{
@@ -227,6 +282,42 @@ void ARRRandomPlayerController::PlayerTick(float DeltaTime)
 	{
 		ClosePauseMenu();
 	}
+	// A third-person game: this screen goes over the shoulder as soon as it has a brawler (and again for a new one), with
+	// no fog of war at all
+	if (IsLocalController() && ARRRandomGameState::IsThirdPersonMode(this))
+	{
+		const ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+		if (RandomCharacter && (!bThirdPerson || !RandomCharacter->IsThirdPerson()))
+		{
+			SetThirdPersonView(true);
+		}
+		if (FogOfWar)
+		{
+			FogOfWar->Destroy();
+			FogOfWar = nullptr;
+		}
+	}
+	// Third person hides the cursor for the mouse look. It comes back for the pause menu and the results screen (their
+	// buttons), while Left Alt is held, and whenever the game's window isn't the one in use (another window clicked,
+	// Alt+Tab): the mouse is then the player's again; clicking back into the game takes it over again
+	if (bThirdPerson && IsLocalController())
+	{
+		const bool bWantCursor = bPauseMenuOpen || ARRRandomGameState::IsMatchOver(this) || bCursorFreed || !IsViewportFocused();
+		if (bShowMouseCursor != bWantCursor)
+		{
+			bShowMouseCursor = bWantCursor;
+			if (bWantCursor)
+			{
+				FInputModeGameAndUI Mode;
+				Mode.SetHideCursorDuringCapture(false);
+				SetInputMode(Mode);
+			}
+			else
+			{
+				SetInputMode(FInputModeGameOnly());
+			}
+		}
+	}
 
 	// The match just ended: blend this screen's view to the MVP and the fireworks
 	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
@@ -237,8 +328,9 @@ void ARRRandomPlayerController::PlayerTick(float DeltaTime)
 		ResultsDirector = GetWorld()->SpawnActor<ARRRandomResultsDirector>(SpawnParams);
 		if (ResultsDirector)
 		{
-			ResultsDirector->Setup(State->GetMVP());
-			SetViewTargetWithBlend(ResultsDirector, ResultsBlendTime, VTBlend_EaseInOut, 2.f);
+			// The show moves its camera in from this view itself (a view blend would swing up to the sky on the way)
+			ResultsDirector->Setup(State->GetMVP(), PlayerCameraManager ? PlayerCameraManager->GetCameraCacheView() : FMinimalViewInfo(), ResultsBlendTime);
+			SetViewTarget(ResultsDirector);
 		}
 	}
 }
@@ -272,6 +364,11 @@ void ARRRandomPlayerController::OnClick()
 	// The map takes clicks on it (and any click while it fills the screen)
 	if (!bPauseMenuOpen && !ARRRandomGameState::IsMatchOver(this))
 	{
+		// (in third person with the cursor hidden the button only shoots; with it out, Alt held, it clicks the map)
+		if (bThirdPerson && !bShowMouseCursor)
+		{
+			return;
+		}
 		if (ARRRandomHUD* MapHud = Cast<ARRRandomHUD>(GetHUD()))
 		{
 			MapHud->HandleMapClick(FVector2D(MouseX, MouseY));
@@ -429,6 +526,22 @@ void ARRRandomPlayerController::OnCheatGun(int32 Type)
 	ServerCheatGun(Type);
 }
 
+void ARRRandomPlayerController::RRGod()
+{
+	ServerCheatGod();
+}
+
+void ARRRandomPlayerController::ServerCheatGod_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		RandomCharacter->SetInvincible(!RandomCharacter->IsInvincible());
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, %s is %s."), *RandomCharacter->GetName(), RandomCharacter->IsInvincible() ? TEXT("invincible") : TEXT("mortal again"));
+	}
+#endif
+}
+
 void ARRRandomPlayerController::ServerCheatGiant_Implementation()
 {
 #if !UE_BUILD_SHIPPING
@@ -500,11 +613,20 @@ void ARRRandomPlayerController::OnFire()
 	float MouseX;
 	float MouseY;
 	const ARRRandomHUD* MapHud = Cast<ARRRandomHUD>(GetHUD());
-	if (IsGameplayInputBlocked() || (MapHud && GetMousePosition(MouseX, MouseY) && MapHud->IsPointOnMap(FVector2D(MouseX, MouseY))))
+	if (IsGameplayInputBlocked() || (!bThirdPerson && MapHud && GetMousePosition(MouseX, MouseY) && MapHud->IsPointOnMap(FVector2D(MouseX, MouseY))))
 	{
 		return;
 	}
 	ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	if (RandomCharacter && bThirdPerson)
+	{
+		// Not with the cursor out (Alt held, or the click that takes the mouse back into the game)
+		if (!bShowMouseCursor && IsViewportFocused())
+		{
+			RandomCharacter->FireAt(GetCrosshairTarget());
+		}
+		return;
+	}
 	FVector CursorOrigin;
 	FVector CursorDirection;
 	if (RandomCharacter && DeprojectMousePositionToWorld(CursorOrigin, CursorDirection))
@@ -574,9 +696,118 @@ void ARRRandomPlayerController::OnMove(const FInputActionValue& Value)
 	}
 	if (APawn* ControlledPawn = GetPawn())
 	{
-		ControlledPawn->AddMovementInput(FVector::ForwardVector, Input.Y);
-		ControlledPawn->AddMovementInput(FVector::RightVector, Input.X);
+		// In third person the camera turns: forward is where it looks, on the ground
+		const FRotator Heading(0.f, bThirdPerson ? GetControlRotation().Yaw : 0.f, 0.f);
+		ControlledPawn->AddMovementInput(Heading.RotateVector(FVector::ForwardVector), Input.Y);
+		ControlledPawn->AddMovementInput(Heading.RotateVector(FVector::RightVector), Input.X);
 	}
+}
+
+void ARRRandomPlayerController::RRThirdPerson()
+{
+#if !UE_BUILD_SHIPPING
+	// A third-person game stays in third person
+	if (ARRRandomGameState::IsThirdPersonMode(this) || !Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		return;
+	}
+	SetThirdPersonView(!bThirdPerson);
+	ClientMessage(bThirdPerson ? TEXT("Cheat: third person (right button: aim)") : TEXT("Cheat: top-down view"));
+#endif
+}
+
+void ARRRandomPlayerController::SetThirdPersonView(bool bOn)
+{
+	ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	if (!RandomCharacter)
+	{
+		return;
+	}
+	bThirdPerson = bOn;
+	if (bThirdPerson)
+	{
+		// Start looking the way the brawler faces, a little down
+		SetControlRotation(FRotator(-10.f, RandomCharacter->GetActorRotation().Yaw, 0.f));
+	}
+	RandomCharacter->SetThirdPerson(bThirdPerson);
+	// The mouse turns the camera instead of pointing at the ground
+	bShowMouseCursor = !bThirdPerson;
+	if (bThirdPerson)
+	{
+		SetInputMode(FInputModeGameOnly());
+	}
+	else
+	{
+		FInputModeGameAndUI Mode;
+		Mode.SetHideCursorDuringCapture(false);
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		SetInputMode(Mode);
+	}
+	if (PlayerCameraManager)
+	{
+		PlayerCameraManager->ViewPitchMin = -70.f;
+		PlayerCameraManager->ViewPitchMax = 50.f;
+	}
+	if (FogOfWar)
+	{
+		FogOfWar->SetShadingVisible(!bThirdPerson);
+	}
+}
+
+void ARRRandomPlayerController::OnLook(const FInputActionValue& Value)
+{
+	// Only while the game has the mouse: not with the cursor out (menus, Alt, another window in use), so moving the mouse
+	// for anything else never turns the camera
+	if (!bThirdPerson || IsGameplayInputBlocked() || bShowMouseCursor || !IsViewportFocused())
+	{
+		return;
+	}
+	const ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	const float Sensitivity = LookSensitivity * (RandomCharacter && RandomCharacter->IsAimingDownSights() ? SightsSensitivity : 1.f);
+	// A jump of the pointer (taking the mouse back, a window switch) is not a turn
+	const FVector2D Delta = Value.Get<FVector2D>().ClampAxes(-MaxLookDelta, MaxLookDelta);
+	AddYawInput(Delta.X * Sensitivity);
+	// Mouse up looks up
+	AddPitchInput(-Delta.Y * Sensitivity);
+}
+
+void ARRRandomPlayerController::OnAimStart()
+{
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()); RandomCharacter && bThirdPerson)
+	{
+		RandomCharacter->SetAimingDownSights(true);
+	}
+}
+
+void ARRRandomPlayerController::OnAimStop()
+{
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		RandomCharacter->SetAimingDownSights(false);
+	}
+}
+
+FVector ARRRandomPlayerController::GetCrosshairTarget() const
+{
+	// From the camera through the middle of the screen, past the brawler itself, to the first thing in the way
+	FVector Eye;
+	FRotator Look;
+	GetPlayerViewPoint(Eye, Look);
+	const FVector Direction = Look.Vector();
+	const APawn* ControlledPawn = GetPawn();
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomCrosshair), false, ControlledPawn);
+	if (ControlledPawn && ControlledPawn->GetAttachParentActor())
+	{
+		Params.AddIgnoredActor(ControlledPawn->GetAttachParentActor());
+	}
+	const FVector Start = Eye + Direction * (ControlledPawn ? FVector::Dist(Eye, ControlledPawn->GetActorLocation()) : 0.f);
+	const FVector End = Eye + Direction * CrosshairRange;
+	FHitResult Hit;
+	if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+	{
+		return Hit.ImpactPoint;
+	}
+	return End;
 }
 
 void ARRRandomPlayerController::OnJump()
@@ -613,6 +844,19 @@ void ARRRandomPlayerController::OnRollDice()
 	}
 }
 
+void ARRRandomPlayerController::OnRide()
+{
+	if (IsGameplayInputBlocked())
+	{
+		return;
+	}
+	// The character asks the server when this is a client
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		RandomCharacter->ToggleRide();
+	}
+}
+
 void ARRRandomPlayerController::OnReload()
 {
 	if (IsGameplayInputBlocked())
@@ -623,4 +867,21 @@ void ARRRandomPlayerController::OnReload()
 	{
 		RandomCharacter->StartReload();
 	}
+}
+
+bool ARRRandomPlayerController::IsViewportFocused() const
+{
+	const UGameViewportClient* ViewportClient = GetWorld() ? GetWorld()->GetGameViewport() : nullptr;
+	const FViewport* Viewport = ViewportClient ? ViewportClient->Viewport : nullptr;
+	return Viewport && Viewport->HasFocus() && FPlatformApplicationMisc::IsThisApplicationForeground();
+}
+
+void ARRRandomPlayerController::OnFreeCursorStart()
+{
+	bCursorFreed = true;
+}
+
+void ARRRandomPlayerController::OnFreeCursorStop()
+{
+	bCursorFreed = false;
 }

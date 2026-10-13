@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Camera/CameraTypes.h"
 #include "RRRandomResultsDirector.generated.h"
 
 class ARRRandomCharacter;
@@ -11,8 +12,9 @@ class UPointLightComponent;
 class USpotLightComponent;
 
 /**
- * The results screen's show, on one machine: a camera that the player's view blends to, at the MVP's height in front of
- * it (from the first angle with nothing in the way) and swaying gently from side to side, fireworks (ARRRandomFirework)
+ * The results screen's show, on one machine: a camera at the MVP's height in front of it (from the first angle with
+ * nothing in the way) and swaying gently from side to side, which it moves to from the player's view by itself, rounding
+ * the MVP and keeping it in sight (a plain view blend swung up to the sky on the way), the dancers turned to face it, fireworks (ARRRandomFirework)
  * going up behind it, and the sun and sky dimmed so their lights stand out. The MVP stays readable against the bright
  * bursts: a soft key light from above the camera, and a glow in front of it that flashes in each burst's color, as if
  * the fireworks were reflecting off it (the toon materials have no specular reflections of their own). Spawned by the local player controller when the match ends; puts the lights back when it goes away.
@@ -28,7 +30,8 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	void Setup(ARRRandomCharacter* InMVP);
+	/** Starts the show from the view the player has now (its place, aim, field of view and post process), moving in over BlendTime seconds. */
+	void Setup(ARRRandomCharacter* InMVP, const FMinimalViewInfo& InFromView, float InBlendTime);
 
 	/** Camera distance from the MVP (grows with a giant), its pitch (a little down, leaving sky above for the fireworks) and field of view. */
 	UPROPERTY(EditAnywhere, Category = "Camera")
@@ -80,7 +83,9 @@ private:
 	void OnFireworkBurst(const FLinearColor& Color);
 	/** How far the camera can back off from the MVP along a view before something is in the way. */
 	float GetClearReach(const FRotator& View, float Reach) const;
-	/** How open a view is, 0 to 1: its middle and sides near the camera checked for cover and hills. */
+	/** How far the camera can back off from the MVP along a view (up to Reach) before another brawler is in the way: hiding the MVP, or in the frame well in front of it. */
+	float GetBrawlerReach(const FRotator& View, float Reach) const;
+	/** How open a view is, 0 to 1: its middle and sides near the camera checked for cover, hills and other brawlers. */
 	float GetViewOpenness(const FRotator& View) const;
 
 	UPROPERTY(VisibleAnywhere, Category = "Camera")
@@ -99,6 +104,11 @@ private:
 	TWeakObjectPtr<ARRRandomCharacter> MVP;
 	float Elapsed = 0.f;
 	float StartYaw = 0.f;
+	/** The camera stays this close to the MVP, in front of another brawler no angle could avoid (huge when none). */
+	float BrawlerReach = UE_BIG_NUMBER;
+	/** The player's view the camera moves in from, and over how many seconds. */
+	FMinimalViewInfo FromView;
+	float BlendTime = 0.f;
 	float FireworkTimer = 0.f;
 	FRandomStream Stream;
 	/** Dimmed lights and their own brightness, to put back. */

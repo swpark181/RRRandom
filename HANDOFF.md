@@ -53,6 +53,48 @@
   - 확인: 빌드 경고 없음. 캡처(`output\screens\fog_half`)에서 엄폐물 블록 뒤로 그늘이 짐. `-game -RRSolo -nullrhi` 90초: 쓰러짐 12번(전 규칙 13번과 비슷).
 - 수정 (사용자: 거인 키를 장애물 너머가 보일 만큼): `GiantScale` 1.5 → **2**. 눈(캡슐 중심) 96×2 = 192 > 엄폐물/2단 언덕 160 → 거인은 그 너머까지 봄(3단 이상 바위/폭포는 여전히 가림). 시야 반경(800)은 그대로.
   - 확인: 임시 `-RRGiantTest` 스위치(플레이어를 바로 거인으로, 확인 뒤 지움)로 창 캡처 `output\screens\giant2x`: 거인 주변 엄폐물 뒤로 그늘이 안 지고, 가운데 엄폐물 바로 뒤 빨강 봇 2명이 보임(남은 그늘은 보통 키 아군 시야 쪽). `-nullrhi` 90초: 쓰러짐 7번, 거인 1번 — 끼어서 못 움직이는 건 안 보였지만 2배 몸으로 엄폐물 사이 길을 오래 지켜본 건 아님.
+- 수정 (사용자: 안개 계단 현상 없애기 + 구름이 걷히는 느낌, 미니맵은 반투명에 얇은 프레임):
+  - 계단 원인(격자를 PNG 로 덤프해 확인, 임시 코드는 지움): ① 그림자 **옆** 경계 — 이웃 광선 두 개만 보간해서 엄폐물 뒤 그늘의 양옆이 한 칸 폭으로 딱 끊김, 그게 '가 봤던 곳'에 그대로 쌓임 ② 128 격자(칸 62.5) ③ 머티리얼이 그 격자를 쌍선형 한 번으로만 읽음.
+  - C++: `Resolution` 128 → **256**(칸 31). `Stamp` 의 그늘은 `ShadowSoftness` 80(월드 단위, 칸 크기와 무관)에 걸쳐 앞뒤로, 그리고 옆으로도 그 폭만큼 퍼진 다섯 방향(텐트 1-2-3-2-1)을 섞음. `EdgeSoftness` 200 → 300(구름 경계가 흔들릴 폭; 반쯤 보임 = 판정 경계는 그대로 `VisionRadius`). 원 밖 칸은 건너뜀. `GetSightAt` 은 네 칸 쌍선형(미니맵도 매끈하게), 가 봤는지는 > 0.5. 머티리얼에 `FogResolution` 넘김.
+  - 머티리얼 `ue_make_fog.py` 를 **Custom(HLSL) 노드 하나**로 다시: 칸 중심 4×4 를 하나씩 읽어 3차 B-스플라인(텍스처 필터와 무관 — 텐트 블러 + 쌍선형으로는 칸 크기 네모가 남았음), 값 노이즈 fbm 으로 조회 위치를 흔들고(`WarpAmount` 70), 같은 노이즈로 보임/가 봤음 경계의 문턱을 움직여(`EdgeNoise` 0.6, `EdgeWidth` 0.35) 뭉게뭉게 걷힘. 안 가 본 곳엔 큰 구름(`CloudScale` 700, `CloudSpeed` 0.05/s, `CloudBrightness` 0.16 × `FogColor`), 가 봤던 곳엔 그 35% 옅은 안개, 걷히는 가장자리는 살짝 밝게(`RimBrightness` 0.12). 텍스처는 sRGB 로 읽히므로 `pow(1/2.2)` 로 게임 값으로 되돌림. 실행: `UnrealEditor-Cmd RRRandom.uproject -run=pythonscript "-script=C:/work/char-pipeline/scripts/ue_make_fog.py /Game/PostProcess/M_PP_Fog"`(경로는 슬래시로 — 역슬래시는 `\u` 가 이스케이프로 먹혀 파일을 못 찾음).
+  - 미니맵(`DrawMinimap`): 3px 검은 판을 없애고 지도 그림을 `BLEND_Translucent` 로 70%(전체 화면 지도는 90%), 둘레에 1px 흰색 45% 테두리(`MapFrameColor`/`MapFrameWidth`).
+  - 확인 (창 캡처 — 사용자가 PC 를 쓰는 중이라 화면 복사 대신 `PrintWindow`, 키는 `PostMessage`): 격자 덤프에서 그늘 옆 경계가 부드러움, 화면에서 시야/그늘/가 봤던 곳 경계가 구름처럼 매끈(칸 계단 없음), 미니맵 아래로 게임이 비침 + 얇은 테두리. F6 결과 화면도 그대로(안개 걷힘, 이번 판은 거인 MVP 카메라 1800). 빌드 경고 없음, 셰이더 컴파일 오류 없음.
+  - 재수정 (사용자 스크린샷: 여전히 안개 속 직선 경계·각진 면): 디버그 화면(마스크만, 조회 좌표 frac, 업로드 격자 덤프)으로 원인 셋을 확인해 고침.
+    ① 머티리얼 노이즈가 값 노이즈(칸마다 네모 모양) → **그래디언트(Perlin) 노이즈** + 옥타브마다 회전. ② 조회 위치가 실제 표면이라 Tripo 블록의 울퉁불퉁한 윗면(블록마다 높이 다름, 면 사이 주름)에서 좌표가 직선으로 튐 → 시선이 **평평한 단 높이**(`GroundZ` = 바닥 높이, `FogOrigin` 의 B 채널로 넘김, `LevelHeight` 80 단위로 스냅, 단 ±45% 안은 평평)와 만나는 점으로 조회. ③ 보임/가 봤음 = 여러 원뿔의 max 라 만나는 곳에 직선 주름이 생기고 경계를 날카롭게 하는 머티리얼이 그걸 선으로 보여 줌 → **업로드 직전 격자에 작은 블러**(`UploadBlurPasses` 2, 1-4-6-4-1 가로·세로, 약 2칸; 게임 판정 `GetSightAt` 은 원래 격자). 덤으로 `SightRays` 240, `ShadowSoftness` 120, 머티리얼 `EdgeNoise` 0.5 / `EdgeWidth` 0.65(덜 날카롭게).
+    - 확인: 마스크 전용 화면에서 직선·면 사라짐, 조회 좌표가 매끈한 격자, 평소 화면 경계 매끈. 빌드 경고 없음. 임시 디버그 코드/에셋(`M_PP_FogDebug`) 지움.
+  - 재재수정 (사용자 스크린샷: 엄폐물 그늘 옆으로 플레이어 쪽에 모이는 선 여러 줄 + 어둠 속 삼각형 면): 그늘 옆 경계를 방향 5개(±2)로만 섞어서 날카로운 경계가 5단 계단(부채꼴 선)으로 남았고, 그게 '가 봤던 곳'에 삼각형으로 쌓였음. `Stamp` 의 `OpenAt`: 방향 13개(`ShadowTaps` 6, 텐트 가중), 간격이 업로드 블러보다 좁게. 반그림자 폭 = `ShadowSoftness` + 장애물 뒤 거리 × `ShadowSpread` 0.4(멀수록 넓게 퍼짐). 확인: 엄폐물 그늘 가장자리가 부드럽게 퍼지고 선/면 없음. 빌드 경고 없음.
+  - 남은 것: '가 봤던 곳'(회색) 안에서 바닥 잔디 타일·모래 판의 명암 차이가 옅은 큰 사각형으로 보임 — 안개 칸보다 훨씬 커서 장면 자체로 보임. 비용: 프레임당 팀원마다 칸 ~3,000 × 5 방향, 화면 픽셀마다 텍스처 16번 + 노이즈 — 느린 PC 에서는 확인 안 함.
+
+## 16차 — 타이틀 그림 (사용자: 트라이포로 여우가 연기 나는 총구를 불고, 머리 위에서 주사위가 번쩍이며 도는 모습을 만들어 타이틀에)
+
+- 아직 커밋 안 됨.
+- 그림: Claude in Chrome 으로 studio.tripo3d.ai 이미지 생성(Generate Image) → Nano Banana Pro, 16:9, 2장씩(무료 할당, 크레딧 0). 첫 프롬프트는 가짜 게임 제목/버튼이 그려지거나 총을 가슴 높이로 들어서, 두 번째 프롬프트("no text, no logo, no buttons…", 총을 얼굴 앞에, 입을 오므려 총구 연기를 부는, 머리 위 무지개 주사위가 반짝이며 도는, 가운데·왼쪽 비움)의 두 번째 그림을 골라 사용자 허락 후 다운로드(`image_1.jpeg` 592KB, 1376×768) → `C:\work\char-pipeline\input\title\title_art.jpeg`.
+- 연출 소스(모두 `C:\work\char-pipeline\scripts`):
+  - `blender_dice_spin_sheet.py`: `output\dice\SM_Dice.fbx` + Tripo 무지개 텍스처(조금 자체 발광), 흰 눈, 기울어진 축으로 한 바퀴 24프레임, 160px, 6×4 → `output\ui\T_TitleDiceSpin.png`(정육면체라 이음새 없이 반복).
+  - `make_title_fx_textures.py`(numpy, PNG 직접 씀): `T_TitleGlow`(둥근 빛), `T_TitleSparkle`(네 갈래 별) — 더하기 블렌드는 알파를 무시하므로 **미리 곱한 색(검정 바탕)**, `T_TitlePuff`(연기, 흰색 + 알파). 처음엔 흰색 + 알파로 만들어 더하기로 그렸더니 흰 네모가 화면을 덮음.
+  - `ue_import_ui_texture.py`(이제 여러 장: `<폴더>|<이미지>=<이름>|...`) → `/Game/UI/T_TitleArt`, `T_TitleDiceSpin`, `T_TitleGlow`, `T_TitleSparkle`, `T_TitlePuff`(UI 그룹, 밉 없음).
+- `ARRRandomTitleHUD`: 그림을 화면을 덮게(긴 쪽을 고르게 잘라) 그리고, 그림 픽셀 좌표 → 화면(`ArtToScreen`)으로 연출을 얹음:
+  - 주사위: 그림 속 주사위 자리(1186,116)에 그림 픽셀 178 크기로 시트 프레임(초당 16) — 그림의 주사위를 덮음. 뒤에 빛(330, 1.3Hz 맥동 + 2.6초마다 0.35초 번쩍), 둘레 6곳에 반짝임(각자 리듬으로 깜빡이며 천천히 돎).
+  - 연기: 총구(921,314)에서 퍼프 9개가 3.2초 동안 위로 48/s 오르며 흔들리고 12→64 로 커지며 옅어짐(알파 0.32), 그림 속 연기와 겹쳐 보임.
+  - 메뉴: 제목·버튼·설명·키 안내를 화면 폭 27% 를 가운데로 한 왼쪽 세로 단, 왼쪽 58% 를 위로 갈수록 0 이 되는 검정 그라데이션(32줄, 픽셀 경계 딱 맞춤 — 1px 겹치게 했더니 세로 줄무늬가 보였음). 그림이 없으면 예전 배경색.
+- 확인 (창 캡처 `C:\work\char-pipeline\output\screens\title2`, 0.3초 간격 4장 + 주사위 부분 `die_frames.png`): 프레임마다 주사위 각도 다름, 빛/반짝임 크기 변함, 총구 연기, 버튼/글자 읽힘. 빌드 경고 없음.
+- 확인 못 한 것: 16:9 가 아닌 창(좌우/위아래 잘림은 계산상 맞음), NETWORK 페이지·상태 글자 표시.
+- 추가 (사용자: 타이틀의 여우도 살짝 움직이게): 퍼펫 워프(Live2D 식). `ARRRandomTitleHUD::DrawFox` — 그림 전체를 그린 뒤 여우 둘레 패치(그림 픽셀 860~1376 × 150~768, 칠한 주사위 아래)를 12px 격자 삼각형(`FCanvasTriangleItem`, 불투명, ~4,400개)으로 한 번 더 그림: 텍스처 좌표는 제자리, 화면 위치는 `FoxNudge` 만큼 밂. 패치 가장자리 30px 에서 0 으로 줄어 밑의 그림과 딱 맞음(이중 그림 없음).
+  - 움직임: 숨쉬기(여우 둘레 타원 안 — 머리·귀·총 포함, 발 0 → 머리 꼭대기 4px, 3.4초), 머리 기울기(목 축 ±1.6°, 5.1초), 꼬리(뿌리 축 ±4°, 1.9초, 뒤 언덕이 따라 돌지 않게 범위 좁게), 오른쪽 귀 까딱(4.3초마다 0.3초, 7°). 총구 연기 시작점도 `FoxNudge(MuzzleSpot)` 로 따라감.
+  - 확인 (타이틀 창 캡처 0.85초 간격, 0초/1.7초 차이 이미지): 머리·귀·총·상체·꼬리 윤곽만 움직이고 발·다리·왼쪽 그림은 그대로, 이음새/찢어짐 없음. 빌드 경고 없음.
+  - 한계: 그림 한 장을 비트는 방식이라 그림에 없는 동작(눈 깜빡임 등)은 못 함. 숨쉬기 타원이 넓어서 여우 오른쪽 뒤 언덕 가장자리도 1~2px 같이 오르내림(좁히면 귀·머리가 따로 늘어남).
+- 수정 (사용자: 꼬리 쪽 왜곡이 신경 쓰임 → 트라이포로 캐릭터와 배경을 나눠 더 자연스럽게): **레이어로 바꿈** — 위 한계(배경이 같이 휨) 해결.
+  - Tripo 이미지 편집(Claude in Chrome 으로 studio.tripo3d.ai → Image → Nano Banana Pro, 원본 `title_art.jpeg` 첨부, 16:9, 무료 할당): ① "여우·총·총구 불꽃·연기를 지우고 뒤 풍경(선착장, 물, 언덕, 하늘)으로 채움, 주사위는 그대로" ② "여우만 그대로 두고 나머지는 #00FF00 단색". 각 2장 중 왼쪽 것을 사용자 허락 후 다운로드 → `C:\work\char-pipeline\input\title\tripo_background.png`, `tripo_fox_green.png`(둘 다 1376×768, 원본과 같은 자리 — ②의 오른쪽은 선착장이 남아서 안 씀).
+  - `C:\work\char-pipeline\scripts\make_title_layers.py`(Blender 의 Python 으로: `blender -b --python make_title_layers.py -- <초록 여우> <배경> <출력 폴더>`) → `output\title_layers\T_TitleBack/T_TitleFoxBody/T_TitleFoxTail.png`(원본 크기 그대로라 그림 좌표 공유):
+    - 키: 초록 초과량(G − max(R,B)) 0.10~0.40 → 알파, 여우 칸(860~1376 × 140~720) 밖은 0, 알파 0.3 조이고 2px 침식 + 1px 흐림(털과 초록이 섞인 노란 테두리는 키로 안 잡혀서), 반투명 가장자리 색은 안쪽 불투명 털 색으로 4px 채움, 초록 > max(R,B) 금지. 투명 픽셀 RGB 도 6px 까지 가까운 여우 색(필터링 때 초록/검정이 안 섞이게). 처음엔 언믹스(초록 몫 빼기)만 했다가 연두 테두리가 남았고, 꼬리 색을 알파 > 0.5 로만 남겨서 검은 테두리가 생긴 것도 고침.
+    - 꼬리: 팔·총 개머리판·반바지 윤곽을 따라 다각형(`TAIL_POLYGON`)으로 잘라 따로, 몸 쪽으로 16px 꼬리 색을 늘려 둠(돌 때 뿌리에 틈 안 생김, 몸이 덮음).
+  - 가져오기: `ue_import_ui_texture.py` → `/Game/UI/T_TitleBack`, `T_TitleFoxBody`, `T_TitleFoxTail`.
+  - `ARRRandomTitleHUD`: 세 장이 있으면 배경(불투명) → 꼬리(`TailBox` 1190~1376 × 420~625 부분만, `TailPivot`(1222,578) 축으로 통째 회전 ±6°, 2.2초 + 두 배 빠른 25% 흔들림, 뿌리는 숨쉬기를 따라 이동) → 몸(격자 워프, 반투명; 숨쉬기 4px·머리 ±1.6°·귀 까딱 — 여우만 있는 레이어라 배경은 안 휨, 그래서 가장자리 페이드/몸 타원 없앰). 없으면 예전 `T_TitleArt` 한 장을 움직임 없이.
+  - 확인 (타이틀 창 캡처, 차이 이미지): 배경 완전히 고정, 여우(머리·귀·총·꼬리)와 주사위·연기만 움직임, 꼬리는 휘지 않고 통째로 흔들림, 뿌리 틈 없음, 머리·꼬리 윤곽에 초록/검은 테두리 없음. 빌드 경고 없음.
+  - 추가 (사용자: 타이틀 바다에 광택 + 흐르는 효과): `make_title_layers.py` 가 `T_TitleWater.png`(배경 색 + 바다 알파: min(G,B)/R 1.06~1.18, 수평선 y570 위는 0, 가장자리 3×3 두 번 부드럽게 — 밝은 물 면은 R 이 높아 처음 기준(B−R)에선 빠졌음)도 만듦 → `/Game/UI/T_TitleWater`. `C:\work\char-pipeline\scripts\ue_make_title_water.py` → `/Game/UI/M_TitleWater`(UI 도메인, 반투명, Custom HLSL 하나): 바다에서만 그림을 그래디언트 노이즈로 살짝 흔들고(`RippleAmount` 2.5px, 아래쪽일수록 큰 물결, `FlowSpeed` 0.35 로 오른쪽으로 흐름; 흔든 곳이 바다가 아니면 원래 색), 물결 마루를 따라 가로로 긴 광택(`SheenAmount` 0.22)과 깜빡이는 작은 반짝임(`SparkleAmount` 0.45), 수평선 쪽이 더 밝음. 캔버스가 감마 색으로 받으므로 출력에 pow(1/2.2)(안 하면 바다가 진하게 나옴). `ARRRandomTitleHUD` 가 배경 다음, 여우 전에 `DrawMaterial` 로 그림 전체 위에.
+    - 확인 (타이틀 캡처 0.85초 간격): 물 색 원래와 같음, 광택·반짝임이 프레임마다 흐름, 선착장·모래·언덕은 그대로. 빌드 경고 없음.
+  - 남은 것: 꼬리가 몸에서 멀어지는 쪽으로 돌 때 개머리판과 꼬리 사이로 배경이 조금 보임(실제로 꼬리가 비켜난 자리라 자연스러움). 몸 레이어는 Tripo 가 다시 그린 여우라 원본과 아주 미세하게 다를 수 있음.
+  - 참고: 캡처 스크립트의 `Stop-Process`(Start-Process 가 준 Id)가 게임을 바로 못 닫는 경우가 있어, 남은 창이 DLL 을 잡아 다음 빌드 링크가 실패(LNK1104)한 적 있음 — 빌드 전에 `UnrealEditor.exe` 가 남아 있는지 확인.
 
 ## 15차 덧붙임 — 시작 카운트다운, 팀원 카드, 미니맵 (사용자: 로드 후 5초 카운트 뒤 시작, 오른쪽 아래 팀원 몽타주·체력·스킬 상태, 왼쪽 위 2D 맵 — 클릭하면 전체 화면, 시야 안 적과 아군 위치 실시간)
 
@@ -105,6 +147,145 @@
 - 확인 못 한 것: 메뉴 버튼 마우스 클릭(키로만), 메뉴의 Enter → 타이틀, 온라인에서 메뉴.
 - 참고: 이번 작업 중 파워셸 패치로 `RRRandomFirework.h` 두 줄의 탭이 `/` 로 바뀐 걸 발견해 고침(빌드가 잡음). 다른 파일엔 같은 손상 없음(`^/[A-Za-z]` 검색).
 
+## 17차 — 탈것 (사용자: 트라이포로 킥보드·오토바이·자동차를 만들어 탈 수 있게. 킥보드는 조금 빠르게, 오토바이·자동차 순으로 더 빠르게, 오토바이와 자동차는 드리프트)
+
+- 아직 커밋 안 됨.
+- 모델(Claude in Chrome 으로 studio.tripo3d.ai, 텍스트 → HD Model, 1회 30 크레딧, 24,780 → 24,630 = 5회): 킥보드(주황 갑판), 오토바이(빨강), 자동차 — 처음 자동차는 지붕 있는 소형차라 사용자 요청으로 "둥근 오픈카, 얼굴이 보이게" 다시, 또 "더 알록달록하고 신형으로" 다시: `stylized cartoon modern electric sports convertible ... open top with no roof and no windshield frame, very low sides so a seated driver's head and shoulders stay visible ... candy turquoise body with bright magenta and orange racing stripes ...`. 3개를 사용자 허락 후 FBX(Blender, 2K) 다운로드 → `C:\work\char-pipeline\input\vehicles\{kickboard,motorbike,car}`(안 쓰는 노란 차 2개는 안 받음).
+- `C:\work\char-pipeline\scripts\blender_vehicles.py <out> 이름=fbx=길이[=추가회전]`: 합치기, 긴 쪽을 X 로(오토바이·자동차 90° 돌림), 바닥 가운데 피벗, 길이 맞춤(여우 키 192 기준 킥보드 140 / 오토바이 220 / 자동차 340), 8000 삼각형으로 줄임, 옆·게임 카메라 프리뷰. 결과 140×96×115, 220×120×140, 340×161×101, 셋 다 앞이 +X. 처음엔 `bound_box` 가 메시 직접 회전 뒤 갱신이 안 돼서 크기가 틀렸음(오토바이 405) → 정점으로 경계 계산.
+- `ue_import_props.py`(소품과 같은 방식: 충돌 없음, 텍스처 × Tint, 거칠기 1) → `/Game/Vehicles/SM_Kickboard|SM_Motorbike|SM_Car`, `M_*`, `Textures/T_*_BaseColor`.
+- `ARRRandomVehicle`(복제: `Kind`, `Rider`): 루트 씬 + `Body` 메시(충돌 없음, 커스텀 뎁스 = 외곽선). `Mount` = 탑승자 캡슐 바닥에 붙임, `Dismount` = 발 위치에 내려놓고 탑승자 방향. Tick 에서 드리프트 각(속도 방향 − 바라보는 방향, 8° 이상·150 이상 속도)만큼 `Body` 롤(오토바이 ×0.7 최대 28°, 자동차 ×0.15 최대 6°).
+  - 핸들링(`FRRVehicleHandling`, 캐릭터 이동에 매 틱 적용 `UpdateVehicleHandling`, 내리면 원래 값): 킥보드 속도 ×1.3/가속 1800/접지 8/회전 720/감속 1600, 오토바이 ×1.6/1500/1.6/560/700, 자동차 ×1.9/1300/1.1/460/600. 접지력(GroundFriction)이 낮으면 속도가 바라보는 방향으로 늦게 따라가서 미끄러짐 = 드리프트. 몸은 `SeatHeight`(12/22/18)만큼 메시를 올림, 타는 동안 다리 애니메이션은 서 있기(속도 0 취급).
+- `ARRRandomCharacter`: `Vehicle`(복제), F → `ToggleRide`(클라이언트면 `ServerToggleRide`): 가장 가까운 빈 탈것(평면 170 안, 높이 차 키 안)에 타기 / 내리기. 안 되는 때: 쓰러짐·기어오르는 중·비행 중·시작 전/게임 끝. 내리면 탈것 옆(오른쪽, 막히면 왼쪽)으로 `TeleportTo`. 쓰러지면(`KnockOut`) 그 자리에 놓고, 비행 시작하면 내려놓고, `EndPlay`(봇이 플레이어에게 자리 양보 등)에도 내려놓음. 타는 동안 점프 안 됨.
+- 플레이어 컨트롤러 `RideAction` F → `OnRide`. HUD `DrawRidePrompt`: 발밑에 `[F] RIDE CAR` / `[F] GET OFF`. 안개(`HideBrawler`)는 붙어 있는 액터(탈것)도 같이 숨김.
+- 게임 모드 `SpawnVehiclesIfNoneExist`(`bSpawnVehicles`): 플레이어 시작점 기준 파랑 앞 (300, ±1100) 킥보드·오토바이, 빨강 앞 (1700, ±1100) 반대로, 가운데 (1000, ±470) 자동차 2대(안쪽을 봄).
+- 확인 (임시 `-RRRideTest=종류` 로 플레이어 옆에 하나 세우고 `PostMessage` 로 F → W 1.4초 → D 0.8초 → F, 창 캡처 + 임시 로그; 확인 후 지움): 셋 다 `gets on`, 여우가 킥보드 위·오토바이 위·오픈카 안(머리·어깨 보임)에서 달림, 오토바이는 회전 때 안쪽으로 기울고 내리면 옆에 섬. 최고 속도/최대 미끄러짐/최대 기울기: 킥보드 390 / 20°(걷기와 같은 수준) / 0, 오토바이 480 / 49° / 23°, 자동차 570 / 53° / 6°. 빌드 경고 없음.
+- 확인 못 한 것: 타고 사격(코드상 막지 않음 — 쏘면 바라보는 방향이 바뀌어 탈것도 돎), 네트워크(참가자의 탑승/드리프트 예측), 거인이 타기(탈것은 안 커짐), 언덕 계단 오르내리기, 봇은 안 탐.
+- 수정 (사용자: 자동차를 더 컬러풀하게 + 앞뒤로 한 칸씩 의자, 두 명이 타게):
+  - 모델: Tripo 가 넓은 스포츠카는 계속 좌우 2인승으로 만듦 — 텍스트 → 3D 2회(무지개 그라데이션 스포츠카 2개, 좌석 좌우), Nano Banana 이미지(앞뒤 좌석 그림) → 3D 2회(그중 날렵한 쪽은 3D 에서 좌석이 좌우로 바뀜, 통통한 색동 블록 장난감 차만 앞뒤 유지). 사용자가 날렵한 그라데이션 디자인을 원해서 참고 이미지 편집·폭 좁힌 레이서 그림까지 시도(이미지는 무료) → 넓은 차체로는 앞뒤 좌석이 안 남아서 사용자 선택으로 **색동 블록 장난감 차**(Tripo `9bfbce5f…`, 분홍 앞뒤 + 노랑·초록·청록·보라 띠, 검은 좌석 2개가 한 줄). 크레딧 24,630 → 24,510(4회 × 30). 다운로드 → `C:\work\char-pipeline\input\vehicles\car2`(참고용 `reference_rainbow_sleek.png` 도). `blender_vehicles.py ... SM_Car=…=360` → `output\vehicles\car2\SM_Car.fbx`(360×162×114), `ue_import_props.py` 로 `/Game/Vehicles/SM_Car` 교체. `blender_vehicles.py` 에 위에서 본 프리뷰(`vehicles_top.png`, 20 단위 격자) 추가 — 좌석 위치를 이걸로 잼: 앞좌석 X −7, 뒷좌석 X −93.
+  - `FRRVehicleHandling` 에 `DriverSeatX`, `bRearSeat`, `RearSeatX`(자동차만 −7 / 있음 / −93). 운전자에 붙일 때 `-DriverSeatX` 만큼 밀어서 운전자가 앞좌석에.
+  - `ARRRandomVehicle`: `Passenger`(복제), `HasRoom`(운전석 비었거나, 뒷좌석 있고 비었음), `Mount` 가 좌석 번호 반환(0 운전, 1 뒷좌석, −1 자리 없음), `RemovePassenger`, `GetRearSeatLocation`. `Dismount` 는 이제 탈것이 있던 자리 그대로 수평으로 내려놓음(운전석이 가운데가 아니라서).
+  - `ARRRandomCharacter`: `bPassenger`(복제), `Vehicle`/`bPassenger` 둘 다 `OnRep_Ride` → `ApplyRide`(모든 기기): 뒷좌석이면 이동 끔(`DisableMovement`), 캡슐의 Pawn 충돌 무시(운전자 캡슐이 바로 앞에서 스윕해도 안 막히게), 탈것 루트에 붙여 뒷좌석 위치. 내리면 떼고 Pawn 충돌·걷기 되돌림. `GetOffVehicle`: 뒷사람이면 자리만 비우고 옆으로 내림, 운전자면 뒷사람을 먼저 내리고 주차. 뒷사람도 쓰러지면/비행이면 내림. HUD `[F] RIDE CAR (BACK SEAT)`. 안개 `HideBrawler` 는 붙어 있는 캐릭터(뒷사람)는 건드리지 않음(자기 시야 판정대로).
+  - 확인 (임시 `-RRRideTest=2 -RRPassengerTest`: 플레이어가 타면 가장 가까운 아군 봇이 뒷좌석에 탐; 확인 후 지움): 로그 `gets on a CAR` → `gets on a CAR (rear seat)`, 화면에서 두 여우가 앞뒤로 앉아 같이 달리고 회전, 운전자가 쓰러지니 차가 그 자리에 남고 뒷사람도 내림. 빌드 경고 없음.
+- 추가 (사용자: 플레이어가 탄 차가 주변에 서 있으면 봇이 타게, 봇도 가까운 탈것을 타고 이동 — 교전 중엔 안 타고 긴 거리일 때만):
+  - `ARRRandomAIController::UpdateVehicles`(Tick 에서 이동 방향을 정한 뒤): 교전 = 숨으려는 중 || 맞는 중(`UnderFireTimer`) || 보이는 적이 사거리 × `EngageRangeShare` 안. 타고 있으면 교전 시 F(내림). 운전 중이면 평소 방향대로 몰다가 목적지(`GetTravelGoal`: 보이는 적 → 마지막으로 본 곳 → 순찰 지점) `RideArriveDistance` 500 안이거나 속도 60 미만 1.5초(막힘)면 내림. 뒷좌석이면 그대로(운전자가 내리면 같이 내려짐).
+  - 안 타고 있고 교전 아니면 0.5초마다 `FindVehicleToRide`: ① 아군이 운전하는 차가 `PassengerJoinRadius` 600 안에서 속도 40 이하로 서 있고 뒷좌석 빔 → 우선(거리와 상관없이) ② 목적지까지 `RideTripDistance` 1400 이상이고 `VehicleSearchRadius` 1000(처음 700 — 100초 봇전에 두 번밖에 안 타서 늘림) 안, 여행 거리의 절반 이내, 다른 봇이 노리는 중 아님(`GetVehicleTarget`), 높이 차 120 이내. 그쪽으로 걸어가 `MountRange` × 0.8 안이면 `ToggleRide`. 8초 안에 못 가거나 자리가 없어지면 포기.
+  - 확인: 시험용 차 옆에서 봇이 먼저 타고 중앙으로 몰고 가다 교전 거리에서 내림(창 캡처). 임시 `-RRRideTest=2` 로 플레이어가 차를 세워 두니 `RRRandomCharacter_2 gets on a CAR (rear seat)`, 같은 판에 적 봇 둘이 자동차/오토바이를 타고 옴. `-nullrhi` 100초: 오토바이 탑승 2번(반경 700 때).
+- 추가 (사용자: 탈것 드리프트 때 속도에 따라 스키드 마크가 생겼다 지워지게): `ARRRandomSkidMarks`(월드에 하나, 처음 쓸 때 스폰, 복제 안 함): 데칼 풀(최대 400, 오래된 것부터 재사용), `AddMark(From, To, Width, Strength)` 한 조각 = 아래로 투영하는 데칼(깊이 30, 길이 방향 Z, 폭 Y), 머티리얼 인스턴스의 `Opacity` 를 `HoldTime` 2초 뒤 `FadeTime` 3초에 걸쳐 0 으로. 머티리얼 `C:\work\char-pipeline\scripts\ue_make_skid_mark.py` → `/Game/Effects/Skid/M_SkidMark`(디퍼드 데칼, 거의 검정, 거칠기 1, 폭 방향(V) 가장자리 부드럽게 + 약한 결) — 디퍼드 데칼은 베이스 컬러에 들어가서 툰 후처리가 지우지 않음. 처음엔 U 를 폭으로 잡아 자국이 점선처럼 끊겨서 V 로 바꿈.
+  - `ARRRandomVehicle::UpdateSkidMarks`: 드리프트(기울기와 같은 판정) + 탑승자가 땅 위일 때 뒷바퀴 자리(메시 반길이 × `RearAxleShare` 뒤, 반폭 × `TrackShare` 양옆, 오토바이는 가운데 하나)가 24 움직일 때마다 한 조각. 진하기 0.3 → 1, 폭 × 0.6 → 1 (속도 150 → 520). 오토바이 폭 16, 자동차 22. 캐릭터와 탈것 메시는 데칼을 안 받음(`SetReceivesDecals(false)`).
+  - 확인 (플레이어 자동차 드리프트 캡처): 휘어진 두 줄 자국, 3초쯤 옅어짐, 5초 뒤 없음. 빌드 경고 없음.
+  - 확인 못 한 것: 언덕 단 경계에서 데칼이 벽면에 늘어지는지, 400개가 다 찼을 때 비용.
+- 수정 (사용자: 거인이 되면 탈것에서 자동으로 내려지게): 캐릭터 Tick 의 비행 하차 조건에 `bGiant` 추가(서버, 운전자·뒷사람 모두), `ToggleRide` 는 거인이면 안 탐, HUD `[F] RIDE` 안내는 거인·비행 중 숨김, 봇 `UpdateVehicles` 는 거인·비행 중 탈것을 찾지 않음(헛걸음 방지). 확인(임시 `-RRRideTest=2 -RRNoBotRide`, 확인 후 지움): 차 운전 중 F7 → 거인이 되며 내려 차 옆에 섬, 다시 F 눌러도 안 탐, 안내 없음. 빌드 경고 없음.
+  - 확인 못 한 것: 네트워크에서 뒷사람(참가자) 화면 — 이동을 끄고 붙이는 걸 각 기기에서 하지만 자기 캐릭터 예측과 어긋나는지 안 봄, 뒷사람이 사격할 때 몸이 돌아가는 모습.
+
+## 18차 — 폼 핑거 (사용자: 슈퍼볼 응원 큰 손가락 무기, 공격력 1, 뒤에서 찌르면 즉사, 낮은 확률, 보이게 Tripo 로)
+
+- 아직 커밋 안 됨.
+- 모델: Tripo 텍스트 → HD Model 2회(24,510 → 24,450). 첫 노란 "#1" 폼 핑거는 사용자가 "안 이쁘다, 풍선 같은 느낌에 파란색, 오브젝트는 항상 카툰 스타일로" → `cute stylized cartoon giant foam finger, inflated like a shiny balloon, very puffy round chubby shapes ... glossy bright blue all over with a small white star on the palm ...`. 사용자 허락 후 다운로드 → `C:\work\char-pipeline\input\foam_finger`.
+- `C:\work\char-pipeline\scripts\blender_foam_finger.py <fbx> <out fbx> <preview>`: 세워진 손을 눕혀 손가락 +X, 손바닥(별) 위, 손목 끝이 원점, 길이 100, 6000 삼각형; 위에서 본 확인 그림. 손끝 위치 출력(98, −8, −2 → FBX 에서 Y 뒤집혀 Unreal (98, 8, −2)). 처음엔 손가락이 −X 라 Z 180° 추가. `ue_import_props.py` → `/Game/Props/FoamFinger/SM_FoamFinger`, `M_FoamFinger`.
+- `FRRWeapon`: `bFoamFinger`, `RangeMultiplier`(복제). `MakeFoamFinger`: 이름 FOAM FINGER, 티어 Legendary(HUD 색), 탄창 기본 × 4, 연사 × 1.2, 재장전 × 0.5, 사거리 × 0.25(325), 총알 속도 × 1.5. `Roll` 이 `FoamFingerChance` 0.1 로 먼저 고름(= 무기 주사위의 10%, 전체 굴림의 약 1.7%). 치트 7번 / `RRGun FINGER`(`GetTypeCount` 7).
+- `ARRRandomCharacter::GetAttackRange` = AttackRange × 무기 `RangeMultiplier`(봇 사격 거리·교전 판정·투사체 `MaxRange` 모두 이걸로). 봇의 선호 거리는 이제 사거리 비율(`PreferredShare`)이라 폼 핑거를 들면 바짝 붙음.
+- `ARRRandomProjectile::bPoke`(복제): 안 그림(메시·빛·총구 효과·꼬리 없음), 데미지 = `PokeDamage` 1 고정(공격력 버프·거인 배율 무시), 맞은 캐릭터가 보는 방향과 찌른 방향이 `BackstabAngle` 60° 안이면(= 등 뒤) 최대 체력 × 10 → 거인도 즉사, 로그 `pokes X in the back with the foam finger`.
+- `URRRandomGunComponent`: 무기가 폼 핑거면 메시를 바꿔 오른손에 머리 위로 높이(`FoamFingerHoldOffset` (10, 25, 95), 앞으로 70° 치켜듦, 길이 110) — 손 높이로 들면 큰 머리에 가려 안 보였음. 공격할 땐 라이플 조준과 같은 방식으로 앞으로 뻗음(손끝이 총구 자리). 메시를 바꿀 때 `EmptyOverrideMaterials` — 랜덤 이벤트 컴포넌트가 시작할 때 라이플 머티리얼로 MID 를 박아 둬서 처음엔 폼 핑거가 라이플 색(회색+주황)으로 나왔음.
+- HUD 무기 줄: `FOAM FINGER  DMG 1  BACK POKE = KO`, 치트 안내 `[1-7] ... FINGER`.
+- 확인 (임시 `-RRFingerTest`: 봇 AI 멈추고 적 하나를 플레이어 앞 150 에 세워 서버에서 직접 찌름; 확인 후 지움): 정면 찌르기 100 → 99, 등 찌르기 → 즉사(`knocked out by`), 화면에서 파란 손 + 흰 별이 머리 위에 보임. 빌드 경고 없음.
+- 수정 (사용자: 평소엔 살짝 대각선 위로 들고 공격 때 앞으로 살짝 찌르는 효과): `URRRandomGunComponent` 폼 핑거는 라이플 조준 블렌드를 안 쓰고 자체 자세 — 손바닥 + `FoamFingerHoldOffset` (15, 25, 70)에서 앞 `FoamFingerLift` 35° 위를 가리킴, 찌르기마다(`ARRRandomCharacter::GetTimeSinceShot`, 모든 기기에서 샷 시각을 기록하므로 복제 그대로) `FoamFingerPokeTime` 0.22초 동안 sin 곡선으로 `FoamFingerPokeDistance` 45 앞으로 뻗으며 10°로 내려옴. 확인(창 캡처): 쉬는 자세는 머리 위 앞쪽으로 비스듬히, 클릭 직후 프레임에서 앞으로 뻗음.
+- 추가 (사용자: 무적 치트키): F10 / `RRGod` → `ServerCheatGod` → `ARRRandomCharacter::SetInvincible` 토글(`bInvincible` 복제). `TakeDamage` 첫 조건에서 0 반환(모든 공격·폼 핑거 즉사 포함), 섬 밖 낙사 대신 시작 위치로 텔레포트. HUD 머리 위 흰 `GOD` 칩(안 깜빡임), 치트 안내에 `[F10] GOD`. F9 는 엔진 스크린샷 키라 F10. 확인: 로그 `cheat, ... is invincible`, 칩 표시, 교전 근처 10초 뒤 체력 100(그 사이 실제로 맞았는지는 캡처로 확인 못 함 — 데미지 경로는 `TakeDamage` 하나).
+- 확인 못 한 것: 실제 클릭으로 등 뒤 돌아 찌르기(봇이 계속 몸을 돌림), 봇이 폼 핑거를 들고 싸우는 모습, 네트워크.
+
+## 18차 덧붙임 — 피격 효과 (사용자: 트라이포에서 2D 로 그려 적용, 파란 손 원킬은 해골, 나머지 무기는 분위기에 맞게)
+
+- 그림: Tripo 이미지 생성(Nano Banana Pro, 16:9, 2장, 무료 할당) — 8개 카툰 스티커를 4×2 격자, 순수 초록 배경, 굵은 외곽선(프롬프트에 칸별 내용: 노란 별 폭발 / 주황 지그재그 불꽃 / 빨강·주황 연사 불똥 고리 / 흰·금 섬광 / 청록·보라 에너지 / 주황 폭발 구름 / 파란 별구름 / 귀여운 해골). 사용자 선택으로 왼쪽 장을 다운로드 → `C:\work\char-pipeline\input\hit_effects\hit_effects_sheet.png`(1376×768).
+- `C:\work\char-pipeline\scripts\make_hit_effects.py`(Blender Python: `blender -b --python make_hit_effects.py -- <sheet> <out>`): 칸마다 초록 키(0.12~0.4) + 초록 번짐 제거, 스티커 bbox 로 잘라 6% 여백의 정사각형, 256 으로 쌍선형(미리 곱한 알파로) → 1024×512 아틀라스 `output\ui\T_HitEffects.png` → `ue_import_ui_texture.py` → `/Game/UI/T_HitEffects`.
+- `ERRHitEffect`(Pistol, Smg, Minigun, Rifle, Blaster, Cannon, Poke, Skull = 아틀라스 칸 순서), `FRRWeapon::GetHitEffect`(이름/폼 핑거로). 사격 때 `ARRRandomProjectile::HitEffect`(서버) → `TakeDamage` 가 읽어 `MulticastDamagePopup(Damage, Effect)`; 폼 핑거 찌르기로 체력이 0 이 되면 Skull. `FRRDamagePopup` 에 Effect·Spin(±25°)·Nudge(±14)·Lifetime(해골 1.6초, 나머지 0.8초).
+- HUD `DrawDamagePopups`: 숫자 아래에 스티커 — 0.1초에 1.25 배까지 튀었다 1 로, 수명 55% 부터 페이드하며 0.8 배로, 크기는 효과별(720p 기준 40~96, 캐논·해골 큼), 해골은 회전 없이 위로 떠오름. 쓰러진 캐릭터에도 팝업을 그리므로 해골이 시체 위에 남음.
+- 확인 (임시 `-RRHitTest`: 봇 AI 멈춤, 적 셋을 앞에 세워 팝업을 차례로 + 폼 핑거 등 찌르기; 확인 후 지움): 별 폭발·지그재그·에너지·폭발 구름이 맞은 여우 위에 튐, 찌르기 별구름, 등 찌르기 로그 + 쓰러진 여우 위에 해골. 빌드 경고 없음.
+- 남은 것: 등 찌르기 데미지 숫자가 `1000`(최대 체력 × 10)으로 뜸 — 원하면 "KO" 같은 글자로 바꿀 수 있음. 아틀라스는 UI 그룹(밉 없음). 막 장착한 순간 텍스처가 아직 안 올라와 잠깐 회색으로 보인 프레임 있음(스트리밍).
+
+## 18차 덧붙임 — 무기별 총 모델 (사용자: 무기 종류별로 다른 오브젝트를 Tripo 로 만들어 붙이기)
+
+- 모델: Tripo 텍스트 → HD Model, 권총·SMG·미니건·블래스터·대포 5종. 첫 세트는 사용자가 "조금 더 카툰 스타일로" → 통통한 장난감 비율(chibi, 굵은 둥근 형태, 밝은 사탕색)로 다시 만듦. 크레딧 현재 24,150. 원본: `C:\work\char-pipeline\input\guns\<pistol|smg|minigun|blaster|cannon>\`.
+- `C:\work\char-pipeline\scripts\blender_guns.py -- <out dir> <SM_X>=<fbx>=<grip x>,<grip z>[=flip] ...`: 메시 합치고 긴 쪽을 X 로(Tripo 가 총구를 -X 로 둔 권총·미니건·대포는 `flip`), 원점을 손잡이(옆모습 기준 길이 대비 비율), 길이 100, 6000 삼각형으로 줄임. 총구 끝(앞 3% 버텍스 중심)을 언리얼 좌표로 출력하고 `<out>\<SM_X>_side.png` 옆모습(빨간 점 손잡이, 파란 점 총구) 렌더. 쓴 값: 권총 -0.24,0.24 flip / SMG -0.15,0.18 / 미니건 -0.03,0.12 flip / 블래스터 0.16,0.22 / 대포 0.02,0.18 flip.
+- `ue_import_props.py "/Game/Props/Guns|SM_Pistol=<fbx>=<basecolor>|..."` → `/Game/Props/Guns/SM_{Pistol,Smg,Minigun,Blaster,Cannon}`, `M_*`, `Textures/T_*_BaseColor`(소품과 같은 평평한 툰 머티리얼).
+- `URRRandomGunComponent`: `GunLooks` 표(`ERRHitEffect` 순서: 경로, 손에 든 길이, 100 길이 메시 기준 총구 끝) — 권총 80 (72,0,33), SMG 100 (63,0,7), 미니건 130 (52,0,27), 라이플 = 기존 `GunLength`/`MuzzleTip`, 블래스터 95 (33,0,30), 대포 120 (46,0,29). 생성자에서 `GunMeshes` 로 로드(없으면 라이플로). 매 틱 `GetWeapon().GetHitEffect()` 로 메시를 고르고 바뀌면 `EmptyOverrideMaterials`, 길이·총구 끝도 그 무기 값으로(걸으며 쏠 때 총알이 그 총구에서 나오게).
+- 확인 (창 캡처, 치트 1–6): 권총 초록/노랑, 미니건 빨강/노랑, SMG 연두/보라, 라이플, 블래스터 흰/보라, 대포 파랑/주황이 손에 각각 보임, 걸을 때 대포 옆모습 확인.
+- 확인 못 한 것: 걸으며 쏠 때 총알이 각 총구에서 정확히 나오는지(측정값만 넣음), 거인 크기.
+
+## 20차 — 두 가지 모드 (사용자: 탑뷰 게임과 TPS 를 골라서 입장, TPS 에선 안개 개념 없음)
+
+- 타이틀: SINGLE PLAY 와 HOST GAME 다음에 보기 선택 페이지(TOP VIEW / THIRD PERSON / BACK, 위 안내 "HOW DO YOU WANT TO PLAY?"). JOIN 은 호스트 방식. `ARRRandomTitlePlayerController`(`ERRTitleChoice::TopView/ThirdPerson`, `bViewPage`, `bViewForHost`; BACK 은 시작한 페이지로).
+- `URRRandomSessionSubsystem::SetThirdPersonMode/IsThirdPersonMode`(게임 인스턴스라 레벨이 바뀌어도 유지 → 새 게임 `?Restart`, F1 호스팅도 같은 모드). `-RRThirdPerson` 명령줄도.
+- `ARRRandomGameState::bThirdPersonMode`(복제) + 정적 `IsThirdPersonMode(context)`. 게임 모드 `StartPlay` 가 세션에서 가져와 설정.
+- 플레이어 컨트롤러: TPS 게임이면 안개 액터를 안 만들고(늦게 복제되면 PlayerTick 에서 없앰), 폰이 생기면 `SetThirdPersonView(true)`(예전 F9 치트 본체를 이 함수로 뺌). F9 치트는 탑뷰 게임에서만. 마우스 시선(Mouse2D)·조준(오른쪽 버튼) 키는 이제 쉬핑 빌드에도 매핑.
+- 안개 없는 시야: `ARRRandomCharacter::IsSeenByTeam` 이 TPS 게임에선 `VisionRadius` 800 대신 `ThirdPersonSightRange` 3000(벽 가림은 그대로) → 봇은 탁 트인 곳의 적을 멀리서 보고 싸움. 적 숨기기 없음(안개 액터가 없으므로), 미니맵은 TPS 에선 적 표시 없음(팀원만).
+- 확인: 타이틀 → SINGLE PLAY → 보기 페이지 → THIRD PERSON 으로 바로 어깨 너머 시점, 안개 없음, 미니맵 밝음.
+- 참고: 이 빌드 직후 게임이 프로젝트 DLL 을 불러오기 직전에서 두 번 멈춤(창 없음, 로그는 Turnkey 장치 검사 뒤에서 끝) — 몇 분 뒤 다시 실행하니 정상. 스마트 앱 컨트롤이 새 DLL 을 검사하느라 붙잡은 것으로 보임(예전 4551 차단과 비슷).
+
+- 수정 (사용자: TPS 에서 마우스가 안 보이는 상태로 계속 움직여서 문제): 게임 창이 마우스를 쥐고 있는지 안 보고 마우스 움직임을 늘 시선으로 받았음. 이제 `IsViewportFocused`(뷰포트 포커스 + `FPlatformApplicationMisc::IsThisApplicationForeground`, 모듈 `ApplicationCore` 추가) 이고 커서가 숨었을 때만 시선 입력, 한 프레임 최대 60 카운트. 커서가 다시 나오는 때: 일시정지/결과 화면, **왼쪽 Alt 누르는 동안**(`IA_FreeCursor`), 다른 창 사용 중(Alt+Tab 등). 게임 창을 다시 클릭하면 다시 잡음(그 클릭은 사격 안 함). 커서가 나와 있을 땐 클릭이 사격 대신 미니맵 클릭. 확인(임시 로그): 게임 창 활성 = 커서 숨김, 다른 창으로 전환 = 커서 보임 + 시선 그대로.
+
+## 20차 덧붙임 — 물을 타이틀처럼 (사용자: 인게임 물 그래픽을 타이틀처럼)
+
+- `C:\work\char-pipeline\scripts\ue_make_water.py /Game/Environment/Island/M_IslandWater`(예전 `ue_make_island_materials.py` 의 물을 대체): 불투명, 월드 노멀.
+  - 색: 해안 근처 밝은 청록(`Shallow`) → 중간 청록 → 먼 바다 깊은 남색. `ShoreMask`(섬이 만듦: 땅 흰색, 칸당 8 텍셀, 반경 5 박스 블러 × 2, sRGB 인코딩) 를 `MapArea` 위에 깔아 해안에서의 거리로. 큰 얼룩 노이즈로 깊은 곳도 단조롭지 않게.
+  - 코스틱: 시간 따라 움직이는 셀룰러 노이즈 두 겹의 경계선(가는 선), 느린 노이즈로 휘게, 밝기 얼룩, 얕은 곳에서 진하고 깊은 곳에선 희미.
+  - 해안 거품: 마스크 0.44 근처의 가는 띠, 노이즈로 끊기고 사인으로 들락날락.
+  - 반짝임: 22 단위 셀마다 일부 점이 깜빡임(이미시브).
+  - 물결 노멀: 여섯 방향 사인파 기울기(정확한 미분). 처음엔 노이즈를 유한 차분해 노멀을 만들었는데 가로 줄무늬가 생김 → 사인파로 교체. 거칠기 0.28, 스페큘러 0.7.
+  - 폭포(세로 면): 아래로 흐르는 밝은 줄.
+- `ARRRandomIsland`: 물 평면을 1.04 배로 겹쳐 이음매 없앰, 물과 폭포에 MID(`ShoreMask`, `MapArea`).
+- 확인: 탑뷰 해변·만·선착장(청록, 코스틱, 해안 거품, 반짝임), TPS 시점 강(맑은 청록, 둑의 흰 거품) — 임시 `-RRWaterLook`(카메라를 강 쪽으로) 로 캡처 후 지움.
+
+## 19차 덧붙임 — 3인칭 치트 (사용자: 배그 3인칭 같은 느낌으로 보고 싶음, 치트로 3인칭 실행하고 조준사격)
+
+- F9 / `RRThirdPerson`(쉬핑 빌드 제외) 토글. `ARRRandomPlayerController`: 마우스 커서 숨김 + `FInputModeGameOnly`, `IA_Look`(Mouse2D) → `AddYawInput`/`AddPitchInput(-Y)`(감도 `LookSensitivity` 0.35, 조준 중 × `SightsSensitivity` 0.5), 시선 상하 -70~50°, `IA_Aim`(오른쪽 버튼 누르는 동안) 조준, WASD 는 카메라 요 기준, 왼쪽 버튼은 `GetCrosshairTarget`(카메라에서 화면 가운데로, 자기 몸 거리부터 20,000 까지 Visibility 트레이스, 맞은 곳 아니면 끝점) 로 `FireAt`. 미니맵 클릭/맵 위 사격 막기는 3인칭에선 무시. 일시정지 메뉴/결과 화면 땐 커서 다시 보이게(PlayerTick). 안개 음영은 숨김(`ARRRandomFogOfWar::SetShadingVisible`, 볼륨 끔 — 위에서 보는 그림용) — 안 보이는 적 숨김은 그대로.
+- `ARRRandomCharacter`: `SetThirdPerson`(로컬) + `ServerSetThirdPerson`, `bThirdPerson` 복제(소유자 제외). 3인칭이면 `bUseControllerRotationYaw`(탈것 위는 제외), 이동 방향 회전 끔(탈것이면 켬). `UpdateCamera`(로컬, 매 틱): 3인칭 = 스프링암 `bUsePawnControlRotation`, 벽 충돌 검사, 길이 340 / 오프셋 (0, 75, 95) / FOV 80, 조준 = 200 / (0, 95, 115) / 50(초당 14 로 부드럽게); 위에서 보기 = 원래 피치 -70, FOV 30, 비행 때 물러나기(원래 `UpdateLocomotionAnimation` 에 있던 것을 옮김). 여우 머리가 커서 처음 조준 위치(140 / (0, 45, 60))에선 귀가 화면을 가림 → 높고 오른쪽으로.
+- HUD `DrawCrosshair`: 3인칭일 때 가운데 점 + 네 개 짧은 선(검은 테두리), 조준 땐 간격 14 → 6, 쏜 직후 0.18초 벌어짐. 치트 안내에 `[F9] 3RD PERSON`.
+- 확인(임시 `-RRTPSTest`: 3인칭에서 카메라 자동 회전, 자동 사격, 5~8초 조준, 무적; 지움): 컨트롤 요와 캐릭터 요가 같이 돎(25° → 24.8°, 99.9° → 99.9°), 어깨 너머 화면에 마을/버섯 집/울타리, 조준 시 확대, 노란 총알이 조준점 쪽으로. F9 다시 누르면 위에서 보기로 돌아옴. 진짜 마우스 입력은 캡처로 못 함(코드 경로는 Enhanced Input 콜백 → 회전 적용 전이라 정상이어야 함).
+- 확인 못 한 것: 실제 마우스로 돌리기, 네트워크 참가자(서버에 3인칭 알림은 있음), 3인칭에서 오르기/비행/탈것.
+
+## 19차 덧붙임 — 흙길 텍스처, 카메라, 비행 느낌 (사용자: 길이 어색하니 자연스러운 텍스처를 뽑아 입히기, 카메라 각도를 조금 더 세워 날아갈 때 느낌, 그림자나 부수 효과로 날아가는 느낌)
+
+- 흙길: Tripo 이미지 생성(Nano Banana Pro, 1:1, 무료 할당, 사용자 허락 후 1장 다운로드) "seamless tileable top-down ... cartoon dirt path ... pebbles ..." → 2×2 반복으로 나온 그림 `C:\work\char-pipeline\input\path\dirt_path_2x2.png`. `scripts\make_path_tile.py`(블렌더 파이썬, numpy): 자기 자신과 가장 잘 맞는 이동량으로 반복 주기(512, 오차 0.004)를 찾아 한 주기를 잘라 가장자리를 맞은편과 섞고 1024 로 → `output\path\T_DirtPath.png`. `scripts\ue_make_path_material.py <png>` → `/Game/Environment/Island/Textures/T_DirtPath`, `M_IslandPath`(마스크드 0.5, 인스턴스 메시용): 흙을 월드 공간 `TileSize` 420 마다 반복, `RoadMask`(섬이 만듦)를 `MapArea`(먼 X, 왼쪽 Y, X 크기, Y 크기; RGBA 출력으로 연결해야 함 — RGB 로 연결해 `.w` 컴파일 에러를 한 번 냄) 위에 깔고 가장자리를 월드 노이즈(`EdgeNoise` 0.28)로 흔듦. 마스크 샘플러는 엔진 흰 사각형과 맞춰 Color(sRGB) — 처음에 LinearColor 로 해서 컴파일 실패(기본 회색 격자 머티리얼로 땅 전체가 회색이 됨).
+- `ARRRandomIsland::Build`: 모래 칸에서 마스크(칸당 8 텍셀, 반경 3 박스 블러 × 2번으로 모서리 둥글게, sRGB 인코딩해서 써서 선형으로 읽힘) → 섬 전체를 덮는 평면 하나(모래판 위 0.5)에 그 머티리얼 MID. 모래판 큐브는 숨기고(충돌은 그대로) 밟는 높이 그대로.
+- 카메라: 피치 -60 → -70(더 내려다봄 — 비행 중 바로 아래 그림자가 보이게), FOV 20 → 30(같은 화면 폭이 되게 팔 길이 계산 그대로 → 약 5,225): 약간의 원근으로 높이 오를수록 캐릭터가 커 보임. 내 캐릭터가 비행(또는 활공) 중이면 카메라 팔이 최대 12% 길어짐(초당 2 로 부드럽게).
+- 비행 중 몸 기울기: 활공/비행 + 공중이면 지상 속도 600 에서 최대 18° 앞으로(액터의 오른쪽 축 기준 회전을 메시 상대 회전 앞에 곱함, 초당 6 으로 부드럽게).
+- `URRRandomFlightEffectsComponent`(새, 모든 캐릭터, 순수 연출): 발밑에서 WorldStatic 만 아래로 트레이스해 바닥을 찾음.
+  - 둥근 그림자 데칼(`/Game/Effects/Flight/M_BlobShadow`): 반지름 85, 높이 900 에서 0.75 배, 진하기 0.75(땅, 몸이 대부분 가림) → 0.85(공중). 처음엔 너무 흐리고 작아(부드러운 감쇠 0.35~1, 진하기 0.5→0.16) 안 보였음 → 절반까지 고르게 진하고 가장자리만 흐린 원으로. 데칼은 회전을 등록 뒤에 위치와 같이 매번 지정.
+  - 흙먼지 고리(`M_DustRing`, 데칼 3개 재사용): 위로 500 이상 빠르게 땅을 떠날 때(점프/비행 상승) 0.6 세기, 140 이상 떨어져 착지하면 낙차에 따라 0.5~1, 0.55초 동안 퍼지며 사라짐.
+  - 바람 줄기(`M_WindStreak`, 가산 무광, 인스턴스 커스텀 데이터로 투명도): 공중 + 지면에서 120 이상 + 속도 250 이상이면 초당 최대 30개, 몸 주위에 진행 방향으로 누운 가는 줄(길이 110~220, 폭 10)이 0.35초에 사라짐.
+  - 머티리얼은 `scripts\ue_make_flight_fx.py`.
+- 확인(캡처 스크립트: F8 비행 치트 → W+스페이스 상승 → D 활공 → 재상승 → 착지): 흙길이 칸 모양이 아니라 둥글고 구불한 가장자리로 잔디와 이어짐, 비행 중 몸 아래(화면상 아래쪽)에 둥근 그림자 + 화면 위쪽에 해 그림자 + 흰 바람 줄 + 날개 반짝이, 땅에선 발밑에 옅은 접촉 그림자. 로그에 머티리얼/게임 경고 없음.
+- 수정 (사용자: 여전히 길이 안 이쁨): `M_IslandPath` 다시 — 타일의 조약돌을 평균색 쪽으로 70% 만 남기고 흙색(선형 값으로 지정; 처음엔 sRGB 값을 그대로 넣어 거의 흰색이 됨)을 입힘, 큰(760)·중간(210)·작은(38) 월드 노이즈로 밝고 어두운 흙 얼룩, 길 가운데는 조금 밝고 가장자리는 0.58 배 어둡게(다진 흙과 잔디 그늘), 가장자리 경계는 두 겹 노이즈(150, 45)로 구불구불 + 0.36~0.64 구간을 픽셀 디더(인터리브드 그래디언트 노이즈, 프레임마다 이동 → TAA 가 섞음)로 풀어서 잔디가 길 가장자리로 스며들게. 섬은 마스크 G 채널에 해변(물에 닿은 모래 칸)을 따로 넣어 그곳은 고운 모래색. 확인: 평소 카메라와 맵 위쪽/아래쪽 내려다본 캡처(임시 `-RRMapTest`, 지움).
+- 수정 (사용자: 길 텍스처가 흐리멍텅): 원인은 (1) `T_DirtPath` 가 스트리밍이라 낮은 밉으로 그려짐 → `never_stream`, 밉 `TMGS_SHARPEN4`, (2) AI 그림 자체가 부드러움 → `make_path_tile.py` 에 대비(1.25)·언샤프 마스크(0.9) 인자 추가해 다시 자름, (3) 머티리얼이 조약돌을 평균색으로 30% 끌어당김 → 원래대로(`PebbleStrength` 1). 색은 흙빛(`DirtTint` 선형 0.74, 0.66, 0.5), 큰 얼룩 0.86~1.12, 반복 `TileSize` 520 → 620, 가장자리는 구불구불한 실제 경계를 따라 0.6 배 어두운 테두리 + 디더 구간 0.46~0.54 로 좁혀 또렷하게. 확인: 평소 카메라 캡처(조약돌·풀 또렷, 테두리 선명).
+- 수정 (사용자: 바닥이 너무 2D, 이미지가 그냥 깔린 것 같음): 입체감 추가. `C:workar-pipelinescriptsmake_path_height.py <tile> <out>`(블렌더 numpy): 주변 흙색과 다른 곳(조약돌·풀·외곽선)을 채워 블러로 둥근 돔 + 흙 얼룩의 약한 굴곡 → `outputpathT_DirtPath_H.png` → `/Game/Environment/Island/Textures/T_DirtPath_H`(선형 그레이스케일, 스트리밍 안 함). `M_IslandPath` 는 월드 공간 노멀(`tangent_space_normal` 끔 — 평면 탄젠트가 월드 UV 와 안 맞으므로): 높이맵 기울기(`BumpHeight` 9, 텍스처 U = 월드 +Y, V = 월드 -X), 9 단위 노이즈로 흙 알갱이(`GrainHeight` 1.6), 가장자리는 커버리지의 월드 기울기(화면 미분으로)로 잔디 쪽이 올라가게(`EdgeBevel` 45) → 길이 잔디에 파인 느낌. 거칠기는 높이로 조약돌 0.62 / 흙 0.95, 스페큘러 0.35. 섬: 길 가장자리(마스크 0.45~0.7)에만 칸당 4번 시도·40% 로 진짜 돌(바위 묶음 0.14~0.28 배, 그림자 있음) — 길 가운데에 작은 돌도 뿌렸었는데 회색 점처럼 어색해 뺌. 확인: 평소 카메라 캡처(조약돌이 볼록하게 빛과 그림자, 흙 알갱이, 가장자리 턱과 돌).
+- 다시 (사용자: 방향을 못 잡음 — 풀 바닥이나 꽃처럼 Tripo 3D 로 만들어 전체 조화): 평면 텍스처 길(`M_IslandPath`, `T_DirtPath*`, 마스크) 은 안 씀(에셋/스크립트는 남음). Tripo 텍스트 → HD Model 5개(150 크레딧, 23,700 남음; 하나는 모양이 깨져 무료 재시도): 흙길 바닥 타일 3종(조약돌 / 작은 풀 / 맨 흙 + 작은 돌, "square flat dirt path floor tile ... perfectly flat even top surface" — 잔디 타일과 같은 식), 작은 꽃 달린 풀 덤불, 둥근 조약돌 무더기 → `C:workar-pipelineinputpath3d*`. `blender_grass_tiles.py` 로 잔디 타일과 똑같이 잘라 180 정사각형(Tripo 가 두 개를 세워서 모델링 → 가장 얇은 축이 Z 가 아니면 정점이 많이 몰린(울퉁불퉁한) 쪽이 위로 오게 세우는 단계 추가) → `/Game/Environment/Path/SM_DirtTile_A/B/C`(`ue_import_grass_tiles.py` 에 `opt:` 옵션 추가: brightness 0.6, desaturate 0.35, normals=mesh — 잔디처럼 법선을 위로 고정하지 않고 메시 그대로 받아 흙덩이에 빛/그늘, under=0). 풀 덤불 `SM_RoadTuft`(폭 110), 조약돌 `SM_RoadPebbles`(폭 60) 는 `blender_props.py` + `ue_import_props.py`. 섬: 모래 칸마다 흙 타일(무작위 종류, 90° 단위 회전, Z 0.6 배로 납작하게, 윗면 바닥 + 7 — 밟는 판 높이도 7), 길이 잔디('.'/'g')와 맞닿은 변마다 풀 덤불 2~3개(0.55~0.95 배, 이음매 위)와 30% 확률로 조약돌. 잔디 바닥은 섬의 길 칸에서 자기 타일을 뺌(`ARRRandomGrassFloor::ClearRoadTiles`, 섬/잔디 중 나중에 깔리는 쪽이 정리 — 로그 `grass floor gave 186 tiles to the island's roads`). 처음엔 흙 타일 윗면을 + 3 에 둬서 흙의 파인 곳 사이로 잔디 밑판 초록이 얼룩처럼 비침 → 납작하게 + 7 로. 확인: 평소 카메라 캡처(흙덩이 입체, 가장자리 풀 덤불, 잔디 바닥과 같은 결). 남은 것: 흙 타일끼리 이음매가 가까이서 희미하게 보임.
+- 확인 못 한 것: 흙먼지 고리가 화면에서 잘 보이는지(캡처 타이밍에 안 잡힘), 네트워크 참가자 화면, 거인 비행.
+
+## 19차 — 카툰 끄기, 장난감 마을 섬 (사용자: 카툰 효과 끄고 전체적으로 자연스럽게, Tripo 로 오브젝트 몇 개 더 만들어 메이플스토리/로블록스 느낌으로 다시 배치, 탈것을 타야 하니 레벨 약 2배 — 질문에 "면적 2배(한 변 약 1.4배)" 선택)
+
+- 카툰: `RRRandomCharacter.cpp` 의 `bCartoonLook = false` → `MI_PP_Toon` 블렌더블을 안 붙임. 대신 AO 0.6, 채도 1.08(툰일 땐 AO 0, 채도 1.15). 모션 블러 0 은 항상. 툰 에셋/스텐실 설정은 그대로(다시 켜기 쉬움). 팀색 외곽선도 툰 안에 있었으므로 같이 꺼짐(머리 위 마커로 구분).
+- Tripo(사용자 허락, 텍스트 → HD Model 10개, 24,150 → 23,850, 프롬프트마다 "cute stylized cartoon, chunky rounded puffy shapes"): 빨간 큰 버섯, 버섯 집, 화살표 표지판, 울타리, 가로등, 나무 상자+통, 꽃 무더기, 나무 다리, 풍차, 장난감 블록. FBX(Blender, 2K) → `C:\work\char-pipeline\input\props2\<이름>`. `blender_props.py` → `output\props2\SM_*.fbx`(높이/폭: 버섯 380h, 집 440h, 표지판 210h, 울타리 190w(길이 X), 가로등 320h, 상자 170h, 꽃 150w, 다리 580w(길이 Y), 풍차 800h, 블록 230h) → `ue_import_props.py` → `/Game/Environment/Village/SM_*`, `M_*`, `Textures/T_*_BaseColor`. Tripo 모델은 정면(문)이 언리얼 +Y → 게임에선 요 90 으로 카메라(-X) 쪽.
+- `C:\work\char-pipeline\scripts\make_island_map.py`(블렌더 파이썬으로 실행: `blender -b --factory-startup --python make_island_map.py -- <out .inc> <preview .txt>`): 36×36 지도를 구역별로 칠하고(시드 36) 검사(시작 칸 모래, 물/다리/길 위 소품 종류, 가장자리, 벽 높이 ≥3) 후 `TypeRows/HeightRows/PropRows` C++ 초기화 코드와 미리보기 출력. 집·풍차 주변 한 칸은 비움. 그 출력을 `ARRRandomIsland` 생성자에 그대로 넣음.
+- `ARRRandomIsland`: 종류 `b`(다리: 물 표면 + 숨긴 발판, 물 위 30, 두께 20, 물벽 없음). 소품은 `PropKinds` 표(글자, 메시, 크기 범위, 칸당 개수, 비껴 놓기, 방향 — 아무/90° 단위/정한 요±, 막는 것 — 없음/캐릭터만/전부 + 폭 비율): 막는 소품은 메시 경계 × 크기 × 폭 비율 상자를 숨긴 `Solid`(전부) 또는 `WaterWalls`(캐릭터만)에 같은 회전으로 추가. 로그 `island 36 x 36 cells: 231 solid, 186 sand, 249 water, 18 dock or bridge, 342 props (78 solid)`.
+- 게임 모드: `GetArenaCenter()` = 플레이어 스타트 아래 레벨 바닥의 가운데(지금 (0,0,92)), 한 번만 계산. 섬·잔디·엄폐물·탈것·봇의 기준이 플레이어 스타트+1000 에서 이 중심으로. `TeamSpawnDistance` 2000 → 3060(파랑 26행, 빨강 9행 = 중심 ∓1530). 엄폐물 새 배치(점대칭: 큰길 양옆 벽, 더 바깥 벽, 팀 앞 기둥 4, 각 팀 쪽 가로 벽 — 길/언덕/소품 피함). 탈것: 각 팀 길 바로 앞 ±900 에 킥보드·오토바이, 차는 서쪽 길(-1890)과 동쪽 길(1710) 가운데. 잔디 바닥을 섬보다 먼저 스폰(가운데에 큰길 모래판이 생겨서 섬 다음에 스폰하면 그 판을 바닥으로 잡아 엔진 체크무늬 바닥이 드러났음).
+- 봇 순찰 반경 최대 1300 → 1800. 미니맵 텍스처 208 → 288 픽셀(칸당 8), 다리는 선착장 색, 집·풍차·상자·블록·버섯은 빨간 지붕색 칸.
+- 확인(임시 `-RRMapTest`: 안개 끔, 카메라 거리/각도/위치 지정, 무적 / `-RRBridgeTest`: 파랑 시작에서 오른쪽으로 계속 걷기; 확인 후 지움): 섬 전체(위 숲·풍차·빨강 마을·들판·파랑 마을·선착장·강과 다리), 집 문과 표지판이 카메라 쪽, 울타리 줄, 다리를 건너 발판 위(Z 143)로 강둑까지 가서 동쪽 벽에서 멈춤. 평소 카메라로 마을 길 근처 모습. 로그에 게임 쪽 경고 없음. 첫 판에 풍차와 집이 겹쳐 집 열을 (4,10,24) → (9,13,24) 로 옮김, 가로등이 위에서 너무 커 보여 0.72~0.8배로, 상자·블록은 조금 키움.
+- 확인 못 한 것: 봇이 집/버섯/울타리에 걸리는지(순찰 지점이 막힌 곳이면 3~6초 뒤 다음 지점), 봇이 다리를 건너는지, 긴 경기 성능(소품 342개 + 인스턴스), 네트워크.
+
+## 18차 덧붙임 — 사격 애니메이션, 총구, 총 크기 (사용자: Tripo·Mixamo 로 사격 애니메이션을 전체적으로 자연스럽게, 총구 위치 맞게, 캐릭터 크기에 맞게 총 크기, 이동 사격도 자연스럽게)
+
+- Mixamo(로그인된 사용자 계정, 기존 캐릭터 `fox_mixamo_upload`)에서 소총 조준 세트 9개를 애니메이션만(스킨 없음, 30fps, In Place) 받음 → `C:\work\char-pipeline\input\fox\mixamo_aim\{aim_idle,walk_f|b|l|r,run_f|b|l|r}.fbx` → `ue_import_fox_anim.py` 로 `/Game/Characters/Fox/Anims/A_Fox_AimIdle`, `A_Fox_AimWalkF|B|L|R`, `A_Fox_AimRunF|B|L|R`. 크롬이 mixamo.com 의 연속 다운로드를 막아 사용자가 허용함.
+- `C:\work\char-pipeline\scripts\blender_anim_speed.py -- <fbx> ...`: 제자리 애니메이션의 이동 속도(딛은 발이 뒤로 미끄러지는 속도의 중앙값), 엉덩이 이동, 중간 프레임의 오른손→왼손 방향. 결과(스케일 1): 조준 걷기 ~59, 조준 달리기 앞 148 / 뒤 134 / 왼 125 / 오른 148 cm/s → 게임 속도 300(× 메시 1.8)엔 달리기가 맞아 달리기만 씀. 모든 Mixamo 소총 자세가 두 손(총)을 몸 정면보다 33~40° 왼쪽으로 듦.
+- `FRRAimAnimations`(새 헤더 `RRRandomAimAnimations.h`): Idle, Fire(= 기존 `A_Fox_Fire`), Move[4], MoveSpeed[4]. `ARRRandomCharacter::AimAnimations`, `WantsAimPose()` = 세트 있음 + 살아 있음 + 안 오름 + 폼 핑거 아님 + `IsAiming` + 춤 아님. `FireAnimationHold` 0.35 → 0.6초(연사 사이에 자세가 풀리지 않게).
+- `URRRandomBodyAnimInstance`: 게임 스레드 `UpdateAim` → 프록시 `EvaluateAim`/`PointGun`.
+  - 가중치 `AimInTime` 0.1 / `AimOutTime` 0.25초. 서 있으면 조준 대기와 사격(발사부터 다시 재생, `FireHold` 0.3초) 섞음. 움직이면(`AimRunSpeed` 150 에서 다 넘어감) 바라보는 쪽 대비 이동 각도로 앞/뒤/왼/오른 달리기 가중치(`DirectionBlendSpeed` 6 로 부드럽게), 네 개 같은 위상, 재생 속도 = 지상 속도 / 가중 평균 애니메이션 속도(거인 스케일 포함, 0.6~1.8). 탈것 위에선 다리 정지(서 있는 조준).
+  - 포즈는 직접 섞음(`GetAnimationPose` + `AccumulateWithShortestRotation`) 후 기본 애니메이션 위에 `BlendWith`.
+  - `PointGun`: 오른손바닥(`RightHand`~`RightHandIndex1` 중간)→`LeftHand` 방향을 메시 공간에서 재서, 바라보는 쪽과의 요 차이를 `Spine`/`Spine1`/`Spine2` 에 0.3/0.3/0.4 로 나눠 돌리고, `Spine2` 에서 피치를 수평으로 + 반동(`KickAngle` 6°, `KickTime` 0.16초, 달릴 때만 — 서 있는 사격 애니메이션엔 자체 반동). 머리는 원래 총을 따라 보므로 그대로 앞을 봄.
+- `ARRRandomCharacter::UpdateLocomotionAnimation`: 세트가 있으면 기본 애니메이션에서 사격을 빼고(대기/걷기만), 메시 사격 자세 회전 `FireStanceYaw` 38° 를 조준 가중치 × (1 - 달리기 가중치) 만큼 — 서 있으면 몸 전체를 틀고, 달리면 다리는 이동 방향 그대로 척추만. `UpdateVehicleHandling` 에서 `bOrientRotationToMovement` = 탈것 || !조준 → 쏘는 동안 쏘는 쪽을 본 채 옆/뒤로 이동(전엔 샷 사이에 이동 방향으로 돌아 640°/s 로 흔들림).
+- 총구: `URRRandomGunComponent` 가 조준 가중치 0.95 이상일 때 매 프레임 실제 총구 끝을 캐릭터 기준(회전 제거, 크기로 나눔)으로 기억(`GetAimMuzzleOffset`, 총 모델 바뀌면 초기화, `MuzzleFollowSpeed` 20). `ShootAt` 이 그 자리에서 쏨(처음엔 `MuzzleOffset`). 높이 판정도 그 총구 높이. 서버는 안 그리는 캐릭터도 뼈를 갱신(`AlwaysTickPoseAndRefreshBones`, 권한 있을 때만). 조준 세트가 있으면 예전 "총을 손에서 떼어 총알 선에 맞추기"(`AimBlend`)는 안 함.
+- 총 크기/쥐는 자리(`GunLooks`: 길이, 총구 끝, 쥐는 자리 — 100 길이 메시 기준): 권총 65 (-30,0,30), SMG 75 (-25,0,5), 미니건 90 (-22,0,27), 라이플 `GunLength` 120 → 95 (손잡이), 블래스터 75 (-50,0,28), 대포 90 (-22,0,29). Mixamo 자세가 총을 뺨 높이·몸 가까이 들어서 통통한 장난감 총은 몸통이 큰 머리 속에 묻히고 위 카메라에선 총구가 머리에 가려졌음 → 몸통을 쥐도록 아래로, 뒤쪽을 쥐도록 앞으로.
+- 확인 (임시 `-RRAimTest`: 무적, 탄 무한, 앞 -Y 로 계속 사격, 1.2초마다 정지/±X/±Y 이동, 옆 카메라 또는 `-RRAimTop` 위 카메라; 확인 후 지움): 이동 방향 전부에서 총 방향 (0.03, -0.999, 0.01~0.1)(반동 포함) = 사격 방향. 옆에서 보면 여섯 총 모두 가슴 높이 수평, 총알이 총구 앞에서 같은 높이로 나감. 위 카메라에서 여섯 총 모두 총구가 머리 앞으로 보임. 라이플 서서 쏠 때 기억된 총구 (70.5, 16.5, -0.4) — 예전 측정 (70, 12, 2) 과 거의 같음. 일반 실행 로그에 에러 없음.
+- 확인 못 한 것: 네트워크 참가자 화면(시뮬레이트 프록시도 같은 계산이지만 총알은 서버 총구 위치에서 복제), 거인 크기의 조준 달리기, 탈것 위 사격 모습.
+
 ## 15차 덧붙임 — 승리 춤 (사용자: `House Dancing.fbx` 를 넣고 승리 여우가 승리 포즈로)
 
 - 15차 커밋에 포함. 원본 `C:\work\char-pipeline\input\fox\mixamo_dance\House Dancing.fbx`(Mixamo With Skin, 같은 여우 메시 9,451 정점, 뼈 41개).
@@ -112,6 +293,18 @@
 - `ARRRandomCharacter::VictoryAnimation`, `IsCelebrating()` = 게임 끝 + 살아 있음 + (이긴 팀이거나 MVP). `UpdateLocomotionAnimation` 이 그때 다른 애니메이션 대신 이것을 반복. 총(`URRRandomGunComponent`)은 쓰러졌을 때처럼 춤추는 동안 숨김(총 컴포넌트가 매 틱 스스로 보임을 정하므로 그쪽 조건에 추가).
 - 확인 (창 캡처 `C:\work\char-pipeline\output\screens\victory1`, `-RRScoreToWin=2`): 빨강 승, MVP 와 옆 빨강 여우가 총 없이 춤(프레임마다 자세 다름), 폭죽/결과 UI 그대로, Enter 로 새 게임(`new match`). 빌드 경고 없음.
 - 확인 못 한 것: 춤의 전체 26초(캡처는 앞 6초쯤), 진 팀 MVP 의 춤, 네트워크.
+- 수정 (사용자: 승리 포즈로 넘어갈 때 하이라이트가 하늘을 비춤 + 승리 포즈 캐릭터는 모두 정면):
+  - 원인: `SetViewTargetWithBlend` 는 위치와 회전을 따로 직선 보간해서, 높은 탑다운 카메라(피치 -60, 7,900 거리, FOV 20) → MVP 정면(피치 -2, 900) 사이 1초쯤에 시선이 MVP 를 벗어나 물/하늘만 보였음(재현 캡처 `w_1000`).
+  - 카메라 전환을 `ARRRandomResultsDirector` 가 직접: 컨트롤러가 `PlayerCameraManager->GetCameraCacheView()`(지금 화면)를 `Setup(MVP, 시작 뷰, ResultsBlendTime)` 에 넘기고 블렌드 없이 `SetViewTarget`. 1.6초 동안(EaseInOut 2) MVP 를 중심으로 궤도 — 피치/요/거리 보간(위에서 내려오기만 해서 하늘을 안 봄), 시선은 시작 카메라가 보던 점 → MVP 로 옮김, FOV 20 → 42, 시작 카메라의 포스트 프로세스(툰)를 복사해 가중치 1 → 0(예전 블렌드와 같은 모습). 엄폐물 피하기(`GetClearReach`)는 진행만큼 섞어서 첫 프레임이 원래 화면과 같게. 폭죽 방향은 최종 카메라 요(`StartYaw`) 기준.
+  - 정면: `Setup` 이 최종 카메라 자리(흔들림 없는)를 모든 캐릭터에 `SetCelebrationViewPoint` 로 알려 주고, 춤추는 동안(`CurrentAnimation == VictoryAnimation`) 메시를 그쪽으로 초당 `CelebrationTurnRate` 360° 돌림(`CelebrationTurn`, 메시 상대 회전 — 복제 안 되는 각 기기 연출, 액터 회전/이동 복제는 그대로). 진 팀(춤 안 춤)은 그대로.
+  - 확인 (창 캡처, F6): 전환 중 0.4초/1초/1.7초 모두 MVP 가 화면 안(하늘만 보이는 프레임 없음), 1.7초쯤 정면. 임시 로그(확인 후 지움)로 3초 시점 춤추는 셋의 몸 방향 vs 카메라 방향 차이 -6°, -1°, -15°(카메라 좌우 흔들림만큼), 진 팀 셋은 그대로. 빌드 경고 없음.
+  - 확인 못 한 것: 거인 MVP, 네트워크 참가자 화면. (내가 MVP 가 아닐 때는 아래 수정에서 확인)
+- 수정 (사용자: 팀원이 카메라를 가림): 각도 고르기(`GetViewOpenness`)가 엄폐물/언덕(WorldStatic)만 봐서, 카메라 바로 앞 팀원이 화면을 크게 가렸음(캡처 `win1/w_4000`, `win4/w_4000` 오른쪽 앞 큰 여우).
+  - `GetBrawlerReach(View, Reach)`: MVP 말고 살아 있는 캐릭터마다 캡슐 반경 + `BrawlerClearance` 70(춤에서 엉덩이가 ~60 벗어남, 귀/팔) + 25 원기둥으로, 카메라가 Reach 뒤에 있을 때 ① MVP 바로 앞을 가리거나(시선 축에서 반경 안) ② MVP 에서 카메라 쪽으로 `MinBrawlerPull` 300 넘게 나와 있으면서 **실제 화면(가로 FOV 42, 16:9) 안**에 들어오면 → 그 앞까지 거리. MVP 옆(300 안)에 선 캐릭터는 같이 찍히는 것이라 안 셈.
+  - 원래 열린 정도 검사의 다섯 선은 MVP→카메라 쪽으로 넓어지는 모양이라(화면은 반대로 카메라 쪽이 좁음) 카메라 근처 캐릭터를 놓쳐서, 캐릭터는 선 대신 위 화면 판정으로. 열린 정도 = min(엄폐물 평균, 캐릭터 거리 / Distance).
+  - 어느 각도도 안 비면: `Setup` 에서 흔들림 양 끝까지 한 번 계산한 `BrawlerReach` 로 카메라를 그 캐릭터 앞까지 당김(흔들리며 들락날락 안 하게 고정; 300 보다 가까우면 안 당김). 정면 바라보기 지점도 그 거리 기준. 로그에 `, in front of a brawler`.
+  - 확인 (창 캡처, F6): 카운트다운 중(팀원이 옆에 줄 섬) — 수정 전 yaw 255 에서 오른쪽 앞에 팀원 크게 → 수정 뒤 yaw 105 `view 100% open`, 화면에 MVP 만. 35초 플레이 뒤(봇 MVP, 진 팀) — 전환 중 하늘 없이 MVP 로 넘어가고 끝 화면 가림 없음. 빌드 경고 없음.
+  - 이 작업 중 사용자 실행이 안 됨: 스마트 앱 컨트롤이 10:57 빌드 DLL 을 막음(로그 `GetLastError=4551`, CodeIntegrity 3033/3077, 아래 참고 메모와 같은 문제). 다시 빌드한 DLL 은 통과.
 
 ## 15차 덧붙임 — 10킬 승리와 결과 화면 (사용자: 10킬이면 게임 종료 + 결과창, 새 게임/타이틀, MVP 줌 + 포인트 라이트 폭죽)
 

@@ -17,8 +17,16 @@ void ARRRandomGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ARRRandomGameState, ScoreToWin);
 	DOREPLIFETIME(ARRRandomGameState, PlayStartTime);
 	DOREPLIFETIME(ARRRandomGameState, bMatchOver);
+	DOREPLIFETIME(ARRRandomGameState, bThirdPersonMode);
 	DOREPLIFETIME(ARRRandomGameState, WinningTeam);
 	DOREPLIFETIME(ARRRandomGameState, MVP);
+}
+
+bool ARRRandomGameState::IsThirdPersonMode(const UObject* WorldContext)
+{
+	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	const ARRRandomGameState* State = World ? World->GetGameState<ARRRandomGameState>() : nullptr;
+	return State && State->bThirdPersonMode;
 }
 
 bool ARRRandomGameState::IsMatchOver(const UObject* WorldContext)

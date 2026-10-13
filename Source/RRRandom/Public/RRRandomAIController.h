@@ -6,12 +6,14 @@
 #include "RRRandomAIController.generated.h"
 
 class ARRRandomCharacter;
+class ARRRandomVehicle;
 
 /**
  * Careful brawler bot. Goes after the nearest opponent it can see, keeps its own preferred distance while strafing,
  * waits a moment after spotting someone before shooting, fires in short bursts with some aim error,
  * and only shoots when no cover is in the way. Ducks behind cover to reload or heal, reloads early while
- * nobody is in sight, and rolls its stored dice when a fight starts.
+ * nobody is in sight, and rolls its stored dice when a fight starts. Out of a fight it rides vehicles for long trips
+ * and hops in the back of a teammate's stopped car (RideTripDistance).
  * Steers directly (sliding around cover) instead of pathfinding, so it needs no navmesh.
  */
 UCLASS()
@@ -86,6 +88,25 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "AI")
 	FVector2D FlightHoldTime = FVector2D(0.25f, 0.75f);
 
+	/**
+	 * Out of a fight, bots ride for trips longer than this (to where they are heading: an opponent far off, where one
+	 * was last seen, or the next roaming spot), walking to a free vehicle at most VehicleSearchRadius away (and no further
+	 * than half the trip); they get off within RideArriveDistance of where they are going, when stuck, or when a fight
+	 * starts. A teammate's car standing still within PassengerJoinRadius with its rear seat free: they hop in the back,
+	 * trip or not, and get off when the driver does or a fight starts.
+	 */
+	UPROPERTY(EditAnywhere, Category = "AI|Vehicles")
+	float RideTripDistance = 1400.f;
+
+	UPROPERTY(EditAnywhere, Category = "AI|Vehicles")
+	float RideArriveDistance = 500.f;
+
+	UPROPERTY(EditAnywhere, Category = "AI|Vehicles")
+	float VehicleSearchRadius = 1000.f;
+
+	UPROPERTY(EditAnywhere, Category = "AI|Vehicles")
+	float PassengerJoinRadius = 600.f;
+
 	/** 0 picks a new seed each play session. */
 	UPROPERTY(EditAnywhere, Category = "AI")
 	int32 Seed = 0;
@@ -105,6 +126,25 @@ private:
 	void UpdateDice(ARRRandomCharacter* Self, float Distance, float DeltaSeconds);
 	/** Takes off and lets go of jump while the flight power lasts and a fight is near. */
 	void UpdateFlight(ARRRandomCharacter* Self, float Distance, float DeltaSeconds);
+	/** Where the bot is heading when not fighting. */
+	FVector GetTravelGoal(const ARRRandomCharacter* Self, const ARRRandomCharacter* Target) const;
+	/** Gets on and off vehicles (see RideTripDistance). Returns true and sets Wanted while walking over to one. */
+	bool UpdateVehicles(ARRRandomCharacter* Self, const ARRRandomCharacter* Target, bool bInFight, FVector& Wanted, float DeltaSeconds);
+	/** The vehicle worth walking to now, if any: a teammate's stopped car with room behind, or a free one for a long trip. */
+	ARRRandomVehicle* FindVehicleToRide(const ARRRandomCharacter* Self, const ARRRandomCharacter* Target) const;
+	/** Whether a vehicle can still be ridden the way the bot set out to (driver's seat free, or the car still stopped for it). */
+	bool IsStillWorthRiding(const ARRRandomCharacter* Self, const ARRRandomVehicle* Ride) const;
+
+public:
+	/** The vehicle this bot is walking over to, so teammates don't all head for the same one. */
+	ARRRandomVehicle* GetVehicleTarget() const { return VehicleTarget.Get(); }
+
+private:
+	TWeakObjectPtr<ARRRandomVehicle> VehicleTarget;
+	/** Seconds left to reach VehicleTarget before giving up; until the next look for one; spent barely moving at the wheel. */
+	float VehicleTargetTimer = 0.f;
+	float VehicleSearchTimer = 0.f;
+	float StuckTimer = 0.f;
 
 	TWeakObjectPtr<ARRRandomCharacter> Opponent;
 	FRandomStream Stream;
@@ -114,7 +154,8 @@ private:
 	bool bHadSight = false;
 	bool bHasCoverSpot = false;
 	FVector CoverSpot = FVector::ZeroVector;
-	float PreferredDistance = 900.f;
+	/** This bot's fighting distance, as a share of its attack range (which a gun such as the foam finger may change). */
+	float PreferredShare = 0.7f;
 	float RetargetTimer = 0.f;
 	float CoverSearchTimer = 0.f;
 	float StrafeTimer = 0.f;

@@ -29,10 +29,36 @@ namespace
 	constexpr float RareDamage = 1.1f;
 	constexpr float EpicDamage = 1.5f;
 	constexpr float LegendaryDamage = 2.1f;
+
+	// The foam finger pokes this often (a share of the pistol's interval) and this far (a share of the attack range)
+	constexpr float FoamFingerPokeInterval = 1.2f;
+	constexpr float FoamFingerRange = 0.25f;
+}
+
+FRRWeapon FRRWeapon::MakeFoamFinger(int32 BaseMagazineSize)
+{
+	FRRWeapon Weapon;
+	Weapon.Name = TEXT("FOAM FINGER");
+	Weapon.bIsDefault = false;
+	Weapon.bFoamFinger = true;
+	// Damage itself is a flat 1 (see the projectile); this only sets the tier's look
+	Weapon.DamageMultiplier = 0.01f;
+	Weapon.Tier = ERRWeaponTier::Legendary;
+	// Poke after poke: no real magazine to speak of
+	Weapon.MagazineSize = FMath::Max(1, BaseMagazineSize * 4);
+	Weapon.FireIntervalMultiplier = FoamFingerPokeInterval;
+	Weapon.ReloadTimeMultiplier = 0.5f;
+	Weapon.ProjectileSpeedMultiplier = 1.5f;
+	Weapon.RangeMultiplier = FoamFingerRange;
+	return Weapon;
 }
 
 FRRWeapon FRRWeapon::Roll(FRandomStream& Stream, int32 Quality, int32 BaseMagazineSize)
 {
+	if (Stream.FRand() < FoamFingerChance)
+	{
+		return MakeFoamFinger(BaseMagazineSize);
+	}
 	const FRRWeaponType& Type = WeaponTypes[Stream.RandRange(0, UE_ARRAY_COUNT(WeaponTypes) - 1)];
 
 	FRRWeapon Weapon;
@@ -51,6 +77,10 @@ FRRWeapon FRRWeapon::Roll(FRandomStream& Stream, int32 Quality, int32 BaseMagazi
 
 FRRWeapon FRRWeapon::Make(int32 Type, int32 Quality, int32 BaseMagazineSize)
 {
+	if (Type == UE_ARRAY_COUNT(WeaponTypes) + 1)
+	{
+		return MakeFoamFinger(BaseMagazineSize);
+	}
 	if (Type <= 0 || Type > UE_ARRAY_COUNT(WeaponTypes))
 	{
 		return FRRWeapon();
@@ -72,12 +102,46 @@ FRRWeapon FRRWeapon::Make(int32 Type, int32 Quality, int32 BaseMagazineSize)
 
 int32 FRRWeapon::GetTypeCount()
 {
-	return UE_ARRAY_COUNT(WeaponTypes) + 1;
+	// The pistol, the gun types and the foam finger
+	return UE_ARRAY_COUNT(WeaponTypes) + 2;
 }
 
 FString FRRWeapon::GetTypeName(int32 Type)
 {
+	if (Type == UE_ARRAY_COUNT(WeaponTypes) + 1)
+	{
+		return TEXT("FINGER");
+	}
 	return Type > 0 && Type <= UE_ARRAY_COUNT(WeaponTypes) ? FString(WeaponTypes[Type - 1].Name) : FRRWeapon().Name;
+}
+
+ERRHitEffect FRRWeapon::GetHitEffect() const
+{
+	if (bFoamFinger)
+	{
+		return ERRHitEffect::Poke;
+	}
+	if (Name == TEXT("SMG"))
+	{
+		return ERRHitEffect::Smg;
+	}
+	if (Name == TEXT("MINIGUN"))
+	{
+		return ERRHitEffect::Minigun;
+	}
+	if (Name == TEXT("RIFLE"))
+	{
+		return ERRHitEffect::Rifle;
+	}
+	if (Name == TEXT("BLASTER"))
+	{
+		return ERRHitEffect::Blaster;
+	}
+	if (Name == TEXT("CANNON"))
+	{
+		return ERRHitEffect::Cannon;
+	}
+	return ERRHitEffect::Pistol;
 }
 
 ERRWeaponTier FRRWeapon::GetTierForDamage(float DamageMultiplier)

@@ -28,6 +28,8 @@ public:
 
 	/** True when the world's game state says the match is over (false without one). */
 	static bool IsMatchOver(const UObject* WorldContext);
+	/** The match is played in third person (over the shoulder, no fog of war) rather than from the top view; the host picks. */
+	static bool IsThirdPersonMode(const UObject* WorldContext);
 
 	/** Seconds until play starts (zero or less once it has), on the server's clock. */
 	float GetCountdownRemaining() const { return PlayStartTime - GetServerWorldTimeSeconds(); }
@@ -44,6 +46,7 @@ public:
 	void AddTeamScore(int32 Team);
 	/** Server only. */
 	void SetScoreToWin(int32 Score) { ScoreToWin = Score; }
+	void SetThirdPersonMode(bool bOn) { bThirdPersonMode = bOn; }
 	/** Server only (the win cheat). */
 	void SetTeamScore(int32 Team, int32 Score);
 	/** Server only: ends the match for everyone. */
@@ -61,6 +64,9 @@ private:
 
 	UPROPERTY(Replicated)
 	bool bMatchOver = false;
+
+	UPROPERTY(Replicated)
+	bool bThirdPersonMode = false;
 
 	UPROPERTY(Replicated)
 	int32 WinningTeam = INDEX_NONE;

@@ -1,4 +1,6 @@
 #include "RRRandomGrassFloor.h"
+#include "RRRandomIsland.h"
+#include "EngineUtils.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
@@ -168,10 +170,43 @@ void ARRRandomGrassFloor::LayTiles()
 	{
 		TileInstances[Index]->AddInstances(Transforms[Index], false, true);
 	}
+	// Roads get the island's dirt tiles instead (whichever of the two is laid out last makes room)
+	for (TActorIterator<ARRRandomIsland> Island(World); Island; ++Island)
+	{
+		ClearRoadTiles(*Island);
+	}
 
 	// The gap plane, just over the floor and under the tiles' tops
 	Under->SetWorldLocationAndRotation(FVector(Center.X, Center.Y, Z + Lift * 0.5f), FRotator::ZeroRotator);
 	Under->SetWorldScale3D(FVector(CountX * TileSize / PlaneSize, CountY * TileSize / PlaneSize, 1.f));
 
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: grass floor %d x %d tiles over %s (seed %d)."), CountX, CountY, *Hit.GetComponent()->GetName(), Seed);
+}
+
+void ARRRandomGrassFloor::ClearRoadTiles(const ARRRandomIsland* Island)
+{
+	if (!Island || !Island->IsBuilt())
+	{
+		return;
+	}
+	int32 Removed = 0;
+	for (UHierarchicalInstancedStaticMeshComponent* Instances : TileInstances)
+	{
+		TArray<int32> OnRoads;
+		for (int32 Index = 0; Index < Instances->GetInstanceCount(); ++Index)
+		{
+			FTransform Transform;
+			Instances->GetInstanceTransform(Index, Transform, true);
+			if (Island->IsRoadAt(FVector2D(Transform.GetLocation())))
+			{
+				OnRoads.Add(Index);
+			}
+		}
+		Instances->RemoveInstances(OnRoads);
+		Removed += OnRoads.Num();
+	}
+	if (Removed > 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: grass floor gave %d tiles to the island's roads."), Removed);
+	}
 }

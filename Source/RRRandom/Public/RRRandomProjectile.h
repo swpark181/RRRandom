@@ -60,6 +60,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
 	FLinearColor ShotColor = FLinearColor(1.f, 0.85f, 0.1f);
 
+	/**
+	 * A foam finger's poke (FRRWeapon::bFoamFinger): not drawn, always PokeDamage, but hitting a brawler from behind
+	 * (flying within BackstabAngle of the way it faces) knocks it out at once. Set before the shot begins play.
+	 */
+	UPROPERTY(Replicated)
+	bool bPoke = false;
+
+	UPROPERTY(EditAnywhere, Category = "Combat")
+	float PokeDamage = 1.f;
+
+	/** The sticker a hit shows on the brawler (the shooter's gun); set before the shot begins play. Server only. */
+	ERRHitEffect HitEffect = ERRHitEffect::Pistol;
+
+	UPROPERTY(EditAnywhere, Category = "Combat")
+	float BackstabAngle = 60.f;
+
 	/** How flashy the shot looks; the shooter sets it from its gun before the shot begins play. */
 	UPROPERTY(Replicated)
 	ERRWeaponTier Tier = ERRWeaponTier::Common;

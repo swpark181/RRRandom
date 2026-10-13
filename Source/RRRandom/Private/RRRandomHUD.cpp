@@ -5,6 +5,7 @@
 #include "RRRandomOverheadDieComponent.h"
 #include "RRRandomPlayerController.h"
 #include "RRRandomSessionSubsystem.h"
+#include "RRRandomVehicle.h"
 #include "Camera/PlayerCameraManager.h"
 #include "CanvasItem.h"
 #include "Components/CapsuleComponent.h"
@@ -44,6 +45,13 @@ namespace
 	// Buffs about to run out blink
 	constexpr float BuffBlinkTime = 3.f;
 	constexpr float DamagePopupRiseSpeed = 70.f;
+	// Hit stickers (/Game/UI/T_HitEffects): the sheet's grid, how long they take to pop in, and each one's size on a
+	// 720 pixel tall screen, in ERRHitEffect order (the cannon's blast and the skull biggest, rapid fire's sparks small)
+	constexpr int32 HitEffectColumns = 4;
+	constexpr int32 HitEffectRows = 2;
+	constexpr float HitEffectPopTime = 0.1f;
+	constexpr float HitEffectReferenceHeight = 720.f;
+	constexpr float HitEffectSizes[] = { 52.f, 46.f, 40.f, 60.f, 66.f, 96.f, 58.f, 84.f };
 
 	const FLinearColor Backing(0.f, 0.f, 0.f, 0.6f);
 	const FLinearColor DiceColor(1.f, 0.85f, 0.1f);
@@ -103,6 +111,8 @@ void ARRRandomHUD::DrawHUD()
 		if (Viewer->IsAlive())
 		{
 			DrawAmmoPanel(*Viewer);
+			DrawRidePrompt(*Viewer);
+			DrawCrosshair(*Viewer);
 		}
 		else
 		{
@@ -230,6 +240,13 @@ void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRand
 		PowerColors.Add(URRRandomDiceBuffComponent::GetFlightColor());
 		PowerRemaining.Add(Brawler.GetFlightRemaining());
 	}
+	if (Brawler.IsInvincible())
+	{
+		// The cheat: never runs out, so it never blinks
+		PowerLabels.Add(TEXT("GOD"));
+		PowerColors.Add(FLinearColor::FromSRGBColor(FColor(255, 255, 255)));
+		PowerRemaining.Add(UE_BIG_NUMBER);
+	}
 	if (PowerLabels.Num() > 0)
 	{
 		ChipsTop = DrawPowerChips(PowerLabels, PowerColors, PowerRemaining, Head.X, ChipsTop, Font);
@@ -313,6 +330,31 @@ void ARRRandomHUD::DrawAmmoBar(const ARRRandomCharacter& Brawler, float Left, fl
 	}
 }
 
+void ARRRandomHUD::DrawRidePrompt(const ARRRandomCharacter& Brawler)
+{
+	// Under the brawler's feet: what F does right now
+	const ARRRandomVehicle* Ridden = Brawler.GetVehicle();
+	// Giants and flyers can't get on, so no offer
+	const ARRRandomVehicle* Near = Ridden || Brawler.IsGiant() || Brawler.CanFly() ? nullptr : Brawler.FindVehicleInReach();
+	if (!Ridden && !Near)
+	{
+		return;
+	}
+	const FString Text = Ridden ? TEXT("[F] GET OFF")
+		: FString::Printf(TEXT("[F] RIDE %s%s"), Near->GetHandling().Name, Near->IsNextSeatRear() ? TEXT(" (BACK SEAT)") : TEXT(""));
+	const FVector Feet = Brawler.GetActorLocation() - FVector(0.f, 0.f, Brawler.GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	const FVector Screen = Project(Feet);
+	if (Screen.Z <= 0.f)
+	{
+		return;
+	}
+	UFont* Font = GEngine->GetSmallFont();
+	float Width = 0.f;
+	float Height = 0.f;
+	GetTextSize(Text, Width, Height, Font);
+	DrawShadowedText(Text, Ridden ? FLinearColor(0.75f, 0.75f, 0.75f) : FLinearColor::FromSRGBColor(FColor(255, 214, 110)), Screen.X - Width * 0.5f, Screen.Y + 6.f, Font);
+}
+
 void ARRRandomHUD::DrawAmmoPanel(const ARRRandomCharacter& Brawler)
 {
 	// "12 / 15", or the reload progress, in the bottom-right corner
@@ -335,8 +377,8 @@ void ARRRandomHUD::DrawAmmoPanel(const ARRRandomCharacter& Brawler)
 
 	// The gun and how it differs from the pistol, e.g. "EPIC CANNON  DMG x2.3  SHOT SPD x0.5"
 	const FRRWeapon& Weapon = Brawler.GetWeapon();
-	const FString WeaponText = Weapon.bIsDefault
-		? Weapon.Name
+	const FString WeaponText = Weapon.bIsDefault ? Weapon.Name
+		: Weapon.bFoamFinger ? TEXT("FOAM FINGER  DMG 1  BACK POKE = KO")
 		: FString::Printf(TEXT("%s %s  DMG x%.1f  SHOT SPD x%.1f"), *FRRWeapon::GetTierName(Weapon.Tier), *Weapon.Name, Weapon.DamageMultiplier, Weapon.ProjectileSpeedMultiplier);
 	UFont* WeaponFont = GEngine->GetMediumFont();
 	GetTextSize(WeaponText, Width, Height, WeaponFont);
@@ -458,13 +500,36 @@ void ARRRandomHUD::DrawDamagePopups(const ARRRandomCharacter& Brawler, const ARR
 	UFont* Font = GEngine->GetMediumFont();
 	const bool bFriendly = Viewer && Brawler.GetTeam() == Viewer->GetTeam();
 	const FLinearColor Color = bFriendly ? FriendlyDamageColor : FLinearColor::White;
+
+	// The cartoon stickers first, under the numbers: popping in with an overshoot, holding, then fading and shrinking
+	if (HitEffects)
+	{
+		const float Scale = Canvas->ClipY / HitEffectReferenceHeight;
+		for (const FRRDamagePopup& Popup : Brawler.GetDamagePopups())
+		{
+			const int32 Cell = FMath::Clamp(static_cast<int32>(Popup.Effect), 0, static_cast<int32>(ERRHitEffect::Count) - 1);
+			const float T = Popup.Age / FMath::Max(Popup.Lifetime, KINDA_SMALL_NUMBER);
+			const float PopIn = FMath::Clamp(Popup.Age / HitEffectPopTime, 0.f, 1.f);
+			// 0 -> 1.25 -> 1, a cartoon bounce
+			const float Bounce = PopIn < 1.f ? 1.25f * FMath::Sin(PopIn * PI * 0.5f) : 1.f + 0.25f * FMath::Max(0.f, 1.f - (Popup.Age - HitEffectPopTime) / HitEffectPopTime);
+			const float Fade = 1.f - FMath::SmoothStep(0.55f, 1.f, T);
+			const float Size = HitEffectSizes[Cell] * Scale * Bounce * FMath::Lerp(0.8f, 1.f, Fade);
+			// A skull drifts up off the fallen body
+			const float Rise = Popup.Effect == ERRHitEffect::Skull ? Popup.Age * 30.f * Scale : 0.f;
+			const FVector2D Center(Body.X + Popup.Nudge.X * Scale, Body.Y + Popup.Nudge.Y * Scale - Rise);
+			DrawTexture(HitEffects, Center.X - Size * 0.5f, Center.Y - Size * 0.5f, Size, Size,
+				float(Cell % HitEffectColumns) / HitEffectColumns, float(Cell / HitEffectColumns) / HitEffectRows, 1.f / HitEffectColumns, 1.f / HitEffectRows,
+				FLinearColor(1.f, 1.f, 1.f, Fade), BLEND_Translucent, 1.f, false, Popup.Effect == ERRHitEffect::Skull ? 0.f : Popup.Spin, FVector2D(0.5f, 0.5f));
+		}
+	}
+
 	for (const FRRDamagePopup& Popup : Brawler.GetDamagePopups())
 	{
 		const FString Text = FString::FromInt(FMath::RoundToInt(Popup.Amount));
 		float Width = 0.f;
 		float Height = 0.f;
 		GetTextSize(Text, Width, Height, Font);
-		const float Alpha = 1.f - Popup.Age / ARRRandomCharacter::DamagePopupLifetime;
+		const float Alpha = FMath::Max(0.f, 1.f - Popup.Age / ARRRandomCharacter::DamagePopupLifetime);
 		DrawShadowedText(Text, WithAlpha(Color, Alpha), Body.X + 50.f + Popup.OffsetX - Width * 0.5f, Body.Y - Popup.Age * DamagePopupRiseSpeed, Font);
 	}
 }
@@ -533,7 +598,7 @@ void ARRRandomHUD::DrawOnlinePanel()
 	DrawShadowedText(TEXT("[F1] HOST   [F2] JOIN   [F3] LEAVE   [ESC] MENU   [M] MAP"), FLinearColor::Gray, Margin, Y, Font);
 	Y += LineHeight;
 #if !UE_BUILD_SHIPPING
-	DrawShadowedText(TEXT("CHEATS  [F6] WIN   [F7] GIANT   [F8] FLY   [1-6] PISTOL MINIGUN SMG RIFLE BLASTER CANNON"), FLinearColor::Gray, Margin, Y, Font);
+	DrawShadowedText(TEXT("CHEATS  [F6] WIN   [F7] GIANT   [F8] FLY   [F9] 3RD PERSON   [F10] GOD   [1-7] PISTOL MINIGUN SMG RIFLE BLASTER CANNON FINGER"), FLinearColor::Gray, Margin, Y, Font);
 	Y += LineHeight;
 #endif
 	if (!Sessions->GetStatus().IsEmpty())
@@ -869,4 +934,35 @@ void ARRRandomHUD::DrawPauseMenu()
 	const FString Keys = TEXT("[ESC] RESUME      [ENTER] TITLE");
 	GetTextSize(Keys, W, H, GEngine->GetSmallFont(), S);
 	DrawText(Keys, Muted, (ScreenW - W) * 0.5f, Second + ButtonH + 24.f * S, GEngine->GetSmallFont(), S);
+}
+
+void ARRRandomHUD::DrawCrosshair(const ARRRandomCharacter& Brawler)
+{
+	const ARRRandomPlayerController* Controller = Cast<ARRRandomPlayerController>(GetOwningPlayerController());
+	if (!Controller || !Controller->IsThirdPerson())
+	{
+		return;
+	}
+	// Four short ticks around a dot; the gap closes in the sights and opens briefly after a shot
+	const float Scale = Canvas->ClipY / 1080.f;
+	const FVector2D Middle(Canvas->ClipX * 0.5f, Canvas->ClipY * 0.5f);
+	const float Kick = FMath::Clamp(1.f - Brawler.GetTimeSinceShot() / 0.18f, 0.f, 1.f);
+	const float Gap = (FMath::Lerp(14.f, 6.f, Brawler.GetSightsBlend()) + 10.f * Kick) * Scale;
+	const float Length = 10.f * Scale;
+	const float Thickness = FMath::Max(2.f, 2.f * Scale);
+	const FLinearColor Ink(1.f, 1.f, 1.f, 0.95f);
+	const FLinearColor Edge(0.f, 0.f, 0.f, 0.6f);
+	const FVector2D Directions[] = { FVector2D(1.f, 0.f), FVector2D(-1.f, 0.f), FVector2D(0.f, 1.f), FVector2D(0.f, -1.f) };
+	for (const FLinearColor& Color : { Edge, Ink })
+	{
+		const float Grow = Color == Edge ? 1.5f * Scale : 0.f;
+		for (const FVector2D& Direction : Directions)
+		{
+			const FVector2D From = Middle + Direction * (Gap - Grow);
+			const FVector2D To = Middle + Direction * (Gap + Length + Grow);
+			Canvas->K2_DrawLine(From, To, Thickness + Grow * 2.f, Color);
+		}
+		const float Dot = (Thickness + Grow * 2.f) * 0.5f;
+		DrawRect(Color, Middle.X - Dot, Middle.Y - Dot, Dot * 2.f, Dot * 2.f);
+	}
 }
