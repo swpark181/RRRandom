@@ -70,6 +70,11 @@ private:
 	void DrawDamagePopups(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer);
 	void DrawDicePanel(const ARRRandomCharacter& Viewer);
 	void DrawAmmoPanel(const ARRRandomCharacter& Brawler);
+	/** "[F] RIDE MOTORBIKE" under the brawler next to a free vehicle, "[F] GET OFF" while riding. */
+	void DrawRidePrompt(const ARRRandomCharacter& Brawler);
+	/** Third person (ARRRandomPlayerController::RRThirdPerson): a crosshair in the middle of the screen, tighter in the sights,
+	 * spreading for a moment after each shot. */
+	void DrawCrosshair(const ARRRandomCharacter& Brawler);
 	/** Draws the gun's name chip ending at Right; nothing for the starting pistol. */
 	void DrawWeaponChip(const struct FRRWeapon& Weapon, float Right, float CenterY, UFont* Font);
 	void DrawScore();
@@ -114,6 +119,10 @@ private:
 	/** Head-and-shoulders picture for the team cards (char-pipeline/scripts/blender_portrait.py). */
 	UPROPERTY()
 	TObjectPtr<UTexture2D> Portrait;
+
+	/** Cartoon hit stickers, a 4 x 2 atlas in ERRHitEffect order (char-pipeline/scripts/make_hit_effects.py). */
+	UPROPERTY()
+	TObjectPtr<UTexture2D> HitEffects;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTexture2D> MapTexture;

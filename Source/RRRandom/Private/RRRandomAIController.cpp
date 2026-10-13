@@ -3,6 +3,7 @@
 #include "RRRandomCover.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomGameState.h"
+#include "RRRandomVehicle.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -33,7 +34,7 @@ namespace
 	// arrival or after this many seconds (cover taller than half a brawler hides the other side, so standing still in the
 	// middle could leave both teams staring at the same block)
 	constexpr float PatrolRadiusMin = 300.f;
-	constexpr float PatrolRadiusMax = 1300.f;
+	constexpr float PatrolRadiusMax = 1800.f;
 	constexpr float PatrolTimeMin = 3.f;
 	constexpr float PatrolTimeMax = 6.f;
 	// Between bursts with this few rounds left, the bot reloads instead of running dry mid-fight
@@ -42,6 +43,16 @@ namespace
 	constexpr int32 BaseMagazineForBursts = 15;
 	// Opponents behind cover count as this much further away when picking a target
 	constexpr float HiddenOpponentPenalty = 600.f;
+
+	// Vehicles: a car counts as stopped (to hop in the back) below this speed; a vehicle more than this far above or
+	// below isn't reachable; the bot gives up walking to one after this long, looks for one this often, and gets off
+	// after this long barely moving at the wheel (wedged against cover)
+	constexpr float StoppedSpeed = 40.f;
+	constexpr float HeightReach = 120.f;
+	constexpr float VehicleWalkTime = 8.f;
+	constexpr float VehicleSearchInterval = 0.5f;
+	constexpr float StuckSpeed = 60.f;
+	constexpr float StuckTime = 1.5f;
 
 	// Shots fly this far above the capsule center, this far to the shooter's right (the rifle's muzzle in the fox's fire
 	// stance) and are this wide (see the character's MuzzleOffset and the projectile)
@@ -95,7 +106,7 @@ void ARRRandomAIController::OnPossess(APawn* InPawn)
 	// Each bot gets its own fighting distance
 	if (const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(InPawn))
 	{
-		PreferredDistance = Brawler->GetAttackRange() * Stream.FRandRange(PreferredRangeShare.X, PreferredRangeShare.Y);
+		PreferredShare = Stream.FRandRange(PreferredRangeShare.X, PreferredRangeShare.Y);
 		LastHealth = Brawler->GetMaxHealth();
 	}
 }
@@ -114,6 +125,8 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	if (!Self || !Self->IsAlive())
 	{
 		Opponent = nullptr;
+		VehicleTarget = nullptr;
+		StuckTimer = 0.f;
 		bRetreating = false;
 		bHadSight = false;
 		bHasCoverSpot = false;
@@ -227,6 +240,10 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		Wanted = ChooseFightDirection(Self, Target, Distance, bCanSee);
 	}
 
+	// Vehicles: only out of a fight (an opponent in sight near its range, or being hit)
+	const bool bInFight = bWantsCover || UnderFireTimer > 0.f || (Target && Distance <= Self->GetAttackRange() * EngageRangeShare);
+	UpdateVehicles(Self, Target, bInFight, Wanted, DeltaSeconds);
+
 	const FVector Move = SteerAroundObstacles(Self, Wanted) + GetSeparation(Self);
 	if (!Move.IsNearlyZero())
 	{
@@ -237,6 +254,146 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	{
 		TryShoot(Self, Target, Distance);
 	}
+}
+
+FVector ARRRandomAIController::GetTravelGoal(const ARRRandomCharacter* Self, const ARRRandomCharacter* Target) const
+{
+	if (Target)
+	{
+		return Target->GetActorLocation();
+	}
+	if (LastSeenTimer > 0.f)
+	{
+		return LastSeenLocation;
+	}
+	return bHasArenaCenter ? PatrolGoal : Self->GetActorLocation();
+}
+
+bool ARRRandomAIController::IsStillWorthRiding(const ARRRandomCharacter* Self, const ARRRandomVehicle* Ride) const
+{
+	if (!Ride || !Ride->HasRoom())
+	{
+		return false;
+	}
+	const ARRRandomCharacter* Driver = Ride->GetRider();
+	// The driver's seat free, or the back of a teammate's car that is still standing for it
+	return !Driver || (Driver->GetTeam() == Self->GetTeam() && Driver->GetVelocity().Size2D() <= StoppedSpeed);
+}
+
+ARRRandomVehicle* ARRRandomAIController::FindVehicleToRide(const ARRRandomCharacter* Self, const ARRRandomCharacter* Target) const
+{
+	const FVector Location = Self->GetActorLocation();
+	const float Trip = FVector::Dist2D(Location, GetTravelGoal(Self, Target));
+	ARRRandomVehicle* Best = nullptr;
+	float BestScore = UE_BIG_NUMBER;
+	for (TActorIterator<ARRRandomVehicle> It(GetWorld()); It; ++It)
+	{
+		ARRRandomVehicle* Ride = *It;
+		if (!IsStillWorthRiding(Self, Ride) || FMath::Abs(Ride->GetActorLocation().Z - Location.Z) > HeightReach)
+		{
+			continue;
+		}
+		const float Distance = FVector::Dist2D(Location, Ride->GetActorLocation());
+		float Score = Distance;
+		if (Ride->GetRider())
+		{
+			// A lift with a teammate, trip or not; first choice
+			if (Distance > PassengerJoinRadius)
+			{
+				continue;
+			}
+			Score -= PassengerJoinRadius;
+		}
+		else
+		{
+			// Driving only pays for a long trip, with the vehicle not far out of the way
+			if (Trip < RideTripDistance || Distance > VehicleSearchRadius || Distance > Trip * 0.5f)
+			{
+				continue;
+			}
+			// Another bot already going for it
+			bool bTaken = false;
+			for (TActorIterator<ARRRandomAIController> Other(GetWorld()); Other; ++Other)
+			{
+				bTaken |= *Other != this && Other->GetVehicleTarget() == Ride;
+			}
+			if (bTaken)
+			{
+				continue;
+			}
+		}
+		if (Score < BestScore)
+		{
+			Best = Ride;
+			BestScore = Score;
+		}
+	}
+	return Best;
+}
+
+bool ARRRandomAIController::UpdateVehicles(ARRRandomCharacter* Self, const ARRRandomCharacter* Target, bool bInFight, FVector& Wanted, float DeltaSeconds)
+{
+	const FVector Location = Self->GetActorLocation();
+	if (const ARRRandomVehicle* Ridden = Self->GetVehicle())
+	{
+		VehicleTarget = nullptr;
+		// A fight: on foot (F again gets off either seat)
+		if (bInFight)
+		{
+			StuckTimer = 0.f;
+			Self->ToggleRide();
+			return false;
+		}
+		// At the wheel: steered by the usual heading; off near the goal, or when it can't get on
+		if (Ridden->GetRider() == Self)
+		{
+			const bool bArrived = FVector::Dist2D(Location, GetTravelGoal(Self, Target)) <= RideArriveDistance;
+			StuckTimer = Self->GetVelocity().Size2D() < StuckSpeed ? StuckTimer + DeltaSeconds : 0.f;
+			if (bArrived || StuckTimer >= StuckTime)
+			{
+				StuckTimer = 0.f;
+				Self->ToggleRide();
+			}
+		}
+		// In the back: along for the ride until the driver gets off
+		return false;
+	}
+	StuckTimer = 0.f;
+	// No seat fits a giant or a flyer
+	if (bInFight || Self->IsGiant() || Self->CanFly())
+	{
+		VehicleTarget = nullptr;
+		return false;
+	}
+
+	VehicleSearchTimer -= DeltaSeconds;
+	if (!VehicleTarget.IsValid() && VehicleSearchTimer <= 0.f)
+	{
+		VehicleSearchTimer = VehicleSearchInterval;
+		VehicleTarget = FindVehicleToRide(Self, Target);
+		VehicleTargetTimer = VehicleWalkTime;
+	}
+	const ARRRandomVehicle* Ride = VehicleTarget.Get();
+	if (!Ride)
+	{
+		return false;
+	}
+	VehicleTargetTimer -= DeltaSeconds;
+	if (VehicleTargetTimer <= 0.f || !IsStillWorthRiding(Self, Ride))
+	{
+		VehicleTarget = nullptr;
+		return false;
+	}
+	// Walk over and get on (the nearest vehicle with room once in reach, which this one is by then)
+	const FVector ToRide = Ride->GetActorLocation() - Location;
+	if (ToRide.Size2D() <= ARRRandomVehicle::MountRange * 0.8f)
+	{
+		VehicleTarget = nullptr;
+		Self->ToggleRide();
+		return false;
+	}
+	Wanted = ToRide.GetSafeNormal2D();
+	return true;
 }
 
 bool ARRRandomAIController::HasLineOfFire(const FVector& From, const FVector& To) const
@@ -283,16 +440,20 @@ FVector ARRRandomAIController::ChooseFightDirection(const ARRRandomCharacter* Se
 	const FVector Toward = (Target->GetActorLocation() - Self->GetActorLocation()).GetSafeNormal2D();
 	const FVector Side = FVector::CrossProduct(FVector::UpVector, Toward) * StrafeSign;
 
+	// Its own distance, whatever gun it holds now (a foam finger wants to be right up close)
+	const float PreferredDistance = Self->GetAttackRange() * PreferredShare;
+	const float Slack = FMath::Min(DistanceSlack, PreferredDistance * 0.4f);
+
 	// Cover in the way: work around it to get a clear shot
 	if (!bCanSee)
 	{
 		return Toward + Side * 0.5f;
 	}
-	if (Distance > PreferredDistance + DistanceSlack)
+	if (Distance > PreferredDistance + Slack)
 	{
 		return Toward + Side * 0.35f;
 	}
-	if (Distance < PreferredDistance - DistanceSlack)
+	if (Distance < PreferredDistance - Slack)
 	{
 		return -Toward + Side * 0.6f;
 	}

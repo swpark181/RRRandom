@@ -35,6 +35,14 @@ namespace
 	constexpr float ViewSideShare = 0.8f;
 	// Keeps the camera this far in front of a wall between it and the MVP
 	constexpr float WallClearance = 20.f;
+	// Other brawlers count as this much wider than their capsules (at scale 1): the dance sways the hips about 60 out
+	// of the capsule, and the ears and arms stick out of it too
+	constexpr float BrawlerClearance = 70.f;
+	// A brawler in the way nearer the MVP than this (at scale 1) isn't worth pulling the camera in front of: it would
+	// end up in a close-up of the MVP's face, or inside the other brawler
+	constexpr float MinBrawlerPull = 300.f;
+	// The frame's width over its height (the window is 16:9; the letterbox bars only make it wider)
+	constexpr float FrameAspect = 16.f / 9.f;
 	// The first fireworks come fast, while the camera closes in
 	constexpr int32 OpeningVolley = 3;
 }
@@ -71,11 +79,15 @@ ARRRandomResultsDirector::ARRRandomResultsDirector()
 	Glow->SetIntensity(0.f);
 }
 
-void ARRRandomResultsDirector::Setup(ARRRandomCharacter* InMVP)
+void ARRRandomResultsDirector::Setup(ARRRandomCharacter* InMVP, const FMinimalViewInfo& InFromView, float InBlendTime)
 {
 	MVP = InMVP;
+	FromView = InFromView;
+	BlendTime = InBlendTime;
 	Stream.GenerateNewSeed();
-	Camera->SetFieldOfView(FieldOfView);
+	// The player's look (the toon post process), faded out as the camera moves in
+	Camera->PostProcessSettings = FromView.PostProcessSettings;
+	Camera->PostProcessBlendWeight = FromView.PostProcessBlendWeight;
 	// In front of the MVP and a little to the side, or the first angle round from there with the most open view (cover
 	// nearby): the whole sway checked, the frame's sides as well as its middle
 	const float Facing = (InMVP ? InMVP->GetActorRotation().Yaw : 0.f) + 180.f;
@@ -98,10 +110,33 @@ void ARRRandomResultsDirector::Setup(ARRRandomCharacter* InMVP)
 			break;
 		}
 	}
-	const float BestReach = GetClearReach(FRotator(Pitch, StartYaw, 0.f), Distance);
+	// No angle clear of the other brawlers: stop in front of the nearest one in the way all through the sway, once, so the
+	// camera doesn't jump in and out as it sways past them (unless that's too close to the MVP to help)
+	const float Scale = InMVP ? InMVP->GetActorScale3D().Z : 1.f;
+	BrawlerReach = UE_BIG_NUMBER;
+	for (const float Sway : { -SwayAngle, 0.f, SwayAngle })
+	{
+		BrawlerReach = FMath::Min(BrawlerReach, GetBrawlerReach(FRotator(Pitch, StartYaw + Sway, 0.f), Distance * Scale));
+	}
+	if (BrawlerReach >= Distance * Scale || BrawlerReach < MinBrawlerPull * Scale)
+	{
+		BrawlerReach = UE_BIG_NUMBER;
+	}
+	const float BestReach = GetClearReach(FRotator(Pitch, StartYaw, 0.f), FMath::Min(Distance * Scale, BrawlerReach));
 	UpdateCamera();
 
-	UE_LOG(LogTemp, Log, TEXT("RRRandom: results camera on %s from yaw %.0f (clear %.0f of %.0f, view %.0f%% open)."), InMVP ? *InMVP->GetName() : TEXT("nobody"), StartYaw, BestReach, Distance, BestScore * 100.f);
+	// Everyone dancing turns to face where the camera ends up
+	if (InMVP)
+	{
+		const FVector ViewPoint = InMVP->GetActorLocation() - FRotator(Pitch, StartYaw, 0.f).Vector() * BestReach;
+		for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+		{
+			It->SetCelebrationViewPoint(ViewPoint);
+		}
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: results camera on %s from yaw %.0f (clear %.0f of %.0f%s, view %.0f%% open)."), InMVP ? *InMVP->GetName() : TEXT("nobody"), StartYaw, BestReach, Distance * Scale,
+		BrawlerReach < Distance * Scale ? TEXT(", in front of a brawler") : TEXT(""), BestScore * 100.f);
 
 	// Dusk: turn down the sun and the sky (lights that can change at run time)
 	for (TObjectIterator<UDirectionalLightComponent> It; It; ++It)
@@ -156,9 +191,32 @@ void ARRRandomResultsDirector::UpdateCamera()
 	const float Scale = Hero->GetActorScale3D().Z;
 	const FVector Target = Hero->GetActorLocation() + FVector(0.f, 0.f, Hero->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() * AimLift);
 	const FRotator View(Pitch, StartYaw + SwayAngle * FMath::Sin(2.f * PI * Elapsed / FMath::Max(SwayPeriod, 1.f)), 0.f);
-	// Don't end up inside cover or a hill: stop in front of whatever is in the way
-	const float Reach = GetClearReach(View, Distance * Scale);
-	SetActorLocationAndRotation(Target - View.Vector() * Reach, View);
+	// Don't end up inside cover or a hill: stop in front of whatever is in the way (and in front of the brawler that no
+	// angle could avoid, see Setup)
+	const float Reach = GetClearReach(View, FMath::Min(Distance * Scale, BrawlerReach));
+	const float Blend = BlendTime > 0.f ? FMath::Clamp(Elapsed / BlendTime, 0.f, 1.f) : 1.f;
+	if (Blend >= 1.f)
+	{
+		Camera->SetFieldOfView(FieldOfView);
+		Camera->PostProcessBlendWeight = 0.f;
+		SetActorLocationAndRotation(Target - View.Vector() * Reach, View);
+		return;
+	}
+
+	// Moving in from the player's view: round the MVP from above (down to the final height, never below it, so the view
+	// doesn't swing up to the sky) while the aim pans from where the player's camera looked onto the MVP
+	const float Alpha = FMath::InterpEaseInOut(0.f, 1.f, Blend, 2.f);
+	const FVector FromOffset = FromView.Location - Target;
+	const FRotator FromOrbit = (-FromOffset).Rotation();
+	const FRotator Orbit(FMath::Lerp(FromOrbit.Pitch, View.Pitch, Alpha), FromOrbit.Yaw + FMath::FindDeltaAngleDegrees(FromOrbit.Yaw, View.Yaw) * Alpha, 0.f);
+	const float OrbitReach = FMath::Lerp((float)FromOffset.Size(), Reach, Alpha);
+	// Kept clear of cover more and more on the way, so the first frame is exactly the player's view
+	const FVector Location = Target - Orbit.Vector() * FMath::Lerp(OrbitReach, GetClearReach(Orbit, OrbitReach), Alpha);
+	const FVector FromAim = FromView.Rotation.Vector();
+	const FVector FromFocus = FromView.Location + FromAim * FMath::Max(0.f, (float)FVector::DotProduct(Target - FromView.Location, FromAim));
+	Camera->SetFieldOfView(FMath::Lerp(FromView.FOV, FieldOfView, Alpha));
+	Camera->PostProcessBlendWeight = FromView.PostProcessBlendWeight * (1.f - Alpha);
+	SetActorLocationAndRotation(Location, (FMath::Lerp(FromFocus, Target, Alpha) - Location).Rotation());
 }
 
 float ARRRandomResultsDirector::GetViewOpenness(const FRotator& View) const
@@ -172,7 +230,53 @@ float ARRRandomResultsDirector::GetViewOpenness(const FRotator& View) const
 		const FVector Toward = -View.Vector() * Distance + Side * Across;
 		Open += GetClearReach((-Toward).Rotation(), Toward.Size()) / Toward.Size();
 	}
-	return Open / UE_ARRAY_COUNT(ViewSideLines);
+	// Another brawler in the frame between the camera and the MVP: the nearer the camera (the bigger on screen), the worse
+	return FMath::Min(Open / UE_ARRAY_COUNT(ViewSideLines), GetBrawlerReach(View, Distance) / Distance);
+}
+
+float ARRRandomResultsDirector::GetBrawlerReach(const FRotator& View, float Reach) const
+{
+	const ARRRandomCharacter* Hero = MVP.Get();
+	if (!Hero)
+	{
+		return Reach;
+	}
+	// The other brawlers standing (or dancing) where they are when the match ends, each a widened upright cylinder, in
+	// the frame of a camera Reach back from the MVP: right in front of the MVP (hiding it), or anywhere in the frame
+	// well nearer the camera (big on screen). Those beside the MVP are in the shot with it, not in the way.
+	const FVector Target = Hero->GetActorLocation() + FVector(0.f, 0.f, Hero->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() * AimLift);
+	const FRotationMatrix Axes(View);
+	const FVector Back = -Axes.GetUnitAxis(EAxis::X);
+	const FVector Right = Axes.GetUnitAxis(EAxis::Y);
+	const FVector Up = Axes.GetUnitAxis(EAxis::Z);
+	const float HalfWidth = FMath::Tan(FMath::DegreesToRadians(FieldOfView * 0.5f));
+	const float HalfHeight = HalfWidth / FrameAspect;
+	const float MinAlong = MinBrawlerPull * Hero->GetActorScale3D().Z;
+	float Clear = Reach;
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		// Knocked-out brawlers lie below the view
+		if (*It == Hero || !It->IsAlive())
+		{
+			continue;
+		}
+		const UCapsuleComponent* Capsule = It->GetCapsuleComponent();
+		const FVector Center = It->GetActorLocation();
+		const float Radius = Capsule->GetScaledCapsuleRadius() + BrawlerClearance * It->GetActorScale3D().Z + ViewRadius;
+		const float Tall = Capsule->GetScaledCapsuleHalfHeight() + ViewRadius;
+		const FVector Offset = Center - Target;
+		const float Along = FVector::DotProduct(Offset, Back);
+		const float Depth = Reach - Along;
+		const float Across = FMath::Abs(FVector::DotProduct(Offset, Right));
+		const float Above = FMath::Abs(FVector::DotProduct(Offset, Up));
+		const bool bHiding = Along > 0.f && Across < Radius && Above < Tall;
+		const bool bInFrame = Along > MinAlong && Depth > 0.f && Across - Radius < Depth * HalfWidth && Above - Tall < Depth * HalfHeight;
+		if ((bHiding || bInFrame) && Along - Radius < Clear)
+		{
+			Clear = FMath::Max(Along - Radius, 0.f);
+		}
+	}
+	return Clear;
 }
 
 float ARRRandomResultsDirector::GetClearReach(const FRotator& View, float Reach) const
@@ -227,8 +331,8 @@ void ARRRandomResultsDirector::LaunchFirework()
 	{
 		return;
 	}
-	// Behind the MVP as the camera sees it, spread across the frame
-	const FVector Forward = FRotator(0.f, GetActorRotation().Yaw, 0.f).Vector();
+	// Behind the MVP as the camera sees it (once moved in), spread across the frame
+	const FVector Forward = FRotator(0.f, StartYaw, 0.f).Vector();
 	const FVector Right = FVector::CrossProduct(FVector::UpVector, Forward);
 	const FVector Feet = Hero->GetActorLocation() - FVector(0.f, 0.f, Hero->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 	const FVector Ground = Feet + Forward * Stream.FRandRange(FireworkDepth.X, FireworkDepth.Y) + Right * Stream.FRandRange(-FireworkSpread, FireworkSpread);

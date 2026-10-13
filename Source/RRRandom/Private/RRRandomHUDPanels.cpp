@@ -48,12 +48,18 @@ namespace
 
 	// Minimap: texture pixels per side, how often the fog shading is redone, the full-screen map's share of the screen,
 	// how dark never-seen and not-seen-now places are, and the marker size on the corner map (scaled up full screen)
-	constexpr int32 MapPixels = 208;
+	constexpr int32 MapPixels = 288;
 	constexpr float MapRefreshInterval = 0.12f;
 	constexpr float ExpandedShare = 0.86f;
 	constexpr float UnexploredShade = 0.22f;
 	constexpr float ExploredShade = 0.55f;
 	constexpr float MarkerRadius = 4.5f;
+	// See-through: the corner map shows the game under it; the full-screen one, over a dimmed game, is more solid.
+	// Framed by a thin light line.
+	constexpr float MinimapOpacity = 0.7f;
+	constexpr float ExpandedMapOpacity = 0.9f;
+	const FLinearColor MapFrameColor(1.f, 1.f, 1.f, 0.45f);
+	constexpr float MapFrameWidth = 1.f;
 	// Map colors (sRGB): the island's cells, cover, and woods (cells of pines and round trees)
 	const FColor WaterColor(70, 168, 205);
 	const FColor SandColor(226, 205, 150);
@@ -62,6 +68,8 @@ namespace
 	const FColor FallsColor(175, 228, 245);
 	const FColor CoverColor(48, 98, 38);
 	const FColor WoodColor(34, 92, 44);
+	// Houses, the windmill, crates, toy blocks and giant mushrooms (the solid props): a red-roofed patch
+	const FColor BuildingColor(196, 72, 58);
 	// A woods cell's trees cover this share of it, and a face down the screen (toward the camera) is shaded this dark
 	constexpr float WoodShare = 0.42f;
 	constexpr float CliffShade = 0.62f;
@@ -141,6 +149,8 @@ ARRRandomHUD::ARRRandomHUD()
 {
 	static ConstructorHelpers::FObjectFinder<UTexture2D> FoxPortrait(TEXT("/Game/UI/T_FoxPortrait.T_FoxPortrait"));
 	Portrait = FoxPortrait.Succeeded() ? FoxPortrait.Object : nullptr;
+	static ConstructorHelpers::FObjectFinder<UTexture2D> HitEffectSheet(TEXT("/Game/UI/T_HitEffects.T_HitEffects"));
+	HitEffects = HitEffectSheet.Succeeded() ? HitEffectSheet.Object : nullptr;
 }
 
 void ARRRandomHUD::DrawCountdown(const ARRRandomGameState& State)
@@ -305,6 +315,7 @@ bool ARRRandomHUD::BuildMinimapBase()
 					Color = SandColor;
 					break;
 				case TEXT('d'):
+				case TEXT('b'):
 					Color = DockColor;
 					break;
 				case TEXT('F'):
@@ -326,6 +337,16 @@ bool ARRRandomHUD::BuildMinimapBase()
 					if (FVector2D::Distance(World, CellMid) < Island->CellSize * WoodShare)
 					{
 						Color = WoodColor;
+					}
+				}
+				// Buildings and other solid props: a smaller square patch
+				else if (FCString::Strchr(TEXT("HVCKM"), Prop))
+				{
+					const FVector2D CellMid(MapBounds.Max.X - (Row + 0.5f) * Island->CellSize, MapBounds.Min.Y + (Col + 0.5f) * Island->CellSize);
+					const float Half = Island->CellSize * (Prop == TEXT('H') || Prop == TEXT('V') ? 0.9f : 0.3f);
+					if (FMath::Abs(World.X - CellMid.X) < Half && FMath::Abs(World.Y - CellMid.Y) < Half)
+					{
+						Color = BuildingColor;
 					}
 				}
 			}
@@ -446,8 +467,12 @@ void ARRRandomHUD::DrawMinimap(const ARRRandomCharacter* Viewer)
 		DrawShadowedText(TEXT("MAP   [M] OR CLICK TO CLOSE"), FLinearColor::White, Rect.Min.X, Rect.Min.Y - 22.f, GEngine->GetSmallFont());
 	}
 	const FVector2D Size = Rect.GetSize();
-	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.75f), Rect.Min.X - 3.f, Rect.Min.Y - 3.f, Size.X + 6.f, Size.Y + 6.f);
-	DrawTexture(MapTexture, Rect.Min.X, Rect.Min.Y, Size.X, Size.Y, 0.f, 0.f, 1.f, 1.f);
+	DrawTexture(MapTexture, Rect.Min.X, Rect.Min.Y, Size.X, Size.Y, 0.f, 0.f, 1.f, 1.f,
+		FLinearColor(1.f, 1.f, 1.f, bMapExpanded ? ExpandedMapOpacity : MinimapOpacity), BLEND_Translucent);
+	DrawRect(MapFrameColor, Rect.Min.X - MapFrameWidth, Rect.Min.Y - MapFrameWidth, Size.X + MapFrameWidth * 2.f, MapFrameWidth);
+	DrawRect(MapFrameColor, Rect.Min.X - MapFrameWidth, Rect.Max.Y, Size.X + MapFrameWidth * 2.f, MapFrameWidth);
+	DrawRect(MapFrameColor, Rect.Min.X - MapFrameWidth, Rect.Min.Y, MapFrameWidth, Size.Y);
+	DrawRect(MapFrameColor, Rect.Max.X, Rect.Min.Y, MapFrameWidth, Size.Y);
 	DrawMapMarkers(Rect, Viewer);
 	if (!bMapExpanded)
 	{
@@ -457,6 +482,7 @@ void ARRRandomHUD::DrawMinimap(const ARRRandomCharacter* Viewer)
 
 void ARRRandomHUD::DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* Viewer)
 {
+	const bool bThirdPersonGame = ARRRandomGameState::IsThirdPersonMode(this);
 	const FVector2D Size = Rect.GetSize();
 	const FVector2D Area = MapBounds.GetSize();
 	const float Scale = Size.X / MinimapSize;
@@ -477,7 +503,8 @@ void ARRRandomHUD::DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* 
 		{
 			continue;
 		}
-		if (!bAlly && (!Brawler->IsAlive() || !ARRRandomCharacter::IsSeenByTeam(GetWorld(), Team, Brawler->GetActorLocation())))
+		// Opponents: only those the team sees; in a third-person game none (no fog of war, so no shared sight to show)
+		if (!bAlly && (bThirdPersonGame || !Brawler->IsAlive() || !ARRRandomCharacter::IsSeenByTeam(GetWorld(), Team, Brawler->GetActorLocation())))
 		{
 			continue;
 		}

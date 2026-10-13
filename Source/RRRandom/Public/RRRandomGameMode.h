@@ -57,9 +57,9 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Teams")
 	bool bSplitPlayersAcrossTeams = true;
 
-	/** How far up the screen (+X) from the player start the red team begins. */
+	/** How far apart (up the screen, +X) the two teams begin, either side of the arena's center (GetArenaCenter): on the island's village roads. */
 	UPROPERTY(EditAnywhere, Category = "Teams")
-	float TeamSpawnDistance = 2000.f;
+	float TeamSpawnDistance = 3060.f;
 
 	/** Sideways gap between teammates at the start. */
 	UPROPERTY(EditAnywhere, Category = "Teams")
@@ -68,6 +68,10 @@ protected:
 	/** Lays out CoverLayout when the level has no cover of its own. */
 	UPROPERTY(EditAnywhere, Category = "Cover")
 	bool bSpawnCover = true;
+
+	/** Parks vehicles to ride (ARRRandomVehicle) at the start: on each team's side a kickboard and a motorbike, and a car on each flank. */
+	UPROPERTY(EditAnywhere, Category = "Vehicles")
+	bool bSpawnVehicles = true;
 
 	UPROPERTY(EditAnywhere, Category = "Cover")
 	TSubclassOf<ARRRandomCover> CoverClass;
@@ -84,7 +88,7 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Grass")
 	int32 GrassSeed = 7;
 
-	/** Blocks of cover relative to the player start. The default is symmetric so both teams get the same. */
+	/** Blocks of cover relative to the arena's center. The default is point-symmetric so both teams get the same. */
 	UPROPERTY(EditAnywhere, Category = "Cover")
 	TArray<FRRCoverPlacement> CoverLayout;
 
@@ -123,12 +127,20 @@ private:
 	void FillEmptySlotsWithBots();
 	void SpawnDummiesIfNoneExist();
 	void SpawnCoverIfNoneExists();
+	void SpawnVehiclesIfNoneExist();
 	void SpawnGrassFloorIfNoneExists();
 	void SpawnIslandIfNoneExists();
 	FVector GetPlayerStartLocation() const;
+	/**
+	 * The middle of the arena: the middle of the level's floor under the player start (the island is built around it
+	 * and both teams start either side of it), at the player start's height. Worked out once, before anything is spawned.
+	 */
+	FVector GetArenaCenter() const;
 
 	/** Places a point on the floor beneath it, or returns false if there is no floor there. */
 	bool FindFloorSpot(const FVector& Spot, float HalfHeight, FVector& OutLocation) const;
 
 	TArray<FTeamSlot> TeamSlots[2];
+
+	mutable TOptional<FVector> ArenaCenter;
 };

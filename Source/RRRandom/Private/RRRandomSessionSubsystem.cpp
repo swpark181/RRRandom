@@ -139,6 +139,10 @@ void URRRandomSessionSubsystem::RunStartupCommand()
 		return;
 	}
 	bStartupCommandDone = true;
+	if (FParse::Param(FCommandLine::Get(), TEXT("RRThirdPerson")))
+	{
+		bThirdPersonMode = true;
+	}
 
 	if (FParse::Param(FCommandLine::Get(), TEXT("RRHost")))
 	{

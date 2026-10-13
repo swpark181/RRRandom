@@ -53,6 +53,12 @@ private:
 	/** Finds the floor under the actor and lays the tiles over all of it. */
 	void LayTiles();
 
+public:
+	/** Takes the grass tiles off the island's road cells (it lays dirt tiles there); safe to call more than once. */
+	void ClearRoadTiles(const class ARRRandomIsland* Island);
+
+private:
+
 	UPROPERTY(VisibleAnywhere, Category = "Grass")
 	TObjectPtr<UStaticMeshComponent> Under;
 

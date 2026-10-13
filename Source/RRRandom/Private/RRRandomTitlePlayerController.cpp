@@ -15,6 +15,10 @@ ARRRandomTitlePlayerController::ARRRandomTitlePlayerController()
 
 TArray<ERRTitleChoice> ARRRandomTitlePlayerController::GetChoices() const
 {
+	if (bViewPage)
+	{
+		return { ERRTitleChoice::TopView, ERRTitleChoice::ThirdPerson, ERRTitleChoice::Back };
+	}
 	if (bNetworkPage)
 	{
 		return { ERRTitleChoice::Host, ERRTitleChoice::Join, ERRTitleChoice::Back };
@@ -42,6 +46,8 @@ FString ARRRandomTitlePlayerController::GetLabel(ERRTitleChoice Choice)
 	case ERRTitleChoice::Host: return TEXT("HOST GAME");
 	case ERRTitleChoice::Join: return TEXT("JOIN GAME");
 	case ERRTitleChoice::Back: return TEXT("BACK");
+	case ERRTitleChoice::TopView: return TEXT("TOP VIEW");
+	case ERRTitleChoice::ThirdPerson: return TEXT("THIRD PERSON");
 	case ERRTitleChoice::Quit: return TEXT("QUIT");
 	}
 	return FString();
@@ -55,7 +61,9 @@ FString ARRRandomTitlePlayerController::GetDescription(ERRTitleChoice Choice)
 	case ERRTitleChoice::Network: return TEXT("Play with others, no server needed.");
 	case ERRTitleChoice::Host: return TEXT("Start a game others can join. Bots fill the empty spots.");
 	case ERRTitleChoice::Join: return TEXT("Join the first game found.");
-	case ERRTitleChoice::Back: return TEXT("Back to the main menu.");
+	case ERRTitleChoice::Back: return TEXT("Back.");
+	case ERRTitleChoice::TopView: return TEXT("The camera high above the arena. Fog of war: you only see what your team sees.");
+	case ERRTitleChoice::ThirdPerson: return TEXT("Over the shoulder: the mouse looks, right button aims. No fog of war.");
 	case ERRTitleChoice::Quit: return TEXT("Close the game.");
 	}
 	return FString();
@@ -72,19 +80,35 @@ void ARRRandomTitlePlayerController::Choose(ERRTitleChoice Choice)
 	switch (Choice)
 	{
 	case ERRTitleChoice::Single:
-		Sessions->PlaySolo();
+		bViewPage = true;
+		bViewForHost = false;
+		Selected = 0;
 		break;
 	case ERRTitleChoice::Network:
 		bNetworkPage = true;
 		Selected = 0;
 		break;
 	case ERRTitleChoice::Host:
-		Sessions->HostGame();
+		bViewPage = true;
+		bViewForHost = true;
+		Selected = 0;
+		break;
+	case ERRTitleChoice::TopView:
+	case ERRTitleChoice::ThirdPerson:
+		Sessions->SetThirdPersonMode(Choice == ERRTitleChoice::ThirdPerson);
+		bViewForHost ? Sessions->HostGame() : Sessions->PlaySolo();
 		break;
 	case ERRTitleChoice::Join:
 		Sessions->JoinGame();
 		break;
 	case ERRTitleChoice::Back:
+		if (bViewPage)
+		{
+			// Back to the page the game was started from
+			bViewPage = false;
+			Selected = GetChoices().IndexOfByKey(bViewForHost ? ERRTitleChoice::Host : ERRTitleChoice::Single);
+			break;
+		}
 		bNetworkPage = false;
 		Selected = GetChoices().IndexOfByKey(ERRTitleChoice::Network);
 		break;
@@ -192,7 +216,7 @@ void ARRRandomTitlePlayerController::OnBack()
 	{
 		Sessions->CancelPending();
 	}
-	else if (bNetworkPage)
+	else if (bNetworkPage || bViewPage)
 	{
 		Choose(ERRTitleChoice::Back);
 	}

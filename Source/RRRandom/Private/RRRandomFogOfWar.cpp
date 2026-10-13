@@ -21,6 +21,10 @@ namespace
 	const FName FogTextureParameter(TEXT("FogTex"));
 	const FName FogOriginParameter(TEXT("FogOrigin"));
 	const FName FogSizeParameter(TEXT("FogSize"));
+	const FName FogResolutionParameter(TEXT("FogResolution"));
+	// Directions sampled each side across a shade's penumbra, and how fast the penumbra widens behind an obstacle
+	constexpr int32 ShadowTaps = 6;
+	constexpr float ShadowSpread = 0.4f;
 
 	UMaterialInterface* FogMaterialAsset = nullptr;
 }
@@ -98,8 +102,10 @@ bool ARRRandomFogOfWar::Setup(const FVector& Near)
 
 	FogMaterial = UMaterialInstanceDynamic::Create(FogMaterialAsset, this);
 	FogMaterial->SetTextureParameterValue(FogTextureParameter, FogTexture);
-	FogMaterial->SetVectorParameterValue(FogOriginParameter, FLinearColor(Origin.X, Origin.Y, 0.f, 0.f));
+	// Blue: the floor's height, the flat ground the material measures its cloud noise on
+	FogMaterial->SetVectorParameterValue(FogOriginParameter, FLinearColor(Origin.X, Origin.Y, Hit.ImpactPoint.Z, 0.f));
 	FogMaterial->SetScalarParameterValue(FogSizeParameter, Size);
+	FogMaterial->SetScalarParameterValue(FogResolutionParameter, Resolution);
 
 	// A post process volume covering the whole world, on this machine only
 	FActorSpawnParameters SpawnParams;
@@ -134,12 +140,32 @@ void ARRRandomFogOfWar::Stamp(const ARRRandomCharacter& Brawler)
 		const float Angle = 2.f * PI * Ray / Rays;
 		SightRayLengths[Ray] = ARRRandomCharacter::GetSightDistance(GetWorld(), Eye, FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.f), Reach);
 	}
-	auto SightAlong = [&](float DX, float DY)
+	auto SightAlong = [&](float Angle)
 	{
 		// Between the two nearest rays
-		const float Turn = FMath::Fmod(FMath::Atan2(DY, DX) + 2.f * PI, 2.f * PI) / (2.f * PI) * Rays;
+		const float Turn = FMath::Fmod(Angle + 4.f * PI, 2.f * PI) / (2.f * PI) * Rays;
 		const int32 Low = FMath::FloorToInt(Turn) % Rays;
 		return FMath::Lerp(SightRayLengths[Low], SightRayLengths[(Low + 1) % Rays], Turn - FMath::FloorToFloat(Turn));
+	};
+	const float Soft = FMath::Max(ShadowSoftness, 1.f);
+	auto OpenAt = [&](float DX, float DY, float Distance)
+	{
+		// The shade behind an obstacle fades over ShadowSoftness going away from the brawler, and across its sides over a
+		// penumbra that widens the farther behind the obstacle (ShadowSpread of that distance): many directions across it,
+		// tent weighted, close enough together that the blur before upload hides them (with few, a sharp side showed as
+		// a fan of lines). A cell into the obstacle still counts, so its face shows.
+		const float Angle = FMath::Atan2(DY, DX);
+		const float Behind = FMath::Max(0.f, Distance - SightAlong(Angle));
+		const float Spread = (Soft + ShadowSpread * Behind) / FMath::Max(Distance, Soft) / ShadowTaps;
+		float Sum = 0.f;
+		float Total = 0.f;
+		for (int32 Tap = -ShadowTaps; Tap <= ShadowTaps; ++Tap)
+		{
+			const float Weight = ShadowTaps + 1 - FMath::Abs(Tap);
+			Sum += Weight * FMath::Clamp((SightAlong(Angle + Spread * Tap) + Soft - Distance) / Soft, 0.f, 1.f);
+			Total += Weight;
+		}
+		return Sum / Total;
 	};
 	const int32 MinX = FMath::Max(0, FMath::FloorToInt(CenterX - RadiusCells));
 	const int32 MaxX = FMath::Min(Resolution - 1, FMath::CeilToInt(CenterX + RadiusCells));
@@ -149,13 +175,17 @@ void ARRRandomFogOfWar::Stamp(const ARRRandomCharacter& Brawler)
 	{
 		for (int32 X = MinX; X <= MaxX; ++X)
 		{
-			// Distance from the cell's middle; full sight inside, fading over the soft edge, and dark past whatever blocks
-			// the view that way (a cell into the obstacle still counts, so its face shows)
+			// Distance from the cell's middle; full sight inside, fading over the soft edge, and shaded past whatever
+			// blocks the view
 			const float DX = (X + 0.5f - CenterX) * CellSize;
 			const float DY = (Y + 0.5f - CenterY) * CellSize;
 			const float Distance = FMath::Sqrt(DX * DX + DY * DY);
-			const float Open = FMath::Clamp((SightAlong(DX, DY) + CellSize - Distance) / CellSize, 0.f, 1.f);
-			const float Sight = FMath::Min(Open, FMath::Clamp((Reach - Distance) / FMath::Max(EdgeSoftness, 1.f), 0.f, 1.f));
+			const float Edge = FMath::Clamp((Reach - Distance) / FMath::Max(EdgeSoftness, 1.f), 0.f, 1.f);
+			if (Edge <= 0.f)
+			{
+				continue;
+			}
+			const float Sight = FMath::Min(OpenAt(DX, DY, Distance), Edge);
 			float& Cell = Visible[Y * Resolution + X];
 			Cell = FMath::Max(Cell, Sight);
 		}
@@ -173,24 +203,38 @@ float ARRRandomFogOfWar::GetSightAt(const FVector& WorldLocation, bool* OutExplo
 		}
 		return 1.f;
 	}
-	const int32 X = FMath::Clamp(FMath::FloorToInt((WorldLocation.X - Origin.X) / Size * Resolution), 0, Resolution - 1);
-	const int32 Y = FMath::Clamp(FMath::FloorToInt((WorldLocation.Y - Origin.Y) / Size * Resolution), 0, Resolution - 1);
-	const int32 Index = Y * Resolution + X;
+	// Between the four nearest cell middles, so the map's lit area has no steps either
+	const float GridX = FMath::Clamp((WorldLocation.X - Origin.X) / Size * Resolution - 0.5f, 0.f, Resolution - 1.f);
+	const float GridY = FMath::Clamp((WorldLocation.Y - Origin.Y) / Size * Resolution - 0.5f, 0.f, Resolution - 1.f);
+	const int32 X0 = FMath::FloorToInt(GridX);
+	const int32 Y0 = FMath::FloorToInt(GridY);
+	const int32 X1 = FMath::Min(X0 + 1, Resolution - 1);
+	const int32 Y1 = FMath::Min(Y0 + 1, Resolution - 1);
+	auto Blend = [&](const TArray<float>& Grid)
+	{
+		const float Low = FMath::Lerp(Grid[Y0 * Resolution + X0], Grid[Y0 * Resolution + X1], GridX - X0);
+		const float High = FMath::Lerp(Grid[Y1 * Resolution + X0], Grid[Y1 * Resolution + X1], GridX - X0);
+		return FMath::Lerp(Low, High, GridY - Y0);
+	};
 	if (OutExplored)
 	{
-		*OutExplored = Explored.IsValidIndex(Index) && Explored[Index] > 0.f;
+		*OutExplored = Blend(Explored) > 0.5f;
 	}
-	return Visible.IsValidIndex(Index) ? Visible[Index] : 0.f;
+	return Blend(Visible);
 }
 
 void ARRRandomFogOfWar::Upload()
 {
 	// Red: seen now, green: ever seen. The render thread frees the copy when it is done with it.
 	const int32 Count = Resolution * Resolution;
+	// Blurred for the screen: both are the most of several soft cones (each teammate's sight, every frame's), which
+	// meet in creases along straight lines; the material sharpens the fade, and the creases showed as lines and facets
+	BlurForUpload(Visible, BlurredVisible);
+	BlurForUpload(Explored, BlurredExplored);
 	FColor* Pixels = new FColor[Count];
 	for (int32 Index = 0; Index < Count; ++Index)
 	{
-		Pixels[Index] = FColor(FMath::RoundToInt(Visible[Index] * 255.f), FMath::RoundToInt(Explored[Index] * 255.f), 0, 255);
+		Pixels[Index] = FColor(FMath::RoundToInt(BlurredVisible[Index] * 255.f), FMath::RoundToInt(BlurredExplored[Index] * 255.f), 0, 255);
 	}
 	FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, Resolution, Resolution);
 	FogTexture->UpdateTextureRegions(0, 1, Region, Resolution * sizeof(FColor), sizeof(FColor), reinterpret_cast<uint8*>(Pixels),
@@ -201,17 +245,65 @@ void ARRRandomFogOfWar::Upload()
 		});
 }
 
+void ARRRandomFogOfWar::BlurForUpload(const TArray<float>& Source, TArray<float>& Out)
+{
+	// Binomial 1-4-6-4-1 across, then down, UploadBlurPasses times (edges clamped)
+	static constexpr float Weights[5] = { 1.f / 16.f, 4.f / 16.f, 6.f / 16.f, 4.f / 16.f, 1.f / 16.f };
+	Out = Source;
+	BlurScratch.SetNumUninitialized(Source.Num());
+	const int32 Last = Resolution - 1;
+	for (int32 Pass = 0; Pass < UploadBlurPasses; ++Pass)
+	{
+		for (int32 Y = 0; Y < Resolution; ++Y)
+		{
+			for (int32 X = 0; X < Resolution; ++X)
+			{
+				float Sum = 0.f;
+				for (int32 Tap = -2; Tap <= 2; ++Tap)
+				{
+					Sum += Weights[Tap + 2] * Out[Y * Resolution + FMath::Clamp(X + Tap, 0, Last)];
+				}
+				BlurScratch[Y * Resolution + X] = Sum;
+			}
+		}
+		for (int32 Y = 0; Y < Resolution; ++Y)
+		{
+			for (int32 X = 0; X < Resolution; ++X)
+			{
+				float Sum = 0.f;
+				for (int32 Tap = -2; Tap <= 2; ++Tap)
+				{
+					Sum += Weights[Tap + 2] * BlurScratch[FMath::Clamp(Y + Tap, 0, Last) * Resolution + X];
+				}
+				Out[Y * Resolution + X] = Sum;
+			}
+		}
+	}
+}
+
 void ARRRandomFogOfWar::HideBrawler(ARRRandomCharacter* Brawler)
 {
 	// Hidden-in-game on the components is local; the actor's own hidden flag would replicate from a host
+	// The brawler's own parts and whatever rides attached to it (a vehicle)
 	TArray<TWeakObjectPtr<UPrimitiveComponent>>& Parts = Hidden.FindOrAdd(Brawler);
-	TInlineComponentArray<UPrimitiveComponent*> All(Brawler);
-	for (UPrimitiveComponent* Part : All)
+	TArray<AActor*> Attached;
+	Brawler->GetAttachedActors(Attached, true, true);
+	Attached.Add(Brawler);
+	for (AActor* Actor : Attached)
 	{
-		if (!Part->bHiddenInGame)
+		// Someone in its rear seat goes by its own sight test
+		if (Actor != Brawler && Actor->IsA<ARRRandomCharacter>())
 		{
-			Part->SetHiddenInGame(true);
-			Parts.Add(Part);
+			continue;
+		}
+		TInlineComponentArray<UPrimitiveComponent*> All(Actor);
+		for (UPrimitiveComponent* Part : All)
+		{
+			if (!Part->bHiddenInGame)
+			{
+				Part->SetHiddenInGame(true);
+				Parts.Add(Part);
+			}
 		}
 	}
 }
@@ -244,6 +336,14 @@ void ARRRandomFogOfWar::ShowAll()
 		}
 	}
 	Hidden.Reset();
+}
+
+void ARRRandomFogOfWar::SetShadingVisible(bool bVisible)
+{
+	if (Volume)
+	{
+		Volume->bEnabled = bVisible;
+	}
 }
 
 void ARRRandomFogOfWar::Tick(float DeltaSeconds)

@@ -21,6 +21,8 @@
 namespace
 {
 	const FName ColorParameter(TEXT("Color"));
+	// A foam finger's poke in the back does this many times the target's whole health
+	constexpr float BackstabDamageShare = 10.f;
 
 	enum class EImpact : uint8 { None, Spark, Burst, Explosion };
 
@@ -145,6 +147,7 @@ void ARRRandomProjectile::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ARRRandomProjectile, Tier);
+	DOREPLIFETIME(ARRRandomProjectile, bPoke);
 	DOREPLIFETIME(ARRRandomProjectile, bImpacted);
 	DOREPLIFETIME(ARRRandomProjectile, ImpactLocation);
 	DOREPLIFETIME(ARRRandomProjectile, ImpactNormal);
@@ -172,16 +175,24 @@ void ARRRandomProjectile::BeginPlay()
 		}
 	}
 
+	// A poke is the finger itself reaching out: nothing flies
+	if (bPoke)
+	{
+		Visual->SetVisibility(false);
+	}
 	const FTierLook& Look = TierLooks[static_cast<int32>(Tier)];
-	if (Look.GlowIntensity > 0.f)
+	if (Look.GlowIntensity > 0.f && !bPoke)
 	{
 		Glow->SetLightColor(FRRWeapon::GetTierColor(Tier));
 		Glow->SetIntensity(Look.GlowIntensity);
 		Glow->SetAttenuationRadius(Look.GlowRadius);
 		Glow->SetVisibility(true);
 	}
-	SpawnOneShot(this, Look.Muzzle == EImpact::Spark ? SparkEffect : (Look.Muzzle == EImpact::Burst ? BurstEffect : nullptr), GetActorLocation(), GetActorRotation(), Look.MuzzleScale);
-	if (Look.bTrail && TrailEffect)
+	if (!bPoke)
+	{
+		SpawnOneShot(this, Look.Muzzle == EImpact::Spark ? SparkEffect : (Look.Muzzle == EImpact::Burst ? BurstEffect : nullptr), GetActorLocation(), GetActorRotation(), Look.MuzzleScale);
+	}
+	if (Look.bTrail && TrailEffect && !bPoke)
 	{
 		Trail = UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, TrailEffect, GetActorLocation(), GetActorRotation(), FVector(Look.TrailScale));
 		SetActorTickEnabled(Trail != nullptr);
@@ -320,7 +331,18 @@ void ARRRandomProjectile::OnHit(UPrimitiveComponent* HitComponent, AActor* Other
 	if (OtherActor && OtherActor != GetInstigator())
 	{
 		const FVector ShotDirection = GetActorForwardVector();
-		const float Damage = FMath::RandRange(MinDamage, MaxDamage) * DamageMultiplier;
+		float Damage = FMath::RandRange(MinDamage, MaxDamage) * DamageMultiplier;
+		if (bPoke)
+		{
+			Damage = PokeDamage;
+			// From behind: the poke flies the way the target faces. Far more than anyone's health, giants included.
+			const ARRRandomCharacter* Victim = Cast<ARRRandomCharacter>(OtherActor);
+			if (Victim && FVector::DotProduct(ShotDirection.GetSafeNormal2D(), Victim->GetActorForwardVector().GetSafeNormal2D()) >= FMath::Cos(FMath::DegreesToRadians(BackstabAngle)))
+			{
+				Damage = Victim->GetMaxHealth() * BackstabDamageShare;
+				UE_LOG(LogTemp, Log, TEXT("RRRandom: %s pokes %s in the back with the foam finger."), *GetNameSafe(GetInstigator()), *Victim->GetName());
+			}
+		}
 		UGameplayStatics::ApplyPointDamage(OtherActor, Damage, ShotDirection, Hit, GetInstigatorController(), this, UDamageType::StaticClass());
 
 		if (OtherComp && OtherComp->IsSimulatingPhysics())

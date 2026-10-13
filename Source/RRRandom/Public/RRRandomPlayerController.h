@@ -83,6 +83,21 @@ public:
 	UFUNCTION(Exec)
 	void RRFly();
 
+	/** Cheat: my brawler takes no damage and can't fall out of the arena, until toggled off (F10). Not in shipping builds. */
+	UFUNCTION(Exec)
+	void RRGod();
+
+	/**
+	 * Cheat: third person, like a battle royale shooter (F9, again to go back): the camera over my brawler's right shoulder
+	 * follows the mouse (the cursor hides), WASD moves the way the camera looks, the left button shoots at the crosshair in
+	 * the middle of the screen, and holding the right button aims down the sights (closer, narrower view, slower mouse).
+	 * The fog's shading is hidden meanwhile (it is drawn for the view from above); who can be seen stays the same.
+	 */
+	UFUNCTION(Exec)
+	void RRThirdPerson();
+
+	bool IsThirdPerson() const { return bThirdPerson; }
+
 	/**
 	 * Cheat: hands my brawler a gun by name or number (keys 1 to 6): 1 PISTOL, 2 MINIGUN, 3 SMG, 4 RIFLE, 5 BLASTER,
 	 * 6 CANNON, made as from a CheatGunQuality weapon die with no random spread. Not in shipping builds.
@@ -121,6 +136,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> ReloadAction;
 
+	/** F: get on or off a vehicle. */
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> RideAction;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> HostAction;
 
@@ -146,6 +165,30 @@ protected:
 	TObjectPtr<UInputAction> CheatFlyAction;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> CheatGodAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> CheatThirdPersonAction;
+
+	/** Third person: the mouse turns the camera, the right button aims down the sights. */
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> LookAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> AimAction;
+
+	/** Third person: held, the cursor comes back and the mouse stops turning the camera. */
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> FreeCursorAction;
+
+	/** Mouse turn per count, and the share of it left while aiming down the sights. */
+	UPROPERTY(EditAnywhere, Category = "Input")
+	float LookSensitivity = 0.35f;
+
+	UPROPERTY(EditAnywhere, Category = "Input")
+	float SightsSensitivity = 0.5f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> CheatWinAction;
 
 	/** One per gun, in RRGun's numbering (keys 1 to 6). */
@@ -160,6 +203,8 @@ private:
 	void ServerCheatGiant();
 	UFUNCTION(Server, Reliable)
 	void ServerCheatFly();
+	UFUNCTION(Server, Reliable)
+	void ServerCheatGod();
 	UFUNCTION(Server, Reliable)
 	void ServerCheatGun(int32 Type);
 	UFUNCTION(Server, Reliable)
@@ -188,9 +233,23 @@ private:
 	void ClosePauseMenu();
 
 	bool bPauseMenuOpen = false;
+	bool bThirdPerson = false;
+	/** Over the shoulder (or back to the top view) on this screen: camera, mouse, cursor, the fog's shading. */
+	void SetThirdPersonView(bool bOn);
+	void OnLook(const FInputActionValue& Value);
+	void OnAimStart();
+	void OnAimStop();
+	void OnFreeCursorStart();
+	void OnFreeCursorStop();
+	/** The game's window is the one in use and its view has the keyboard and mouse. */
+	bool IsViewportFocused() const;
+	bool bCursorFreed = false;
+	/** Third person: where the crosshair (the middle of the screen) points in the world. */
+	FVector GetCrosshairTarget() const;
 	void OnMove(const FInputActionValue& Value);
 	void OnJump();
 	void OnStopJumping();
 	void OnRollDice();
 	void OnReload();
+	void OnRide();
 };
