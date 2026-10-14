@@ -80,6 +80,10 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Island")
 	bool bSpawnIsland = true;
 
+	/** In the third person mode, builds Dice Land (ARRRandomDiceLand) instead of the island, its grass and the cover blocks. */
+	UPROPERTY(EditAnywhere, Category = "Island")
+	bool bSpawnDiceLand = true;
+
 	/** Covers the floor with grass tiles when the level has none of its own (ARRRandomGrassFloor). */
 	UPROPERTY(EditAnywhere, Category = "Grass")
 	bool bSpawnGrassFloor = true;
@@ -113,6 +117,10 @@ private:
 	};
 
 	void EndMatch(int32 Winner);
+	/** Lines everyone up behind the MVP to dance: the winners in the row behind it, the others behind them. */
+	void ArrangeVictoryFormation(ARRRandomCharacter* MVP, int32 Winner);
+	/** A clear spot for a brawler near Wanted (on the floor, not in cover, apart from Taken), or false if none nearby. */
+	bool FindFormationSpot(const FVector& Wanted, float FloorZ, const ARRRandomCharacter* Brawler, const TArray<FVector>& Taken, FVector& OutSpot) const;
 	void EnsureSlots();
 	/** The team a new player joins, or INDEX_NONE when both are full of players. */
 	int32 ChooseTeamForPlayer() const;
@@ -120,8 +128,8 @@ private:
 	int32 FindSlotForPlayer(int32 Team) const;
 	/** Where a spot is and which way it faces; false if there is no floor there. */
 	bool GetSlotTransform(int32 Team, int32 Slot, float HalfHeight, FTransform& OutTransform) const;
-	/** Spawns a brawler on a team, standing on one of its spots. */
-	ARRRandomCharacter* SpawnBrawler(TSubclassOf<ARRRandomCharacter> BrawlerClass, int32 Team, int32 Slot);
+	/** Spawns a brawler of a species (RRSpecies) on a team, standing on one of its spots. */
+	ARRRandomCharacter* SpawnBrawler(TSubclassOf<ARRRandomCharacter> BrawlerClass, int32 Team, int32 Slot, int32 Species);
 	void RemoveBot(int32 Team, int32 Slot);
 	/** Puts a bot on every spot that has nobody. */
 	void FillEmptySlotsWithBots();
@@ -130,6 +138,7 @@ private:
 	void SpawnVehiclesIfNoneExist();
 	void SpawnGrassFloorIfNoneExists();
 	void SpawnIslandIfNoneExists();
+	void SpawnDiceLandIfNoneExists();
 	FVector GetPlayerStartLocation() const;
 	/**
 	 * The middle of the arena: the middle of the level's floor under the player start (the island is built around it

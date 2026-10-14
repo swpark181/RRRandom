@@ -31,6 +31,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "RRRandom")
 	float GetSpeedMultiplier() const { return SpeedMultiplier; }
 
+	/** After the owner gave one of its meshes new materials or a new size: takes those as the ones to color and scale. */
+	void RefreshMesh(UMeshComponent* Mesh);
+
 	/** 0 picks a new seed each play session. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom")
 	int32 Seed = 0;

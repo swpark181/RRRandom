@@ -195,7 +195,9 @@ void ARRRandomFogOfWar::Stamp(const ARRRandomCharacter& Brawler)
 
 float ARRRandomFogOfWar::GetSightAt(const FVector& WorldLocation, bool* OutExplored) const
 {
-	if (!bReady || Size <= 0.f || ARRRandomGameState::IsMatchOver(this))
+	const APlayerController* Viewer = Cast<APlayerController>(GetOwner());
+	const ARRRandomCharacter* Self = Viewer ? Cast<ARRRandomCharacter>(Viewer->GetPawn()) : nullptr;
+	if (!bReady || Size <= 0.f || ARRRandomGameState::IsMatchOver(this) || (Self && Self->IsUsingUltimate()))
 	{
 		if (OutExplored)
 		{
@@ -374,6 +376,21 @@ void ARRRandomFogOfWar::Tick(float DeltaSeconds)
 		{
 			return;
 		}
+	}
+	// My tiger's spirit is out: the whole arena on show while it picks where to strike, the fog back after
+	if (Self->IsUsingUltimate())
+	{
+		// At once: the view jumps to unseen ground that would otherwise show black while the fog faded
+		ShowAll();
+		if (Volume)
+		{
+			Volume->BlendWeight = 0.f;
+		}
+		return;
+	}
+	if (Volume && Volume->BlendWeight < 1.f)
+	{
+		Volume->BlendWeight = FMath::FInterpConstantTo(Volume->BlendWeight, 1.f, DeltaSeconds, ResultsFadeSpeed);
 	}
 
 	// What the team sees right now, and what it has ever seen

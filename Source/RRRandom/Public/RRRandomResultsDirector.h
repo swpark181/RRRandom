@@ -33,9 +33,9 @@ public:
 	/** Starts the show from the view the player has now (its place, aim, field of view and post process), moving in over BlendTime seconds. */
 	void Setup(ARRRandomCharacter* InMVP, const FMinimalViewInfo& InFromView, float InBlendTime);
 
-	/** Camera distance from the MVP (grows with a giant), its pitch (a little down, leaving sky above for the fireworks) and field of view. */
+	/** Camera distance from the MVP (grows with a giant; far enough to take in the dance line behind it), its pitch (a little down, leaving sky above for the fireworks) and field of view. */
 	UPROPERTY(EditAnywhere, Category = "Camera")
-	float Distance = 900.f;
+	float Distance = 1100.f;
 	UPROPERTY(EditAnywhere, Category = "Camera")
 	float Pitch = -2.f;
 	UPROPERTY(EditAnywhere, Category = "Camera")

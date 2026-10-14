@@ -7,21 +7,25 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "GameFramework/DamageType.h"
+#include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
 {
-	// By ERRVehicleKind. Each a bit faster than the last; the motorbike and the car trade grip for drifts.
+	// By ERRVehicleKind. Each clearly faster than the last, and all of them much faster than walking (speed is a share of
+	// the walk); the motorbike and the car trade grip for drifts.
 	const FRRVehicleHandling Handlings[] =
 	{
-		// Kickboard: a little faster, otherwise like walking
-		{ 1.3f, 1800.f, 8.f, 720.f, 1600.f, false, 12.f, 0.f, 0.f, TEXT("KICKBOARD") },
+		// Kickboard: twice the walk, otherwise like walking
+		{ 2.f, 2600.f, 8.f, 720.f, 2200.f, false, 12.f, 0.f, 0.f, TEXT("KICKBOARD") },
 		// Motorbike: faster, slides out in tight turns and leans into them; one rear wheel's mark
-		{ 1.6f, 1500.f, 1.6f, 560.f, 700.f, true, 22.f, 0.7f, 28.f, TEXT("MOTORBIKE"), 0.f, false, 0.f, 16.f, 0.65f, 0.f },
+		{ 2.7f, 2400.f, 1.6f, 560.f, 1100.f, true, 22.f, 0.7f, 28.f, TEXT("MOTORBIKE"), 0.f, false, 0.f, 16.f, 0.65f, 0.f },
 		// Car: fastest, slides the most, rolls a little; a tandem two-seater, the rear seat right behind the driver's;
 		// two rear wheels' marks
-		{ 1.9f, 1300.f, 1.1f, 460.f, 600.f, true, 18.f, 0.15f, 6.f, TEXT("CAR"), -7.f, true, -93.f, 22.f, 0.55f, 0.72f },
+		{ 3.5f, 2200.f, 1.1f, 460.f, 1000.f, true, 18.f, 0.15f, 6.f, TEXT("CAR"), -7.f, true, -93.f, 22.f, 0.55f, 0.72f },
 	};
 	const TCHAR* MeshPaths[] =
 	{
@@ -39,6 +43,13 @@ namespace
 	constexpr float SkidSegment = 24.f;
 	constexpr float SkidFullSpeed = 520.f;
 	constexpr float SkidMinStrength = 0.3f;
+	// The car running into an enemy: faster than walking knocks them out at once; slower, it hurts by its speed (all of
+	// a brawler's health at walking speed), from this speed up, the same brawler at most once in this many seconds; the
+	// car's body reaches this much past its mesh, and the hit throws them along and up
+	constexpr float RamMinSpeed = 60.f;
+	constexpr float RamRepeatTime = 0.8f;
+	constexpr float RamReach = 15.f;
+	const FVector2D RamKnock(500.f, 250.f);
 }
 
 ARRRandomVehicle::ARRRandomVehicle()
@@ -123,6 +134,8 @@ int32 ARRRandomVehicle::Mount(ARRRandomCharacter* NewRider)
 		return 1;
 	}
 	Rider = NewRider;
+	// What the car runs into is the driver's doing (kills go to them)
+	SetInstigator(NewRider);
 	// Under the rider's feet with the driver's seat there, turned with it (the vehicle's pivot is the middle of its bottom)
 	UCapsuleComponent* Capsule = NewRider->GetCapsuleComponent();
 	AttachToComponent(Capsule, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
@@ -143,6 +156,7 @@ void ARRRandomVehicle::Dismount()
 	SetActorRotation(FRotator(0.f, GetActorRotation().Yaw, 0.f));
 	SetActorScale3D(FVector::OneVector);
 	Rider = nullptr;
+	SetInstigator(nullptr);
 }
 
 void ARRRandomVehicle::RemovePassenger(ARRRandomCharacter* Who)
@@ -180,6 +194,65 @@ void ARRRandomVehicle::Tick(float DeltaSeconds)
 	Lean = FMath::FInterpConstantTo(Lean, Wanted, DeltaSeconds, LeanRate);
 	Body->SetRelativeRotation(FRotator(0.f, 0.f, Lean));
 	UpdateSkidMarks(bDrifting, Speed);
+	if (HasAuthority() && Kind == ERRVehicleKind::Car)
+	{
+		UpdateRam();
+	}
+}
+
+void ARRRandomVehicle::UpdateRam()
+{
+	if (!Rider || !Rider->IsAlive() || !Body->GetStaticMesh())
+	{
+		return;
+	}
+	const FVector Velocity = Rider->GetVelocity() * FVector(1.f, 1.f, 0.f);
+	const float Speed = Velocity.Size();
+	if (Speed < RamMinSpeed)
+	{
+		return;
+	}
+	const float Now = GetWorld()->GetTimeSeconds();
+	RamTimes.RemoveAll([Now](const TPair<TWeakObjectPtr<ARRRandomCharacter>, float>& Entry) { return !Entry.Key.IsValid() || Now - Entry.Value > RamRepeatTime; });
+	// The body's box, in the vehicle's own space (its pivot is the middle of its bottom)
+	const FBox Box = Body->GetStaticMesh()->GetBoundingBox();
+	const FTransform Frame = GetActorTransform();
+	const float WalkSpeed = Rider->GetBaseWalkSpeed();
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		ARRRandomCharacter* Victim = *It;
+		if (Victim == Rider || Victim == Passenger || !Victim->IsAlive() || Victim->GetTeam() == Rider->GetTeam()
+			|| RamTimes.ContainsByPredicate([Victim](const TPair<TWeakObjectPtr<ARRRandomCharacter>, float>& Entry) { return Entry.Key.Get() == Victim; }))
+		{
+			continue;
+		}
+		const float Radius = Victim->GetCapsuleComponent()->GetScaledCapsuleRadius();
+		const float HalfHeight = Victim->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+		const FVector Local = Frame.InverseTransformPosition(Victim->GetActorLocation());
+		const bool bTouching = FMath::Abs(Local.X - Box.GetCenter().X) <= Box.GetExtent().X + Radius + RamReach
+			&& FMath::Abs(Local.Y - Box.GetCenter().Y) <= Box.GetExtent().Y + Radius + RamReach
+			&& Local.Z + HalfHeight >= Box.Min.Z - RamReach && Local.Z - HalfHeight <= Box.Max.Z + RamReach;
+		// Only what the car drives into, not someone walking into its side or back as it goes by
+		const FVector Toward = (Victim->GetActorLocation() - Rider->GetActorLocation()) * FVector(1.f, 1.f, 0.f);
+		if (!bTouching || FVector::DotProduct(Toward, Velocity) <= 0.f)
+		{
+			continue;
+		}
+		RamTimes.Emplace(Victim, Now);
+		const FVector Direction = Velocity.GetSafeNormal();
+		const bool bDeadly = Speed > WalkSpeed;
+		const float Damage = bDeadly ? Victim->GetMaxHealth() * 100.f : Victim->GetMaxHealth() * Speed / FMath::Max(WalkSpeed, 1.f);
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s rams %s at %.0f (walk %.0f): %s."), *Rider->GetName(), *Victim->GetName(), Speed, WalkSpeed,
+			bDeadly ? TEXT("knockout") : *FString::Printf(TEXT("%.0f damage"), Damage));
+		FHitResult Hit(Victim, Victim->GetCapsuleComponent(), Victim->GetActorLocation(), -Direction);
+		// A knockout from this throws the body off through the air
+		Victim->SetRamImpact(Velocity);
+		UGameplayStatics::ApplyPointDamage(Victim, Damage, Direction, Hit, Rider->GetController(), this, UDamageType::StaticClass());
+		if (Victim->IsAlive())
+		{
+			Victim->LaunchCharacter(Direction * RamKnock.X * Speed / FMath::Max(WalkSpeed, 1.f) + FVector(0.f, 0.f, RamKnock.Y), true, true);
+		}
+	}
 }
 
 void ARRRandomVehicle::UpdateSkidMarks(bool bDrifting, float Speed)

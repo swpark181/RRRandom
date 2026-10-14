@@ -25,6 +25,186 @@
 - (13차) Tripo 잔디 타일(캐릭터 크기)로 바닥을 깔되, 이어 붙인 티가 덜 나게 랜덤 배치.
 - (14차) 참고 그림(복셀 섬: 절벽, 폭포, 물, 선착장, 언덕, 길) 같은 레벨. 사용자 선택: 가운데는 평평하게 싸우고 절벽/폭포/물은 가장자리 배경, 바위/모래/나무는 임시 블록으로 먼저(Tripo 블록이 오면 교체).
 - (15차) 스타크래프트 같은 전장의 안개: 처음엔 다 가려져 있고 캐릭터 주변 원형 시야, 지나간 곳은 안개가 걷힘.
+- (21차) TPS 모드 전용 맵 "주사위 랜드": 파스텔 → (피드백) 진하고 생동감 있는 사탕색 주사위 섬, 무지개 주사위, 주사위 숲, 구름. TPS 용으로 엄폐물 많이, 디자인을 해치지 않게 자연스럽게. Tripo 로 3D 를 뽑아 TPS 로 시작할 때 나오게.
+- (22차) TPS 카메라: 거인·비행 때 각도/거리 조절, 조준 줌 때 캐릭터가 화면을 너무 가림. 거대화·날개·피격 이펙트를 만들어 강화.
+- (23차) 토끼·다람쥐·호랑이를 여우와 비슷한 느낌으로 추가, 시작할 때 고름. 봇은 랜덤. Tripo + Mixamo 로.
+- (24차) 차에 치이면 뒤로 날아가는 모션과 함께 날아가며 쓰러짐. Mixamo 에서 모션.
+- (26차) 궁극기 주사위를 얻는 치트, 궁극기 주사위를 굴릴 때 더 화려하게.
+- (27차) 호랑이 기운 범위 지정: 캐릭터와 상관없이 주변 원하는 곳으로 뛸 수 있고, 범위 안 적은 모두 피해.
+- (28차) 범위 표시가 바닥에 고정 안 되고 멀수록 커짐 → 홀로그램 같은 이펙트로, 데미지도 정상으로.
+- (25차) 호랑이 뒤통수 호피무늬, 다람쥐 머리-꼬리 사이 깨짐, 토끼 주둥이를 더 귀여운 카툰으로, 호랑이 궁극기 "호랑이 기운"(궁극기 주사위 → 레벨만큼 거대해져 주사위 숫자만큼 앞발 내려치기, 범위 캐릭터의 약 10배).
+
+## 28차 — 호랑이 기운 범위 홀로그램, 지점은 늘 바닥 (사용자: 범위 표시가 바닥에 고정 안 되고 멀어질수록 커짐, 홀로그램 같은 이펙트로, 데미지 정상으로)
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 원인: 27차의 지점 찾기가 커서 선이 처음 닿는 WorldStatic/Dynamic 을 지점으로 써서, 주사위 랜드 가장자리의 보이지 않는 림 벽(높이 6000), 나무·엄폐물 꼭대기 등 공중에 잡힘 → HUD 원이 공중(카메라 가까이)에 그려져 크게 보이고, 서버의 피해 원기둥(지점 −500 ~ +3500)도 공중에 떠서 바닥의 적이 빠짐.
+- 지점: 커서 선과 바닥 높이 평면의 교점(`ARRRandomTigerSpirit::GetGroundZ` = 호랑이가 서 있던 발 높이) → `FindGround`: 그 XY 에서 +250 위부터 아래로 WorldStatic 만, 폰 무시, 위를 향한 면(법선 Z > 0.6) 첫 번째. 서버 `MulticastStrike` 도 같은 `FindGround`(전엔 +600 위에서 Visibility 채널).
+- 홀로그램(`/Game/Effects/DiceFX/M_FXHolo`, `scripts\ue_make_holo.py`): 엔진 `/Engine/BasicShapes/Cylinder` 를 반지름 `StrikeRadius` 500, 높이 `HoloHeight` 260 으로. 반투명(가산은 주사위 랜드의 밝은 바닥에서 안 보였음), 언릿, 양면, 깊이 테스트 끔(거인 몸 너머로도 보임). 물체 좌표로 H(높이 0..1)·R(반경 0..1): 벽 = (1−H)² × (0.35 + 위로 흐르는 스캔라인), 바닥 = 0.12 + 바깥으로 퍼지는 물결 + R>0.88 테두리 + 테두리를 도는 점선 12개. 발광 = Color × Glow × (0.6 + 양), 불투명도 = 양 × 2.2 × "Opacity".
+  - 커서 홀로그램(`CursorHolo`, 주황): 그 호랑이 플레이어 기기에서만, 플레이어 컨트롤러 `PlayerTick` 이 매 프레임 `ShowCursorSpot`. 쓸 수 있는 동안 계속(치는 중 클릭 예약도). HUD 의 선 원은 지움.
+  - 칠 곳 경고(`TargetHolo`, 진한 빨강·맥동): 모든 기기에서 `MulticastStrike` 때 그 자리에, 앞발이 닿으면 0.35초에 사라짐 — 상대도 피할 곳을 봄.
+- 확인: 빌드 경고 없음. 주사위 랜드 TPS 에서 화면 여러 곳(가장자리 쪽 포함) 클릭 6번 → 지점 모두 바닥(Z 1.5), 임시 `-RRTEMPUltPlace`(지점 옆 100/400 에 적 둘 — 지움)로 매번 원 안 적 피해(넉아웃 포함). 탑뷰 섬·TPS 주사위 랜드 캡처(`output\screens\holo3`, `holo4`, `holo5`): 가까운 곳·먼 곳 원 크기 같음, 바닥에 붙어 물결·테두리·벽이 보임.
+- 확인 못 한 것: 언덕 위·다리 위처럼 호랑이 발 높이와 많이 다른 곳(교점이 조금 어긋날 수 있음 — FindGround 가 +250 위부터 찾음), 참가자 화면의 칠 곳 경고.
+
+## 27차 — 호랑이 기운: 아무 곳이나, 범위 안 적 전부 (사용자: 범위 지정은 캐릭터와 상관없이 주변 원하는 곳으로 뛸 수 있고 범위 내 적은 모두 피해)
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 고친 것 (`ARRRandomPlayerController::GetUltimateSpot`, `ARRRandomTigerSpirit`):
+  - 지점: 전엔 WorldStatic 지형에만 맞춰서 바다·맵 밖·하늘 쪽 클릭은 무시됨 → 캐릭터(모든 폰)·탈것·거인은 통과, WorldStatic+WorldDynamic 에 맞추고, 아무것도 없으면 바닥 높이(호랑이 발) 평면과 만나는 점.
+  - 내려치는 중·커지는 중 클릭: 전엔 버려짐 → 서버가 하나 기억(`QueuedTarget`, 마지막 클릭)했다가 준비되면 바로 침. 클라이언트 재요청 간격 0.5 → 0.3초. HUD 원은 치는 중에도 커서 아래 표시, 안내 `[CLICK ANYWHERE]`.
+  - 플레이어가 6초 안 고르면: 전엔 적이 모인 곳 → 거인 바로 앞(앞발 거리 × 1.5). 적 모인 곳 고르기는 봇 호랑이만.
+  - 피해: 전엔 높이 차 ±500 넘으면 제외 → 지점 아래 500 ~ 위 `GiantHeight` 원기둥(날거나 엄폐물 위 적도). 2D 거리 ≤ 반지름 500 + 캡슐 반경이면 모두. 맞을 때마다 로그 `tiger spirit hits X <거리> away: <체력> -> <체력>`(빗나감은 Verbose).
+  - 맞지 않는 예외(의도): 같은 팀, 이미 쓰러진 적, 무적(치트), 자기 호랑이 기운을 쓰는 중인 상대 호랑이(숨은 본체는 데미지 없음).
+- 확인: 빌드 경고 없음. 임시 `-RRTEMPUltTest`(지점 주변 150/480/700 에 적을 옮기고 그 지점을 침, 궁극기 주사위 자동 굴림 — 확인 후 지움)로 탑뷰·TPS 7번: 치는 순간 원 안(≤542) 적은 모두 맞음(36~526), 빗나간 3명은 모두 밖(591, 644, 700). 처음 몇 번 "가까이 놓은 적이 안 맞음"은 1초 사이 봇이 걸어 나간 것. 실제 클릭(탑뷰, `-ExecCmds="RRUltimate"` + E, `output\screens\ult_click`): 커지는 중 왼쪽 위 클릭 → 기억했다가 그 자리, 오른쪽 개울가, 맵 밖 바다(왼쪽 아래)까지 찍은 곳마다 뛰어가 내려침.
+- 캡처 스크립트(scratchpad `capture_keys.ps1`): 클릭마다 화면 위치 `"시간:1:dx:dy"`.
+
+## 26차 — 궁극기 주사위 치트, 굴릴 때 연출 (사용자: 궁극기 주사위를 얻는 치트, 굴릴 때 조금 더 화려하게)
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 치트: **U** 키(F11 도 그대로 — 단 에디터 PIE 에선 F11 이 에디터 전체 화면 키라 게임에 안 감) / 콘솔 `RRUltimate`. 호랑이가 아니면 먼저 호랑이로 바꾼 뒤(`SetSpecies`, 로그 `is now the Tiger`) 궁극기 주사위 하나 저장. E 로 굴림. 치트 줄 `[U] TIGER ULT DIE`.
+- 굴리기 연출(각 기기, 보는 사람 모두):
+  - `URRRandomDiceBuffComponent::GetSpinTime()`: 궁극기 주사위는 `UltimateSpinTime` 1.6초(보통 0.6) 동안 굴러간 뒤 효과. HUD 결과 표시·머리 위 주사위 모두 이 값을 씀.
+  - `URRRandomOverheadDieComponent`: 궁극기면 금색(`/Game/Props/Dice/M_DiceGold`, `scripts\ue_make_gold_die.py` — 금색 베이스, 금속 0.9, 거칠기 0.35, 발광 = 색 × "Glow") + 진한 빨강 눈(M_DicePip MID), 크기 × `UltimateScale` 1.8, 높이 × `UltimateHop` 1.5(2.4 는 TPS 에서 화면 위로 잘림), 회전 `UltimateTurns` 6바퀴, 빛 맥동 + 착지 때 번쩍.
+  - `ARRRandomEffects::UltimateDieSpin`: 주사위 둘레 3갈래 금빛 별 소용돌이(점점 빨라짐), 발밑에서 주사위까지 금빛 기둥, 기둥 타고 오르는 불꽃, 바닥 파동 고리. `UltimateDieBurst`(착지): 금·흰·주황 고리 3겹, 섬광, 빛 기둥, 별과 금 주사위 분수, `GiantBurst` 충격파.
+  - 내 HUD: 굴러가는 동안 화면 아래쪽(크로스헤어 밑) 금색 `ULTIMATE DIE!`(맥동), 착지하면 화면 전체 금빛 섬광 + `TIGER SPIRIT xN!` 크게 쾅 → 1.8초 뒤 사라짐(`ARRRandomHUD::UltimateBannerTime`). 처음엔 화면 위쪽 0.28 에 뒀다가 머리 위 표시들과 겹쳐서 0.66 으로.
+- 확인: 빌드 경고 없음. `-ExecCmds="RRUltimate"` + E 키로 여우(TPS)·토끼(TPS)·다람쥐(탑뷰)에서 시작 → 각각 호랑이로 바뀌고 궁극기 주사위 굴림 → 호랑이 기운까지 이어짐(로그·캡처 `output\screens\ultdie`, `ultdie_tps`, `ultdie_top`).
+- 확인 못 한 것: U 키를 사람이 직접 누른 것(자동 입력은 E 만, 치트는 콘솔 명령으로), 다른 사람(참가자) 화면에서 본 금색 주사위.
+
+## 25차 — 외형 손질 3가지 + 호랑이 기운 (사용자: 1 호랑이 뒤통수 호피무늬 2 다람쥐 머리와 꼬리 사이 그래픽 깨짐 3 토끼 주둥이 더 귀여운 카툰 4 호랑이 궁극기)
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 호랑이 뒤통수: `scripts\blender_tiger_back_stripes.py <tripo fbx> <베이스컬러> <png> [미리보기]` — 머리 가운데 기준 각도(뒤 0°, 옆 ±)·높이로 정의한 줄무늬 5개(정수리에서 굵고 아래로 뾰족, 이마 줄무늬와 같은 진갈색, 가장자리 1.6° 부드럽게)를 뒤를 향한 머리 면의 텍셀에만 칠함(UV 이음매 양쪽이 겹치게 1.5텍셀 여유, 옆 64° 넘으면 귀·흰 볼털이라 제외) → `output\animals\T_Tiger_BaseColor_striped.png` → `T_Tiger_BaseColor` 다시 들여옴(스크래치 `ue_reimport_tex.py`). 게임 TPS 뒤 화면에서 확인(`output\screens\look_Tiger`).
+- 다람쥐 깨짐: 원인은 Tripo 메시에서 꼬리와 뒤통수가 붙어 있어 꼬리 뼈 정점과 머리 정점이 같은 면 58개를 공유 → 머리가 돌거나 꼬리가 흔들리면 볼에서 꼬리까지 길쭉한 조각으로 늘어남(머리 35° 돌린 렌더로 재현, `output\animals\tail\seam_compare.png`). `blender_animal_tail.py` 에 6번째 인자 SEAM(m): 꼬리와 다른 부위(Hips 제외)가 만나는 면에서 그 거리 안 정점의 뼈 무게를 모든 그룹 스무딩 12번 + 정규화 → 다람쥐 6cm(411 정점). 늘어난 조각이 작은 볼록함 정도로 줄어듦. 게임 TPS 뒤 화면에서 확인(`look_Squirrel`).
+- 토끼 주둥이: 입이 벌어지고 이빨·잇몸이 보이는 모양이 메시에 파여 있어 텍스처로는 안 되므로 새로 만듦 — 기존 토끼 정면 렌더를 Tripo Image(Nano Banana Pro, 무료)에 넣고 "나머지는 그대로, 주둥이만: 작은 하얀 볼 주둥이, 하트 분홍 코, 다문 w 미소, 작은 앞니 두 개" → HD Model(30, 23,400 → 23,370) → FBX → Mixamo(호랑이를 덮어씀) 18개(날아가기 포함, 토끼 자기 리그) → 꼬리 2뼈 → 언리얼. 옛 토끼 원본은 `input\rabbit_v1`. 새 토끼는 다리가 짧고 귀·머리가 커서 엉덩이 17.5, 크기 2.45(걷기 실측 52/s), 얼굴 그림 다시 렌더.
+- 호랑이 기운(`RRRandomTigerSpirit.h/.cpp`):
+  - 주사위(`URRRandomDiceBuffComponent`): `UltimateDieChance`(호랑이만 `TigerUltimateDieChance` 0.15, 종 적용 때 설정) — 게이지로 얻는 주사위가 그 확률로 궁극기 주사위(한 번에 하나), 저장 수 `UltimateCharges` 복제, 굴리면 그것부터(`FRRDiceRoll::bUltimate`), 착지하면 `OnUltimateDie(눈)`. 치트 F11 / `RRUltimate`(`GiveUltimateDie`).
+  - 캐릭터: `OnUltimateDie` 가 `ARRRandomTigerSpirit` 를 스폰(Instigator = 호랑이 → 킬 인정), 복제 `Spirit`. 쓰는 동안 몸·총 숨김, 이동 속도 0, 사격·점프·주사위·데미지 없음(`IsUsingUltimate`). 끝나면 `EndUltimate`.
+  - 거인: 키 `GiantHeight` 3500(맵 지름 약 6000, 탑뷰 카메라 높이 약 4900 이하), 호랑이 메시·머티리얼 + 주황 빛 맥동(HitFlash 파라미터), `A_Tiger_Roar`(Mixamo Mutant Roaring)로 2초 동안 커짐 → 대기 → 내려치기 `A_Tiger_JumpAttack`(Mixamo Mutant Jump Attack: 1.7초에 두 앞발이 리그 앞 77.4·높이 9.5에 닿고 엉덩이는 50 앞으로 — 블렌더로 잼) 0.35초부터 1.3배속. 앞발이 정확히 지점에 떨어지게 지점 − 바라보는 방향 × 77.4 × 크기 자리로 도약하며 돌고, 끝나면 엉덩이가 간 만큼 앞에 섬. 반지름 `StrikeRadius` 500(캐릭터 폭의 약 10배) 안 상대 팀에게 가운데 70 → 가장자리 35 데미지, 살아남으면 밖으로 날림. 다 치면 1.2초 줄어들어 호랑이로.
+  - 지점: 호랑이 플레이어는 클릭(커서 아래 바닥, HUD 에 반지름 원), 6초 안 고르면 거인이 고름. 봇 호랑이는 0.8초 뒤 적이 가장 많이 모인 곳.
+  - 시점(그 플레이어만): 모든 캐릭터 평균 위치 위 높은 카메라(피치 -60, 7000 뒤, FOV 70)로 0.8초 블렌드, 커서 보임, 전장의 안개 즉시 걷힘(서서히 걷으면 시점이 넘어가는 순간 검은 화면 한 장이 나왔음), 끝나면 돌아옴.
+  - 다른 사람 화면: 카메라가 거인이 차지하는 공간(몸 + 앞발이 닿는 앞쪽) 안이면 그 기기에서만 거인을 `M_FXGhost` 반투명 주황으로(TPS 에서 화면이 털로 가득 찼음).
+  - 이펙트 `ARRRandomEffects::TigerStrike`(충격파 고리 3개, 섬광, 먼지, 별·주사위), 커질 때 `GiantBurst`, 서 있는 동안 `GiantAura`, 사라질 때 `TeleportPoof`.
+  - 네트워크: 거인 액터 복제(항상), 내려치기는 `MulticastStrike`, 줄어들기는 복제 `bEnding`; 참가자 기기에서 호랑이가 늦게 도착해도 그때 시작(`TryStart`).
+  - HUD: 궁극기 주사위가 있으면 머리 위 주사위 상자 금색 + 아래 `ULTIMATE DIE: TIGER SPIRIT!`, 굴린 결과 `6 TIGER SPIRIT`, 쓰는 동안 `TIGER SPIRIT [CLICK] PAW STRIKE xN LEFT`, 치트 줄에 `[F11] TIGER ULT`.
+- 확인: 빌드 경고 없음. 임시 `-RRTEMPUlt`(호랑이마다 시작 2초 뒤 궁극기 주사위를 주고 굴림)·`-RRTEMPAllTiger`(봇 모두 호랑이) — 확인 후 지움. 화면 없이 호랑이 3~4마리가 각자 1~6번씩 끝까지 치고 맞은 수 기록, 탑뷰 플레이어 호랑이 화면(`output\screens\ult2`, `ult_input2`), 토끼 TPS 에서 본 거인(`ult3` 불투명 → `ult5` 반투명), 실제 입력(F11 → E → 6 → 클릭 6번 모두 커서 자리, `ult_input`), LAN 참가자 화면에도 거인들 등장. 일반 실행 중 봇 호랑이가 확률로 얻어 쓰는 장면도 캡처됨(`rabbit2`).
+- 확인 못 한 것: 실제 사람이 탑뷰/TPS 에서 여러 곳을 골라 치는 손맛(시험은 커서 고정), 참가자 호랑이 플레이어의 클릭(서버 RPC 경로), 거인이 맵 밖 바다에 서는 모습, 성능(거인 그림자·이펙트). 자동 키 입력은 가끔 게임 창에 안 들어가서 몇 번은 `-ExecCmds="RRUltimate"` 로 대신함.
+- Mixamo 에 지금 남은 캐릭터: 새 토끼(호랑이 리그는 사라짐 — 호랑이에 쓰는 모션은 모두 받아 둠: `input\tiger\mixamo\tiger_roar|swipe|jumpattack|punch|flyback.fbx`).
+
+## 24차 — 차에 치이면 날아감 (사용자: 뒤로 날아가는 모션과 함께 날아가면서 죽게, Mixamo 에서 적당한 모션)
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 모션: Mixamo "Flying Back Death"(Dying Flying Backward, 3.0초, 엉덩이 0.4초에 가장 높고 0.93초에 땅, 뒤로 43cm). Mixamo 엔 호랑이만 남아 있어(23차 메모) 호랑이 리그로 받음 → `C:\work\char-pipeline\input\tiger\mixamo\tiger_flyback.fbx`.
+- 네 종에 옮기기: `scripts\ue_import_flyback.py <fbx>|26.3|Fox=27.5|Rabbit=22.1|Squirrel=21.2|Tiger=26.3` → `A_<Name>_FlyBack`. Mixamo 리그는 뼈 이름·축이 같아서 로컬 회전은 그대로, 뼈 길이(엉덩이 말고 모든 뼈의 이동)는 각자 스켈레톤 기준 포즈로, 엉덩이 높이는 엉덩이 높이 비로, 엉덩이의 땅 위 이동은 첫 프레임 자리로 고정(게임이 몸을 던짐). 다람쥐에 없는 엄지 트랙은 빠짐. 각 종 자기 대기 애니메이션 뼈 길이 = 기준 포즈(차 0.00) 확인. 주의: UE 파이썬이 트랙 이름을 소문자로 돌려줌, 이미 있는 애니메이션을 덮어쓰면 압축 설정이 깨져서 파일을 먼저 지우고 들여옴.
+- 코드:
+  - `FRRSpeciesLook::FlyBack` → `ARRRandomCharacter::FlyBackAnimation`.
+  - `ARRRandomVehicle::UpdateRam` 이 데미지 직전에 `Victim->SetRamImpact(속도)`. `KnockOut` 이 같은 순간(월드 시간 double 로 비교 — float 로 했다가 항상 달라서 안 됐음)의 충격이면 복제 `FlingVelocity` = 차 방향 × clamp(차 속도 × `FlingSpeedShare` 0.8, `FlingSpeedRange` 600~1300) + 위 `FlingLift` 480(중력 980 에서 약 1초, 모션 착지와 맞음).
+  - `ApplyKnockedOutBody`(서버·OnRep 모두): 날림이면 캡슐 충돌은 켠 채 Pawn 만 무시(다른 캐릭터·운전자 통과, 지형엔 막힘), 차 반대쪽을 보게 돌리고(움직임 방향/컨트롤러 회전 끔), `MOVE_Falling` + 속도, `FlyBackAnimation` 한 번. `UpdateFling`(쓰러진 동안 Tick): 0.2초 뒤 땅(또는 서버가 이미 멈춤)이면 `EndFling` — 이동 끄고 캡슐 충돌 끔, Pawn 응답 되돌림, 서버 로그 `run over, lands <거리> away after <초>`. 맵 밖으로 날아가면 부활 때까지 떨어짐. 부활(`ApplyStandingBody`)이 날던 중이면 정리.
+- 확인(임시 `-RRTEMPRam`: 시작 뒤 가까운 브롤러를 속도 1400 으로 옆/카메라 쪽으로 친 것처럼 — 확인 후 지움): 화면 없이 4번 모두 0.98~1.00초 뒤 착지, 약 11m(장애물에 걸리면 6.8m). TPS 창 캡처(`output\screens\fling2`)에서 호랑이가 팔다리를 뻗고 뒤로 날아 플레이어 뒤를 지나 등으로 떨어져 누움. LAN 호스트+참가자: 참가자 화면에서도 같은 몸이 0.99초 뒤 착지(732 vs 호스트 768). 일반 봇전 끝까지 에러 없음.
+- 확인 못 한 것: 실제 차가 사람을 치는 장면(봇이 차로 치는 경우가 드묾 — 경로는 같은 `SetRamImpact` → 데미지), 거인이 치였을 때, 탑뷰에서의 모습.
+
+## 23차 — 토끼·다람쥐·호랑이 (사용자: 여우와 비슷한 느낌으로 추가하고 시작할 때 고르게, 봇은 랜덤, Tripo·Mixamo 로)
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 그림: 여우 OBJ 정면 렌더(`scripts\blender_fullbody.py` → `output\animals\fox_front.png`)를 Tripo Image(Nano Banana Pro, 1:1, 무료)에 참고로 올려 "같은 스타일·비율·A 자세, 비슷한 옷(티셔츠, 반바지, 갈색 주머니 벨트)" — 토끼(흰 털, 하늘색 티, 청 반바지), 다람쥐(적갈색, 흰 티, 올리브 반바지, 등 뒤로 솟아 말린 큰 꼬리), 호랑이(주황 줄무늬, 흰 티, 짙은 회색 반바지, 옆으로 휜 줄무늬 꼬리).
+- 3D: 그림 → Tripo HD Model(H3.1, 2K PBR, 삼각형 20,000 목표, 1회 30 크레딧 × 3, 23,490 → 23,400). FBX(Blender, 2K)로 받음 → `C:\work\char-pipeline\input\<rabbit|squirrel|tiger>\tripo\`(19,290 / 19,262 / 19,842 삼각형).
+- Mixamo 용 OBJ: 새 Tripo FBX 는 1m 높이에 노드 변환이 있어서 `fbx_to_obj.py`(원시 좌표)로는 누워 나옴 → `scripts\blender_tripo_to_obj.py <fbx> <obj> <베이스컬러 파일명>`: 블렌더가 변환 적용, 높이 100(여우 OBJ 와 같게), 발(아래 6%) 기준 가운데, Y-up → `input\<동물>\<동물>_mixamo.zip`(obj+mtl+jpg).
+- Mixamo(사용자 계정, Claude in Chrome): 업로드 → 마커 → **2 Chain Fingers (41)**(여우와 같은 뼈 이름). Mixamo 는 대칭선을 모델 범위 가운데에 그려서 꼬리가 옆으로 큰 다람쥐·호랑이는 대칭을 끄고 마커를 하나씩 찍음. **Mixamo 는 올린 캐릭터를 하나만 보관** — 새로 올리면 이전 것(여우 `fox_mixamo_upload` → 토끼 → 다람쥐 → 지금 호랑이)이 사라짐. 여우 애니메이션을 더 받으려면 `C:\Users\user\Downloads\fox_mixamo_upload.zip` 을 다시 올려 리깅해야 함(리그가 조금 달라질 수 있음).
+- 다운로드(페이지 안 API, `X-Api-Key: mixamo2` + localStorage 토큰): 캐릭터마다 17개 — `<동물>_SK.fbx`(Two Hand Rifle Idle, With Skin), walk(Quickly Walk Forward With Rifle), fire(Firing A Rifle While Standing, 짧은 것), death(Rifle Getting Hit To Ground), victory(House Dance Variation Two), aim_idle, run_f/b/l/r(in place), dance1~4, defeat1~3 — 여우가 쓴 것과 같은 상품(프레임 수로 확인). 결과 파일은 CORS 때문에 fetch 로 못 받아 링크 클릭으로 받음, 너무 빨리 요청하면 429 → 4초 간격. → `input\<동물>\mixamo\`.
+- 꼬리: Mixamo 자동 리그가 다람쥐 꼬리는 **왼팔(56%)·목**, 호랑이 꼬리는 **왼허벅지 100%**, 토끼 꼬리 공은 **머리 83%** 에 붙임 → `scripts\blender_animal_tail.py <fbx> <out> "x,y,z;..." [반경] [몸 비율]`: 블렌더 좌표(m, +Y 뒤, +X 캐릭터 왼쪽) 중심선을 따라 Hips 자식 `Tail1..N`, 중심선에서 반경 안이고 다른 뼈보다 가까운(× 몸 비율) 정점만 꼬리 뼈로 다시 스킨(뼈마다 구간, 3cm 섞기, 뿌리 5cm 는 Hips 와 섞음). 중심선은 `scripts\blender_rest_grid.py`(옆/뒤 10cm 격자 렌더)에서 읽음. 다람쥐 4뼈 97cm(반경 0.34, 몸 비율 1.15, 4,003 정점), 호랑이 4뼈 53cm(0.08, 0.85, 801), 토끼 2뼈 8cm(0.05, 0.85, 233). 확인은 꼬리 무게 칠한 렌더(`output\animals\tail\*_paint_*.png`).
+  - 덤으로 찾은 것: `blender_fox_tail.py` 의 마지막 꼬리 뼈 무게 식(`hi = 1.0`)이 0 이 되어 여우 Tail4 엔 정점이 없고 끝을 지난 정점은 무게가 없을 수 있음. 새 스크립트에선 고침(`hi = 0.0`), 여우는 손대지 않음.
+- 언리얼: `scripts\ue_import_animal.py <Name>|<mixamo 폴더>|<베이스컬러>|<꼬리 fbx>` → `/Game/Characters/<Name>/`: `<name>_SK.fbx` 로 `SK_<Name>`+스켈레톤을 만들고 꼬리 FBX 를 그 스켈레톤으로 다시 들여옴(다른 뼈 기준 포즈 변화 0.000 확인), `Anims/A_<Name>_Idle..AimRunR`(걷기·춤은 엉덩이 이동 제거), `Textures/T_<Name>_BaseColor`, `M_<Name>` = 여우 머티리얼 지금 모양(베이스 × DiffuseColor 틴트, 평평, 그리고 `ue_fox_pastel.py`·`ue_fox_hitflash.py` 를 그대로 실행). 이미 있던 폴더를 다시 들여올 땐 게임 코드가 시작 때 에셋을 잡고 있어 지우기가 실패함 → `Content\Characters\<Name>` 을 먼저 파일로 지울 것. 다람쥐는 엄지 뼈가 없음(33 + 꼬리 4) — 코드가 쓰는 손 뼈(RightHand, RightHandIndex1, LeftHand)는 있음.
+- 얼굴: `blender_portrait.py <SK fbx> <png> 256 [머리 x]`(다람쥐는 꼬리 때문에 머리 x 0 지정) → `ue_import_ui_texture.py` → `/Game/UI/T_<Name>Portrait`.
+- 코드:
+  - `RRRandomSpecies.h/.cpp`: `RRSpecies`(Fox, Rabbit, Squirrel, Tiger; 이름 ↔ 번호), `FRRSpeciesLook`(메시, 머티리얼, 대기/걷기/사격/쓰러짐, 춤들, 좌절들, 조준 세트, 메시 크기, 메시 오프셋, 걷기 속도, 얼굴) — `GetAll()` 이 생성자에서 경로 규칙으로 찾음. 크기 = 여우 엉덩이 높이 맞춤과 머리 끝 맞춤의 중간(토끼 2.14, 다람쥐 2.05, 호랑이 1.75; 엉덩이만 맞추면 다람쥐 머리가 여우보다 훨씬 큼). 걷기/조준 달리기 속도 = 여우 값 × 엉덩이 높이 비 × 크기(토끼 걷기 실측 65 ≈ 계산 63.5). (처음엔 기본 자세 엉덩이 XY 로 메시 오프셋을 줬다가 24차에서 뺌: Mixamo 애니메이션은 기본 자세와 상관없이 엉덩이를 원점 근처(0.3, 0.8)에 두고 재생해서, 호랑이가 오히려 30cm 어긋났음.)
+  - `ARRRandomCharacter`: `SpeciesLooks`(모두 로드 유지), 복제 `Species`(OnRep), `SetSpecies`(서버), `UseLook`, `ApplySpecies`(시작 전이면 BeginPlay 가 적용; 시작 뒤면 메시·머티리얼 교체 + `URRRandomEventComponent::RefreshMesh` + 팀 색 + 잔상 지움 + 자세), `GetPortrait`. 클라이언트에서 시작할 때 `arrives as the <종>` 로그.
+  - 게임 모드: `SpawnBrawler(…, Species)` 지연 스폰에서 설정 + `is a <종> on team` 로그. 봇 = `FMath::RandRange` 4종, 플레이어 = 컨트롤러가 알려 준 값 또는 이 기기 플레이어면 세션 서브시스템 값.
+  - `URRRandomSessionSubsystem::Get/SetSpecies`(레벨 넘어 유지, `-RRSpecies=<이름>`). `ARRRandomPlayerController`: 참가자가 BeginPlay 에서 `ServerChooseSpecies` → 서버가 기억(`GetChosenSpecies`, 새 게임 때 스폰에 씀)하고 지금 브롤러를 바꿈.
+  - 타이틀: 시점(TOP VIEW / THIRD PERSON) 고른 뒤, 참가(JOIN)는 바로 `PICK YOUR BRAWLER` 페이지 — FOX / RABBIT / SQUIRREL / TIGER(버튼 왼쪽에 얼굴, 설명 한 줄) / BACK. 마지막 고른 것이 선택돼 있음, Esc/BACK 은 이전 페이지로.
+  - HUD 팀원 카드 얼굴 = 그 브롤러의 종(`GetPortrait`, 없으면 여우).
+- 확인:
+  - 빌드 경고 없음. `-nullrhi` 봇전(`-RRSpecies=Rabbit -RRScoreToWin=3`): 플레이어 토끼, 봇 여우·다람쥐×2·호랑이 등 랜덤, 경기 끝까지 에러 없음.
+  - 창 캡처: 탑뷰 호랑이(`output\screens\species1`), TPS 다람쥐(`species2`), 타이틀 키 입력(싱글 → THIRD PERSON → 캐릭터 페이지 → 다람쥐 → 시작, `species_title`; 캡처 스크립트에 키/마우스 입력 추가), 결과 화면에서 다람쥐·호랑이 춤(`species3`), TPS 에서 네 종 모두 마우스 왼쪽 누른 채 사격 — 총이 손에, 같은 조준 자세(`species_fire\compare.png`).
+  - LAN 두 프로세스(`-RRHost -RRLan -RRSpecies=Tiger` / `-RRJoin -RRLan -RRSpecies=Squirrel`): 호스트에서 참가자 브롤러가 여우로 생겼다가 `is now the Squirrel`, 참가자 화면에서도 자기 것이 다람쥐로 바뀌고 봇들은 호스트와 같은 구성(호랑이 3, 토끼 1, 다람쥐 2)으로 도착.
+- 확인 못 한 것: 실제 마우스로 해 본 타이틀 클릭, 참가자가 새 게임(`?Restart`) 뒤에도 고른 종 유지(서버가 컨트롤러에 기억하지만 재접속 때 컨트롤러가 새로 생기면 다시 RPC 로 보냄 — 로그로는 안 봄), 꼬리 흔들림의 실제 모습(다람쥐 꼬리는 크고 위로 솟아 여우용 흔들기 축이 덜 맞을 수 있음), 각 종의 쓰러짐·거인·비행 모습, 연습 더미(`ARRRandomDummy`)는 여전히 여우, 타이틀 그림도 여우.
+
+## 22차 — TPS 카메라, 거대화·날개·피격 이펙트
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 카메라(`ARRRandomCharacter::UpdateCamera`, 3인칭): 팔 길이와 어깨 오프셋에 몸 크기(`GetActorScale3D().Z`, 거인 2배)를 곱함 — 스프링암은 액터 크기를 따라 커지지 않아 거인이 화면을 덮었음. 비행·활공 중(`FlightCameraPull`, 이제 3인칭에서도 계산)엔 팔 × (1 + 0.55), 위로 +70, 화각 +8°. 조준: 200 / (0, 95, 115) / 50° → 290 / (0, 125, 95) / 52° — 캐릭터가 왼쪽 아래 가장자리에 어깨·귀만 걸침(145 까지 비켰더니 귀 끝만 보여 되돌림).
+- `ARRRandomEffects`(새, 기기마다 하나, 복제 안 함, `Get()` 이 처음 쓸 때 만듦): 풀 방식 파티클 — 구·링·별(날개 반짝이 메시)·주사위를 `/Game/Effects/DiceFX` 의 `M_FXGlow`(언릿 반투명, 인스턴스 커스텀 데이터 0~2 색, 3 밝기, 4 불투명) 인스턴스로, Tick 에서 날고 커지고 사라짐. 별과 일부 링은 카메라를 향함. 밝기 1 넘는 값은 `GlowSqueeze` 0.3 으로 눌러 넣음(그대로면 밝은 하늘 앞에서 색이 다 하얗게 탐). 카메라 500 안쪽 파티클은 반지름을 빼고 가까울수록 옅게(최저 0.1) — 내 캐릭터 주변 폭발이 화면을 덮던 것.
+  - 거대화 시작: 바닥 충격파 링 두 개(금색, 팀색), 먼지 고리 18, 위로 튀는 별 40·사탕색 주사위 14, 가슴 섬광, 가는 빛기둥. 유지 중: 발밑 링 초당 2.2, 몸 둘레로 올라가는 빛 알갱이 초당 16, 가끔 별. 끝: 작은 링 + 옅은 먼지 + 별.
+  - 날개 시작: 카메라를 향한 하늘색 링 + 바닥 링 + 섬광 + 별 32. 비행·활공 중: 날개 위치에서 별과 빛 뭉치가 꼬리처럼(속도에 비례).
+  - 피격(`MulticastDamagePopup` — 모든 기기): 총마다 색과 세기(`HitBurstStrengths`/`HitBurstColors`, ERRHitEffect 순서) 로 카메라 쪽으로 튀는 불꽃 + 별 + 카메라를 향한 링 + 섬광, 그리고 몸 번쩍임.
+  - 상태 변화는 각 기기에서 복제된 `bGiant`/`bFlying` 을 `bWasGiant`/`bWasFlying` 과 비교해 감지(쓰러진 동안은 조용히 맞춤 — 부활 때 엉뚱한 효과 안 나게).
+- 에셋: `C:\work\char-pipeline\scripts\ue_make_fx.py <dice_land fbx 폴더>` → `M_FXGlow`, `SM_FXBall/Ring/Die`(주사위 랜드 도형을 나나이트 없이 — 나나이트는 반투명을 못 그림). `ue_fox_hitflash.py /Game/Characters/Fox/M_Fox` → 이미시브 += `HitFlashColor` × `HitFlash`(기본 0); 캐릭터가 맞으면 1 → 0.18초에 사라짐(제곱 × 2.5).
+- 확인(임시 `-RRFxTest=giant|fly|aim|hit` — 5초마다 거인/비행 반복, 조준 고정, 0.6초마다 자기 피격; 확인 후 지움): 캡처 `C:\work\char-pipeline\output\screens\fx_giant*`, `fx_fly`, `fx_aim*`, `fx_hit` + `*_sheet.png`(여러 장 한 장으로). `-nullrhi` 80초: TPS 쓰러짐 6·거인 3·비행 3, 탑뷰 8·2·3, 오류 없음.
+- 수정 (사용자: 기존 2D 표시는 해골 말고 다 지우기): `ARRRandomHUD` 가 피격 스티커(`T_HitEffects`) 중 해골(폼 핑거 원킬)만 그림 — 총 스티커는 월드 이펙트로 대신. 데미지 숫자는 그대로. 캡처 `output\screens\nosticker*`(교전 중 스티커 없음).
+- 수정 (사용자: 바다를 TPS 에서 볼 때도 예쁘게 — 위에서 볼 때만 신경 쓴 것 같음): 섬의 바다(탑뷰 맵을 3인칭으로 볼 때, F9 치트 등).
+  - `ue_make_water.py`: 거칠기 0.28 → 파라미터 `Roughness` 0.08(엔진 반사로 하늘이 비침), 이미시브에 프레넬(Schlick, 물결 노멀 기준) × `SkySheen`(0.42, 0.78, 0.95) × `SheenAmount` 0.3 — 비스듬할수록 하늘빛, 먼 바다가 수평선으로 이어짐. 코스틱·반짝임·짧은 물결은 `PixelDepth` 와 `DetailFade` 3500 으로 멀수록 줄이되 비스듬히 볼 때만(카메라 벡터의 z 가 0.3~0.65 아래) — 탑뷰 카메라(약 70° 아래, 거리 약 5000)에선 그대로. 처음엔 거리만 봐서 탑뷰 코스틱이 다 사라질 뻔함. `SheenAmount` 0.6 은 바다가 하늘색으로 하얗게 떠서 0.3.
+  - `ARRRandomIsland`: 바닥 밖 바다 평면을 레벨 바닥 경계 + `SeaReach` 80000 까지 — 3인칭에서 수평선에 바다 끝 선(그 너머 대기 지면의 짙은 띠)이 보였음.
+  - 확인(임시 `-RRIslandTPS`(3인칭인데 섬) + `-RRLook=Yaw,Pitch`(시선 고정), 지움 — `FParse::Value` 는 기본으로 쉼표에서 끊으니 `false` 필요했음): `output\screens\sea_before3*`(납작한 청록 띠 + 수평선 끝 선) → `sea_after3`(하늘 반사, 수평선까지 이어짐), `sea_after3_high`(내려다보면 해안 코스틱·거품 그대로). `-nullrhi` 탑뷰 60초 정상.
+- 추가 (사용자: 머리 위 주사위가 돌 때 반짝임 / 탈것을 걷기보다 확실히 빠르게, 킥보드 < 오토바이 < 자동차 / 자동차로 걷기보다 빠르게 들이받으면 즉사, 그 이하는 속도 비례 데미지):
+  - 주사위: `URRRandomOverheadDieComponent` 가 구르는 동안 매 프레임 `ARRRandomEffects::DiceSpinSparkle`(주사위 둘레에서 사탕색 별 초당 65 + 흰 빛 알갱이 12), 착지하는 순간 한 번 `DiceLandBurst`(카메라를 향한 금색 링, 섬광, 별 14).
+  - 탈것(`Handlings`, 걷기 300 대비): 킥보드 1.3 → 2.0, 오토바이 1.6 → 2.7, 자동차 1.9 → 3.5. 가속 1800/1500/1300 → 2600/2400/2200, 제동 1600/700/600 → 2200/1100/1000.
+  - 자동차 돌진(`ARRRandomVehicle::UpdateRam`, 서버, 자동차만): 운전자 수평 속도 60 이상일 때, 다른 팀 캐릭터의 캡슐이 차체 메시 상자(+15)에 닿고 차가 그쪽으로 가고 있으면(옆·뒤에서 걸어와 닿은 건 제외) — 속도 > 운전자의 기본 걷기 속도(`GetBaseWalkSpeed`, 버프·이벤트 전) 면 최대 체력 × 100 데미지(거인도 즉사), 이하면 최대 체력 × 속도/걷기 + 속도 비례로 밀려남. 같은 상대는 0.8초에 한 번. `ApplyPointDamage`, 데미지 원인은 차, 차의 Instigator = 운전자(탈 때 지정, 내릴 때 해제) → 킬은 운전자 점수.
+  - 확인(임시 `-RRRamTest=fast|slow` — 플레이어를 자동차에 태워 앞에 고정한 적에게 돌진 / `-RRDiceTest` — 2초마다 주사위; 지움): fast `rams ... at 981 (walk 300): knockout` → `knocked out by RRRandomCharacter_0`, slow `at 126: 42 damage` 반복 후 쓰러짐. 주사위 캡처 `output\screens\dice_sparkle*`. `-nullrhi` 80초: TPS 쓰러짐 7·탑승 14, 탑뷰 13·8, 오류 없음.
+  - 확인 못 한 것: 실제로 몰아 본 속도감(코너링·드리프트가 빨라진 속도에 맞는지), 봇이 자동차로 일부러 들이받지는 않음(AI 는 그대로), 네트워크.
+- 추가 (사용자: 승리 화면에서 MVP 주변으로 캐릭터들이 몰려와 대열을 맞춰 춤, 너무 멀거나 3초 넘게 걸리면 오다가 순간이동):
+  - `ARRRandomGameMode::ArrangeVictoryFormation`(`EndMatch` 에서 MVP 부활 뒤): MVP 는 제자리(`SetFormationLeader`), 나머지는 쓰러진 사람도 부활시켜 MVP 뒤 V 자 — 둘씩 오른쪽·왼쪽, 한 쌍마다 뒤로 130 · 옆으로 150 더(MVP 팀 먼저, 그다음 진 팀). 자리는 `FindFormationSpot`: MVP 와 같은 바닥 높이(±60, 엄폐물 위 X), 캡슐이 WorldStatic/Dynamic 과 안 겹치고 다른 자리와 120 이상 — 원하는 점에서 바깥으로 70 씩 고리 5바퀴까지.
+  - `ARRRandomCharacter::SetFormationSpot`: 탈것에서 내리고 거인·비행 즉시 끝, `FormationSpot`/`bHasFormation`/`bInFormation` 복제. `UpdateFormation`(매 틱): 움직이는 쪽 기기(봇은 서버, 플레이어는 자기 기기)가 그 자리로 걷기 입력. 서버가 45 안이면 도착, 0.8초 걸은 뒤 남은 거리 ÷ 걷기 속도로 3초(`VictoryGatherTime`) 안에 못 오면, 또는 3초가 지나면 순간이동 + `MulticastFormationTeleport`(사라진 곳·나타난 곳에 `ARRRandomEffects::TeleportPoof` — 섬광, 금색 링, 별 16).
+  - `IsCelebrating`: 대열이 있으면 도착한 사람만(양 팀 모두) 춤, 없으면 예전처럼 이긴 팀 + MVP 제자리. 결과 카메라 거리 900 → 1100(대열이 들어오게).
+  - 처음엔 MVP 바로 뒤에 가로줄로 세워서 정면 카메라에서 MVP 몸에 가려 2~3명만 보임 → V 자로.
+  - 확인(임시 `-RRWinAt=초` 로 그때 플레이어 팀 승리; 지움): 캡처 `output\screens\victory_line2_sheet.png` — 이동 중엔 HUD, 결과 화면에서 여우 5~6이 V 자로 카메라 보며 춤. 로그 `5 brawlers line up ...`, 먼 봇은 `teleports into the dance line (1066 away after 0.8 s)`. `-RRScoreToWin=3` 탑뷰 자연 종료: 5명 중 4명 순간이동, 1명은 걸어서 도착.
+  - 확인 못 한 것: 걸어오는 모습을 화면으로(이번 판들은 대부분 멀어서 순간이동), 엄폐물 많은 곳에서 자리가 없을 때(로그 `no room in the dance line`, 그 캐릭터는 제자리), 네트워크 참가자 화면.
+- 수정 (사용자: 이긴 팀만 모여서 춤, 진 팀은 좌절 모션, Mixamo 로 춤을 몇 개 더 받아 랜덤으로):
+  - Mixamo(로그인된 사용자 계정, 기본 캐릭터 `fox_mixamo_upload`): 페이지 안에서 Mixamo API(`/api/v1/products`, `/animations/export`, `/characters/{id}/monitor`)로 스킨 없이 30fps FBX 7개 → `C:\work\char-pipeline\input\fox\mixamo_celebrate\`. 춤: Silly Dancing(Twist), Hip Hop Dancing Shimmy, Dancing The Running Man, Doing The Chicken Dance. 좌절: Defeated(Showing Frustration After A Loss), Crying(And Rubbing Eyes), Sad Idle(Standing In A Sad Disposition). 중간에 Mixamo 세션이 풀려 사용자가 다시 로그인함.
+  - `ue_import_fox_anim.py ...|A_Fox_Dance1..4|inplace`, `A_Fox_Defeat1..3` → `/Game/Characters/Fox/Anims/`(모두 시작=끝 엉덩이 위치, 반복 가능; 4.0~12.0초).
+  - `ARRRandomCharacter`: `VictoryAnimations`(A_Fox_Victory + Dance1~4), `DefeatAnimations`(Defeat1~3), 복제 `CelebrationPick` 로 각자 하나(`% 개수`). `IsDespairing()` = 경기 끝 + 살아 있음 + 진 팀 + MVP 아님 → 제자리에서 좌절 반복, 총 숨김, 카메라 쪽으로 몸 돌림(춤과 같이).
+  - 게임 모드: `ArrangeVictoryFormation` 이 이긴 팀만 V 자 대열(진 팀은 부활·이동 없음), 모든 캐릭터에 무작위 시작 + 순서대로 `CelebrationPick`(옆끼리 다른 춤). MVP 는 이긴 팀 안에서만(킬 → 살아 있음 순) — 진 팀 봇이 MVP 가 되어 이긴 팀이 진 팀 MVP 뒤에서 춤추던 것(캡처 `victory_dances`).
+  - 확인(임시 `-RRWinAt` + 애니메이션 로그, 지움): 이긴 팀 Dance2/3/4 — 셋이 서로 다른 춤(캡처 `output\screens\victory_dances2_sheet.png`), 진 팀 Defeat3/1/2. 탑뷰 3점 자연 종료 정상.
+  - 확인 못 한 것: 좌절 모션을 화면으로(진 팀은 제자리라 결과 카메라에 안 잡힘 — 로그로만), 네트워크.
+- 수정 (사용자: 길찾기가 되면 3초 안에 도착할 속도를 계산해 엄청 빠르게 달려오게, 플래시·소닉 같은 효과, 텔레포트는 걸어서 못 오거나 3초가 지나면):
+  - `FRRGridPath`(새, `RRRandomGridPath.h/.cpp`): 내비메시가 없어서(레벨을 런타임에 지음) 직접 A* — 시작~목표를 감싸는 사각형 + 1200 여유, 100 칸, 8방향(대각선은 양옆이 열려 있을 때만). 칸이 열림 = 아래로 바닥(Visibility, 법선 z ≥ 0.7)이 있고 그 위 캡슐이 WorldStatic/WorldDynamic(엄폐물·언덕·소품 상자·물가/가장자리 숨은 벽)과 안 겹침; 이웃 바닥 높이 차 50 넘으면 못 감. 캐릭터들은 무시. 칸은 필요할 때만 검사, 4만 칸 넘으면 포기. 결과는 캡슐 스윕으로 모서리를 건너뛰어 펴서 꺾이는 점만. 시작이 공중이면(비행 중 경기 끝) 아래 바닥 기준 — 처음엔 공중 높이를 그대로 써서 옆 칸과 490 차이 → "길 없음" 으로 텔레포트됐음.
+  - `SetFormationSpot`(서버): 길이 있으면 `FormationPath`(복제) + `FormationDashSpeed` = 길이 / `FormationDashTime`(처음 2.5초 → 사용자 요청으로 1.5초 안 도착, 출발·모서리 여유로 1.3초), 걷기 × 2.5 ~ 6000 사이(가까워도 번개처럼). 길이 없으면 바로 순간이동. `UpdateFormation`: 움직이는 기기가 다음 꺾임점으로 입력(속도에 비례한 거리 안이면 다음 점), 서버가 도착(45 또는 한 프레임 이동량 × 1.2) 판정, 3초가 지나면 순간이동. 달리는 동안 `MaxWalkSpeed` = 대시 속도, 가속·제동 30000, 회전 3000, 이동 방향으로 몸 돌림(3인칭 컨트롤러 회전 끔).
+  - 연출(`UpdateDashEffects`, 모든 기기): 잔상 — `UPoseableMeshComponent` 8개를 돌려 쓰며 0.035초마다 몸 자세 복사, `M_FXGhost`(새: 언릿 반투명, 프레넬 가장자리 발광, `Color`/`Opacity`, 스켈레탈용; `ue_make_fx.py` 에 추가)로 0.3초에 사라짐(금색 + 팀색). `ARRRandomEffects::SpeedTrail`: 진행 방향으로 늘린 빛줄기 초당 70, 튀는 전기 불꽃 55, 발밑 먼지 30. `SonicBoom`: 출발·도착 때 진행 방향을 축으로 선 링 두 개(금색, 팀색) + 섬광 + 불꽃 18.
+  - 확인(임시 `-RRWinAt` + 길찾기 실패 로그, 지움): 화면 없이 TPS/탑뷰 여러 판 — `dashes to the dance line: N corners, L long, at S` → `arrives ... after 0.2~2.5 s`, 순간이동 없음. 캡처 `output\screens\dash3_sheet.png`(빛줄기·금색 잔상으로 달려와 도착 링, 이어서 대열 춤). 탑뷰 3점 자연 종료 정상.
+  - 확인 못 한 것: 3초 안에 못 와서 순간이동하는 경우(이번 판들은 모두 도착), 네트워크 참가자(플레이어 폰은 자기 기기가 경로를 따라감 — 서버 이동 검증과 맞는지 미확인), 아주 높은 속도(이번엔 대부분 750~1100)에서 모서리 끼임.
+- 확인 못 한 것: 실제 마우스로 조준해 본 느낌, 탑뷰 시점에서 이펙트 크기(같은 이펙트가 나옴), 네트워크 참가자 화면, 많은 효과가 겹칠 때 프레임(풀 크기: 구 500, 링 80, 별 500, 주사위 120 — 넘치면 새 파티클 생략).
+
+## 21차 — TPS 전용 맵 "주사위 랜드" (사용자: 파스텔 주사위 랜드 컨셉 → 색 진하게 + 엄폐물 많이 → Tripo 3D 로 만들어 TPS 시작 시 나오게)
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 컨셉: Tripo 웹 이미지 생성(Nano Banana Pro, 16:9, 무료 할당)으로 5장씩 두 번(전경/TPS 어깨 너머/주사위 숲/하늘 섬/노을 폭포). 첫 판은 "물 빠짐" → 두 번째 판 "vibrant saturated candy colors ... not washed out" + 엄폐물(주사위 담, 바리케이드, 반쯤 묻힌 큰 주사위, 덤불, 기둥). 다운로드는 안 함(Tripo 기록에만). 같은 장면의 3D 스케치 아티팩트: https://claude.ai/artifact/43gnXuFWhYp7MeMM6o2xZm
+- Tripo 3D(Claude in Chrome 으로 studio.tripo3d.ai, 텍스트 → HD Model H3.1, 1회 30, 23,700 → 23,490 = 7개; 주사위 담은 뒤에 판 조각이 떠 있어 무료 재시도): 주사위 나무 A(분홍·보라·주황) / B(민트·하늘·노랑, 2층), 주사위 담(5×3), 둥근 덤불, 광장 받침대(보라·분홍 2단), 주사위 무지개 아치(양끝 구름), 구름. 프롬프트마다 "cute stylized cartoon ... chunky rounded balloon-like shapes, glossy soft clay look, vibrant saturated candy colors". 사용자 허락 후 FBX(Blender, 2K) → `C:\work\char-pipeline\input\dice_land\<treeA|treeB|dicewall|hedge|pedestal|rainbow|cloud>`.
+  - `blender_props.py` → `output\dice_land_props\SM_DL*.fbx`(나무 A 560h, B 640h, 덤불 150h, 담 165h(275 폭), 받침대 560w(높이 217), 무지개 1000w, 구름 600w) → `ue_import_props.py` 에 `=gloss` 옵션 추가(Tint 1, 거칠기 0.4, 스페큘러 0.5 — 사탕 광택) → `/Game/Environment/DiceLand/SM_DL*`, `M_DL*`.
+  - 주의: props 스크립트는 머티리얼 이름을 `SM_X` → `M_X` 로 만들므로 `SM_DLRainbow` 가 `M_DLRainbow` 를 덮어씀 → 무지개 주사위 머티리얼은 `M_DLRainbowDie`.
+- 절차 메시: `C:\work\char-pipeline\scriptslender_dice_land.py <out>` → `output\dice_land\SM_DLDie`(초타원체 p=6, 100 크기, 슬롯 Body/Pips, 마주 보는 면 합 7), `SM_DLDieBlank`(눈 없음), `SM_DLRainbowDie`(면마다 버텍스 컬러), `SM_DLTile`(쿠션 타일 200×200×50, 피벗은 윗면 가운데). `ue_import_dice_land.py <dir>` → 같은 폴더에 메시(충돌 없음, 나나이트) + `M_DLCandy`(인스턴스 커스텀 데이터 0~2 = 선형 색, 거칠기 0.35), `MI_DLTile`(거칠기 0.6), `M_DLRainbowDie`(버텍스 컬러), `M_DLPip`.
+- `ARRRandomDiceLand`(새, 복제, 모든 기기가 같은 시드로 같게 지음; 에셋은 BeginPlay 에서 `LoadObject` — 생성자 `ConstructorHelpers` 로 하면 에셋이 없을 때 커맨드렛이 CDO 오류로 종료됨):
+  - 게임 모드 `StartPlay`: `bSpawnDiceLand` + `ARRRandomGameState::IsThirdPersonMode` 면 섬·잔디·기본 엄폐물 대신 이것만. 탑뷰는 그대로(확인: 로그 `island 36 x 36 ...`).
+  - 바닥: 레벨 바닥 위(보이지 않게 숨김, 충돌은 그대로 — 밟는 건 레벨 바닥), 흔들리는 원(반지름 약 3050) 안에 쿠션 타일(체크, 잔디엔 가끔 라임/레몬/분홍), 타일 아래 어두운 판(이음매가 구멍 대신 줄눈으로). 길: 가운데 큰길(X), 팀 출발 줄(X ±1530 = `TeamSpawnDistance`/2), 양옆 차선(Y ±1800 — 게임 모드가 차를 세우는 -1890/1710 이 들어감), 폭 360. 광장 반지름 560, 테 720.
+  - 광장: Tripo 받침대(충돌 상자) 위에 무지개 주사위(2.6 배)가 돌며 떠 있음(Tick), 둘레에 작은 주사위 28개(길 쪽은 비움).
+  - 필드 엄폐물은 점대칭(파랑 쪽에 손으로 놓고 반 바퀴 돌려 빨강 쪽): 덤불 2, 주사위 담 4(+ 가운데 줄 1쌍), 큰 주사위 4, 바리케이드(주사위 2 + 위 1) 2. 바깥: 왼쪽 먼 끝/오른쪽 가까운 끝은 주사위 숲(나무·덤불·주사위), 반대 끝은 거대 주사위 들판, 팀 뒤뜰에 나무·덤불·작은 주사위 — `FRandomStream` 으로 뽑되 점과 그 반대편이 모두 비었을 때만(`IsClear`: 섬 안 `RimMargin` 170, 광장·길·출발 줄 밖, 서로 70 간격).
+  - 막는 것: 모두 숨긴 큐브(`BlockAll`, 섬과 같음) — 담/덤불/받침대는 메시 경계 × 비율, 나무는 줄기만, 주사위는 0.94 배. 가장자리: 높이 6000 숨은 벽 160조각(캐릭터만 막음, 비행해도 못 넘음), 그 안쪽에 작은 주사위 줄(보기만).
+  - 하늘: 섬 아래 주사위 원뿔(8단, 주황 → 분홍 → 보라, 14% 는 눈 있음), Tripo 구름 바다 240개(멀수록 크고 높게 — 32,000 까지, 먼 것은 바닥보다 조금 위까지 올라와 수평선을 덮음), 높은 하늘의 작은 구름 10, 양 끝 너머 무지개 아치 2(긴 쪽을 가로로, 발은 구름 속), 필드 위에 떠서 출렁이며 도는 무지개 주사위 26(Tick 에서 `BatchUpdateInstancesTransforms`), 닿지 않는 하늘 섬 3(주사위 탑 / 나무 / 나무 + 덤불).
+  - 색 보정: 바운드 없는 `APostProcessVolume`(노출 -0.35, 대비 1.1, 미드톤·하이라이트 채도 1.3) — 카메라가 전체 채도(1.08)를 덮어쓰므로 그것 외의 항목만. 이게 없으면 밝은 하늘 탓에 사탕색이 파스텔로 빠짐.
+  - 미니맵: `ARRRandomHUD::BuildMinimapBase` 가 섬이 없으면 `GetMapColor`(가장자리 밖 하늘색, 놓인 것들의 발자국 상자, 그 외 바닥색).
+  - 로그 `RRRandom: dice land 700 tiles, 1151 dice, 87 solid boxes, 14 trees, 17 hedges, 10 walls.`
+- 확인: 빌드 경고 없음. 창 캡처 `C:\work\char-pipeline\output\screens\diceland1~5_*`(TPS 시작 시점, 위에서 전경, 숲, 필드 — 임시 `-RRLandCam=X,Y,Z,Pitch,Yaw` 고정 카메라로 찍고 지움). `-nullrhi` 80초 봇전: TPS 쓰러짐 2번, 탑뷰 6번.
+- 수정 (사용자: 색을 전체적으로 파스텔로, "이전 게임 색감이 더 좋았어"; 오브젝트 퀄리티가 낮으니 Claude 가 그린 주사위 랜드 3D 스케치처럼 깔끔하게):
+  - 색 보정 볼륨(노출/대비/채도) 뺌 → 게임 원래 색감. 팔레트를 마카롱 파스텔로(분홍 255,143,177 / 복숭아 / 레몬 / 민트 / 하늘 / 페리윙클 / 라벤더; 바닥 민트 150,225,180 등). 처음엔 스케치 값 그대로(거의 흰색에 가까운 파스텔)를 넣었더니 밝은 하늘 아래 하얗게 날아가서 한 단계 진하게.
+  - Tripo 소품(나무/담/덤불/받침대/무지개/구름)은 더 안 씀(에셋과 `input\dice_land` 는 남음) — 울퉁불퉁한 표면 + 6000 삼각형 감축으로 음영이 깨져 보였음. 대신 스케치처럼 매끈한 기본 도형을 조합: `blender_dice_land.py` 에 `SM_DLBall`(구), `SM_DLTrunk`(위로 가늘어지고 윗모서리 둥근 줄기), `SM_DLRing`(얇은 링) 추가, 주사위 해상도 10 → 18 분할, 눈 32×12(주사위 18,672 삼각형, 나나이트), 무지개 주사위는 다각형 중심 기준으로 면 색을 칠해 모서리에서 색이 번지지 않게, 파스텔로.
+  - `ue_import_dice_land.py`: `M_DLCandy` 에 "Glow"(색 × 값 → 이미시브), `MI_DLCloud`(거칠기 0.85, Glow 0.2), `M_DLPip` 은 커스텀 데이터 3~5 로 눈 색(없으면 흰색) → 흰 주사위에 파스텔 눈, 색 주사위에 짙은 눈.
+  - `ARRRandomDiceLand` 다시: 나무 = 줄기 + 주사위 잎(하나 / 둘 쌓기 / 셋 묶음 + 위 하나), 덤불 = 공 5개 + 위 3개 + 작은 꽃 공(담 높이 약 143), 주사위 담 = 78 주사위 4×2(무지개 순서, 약간씩 틀어짐, 높이 156), 받침대 = 둥근 판 두 장(라벤더 500, 분홍 350, 45° 돌림) 위에 무지개 주사위 + 흰색·라일락 링 두 개가 반대로 돎, 구름 = 공 4~7개 더미(바다 170 더미 + 하늘 12 더미), 무지개 = 주사위 7줄 반원(앞쪽 반지름 7600, 뒤쪽 6800), 풀밭에 작은 덤불과 꽃 공 220개. 배치(점대칭, 바깥 숲/거대 주사위/뒤뜰)는 그대로.
+  - 로그 `dice land 700 tiles, 2173 dice, 474 balls, 988 cloud balls, 13 trunks, 88 solid boxes.` `-nullrhi` 80초: TPS 쓰러짐 4번, 탑뷰 12번(탑뷰 섬 그대로). 캡처 `output\screens\diceland6~8_*`.
+- 수정 (사용자: 배경 오브젝트 색만 조금 더 진하게): `Richer()`(채도 × 1.35 + 0.06, 밝기 × 0.95)를 무지개 아치, 가장자리 주사위 줄, 하늘 섬(타일·탑·덤불·주사위)에만 적용, 섬 아래 원뿔 색을 진하게(255,165,115 → 255,130,165 → 160,125,255), 구름 색조를 조금 더 분홍·라일락·하늘빛으로. 필드(바닥·엄폐물·나무)는 그대로. 캡처 `output\screens\diceland9_tps`.
+- 수정 (사용자: Claude 주사위 랜드 색감과 비슷하되 살짝 진하게, 캐릭터도 어울리는 톤으로 조금):
+  - 맵 전체: `AddColored` 가 모든 색을 `Toned()`(채도 × 1.12 + 0.03, 밝기 × 0.97)로 한 번 거침(흰 눈은 제외). 배경의 `Richer()` 는 그 위에 그대로.
+  - 여우: `C:\work\char-pipeline\scripts\ue_fox_pastel.py /Game/Characters/Fox/M_Fox` — 베이스 컬러 뒤에 `lerp(색, lerp(desaturate(색, PastelDesaturate 0.12), PastelCream (1, 0.92, 0.86), PastelLift 0.07), Pastel)`. "Pastel" 기본 0(탑뷰는 그대로), `ARRRandomDiceLand::Tick` 이 1초마다 모든 캐릭터 몸 MID 에 1 → 부드러운 살구색 털. 처음엔 0.28 / 0.2 로 했더니 선형 색에서 크림을 섞어서 털이 회색빛 베이지가 됨. 다시 실행하면 이전 노드는 연결 없이 그래프에 남음(셰이더엔 안 들어감, 경고 없음). 총 등 다른 머티리얼은 그대로.
+  - 캡처 `output\screens\diceland10_tps`(0.28 / 0.2, 너무 빠짐), `diceland11_tps`(0.12 / 0.07).
+  - 수정 (사용자: 조금 더 주황): Dice Land 가 `PastelDesaturate` 0.05, `PastelLift` 0.03 도 함께 넘김(`FoxDesaturate`, `FoxCreamLift` — 머티리얼 기본값 0.12 / 0.07 은 그대로). 캡처 `diceland12_tps`.
+- 수정 (사용자: 맵도 살짝 더 진하게, 보면서 조절할 수 있게 값을 따로): 콘솔 변수(게임 중 `~` 콘솔에서 바로 반영) `rr.DiceLand.Saturation`(1 = 만든 그대로, 기본 1.15), `rr.DiceLand.Brightness`(1), `rr.DiceLand.FoxDesaturate`(0.05), `rr.DiceLand.FoxCream`(0.03). 기본값은 `Config/DefaultEngine.ini` `[SystemSettings]`(로그에 `deferred - dummy variable created` 가 뜨지만 모듈이 변수를 등록할 때 값이 넘어감).
+  - `ue_import_dice_land.py` 의 `tone()`: 네 머티리얼(Candy/RainbowDie/Pip, 타일·구름 인스턴스 포함) 베이스 컬러를 `max(0, lerp(회색, 색, Saturation) × Brightness)` 로. `ARRRandomDiceLand` 가 다 지은 뒤 자기 메시 컴포넌트의 머티리얼을 전부 MID 로 바꿔 `Tunable` 에 모으고, Tick 에서 값이 바뀌면 모두에 넣음. 여우 값은 0.25초마다.
+  - 확인: 기본(1.15) `output\screens\diceland13_default`, `-dpcvars=rr.DiceLand.Saturation=1.6` `diceland13_sat16`(확연히 진해짐). 콘솔에 직접 쳐서 바꾸는 건 캡처로 못 해 봄(같은 Tick 경로).
+- 확인 못 한 것: 실제 마우스로 TPS 플레이 감각(엄폐물 높이 약 145~160 이 적당한지), 봇이 숲·담에 걸리는 빈도(로그에 `is stuck and failed to move` 가 가끔), 네트워크 참가자, 프레임 비용(타일 700 + 주사위 2,170 + 공 1,460, 나나이트), 비행으로 하늘 섬까지 가는지(가장자리 벽에 막혀야 함).
 
 ## 15차 — 전장의 안개
 
@@ -221,6 +401,17 @@
 - 참고: 이 빌드 직후 게임이 프로젝트 DLL 을 불러오기 직전에서 두 번 멈춤(창 없음, 로그는 Turnkey 장치 검사 뒤에서 끝) — 몇 분 뒤 다시 실행하니 정상. 스마트 앱 컨트롤이 새 DLL 을 검사하느라 붙잡은 것으로 보임(예전 4551 차단과 비슷).
 
 - 수정 (사용자: TPS 에서 마우스가 안 보이는 상태로 계속 움직여서 문제): 게임 창이 마우스를 쥐고 있는지 안 보고 마우스 움직임을 늘 시선으로 받았음. 이제 `IsViewportFocused`(뷰포트 포커스 + `FPlatformApplicationMisc::IsThisApplicationForeground`, 모듈 `ApplicationCore` 추가) 이고 커서가 숨었을 때만 시선 입력, 한 프레임 최대 60 카운트. 커서가 다시 나오는 때: 일시정지/결과 화면, **왼쪽 Alt 누르는 동안**(`IA_FreeCursor`), 다른 창 사용 중(Alt+Tab 등). 게임 창을 다시 클릭하면 다시 잡음(그 클릭은 사격 안 함). 커서가 나와 있을 땐 클릭이 사격 대신 미니맵 클릭. 확인(임시 로그): 게임 창 활성 = 커서 숨김, 다른 창으로 전환 = 커서 보임 + 시선 그대로.
+
+## 20차 덧붙임 — TPS 마우스 고정, 창 크기 변경 GPU 크래시 (사용자: TPS 에선 마우스를 가운데 고정, 사격 중 안 보이는 커서가 창 밖으로 나감 / 창 크기 바꿀 때 GPU crash)
+
+- 마우스: `ARRRandomPlayerController::LockMouse` — 게임이 마우스를 가진 동안(TPS, 커서 숨김) 뷰포트 `SetMouseLockMode(LockAlways)`, `SetMouseCaptureMode(CapturePermanently_IncludingInitialMouseDown)`, `CaptureMouse`, `LockMouseToViewport` → 창 안에 묶임; `CenterMouse` 가 매 틱 가운데에서 40 픽셀 넘게 벗어나면 가운데로(시선은 원시 마우스 이동으로 돌아서 되돌림은 회전 안 함). Alt/다른 창/메뉴/탑뷰로 돌아갈 땐 풀어 줌. 확인: 게임 창 앞에서 상대 이동 주입 → 커서 계속 창 가운데(1280,764), 시선 0 → 18.4°, 다른 창으로 바꾸면 풀림.
+- GPU 크래시: 크래시 기록(`SavedCrashesECC-...359758...`) — 창 크기 변경 중(TSR 1292X727 → 1352X760) ASYNC COMPUTE 큐 작업이 5초 타임아웃 → 다음 PRESENT 에서 `DXGI_ERROR_DEVICE_REMOVED`(RTX 5060 LAPTOP, 하이브리드 그래픽, SWAPCHAIN ALLOWTEARING=1). `CONFIGDEFAULTENGINE.INI [SYSTEMSETTINGS]` 에 `R.D3D12.ALLOWASYNCCOMPUTE=0`, `R.RDG.ASYNCCOMPUTE=0`, `R.D3D12.USEALLOWTEARING=0`. 확인: 창 크기 24번 연속 변경(800X500~1700X950) — GPU 타임아웃/크래시 없음, 게임 정상. (원래도 매번 나던 건 아니라 완전히 없어졌다고 단정은 못 함.)
+
+## 20차 덧붙임 — TPS 조준 사격 (사용자: TPS 모드에선 에임에 맞게 발사체가 날아가게)
+
+- `ARRRandomCharacter::ShootAt`: 3인칭 플레이어면 총구에서 조준점(`GetCrosshairTarget`)으로 곧장(같은 층이면 수평으로 펴던 것, 목표를 총구 높이로 올리던 것 없음), 위아래 한계 `ThirdPersonMaxShotPitch` 80°(탑뷰/봇은 그대로 50°, 같은 층 수평). 발사체는 원래 중력 없이 직선.
+- `URRRandomBodyAnimInstance`: 3인칭이면 조준 자세의 목표 방향을 `GetBaseAimRotation`(내 기기/서버는 카메라, 다른 기기는 복제된 시선 피치)의 피치로(±55°) → `PointGun` 이 가슴을 그만큼 기울여 총이 위아래로 조준점을 향함.
+- 확인(임시 `-RRShotTest`: 카메라 피치 고정 후 연사, 로그; 지움): 수평 조준(-10°) → 총알 -5.7° 로 조준점 바닥에, 위 조준(25°) → 25.3° 로 하늘의 조준점 쪽, 캡처에서 노란 총알이 조준점으로.
 
 ## 20차 덧붙임 — 물을 타이틀처럼 (사용자: 인게임 물 그래픽을 타이틀처럼)
 

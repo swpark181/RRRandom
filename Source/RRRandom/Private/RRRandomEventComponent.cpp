@@ -48,6 +48,25 @@ void URRRandomEventComponent::BeginPlay()
 	}
 }
 
+void URRRandomEventComponent::RefreshMesh(UMeshComponent* Mesh)
+{
+	const int32 Index = Meshes.IndexOfByKey(Mesh);
+	if (Index == INDEX_NONE)
+	{
+		return;
+	}
+	BaseMeshScales[Index] = Mesh->GetRelativeScale3D();
+	// The dynamic materials made for this mesh belong to it
+	Materials.RemoveAll([Mesh](const UMaterialInstanceDynamic* Material) { return !Material || Material->GetOuter() == Mesh; });
+	for (int32 Slot = 0; Slot < Mesh->GetNumMaterials(); ++Slot)
+	{
+		if (UMaterialInstanceDynamic* Material = Mesh->CreateAndSetMaterialInstanceDynamic(Slot))
+		{
+			Materials.Add(Material);
+		}
+	}
+}
+
 FText URRRandomEventComponent::RollRandomEvent()
 {
 	FText Description;

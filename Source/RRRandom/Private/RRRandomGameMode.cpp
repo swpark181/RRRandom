@@ -3,6 +3,7 @@
 #include "Engine/GameInstance.h"
 #include "RRRandomAIController.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomDiceLand.h"
 #include "RRRandomDummy.h"
 #include "RRRandomGrassFloor.h"
 #include "RRRandomIsland.h"
@@ -72,19 +73,27 @@ void ARRRandomGameMode::StartPlay()
 
 	// Found on the bare level, before anything is built on its floor
 	GetArenaCenter();
-	// The grass first: it looks for the level's floor under the middle, where the island puts a road
-	if (bSpawnGrassFloor)
+	if (bSpawnDiceLand && ARRRandomGameState::IsThirdPersonMode(this))
 	{
-		SpawnGrassFloorIfNoneExists();
+		// The third person map brings its own ground and cover; it goes up before the bots, whose floor traces land beside it
+		SpawnDiceLandIfNoneExists();
 	}
-	// The island's hills and walls go up before the cover and the bots, whose floor traces must land beside them
-	if (bSpawnIsland)
+	else
 	{
-		SpawnIslandIfNoneExists();
-	}
-	if (bSpawnCover)
-	{
-		SpawnCoverIfNoneExists();
+		// The grass first: it looks for the level's floor under the middle, where the island puts a road
+		if (bSpawnGrassFloor)
+		{
+			SpawnGrassFloorIfNoneExists();
+		}
+		// The island's hills and walls go up before the cover and the bots, whose floor traces must land beside them
+		if (bSpawnIsland)
+		{
+			SpawnIslandIfNoneExists();
+		}
+		if (bSpawnCover)
+		{
+			SpawnCoverIfNoneExists();
+		}
 	}
 	if (bSpawnVehicles)
 	{
@@ -125,11 +134,12 @@ void ARRRandomGameMode::OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRando
 
 void ARRRandomGameMode::EndMatch(int32 Winner)
 {
-	// MVP: the most knockouts; on a tie the winning team's, then whoever is still standing
+	// MVP: the winning team's one with the most knockouts (the results show the winners dancing round it), then whoever
+	// is still standing; anyone's only if the winners have nobody
 	ARRRandomCharacter* MVP = nullptr;
 	auto Rank = [Winner](const ARRRandomCharacter* Brawler)
 	{
-		return Brawler->GetKills() * 4 + (Brawler->GetTeam() == Winner ? 2 : 0) + (Brawler->IsAlive() ? 1 : 0);
+		return (Brawler->GetTeam() == Winner ? 100000 : 0) + Brawler->GetKills() * 4 + (Brawler->IsAlive() ? 1 : 0);
 	};
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{
@@ -138,16 +148,95 @@ void ARRRandomGameMode::EndMatch(int32 Winner)
 			MVP = *It;
 		}
 	}
-	// The camera closes in on the MVP, so it stands up for it
+	// The camera closes in on the MVP, so it stands up for it; everyone else comes to dance behind it
 	if (MVP)
 	{
 		MVP->ReviveNow();
+		ArrangeVictoryFormation(MVP, Winner);
 	}
 	if (ARRRandomGameState* State = GetGameState<ARRRandomGameState>())
 	{
 		State->EndMatch(Winner, MVP);
 	}
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: match over, team %d wins; MVP %s with %d knockouts."), Winner, MVP ? *MVP->GetName() : TEXT("nobody"), MVP ? MVP->GetKills() : 0);
+}
+
+void ARRRandomGameMode::ArrangeVictoryFormation(ARRRandomCharacter* MVP, int32 Winner)
+{
+	// A V of the winning team behind the MVP, like backup dancers: the results camera looks at the MVP's face, so each pair
+	// stands a step further back and further out to the sides, all in view. The losers stay where they are and slump.
+	constexpr float RowGap = 130.f;
+	constexpr float SideGap = 150.f;
+	MVP->SetFormationLeader();
+	// A different dance (or slump) each, starting somewhere random, so the line doesn't move in step
+	int32 Pick = FMath::RandRange(0, 255);
+	TArray<ARRRandomCharacter*> Dancers;
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		It->SetCelebrationPick(Pick++);
+		if (*It != MVP && It->GetTeam() == Winner)
+		{
+			Dancers.Add(*It);
+		}
+	}
+	const float Yaw = MVP->GetActorRotation().Yaw;
+	const FVector Front = FRotator(0.f, Yaw, 0.f).Vector();
+	const FVector Right = FRotator(0.f, Yaw + 90.f, 0.f).Vector();
+	const float FloorZ = MVP->GetActorLocation().Z - MVP->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	TArray<FVector> Taken = { MVP->GetActorLocation() };
+	for (int32 Index = 0; Index < Dancers.Num(); ++Index)
+	{
+		ARRRandomCharacter* Dancer = Dancers[Index];
+		// In pairs, right then left: the first pair one step back and out, the next a step further, and so on
+		const int32 Step = Index / 2 + 1;
+		const float Side = Index % 2 == 0 ? 1.f : -1.f;
+		const FVector Wanted = MVP->GetActorLocation() - Front * RowGap * Step + Right * Side * SideGap * Step;
+		Dancer->ReviveNow();
+		FVector Spot;
+		if (!FindFormationSpot(Wanted, FloorZ, Dancer, Taken, Spot))
+		{
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: no room in the dance line for %s."), *Dancer->GetName());
+			continue;
+		}
+		Taken.Add(Spot);
+		Dancer->SetFormationSpot(Spot);
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %d winners line up behind %s to dance."), Taken.Num() - 1, *MVP->GetName());
+}
+
+bool ARRRandomGameMode::FindFormationSpot(const FVector& Wanted, float FloorZ, const ARRRandomCharacter* Brawler, const TArray<FVector>& Taken, FVector& OutSpot) const
+{
+	constexpr float MinApart = 120.f;
+	const UCapsuleComponent* Capsule = Brawler->GetCapsuleComponent();
+	const float Radius = Capsule->GetUnscaledCapsuleRadius();
+	const float HalfHeight = Capsule->GetUnscaledCapsuleHalfHeight();
+	// The wanted spot, then rings round it further and further out
+	for (int32 Ring = 0; Ring <= 5; ++Ring)
+	{
+		const int32 Tries = Ring == 0 ? 1 : 8;
+		for (int32 Try = 0; Try < Tries; ++Try)
+		{
+			const FVector Probe = Wanted + FVector(Ring * 70.f, 0.f, 0.f).RotateAngleAxis(Try * 45.f + Ring * 20.f, FVector::UpVector);
+			FVector Location;
+			// On the ground the MVP stands on (not the top of a cover block), out of everything solid, apart from the others
+			if (!FindFloorSpot(Probe, HalfHeight, Location) || FMath::Abs(Location.Z - HalfHeight - FloorZ) > 60.f)
+			{
+				continue;
+			}
+			FCollisionObjectQueryParams Solid;
+			Solid.AddObjectTypesToQuery(ECC_WorldStatic);
+			Solid.AddObjectTypesToQuery(ECC_WorldDynamic);
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomFormation), false, Brawler);
+			if (GetWorld()->OverlapAnyTestByObjectType(Location, FQuat::Identity, Solid, FCollisionShape::MakeCapsule(Radius, HalfHeight - 5.f), Params)
+				|| Taken.ContainsByPredicate([&Location](const FVector& Other) { return FVector::Dist2D(Other, Location) < MinApart; }))
+			{
+				continue;
+			}
+			OutSpot = Location;
+			return true;
+		}
+	}
+	return false;
 }
 
 void ARRRandomGameMode::CheatWin(int32 Team)
@@ -221,7 +310,7 @@ bool ARRRandomGameMode::GetSlotTransform(int32 Team, int32 Slot, float HalfHeigh
 	return true;
 }
 
-ARRRandomCharacter* ARRRandomGameMode::SpawnBrawler(TSubclassOf<ARRRandomCharacter> BrawlerClass, int32 Team, int32 Slot)
+ARRRandomCharacter* ARRRandomGameMode::SpawnBrawler(TSubclassOf<ARRRandomCharacter> BrawlerClass, int32 Team, int32 Slot, int32 Species)
 {
 	const float HalfHeight = BrawlerClass->GetDefaultObject<ARRRandomCharacter>()->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
 	FTransform SpawnTransform;
@@ -231,14 +320,16 @@ ARRRandomCharacter* ARRRandomGameMode::SpawnBrawler(TSubclassOf<ARRRandomCharact
 		return nullptr;
 	}
 
-	// Deferred so the team (and with it the body color) is set before the brawler begins play
+	// Deferred so the team (and with it the body color) and the species are set before the brawler begins play
 	ARRRandomCharacter* Brawler = GetWorld()->SpawnActorDeferred<ARRRandomCharacter>(BrawlerClass, SpawnTransform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
 	if (!Brawler)
 	{
 		return nullptr;
 	}
 	Brawler->SetTeam(Team);
+	Brawler->SetSpecies(Species);
 	Brawler->FinishSpawning(SpawnTransform);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s is a %s on team %d."), *Brawler->GetName(), RRSpecies::GetAssetName(Species), Team);
 	TeamSlots[Team][Slot].Brawler = Brawler;
 	return Brawler;
 }
@@ -257,7 +348,12 @@ APawn* ARRRandomGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPla
 	}
 
 	RemoveBot(Team, Slot);
-	ARRRandomCharacter* Brawler = SpawnBrawler(PawnClass, Team, Slot);
+	// This machine's own player is the one picked on its title; a joiner's pick comes with ServerChooseSpecies
+	const URRRandomSessionSubsystem* Sessions = GetGameInstance() ? GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>() : nullptr;
+	const ARRRandomPlayerController* Player = Cast<ARRRandomPlayerController>(NewPlayer);
+	const int32 Species = Player && Player->GetChosenSpecies() != INDEX_NONE ? Player->GetChosenSpecies()
+		: NewPlayer && NewPlayer->IsLocalController() && Sessions ? Sessions->GetSpecies() : RRSpecies::Fox;
+	ARRRandomCharacter* Brawler = SpawnBrawler(PawnClass, Team, Slot, Species);
 	if (!Brawler)
 	{
 		return Super::SpawnDefaultPawnFor_Implementation(NewPlayer, StartSpot);
@@ -361,7 +457,8 @@ void ARRRandomGameMode::FillEmptySlotsWithBots()
 			{
 				continue;
 			}
-			ARRRandomCharacter* Bot = SpawnBrawler(BotClass, Team, Slot);
+			// Bots are any of the brawlers
+			ARRRandomCharacter* Bot = SpawnBrawler(BotClass, Team, Slot, FMath::RandRange(0, RRSpecies::Count - 1));
 			if (!Bot)
 			{
 				continue;
@@ -454,6 +551,17 @@ void ARRRandomGameMode::SpawnIslandIfNoneExists()
 	}
 	// Around the arena's center, halfway between the teams; its map puts each team's start on a village road
 	World->SpawnActor<ARRRandomIsland>(ARRRandomIsland::StaticClass(), FTransform(GetArenaCenter()));
+}
+
+void ARRRandomGameMode::SpawnDiceLandIfNoneExists()
+{
+	UWorld* World = GetWorld();
+	if (TActorIterator<ARRRandomDiceLand>(World))
+	{
+		return;
+	}
+	// Around the arena's center, halfway between the teams; its roads run through each team's starting row
+	World->SpawnActor<ARRRandomDiceLand>(ARRRandomDiceLand::StaticClass(), FTransform(GetArenaCenter()));
 }
 
 void ARRRandomGameMode::SpawnGrassFloorIfNoneExists()

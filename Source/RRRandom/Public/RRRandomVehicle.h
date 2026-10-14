@@ -61,6 +61,8 @@ struct FRRVehicleHandling
  * each kind, and the motorbike and the car slide into drifts in tight turns. The car has a rear seat: a second brawler
  * pressing F next to it while it has a driver gets in behind and is carried along (it can still shoot, not move).
  * F again, a knockout or the flight power puts it back down (the driver getting off lets the passenger out too).
+ * The car is a weapon too: an enemy it drives into faster than walking is knocked out (the driver gets the point),
+ * slower it hurts them by its speed and throws them aside.
  * Replicated: who drives it, who sits behind, and its kind.
  */
 UCLASS(NotPlaceable)
@@ -133,6 +135,12 @@ private:
 
 	/** The body's lean into a drift right now, degrees. */
 	float Lean = 0.f;
+
+	/** Server, the car: an enemy it drives into faster than walking is knocked out, slower takes damage by the speed. */
+	void UpdateRam();
+
+	/** Who the car has just hit and when, so one bump hits once. */
+	TArray<TPair<TWeakObjectPtr<ARRRandomCharacter>, float>> RamTimes;
 
 	/** Lays tyre marks behind the rear wheels while drifting on the ground, every machine for itself. */
 	void UpdateSkidMarks(bool bDrifting, float Speed);

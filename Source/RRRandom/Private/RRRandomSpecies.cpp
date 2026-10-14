@@ -1,0 +1,126 @@
+#include "RRRandomSpecies.h"
+#include "Animation/AnimSequence.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/Texture2D.h"
+#include "Materials/MaterialInterface.h"
+#include "UObject/ConstructorHelpers.h"
+
+namespace
+{
+	struct FSpeciesTuning
+	{
+		const TCHAR* Name;
+		/** Mesh scale on the brawler. The fox is 100 units to its ear tips at 1.8, filling the capsule (192) the way the
+		 * mannequin did; the others sit halfway between having the fox's hips height and the fox's head height, so none
+		 * towers over it (char-pipeline/scripts/blender_rig_measure.py). */
+		float MeshScale;
+		/** The rest pose's hips height at scale 1 (the strides scale with it). Across and front to back the rest pose doesn't
+		 * matter: every Mixamo animation plays with the hips over the origin, whatever the bind pose. */
+		float HipsHeight;
+	};
+
+	const FSpeciesTuning Tunings[RRSpecies::Count] = {
+		{ TEXT("Fox"), 1.8f, 27.5f },
+		{ TEXT("Rabbit"), 2.45f, 17.5f },
+		{ TEXT("Squirrel"), 2.05f, 21.2f },
+		{ TEXT("Tiger"), 1.75f, 26.3f },
+	};
+	const FSpeciesTuning& FoxTuning = Tunings[RRSpecies::Fox];
+
+	// The fox's walk covers 79 units a second at scale 1 (its hips' drift before it was made to walk in place), and its
+	// aimed runs (forward, backward, left, right) 148, 134, 125, 148 (how fast the planted foot slides back,
+	// blender_anim_speed.py). The others' Mixamo copies stride in proportion to their hips height (the rabbit's walk: 52).
+	constexpr float FoxWalkSpeed = 79.f;
+	constexpr float FoxAimRunSpeeds[4] = { 148.f, 134.f, 125.f, 148.f };
+
+	template <typename T>
+	T* Find(const FString& Path)
+	{
+		ConstructorHelpers::FObjectFinderOptional<T> Finder(*Path);
+		return Finder.Succeeded() ? Finder.Get() : nullptr;
+	}
+}
+
+const TCHAR* RRSpecies::GetAssetName(int32 Species)
+{
+	return Tunings[FMath::Clamp(Species, 0, Count - 1)].Name;
+}
+
+FString RRSpecies::GetDisplayName(int32 Species)
+{
+	return FString(GetAssetName(Species)).ToUpper();
+}
+
+int32 RRSpecies::FromName(const FString& Name)
+{
+	for (int32 Species = 0; Species < Count; ++Species)
+	{
+		if (Name.Equals(Tunings[Species].Name, ESearchCase::IgnoreCase))
+		{
+			return Species;
+		}
+	}
+	return INDEX_NONE;
+}
+
+const TArray<FRRSpeciesLook>& FRRSpeciesLook::GetAll()
+{
+	static TArray<FRRSpeciesLook> Looks;
+	if (Looks.Num() > 0)
+	{
+		return Looks;
+	}
+	for (int32 Species = 0; Species < RRSpecies::Count; ++Species)
+	{
+		const FSpeciesTuning& Tuning = Tunings[Species];
+		const FString Name = Tuning.Name;
+		const FString Folder = FString::Printf(TEXT("/Game/Characters/%s/"), *Name);
+		auto Anim = [&](const TCHAR* What)
+		{
+			const FString Asset = FString::Printf(TEXT("A_%s_%s"), *Name, What);
+			return Find<UAnimSequence>(Folder + TEXT("Anims/") + Asset + TEXT(".") + Asset);
+		};
+
+		FRRSpeciesLook& Look = Looks.AddDefaulted_GetRef();
+		Look.Mesh = Find<USkeletalMesh>(FString::Printf(TEXT("%sSK_%s.SK_%s"), *Folder, *Name, *Name));
+		Look.Material = Find<UMaterialInterface>(FString::Printf(TEXT("%sM_%s.M_%s"), *Folder, *Name, *Name));
+		Look.Idle = Anim(TEXT("Idle"));
+		Look.Walk = Anim(TEXT("Walk"));
+		Look.Fire = Anim(TEXT("Fire"));
+		Look.Death = Anim(TEXT("Death"));
+		// One Mixamo rig's motion on every skeleton (char-pipeline/scripts/ue_import_flyback.py)
+		Look.FlyBack = Anim(TEXT("FlyBack"));
+		// Mixamo "House Dancing", then twist, shimmy, running man and chicken dance; frustrated, crying and sad
+		for (const TCHAR* Dance : { TEXT("Victory"), TEXT("Dance1"), TEXT("Dance2"), TEXT("Dance3"), TEXT("Dance4") })
+		{
+			if (UAnimSequence* Found = Anim(Dance))
+			{
+				Look.Dances.Add(Found);
+			}
+		}
+		for (const TCHAR* Slump : { TEXT("Defeat1"), TEXT("Defeat2"), TEXT("Defeat3") })
+		{
+			if (UAnimSequence* Found = Anim(Slump))
+			{
+				Look.Slumps.Add(Found);
+			}
+		}
+		// Mixamo rifle aiming set, in place: "Rifle Aiming Idle" and "Rifle Run Forward/Backward/Left/Right"
+		Look.Aim.Idle = Anim(TEXT("AimIdle"));
+		Look.Aim.Fire = Look.Fire;
+		Look.Aim.Move[0] = Anim(TEXT("AimRunF"));
+		Look.Aim.Move[1] = Anim(TEXT("AimRunB"));
+		Look.Aim.Move[2] = Anim(TEXT("AimRunL"));
+		Look.Aim.Move[3] = Anim(TEXT("AimRunR"));
+		Look.MeshScale = Tuning.MeshScale;
+		const float Stride = Tuning.HipsHeight / FoxTuning.HipsHeight * Tuning.MeshScale;
+		Look.WalkSpeed = FoxWalkSpeed * Stride;
+		for (int32 Direction = 0; Direction < 4; ++Direction)
+		{
+			Look.Aim.MoveSpeed[Direction] = FoxAimRunSpeeds[Direction] * Stride;
+		}
+		Look.Portrait = Find<UTexture2D>(FString::Printf(TEXT("/Game/UI/T_%sPortrait.T_%sPortrait"), *Name, *Name));
+		UE_CLOG(!Look.IsUsable(), LogTemp, Warning, TEXT("RRRandom: the %s's assets are missing; it falls back to the fox."), *Name);
+	}
+	return Looks;
+}

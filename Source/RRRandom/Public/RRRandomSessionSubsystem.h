@@ -69,6 +69,13 @@ public:
 	void SetThirdPersonMode(bool bOn) { bThirdPersonMode = bOn; }
 	bool IsThirdPersonMode() const { return bThirdPersonMode; }
 
+	/**
+	 * The brawler this machine's player plays (RRSpecies: fox, rabbit, squirrel, tiger), picked on the title and kept across
+	 * levels. -RRSpecies=<name> on the command line sets it too. Sent to the host by ARRRandomPlayerController.
+	 */
+	void SetSpecies(int32 InSpecies) { Species = InSpecies; }
+	int32 GetSpecies() const { return Species; }
+
 	/** True when online play goes through Epic Online Services, false for LAN. */
 	bool IsUsingEOS() const;
 
@@ -162,6 +169,7 @@ private:
 	bool bDelegatesBound = false;
 	bool bStartupCommandDone = false;
 	bool bThirdPersonMode = false;
+	int32 Species = 0;
 	int32 JoinRetriesLeft = 0;
 	FString Status;
 	TSharedPtr<FOnlineSessionSearch> Search;

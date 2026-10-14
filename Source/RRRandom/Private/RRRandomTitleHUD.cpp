@@ -1,5 +1,6 @@
 #include "RRRandomTitleHUD.h"
 #include "RRRandomSessionSubsystem.h"
+#include "RRRandomSpecies.h"
 #include "RRRandomTitlePlayerController.h"
 #include "CanvasItem.h"
 #include "CanvasTypes.h"
@@ -167,6 +168,10 @@ ARRRandomTitleHUD::ARRRandomTitleHUD()
 	Glow = GlowTexture.Succeeded() ? GlowTexture.Object : nullptr;
 	Sparkle = SparkleTexture.Succeeded() ? SparkleTexture.Object : nullptr;
 	Puff = PuffTexture.Succeeded() ? PuffTexture.Object : nullptr;
+	for (const FRRSpeciesLook& Look : FRRSpeciesLook::GetAll())
+	{
+		Portraits.Add(Look.Portrait);
+	}
 }
 
 int32 ARRRandomTitleHUD::GetButtonAt(const FVector2D& ScreenPoint) const
@@ -368,8 +373,12 @@ void ARRRandomTitleHUD::DrawHUD()
 	Y += 18.f * S;
 	DrawCenteredText(TEXT("TEAM BRAWL PROTOTYPE"), Muted, ColumnX, Y, MediumFont, S);
 
-	// The view page asks how to play
-	if (Menu->IsOnViewPage())
+	// The brawler page asks who to play, the view page how
+	if (Menu->IsOnSpeciesPage())
+	{
+		DrawCenteredText(TEXT("PICK YOUR BRAWLER"), Muted, ColumnX, ScreenH * 0.36f, SmallFont, S);
+	}
+	else if (Menu->IsOnViewPage())
 	{
 		DrawCenteredText(TEXT("HOW DO YOU WANT TO PLAY?"), Muted, ColumnX, ScreenH * 0.36f, SmallFont, S);
 	}
@@ -431,6 +440,14 @@ void ARRRandomTitleHUD::DrawHUD()
 		GetTextSize(Label, TextW, TextH, LargeFont, 1.2f * S);
 		DrawText(Label, WithAlpha(bSelected ? SelectedText : FLinearColor::White, ButtonAlpha),
 			Rect.Min.X + (Size.X - TextW) * 0.5f, Rect.Min.Y + (Size.Y - TextH) * 0.5f, LargeFont, 1.2f * S);
+		// A brawler's face at the left end of its button
+		const int32 Species = ARRRandomTitlePlayerController::GetSpeciesOf(Choices[Index]);
+		if (Portraits.IsValidIndex(Species) && Portraits[Species])
+		{
+			const float Face = Size.Y - Border * 4.f;
+			DrawTexture(Portraits[Species], Rect.Min.X + Border * 2.f, Rect.Min.Y + Border * 2.f, Face, Face, 0.f, 0.f, 1.f, 1.f,
+				WithAlpha(FLinearColor::White, ButtonAlpha));
+		}
 	}
 
 	// What the selected button does, then the online status
@@ -449,7 +466,7 @@ void ARRRandomTitleHUD::DrawHUD()
 		DrawCenteredText(TEXT("[ESC] CANCEL"), Muted, ColumnX, Y, SmallFont, S);
 	}
 
-	const FString Keys = Menu->IsOnNetworkPage()
+	const FString Keys = Menu->IsOnNetworkPage() || Menu->IsOnViewPage() || Menu->IsOnSpeciesPage()
 		? TEXT("[W/S] SELECT     [ENTER] OK     [ESC] BACK")
 		: TEXT("[W/S] SELECT     [ENTER] OK");
 	DrawCenteredText(Keys, Muted, ColumnX, ScreenH - 40.f * S, SmallFont, S);

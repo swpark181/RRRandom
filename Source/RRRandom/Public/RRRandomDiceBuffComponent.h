@@ -53,6 +53,10 @@ struct FRRDiceRoll
 	/** A flight die lets its owner fly for a while instead of a buff; Stat is unused then. */
 	UPROPERTY(BlueprintReadOnly, Category = "RRRandom")
 	bool bFlight = false;
+
+	/** An ultimate die (the tiger's): its face is how many times the ultimate strikes; Stat is unused then. */
+	UPROPERTY(BlueprintReadOnly, Category = "RRRandom")
+	bool bUltimate = false;
 };
 
 /** Fired when a weapon die lands, with its face. */
@@ -63,6 +67,8 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FRRGiantDieSignature, int32 /*Face*/);
 
 /** Fired when a flight die lands, with its face. */
 DECLARE_MULTICAST_DELEGATE_OneParam(FRRFlightDieSignature, int32 /*Face*/);
+/** Fired when an ultimate die lands, with its face. */
+DECLARE_MULTICAST_DELEGATE_OneParam(FRRUltimateDieSignature, int32 /*Face*/);
 
 /**
  * A gauge fills over time; each full gauge stores one die. Rolling spends one stored die, which tumbles
@@ -70,6 +76,8 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FRRFlightDieSignature, int32 /*Face*/);
  * attack speed or move speed sized by its face, or now and then a weapon die that hands its owner a new random gun,
  * a giant die that makes its owner bigger, harder hitting and harder to hurt for a while,
  * or a flight die that lets its owner rise while holding jump and glide down for a while.
+ * An owner with an ultimate (UltimateDieChance above 0: the tiger) sometimes stores a golden ultimate die instead of a plain
+ * one; it is rolled before the plain ones, and its face is how many times the ultimate strikes (OnUltimateDie).
  */
 UCLASS(ClassGroup = (RRRandom), meta = (BlueprintSpawnableComponent))
 class RRRANDOM_API URRRandomDiceBuffComponent : public UActorComponent
@@ -88,7 +96,9 @@ public:
 
 	/** True while the latest die is still tumbling. */
 	UFUNCTION(BlueprintPure, Category = "RRRandom")
-	bool IsRolling() const { return GetTimeSinceLastRoll() < RollSpinTime; }
+	bool IsRolling() const { return GetTimeSinceLastRoll() < GetSpinTime(); }
+	/** How long the latest die tumbles: an ultimate die takes its time (UltimateSpinTime), with a bigger show. */
+	float GetSpinTime() const { return LastRoll.bUltimate ? UltimateSpinTime : RollSpinTime; }
 
 	/** 1 plus the summed bonuses of every active buff on that stat. */
 	UFUNCTION(BlueprintPure, Category = "RRRandom")
@@ -96,6 +106,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "RRRandom")
 	int32 GetCharges() const { return Charges; }
+	/** How many of the stored dice are ultimate dice (counted in GetCharges too). */
+	int32 GetUltimateCharges() const { return UltimateCharges; }
+	/** Server: stores an ultimate die (a cheat), if the owner has an ultimate. */
+	void GiveUltimateDie();
 
 	/** 0..1 progress toward the next charge. */
 	UFUNCTION(BlueprintPure, Category = "RRRandom")
@@ -130,6 +144,17 @@ public:
 
 	/** The owner listens to this to start flying. */
 	FRRFlightDieSignature OnFlightDie;
+	/** The owner listens to this to use its ultimate. */
+	FRRUltimateDieSignature OnUltimateDie;
+
+	/** Chance for each die the gauge fills to be an ultimate die; 0 for owners without an ultimate. One at a time. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom", meta = (ClampMin = "0", ClampMax = "1"))
+	float UltimateDieChance = 0.f;
+	static FLinearColor GetUltimateColor() { return FLinearColor(1.f, 0.72f, 0.1f); }
+
+	/** Seconds an ultimate die tumbles before it lands. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom", meta = (ClampMin = "0"))
+	float UltimateSpinTime = 1.6f;
 
 	/** Chance for each die to be a weapon die. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom", meta = (ClampMin = "0", ClampMax = "1"))
@@ -209,4 +234,7 @@ private:
 
 	UPROPERTY(Replicated)
 	int32 Charges = 0;
+
+	UPROPERTY(Replicated)
+	int32 UltimateCharges = 0;
 };

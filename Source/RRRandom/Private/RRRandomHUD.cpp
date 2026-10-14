@@ -5,6 +5,7 @@
 #include "RRRandomOverheadDieComponent.h"
 #include "RRRandomPlayerController.h"
 #include "RRRandomSessionSubsystem.h"
+#include "RRRandomTigerSpirit.h"
 #include "RRRandomVehicle.h"
 #include "Camera/PlayerCameraManager.h"
 #include "CanvasItem.h"
@@ -202,7 +203,8 @@ void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRand
 	const float BoxX = Left + HealthBarWidth + 4.f;
 	const float BoxY = Top + HealthBarHeight * 0.5f - DiceBoxSize * 0.5f;
 	DrawRect(Backing, BoxX - 1.f, BoxY - 1.f, DiceBoxSize + 2.f, DiceBoxSize + 2.f);
-	DrawRect(Charges > 0 ? DiceColor : EmptyDiceColor, BoxX, BoxY, DiceBoxSize, DiceBoxSize);
+	// Gold while one of them is the tiger's ultimate die
+	DrawRect(Dice->GetUltimateCharges() > 0 ? URRRandomDiceBuffComponent::GetUltimateColor() : Charges > 0 ? DiceColor : EmptyDiceColor, BoxX, BoxY, DiceBoxSize, DiceBoxSize);
 	const FString ChargeText = FString::FromInt(Charges);
 	GetTextSize(ChargeText, TextWidth, TextHeight, Font);
 	DrawText(ChargeText, Charges > 0 ? FLinearColor::Black : FLinearColor::Gray, BoxX + (DiceBoxSize - TextWidth) * 0.5f, BoxY + (DiceBoxSize - TextHeight) * 0.5f, Font);
@@ -461,21 +463,21 @@ float ARRRandomHUD::DrawBuffChips(const URRRandomDiceBuffComponent& Dice, float 
 float ARRRandomHUD::DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom, UFont* Font)
 {
 	// While the 3D die is up its result gets a row: empty while it tumbles, "5 ATK" (colored by stat) once it lands
-	const float Landed = Dice.GetTimeSinceLastRoll() - Dice.RollSpinTime;
+	const float Landed = Dice.GetTimeSinceLastRoll() - Dice.GetSpinTime();
 	if (Landed >= RollPopupTime)
 	{
 		return Bottom;
 	}
 
 	const FRRDiceRoll& Die = Dice.GetLastRoll();
-	const FString Text = FString::Printf(TEXT("%d %s"), Die.Face, Die.bWeapon ? TEXT("GUN") : Die.bGiant ? TEXT("GIANT") : Die.bFlight ? TEXT("FLY") : *URRRandomDiceBuffComponent::GetStatShortName(Die.Stat));
+	const FString Text = FString::Printf(TEXT("%d %s"), Die.Face, Die.bUltimate ? TEXT("TIGER SPIRIT") : Die.bWeapon ? TEXT("GUN") : Die.bGiant ? TEXT("GIANT") : Die.bFlight ? TEXT("FLY") : *URRRandomDiceBuffComponent::GetStatShortName(Die.Stat));
 	float Width = 0.f;
 	float TextHeight = 0.f;
 	GetTextSize(Text, Width, TextHeight, Font);
 	const float Y = Bottom - TextHeight;
 	if (Landed >= 0.f)
 	{
-		const FLinearColor DieColor = Die.bWeapon ? WeaponDieColor
+		const FLinearColor DieColor = Die.bUltimate ? URRRandomDiceBuffComponent::GetUltimateColor() : Die.bWeapon ? WeaponDieColor
 			: Die.bGiant ? URRRandomDiceBuffComponent::GetGiantColor()
 			: Die.bFlight ? URRRandomDiceBuffComponent::GetFlightColor() : URRRandomDiceBuffComponent::GetStatColor(Die.Stat);
 		const float Alpha = FMath::Clamp((RollPopupTime - Landed) / RollPopupFadeTime, 0.f, 1.f);
@@ -501,12 +503,18 @@ void ARRRandomHUD::DrawDamagePopups(const ARRRandomCharacter& Brawler, const ARR
 	const bool bFriendly = Viewer && Brawler.GetTeam() == Viewer->GetTeam();
 	const FLinearColor Color = bFriendly ? FriendlyDamageColor : FLinearColor::White;
 
-	// The cartoon stickers first, under the numbers: popping in with an overshoot, holding, then fading and shrinking
+	// The skull sticker of a foam finger's knockout first, under the numbers: popping in with an overshoot, holding, then
+	// fading and shrinking. The guns' stickers aren't drawn any more; the glowing hit bursts in the world
+	// (ARRRandomEffects) took their place.
 	if (HitEffects)
 	{
 		const float Scale = Canvas->ClipY / HitEffectReferenceHeight;
 		for (const FRRDamagePopup& Popup : Brawler.GetDamagePopups())
 		{
+			if (Popup.Effect != ERRHitEffect::Skull)
+			{
+				continue;
+			}
 			const int32 Cell = FMath::Clamp(static_cast<int32>(Popup.Effect), 0, static_cast<int32>(ERRHitEffect::Count) - 1);
 			const float T = Popup.Age / FMath::Max(Popup.Lifetime, KINDA_SMALL_NUMBER);
 			const float PopIn = FMath::Clamp(Popup.Age / HitEffectPopTime, 0.f, 1.f);
@@ -538,6 +546,43 @@ void ARRRandomHUD::DrawDicePanel(const ARRRandomCharacter& Viewer)
 {
 	const URRRandomDiceBuffComponent& Dice = *Viewer.GetDiceBuffs();
 	UFont* Font = GEngine->GetMediumFont();
+
+	// My ultimate die: a gold flash and big words across the middle of the screen while it tumbles and as it lands
+	const FRRDiceRoll& Roll = Dice.GetLastRoll();
+	const float RollAge = Dice.GetTimeSinceLastRoll();
+	const float Spin = Dice.GetSpinTime();
+	if (Roll.bUltimate && RollAge < Spin + UltimateBannerTime)
+	{
+		const float S = Canvas->ClipY / 720.f;
+		const FLinearColor Ult = URRRandomDiceBuffComponent::GetUltimateColor();
+		FString Banner;
+		float Scale;
+		float Alpha = 1.f;
+		if (RollAge < Spin)
+		{
+			Banner = TEXT("ULTIMATE DIE!");
+			Scale = (3.f + 0.35f * FMath::Sin(RollAge * 12.f)) * S;
+			Alpha = FMath::Clamp(RollAge / 0.15f, 0.f, 1.f);
+		}
+		else
+		{
+			const float Landed = RollAge - Spin;
+			Banner = FString::Printf(TEXT("TIGER SPIRIT  x%d!"), Roll.Face);
+			// Slams in big, settles, fades out at the end
+			Scale = (3.4f + 2.f * FMath::Max(0.f, 1.f - Landed / 0.2f)) * S;
+			Alpha = FMath::Clamp((UltimateBannerTime - Landed) / 0.4f, 0.f, 1.f);
+			DrawRect(WithAlpha(Ult, 0.45f * FMath::Max(0.f, 1.f - Landed / 0.35f)), 0.f, 0.f, Canvas->ClipX, Canvas->ClipY);
+		}
+		UFont* Big = GEngine->GetLargeFont();
+		float Width;
+		float Height;
+		GetTextSize(Banner, Width, Height, Big, Scale);
+		const float X = (Canvas->ClipX - Width) * 0.5f;
+		// Below the crosshair, clear of the labels over the brawlers' heads
+		const float Y = Canvas->ClipY * 0.66f - Height * 0.5f;
+		DrawText(Banner, WithAlpha(FLinearColor(0.15f, 0.05f, 0.f), Alpha * 0.8f), X + 3.f * S, Y + 3.f * S, Big, Scale);
+		DrawText(Banner, WithAlpha(Ult, Alpha), X, Y, Big, Scale);
+	}
 	const float BarY = Canvas->ClipY - Margin - BarHeight;
 
 	// Gauge: dark track, yellow fill, stored dice count to the right
@@ -545,9 +590,24 @@ void ARRRandomHUD::DrawDicePanel(const ARRRandomCharacter& Viewer)
 	DrawRect(DiceColor, Margin, BarY, BarWidth * FMath::Clamp(Dice.GetGaugeProgress(), 0.f, 1.f), BarHeight);
 	const FLinearColor CountColor = Dice.GetCharges() > 0 ? FLinearColor::White : FLinearColor::Gray;
 	DrawText(FString::Printf(TEXT("DICE x%d  [E]"), Dice.GetCharges()), CountColor, Margin + BarWidth + 10.f, BarY, Font);
+	if (Dice.GetUltimateCharges() > 0)
+	{
+		float CountWidth;
+		float CountHeight;
+		GetTextSize(FString::Printf(TEXT("DICE x%d  [E]"), Dice.GetCharges()), CountWidth, CountHeight, Font);
+		DrawText(TEXT("  ULTIMATE DIE: TIGER SPIRIT!"), URRRandomDiceBuffComponent::GetUltimateColor(), Margin + BarWidth + 10.f + CountWidth, BarY, Font);
+	}
 
-	// Powers (flight, giant), then active buffs, stacked upward from the gauge
+	// Powers (the tiger spirit, flight, giant), then active buffs, stacked upward from the gauge
 	float LineY = BarY - LineHeight - 4.f;
+	if (const ARRRandomTigerSpirit* Spirit = Viewer.GetSpirit())
+	{
+		const FString Line = Spirit->IsReady()
+			? FString::Printf(TEXT("TIGER SPIRIT  [CLICK ANYWHERE] PAW STRIKE  x%d LEFT"), Spirit->GetStrikesLeft())
+			: FString::Printf(TEXT("TIGER SPIRIT  x%d LEFT"), Spirit->GetStrikesLeft());
+		DrawText(Line, URRRandomDiceBuffComponent::GetUltimateColor(), Margin, LineY, Font);
+		LineY -= LineHeight;
+	}
 	if (Viewer.CanFly())
 	{
 		const TCHAR* Dash = Viewer.IsDashing() ? TEXT("DASHING") : Viewer.HasDash() ? TEXT("[SPACE x2 HOLD] DASH") : TEXT("DASH AFTER LANDING");
@@ -598,7 +658,7 @@ void ARRRandomHUD::DrawOnlinePanel()
 	DrawShadowedText(TEXT("[F1] HOST   [F2] JOIN   [F3] LEAVE   [ESC] MENU   [M] MAP"), FLinearColor::Gray, Margin, Y, Font);
 	Y += LineHeight;
 #if !UE_BUILD_SHIPPING
-	DrawShadowedText(TEXT("CHEATS  [F6] WIN   [F7] GIANT   [F8] FLY   [F9] 3RD PERSON   [F10] GOD   [1-7] PISTOL MINIGUN SMG RIFLE BLASTER CANNON FINGER"), FLinearColor::Gray, Margin, Y, Font);
+	DrawShadowedText(TEXT("CHEATS  [F6] WIN   [F7] GIANT   [F8] FLY   [F9] 3RD PERSON   [F10] GOD   [U] TIGER ULT DIE   [1-7] PISTOL MINIGUN SMG RIFLE BLASTER CANNON FINGER"), FLinearColor::Gray, Margin, Y, Font);
 	Y += LineHeight;
 #endif
 	if (!Sessions->GetStatus().IsEmpty())

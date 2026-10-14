@@ -32,6 +32,9 @@ class RRRANDOM_API ARRRandomPlayerController : public APlayerController
 public:
 	ARRRandomPlayerController();
 
+	/** On the server: the species (RRSpecies) this player picked on its title, or INDEX_NONE before it has said. */
+	int32 GetChosenSpecies() const { return ChosenSpecies; }
+
 	/** StarCraft-style fog of war on this player's screen (ARRRandomFogOfWar). */
 	UPROPERTY(EditAnywhere, Category = "Fog")
 	bool bFogOfWar = true;
@@ -86,6 +89,16 @@ public:
 	/** Cheat: my brawler takes no damage and can't fall out of the arena, until toggled off (F10). Not in shipping builds. */
 	UFUNCTION(Exec)
 	void RRGod();
+
+	/**
+	 * Cheat: my brawler stores an ultimate die, to roll with E (U or F11); one that isn't the tiger turns into the tiger first.
+	 * Not in shipping builds.
+	 */
+	UFUNCTION(Exec)
+	void RRUltimate();
+
+	/** While my tiger's spirit is out: the floor under the cursor, where a strike would land (false off the arena). */
+	bool GetUltimateSpot(FVector& OutSpot) const;
 
 	/**
 	 * Cheat: third person, like a battle royale shooter (F9, again to go back): the camera over my brawler's right shoulder
@@ -168,6 +181,9 @@ protected:
 	TObjectPtr<UInputAction> CheatGodAction;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> CheatUltimateAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> CheatThirdPersonAction;
 
 	/** Third person: the mouse turns the camera, the right button aims down the sights. */
@@ -198,6 +214,11 @@ protected:
 private:
 	void CreateDefaultInputAssets();
 
+	/** A joiner tells the host which brawler it picked; its brawler (there already, as the fox) changes to it. */
+	UFUNCTION(Server, Reliable)
+	void ServerChooseSpecies(uint8 Species);
+	int32 ChosenSpecies = INDEX_NONE;
+
 	/** The cheats run on the server, which owns the brawlers' powers and guns. */
 	UFUNCTION(Server, Reliable)
 	void ServerCheatGiant();
@@ -205,6 +226,16 @@ private:
 	void ServerCheatFly();
 	UFUNCTION(Server, Reliable)
 	void ServerCheatGod();
+	UFUNCTION(Server, Reliable)
+	void ServerCheatUltimate();
+
+	/** My tiger's spirit strikes at this spot (if it's ready for one). */
+	UFUNCTION(Server, Reliable)
+	void ServerUltimateStrike(FVector_NetQuantize Spot);
+	/** When this machine last asked, so a held button asks once per strike. */
+	float LastStrikeRequestTime = -10.f;
+	/** Whether the view is on my tiger's spirit (its overview camera). */
+	bool bViewingSpirit = false;
 	UFUNCTION(Server, Reliable)
 	void ServerCheatGun(int32 Type);
 	UFUNCTION(Server, Reliable)
@@ -244,6 +275,10 @@ private:
 	/** The game's window is the one in use and its view has the keyboard and mouse. */
 	bool IsViewportFocused() const;
 	bool bCursorFreed = false;
+	/** Third person: hold the mouse inside the game's view (and capture it), or let it go. */
+	void LockMouse(bool bLock);
+	/** Third person: put the hidden cursor back in the middle of the view if it has drifted. */
+	void CenterMouse();
 	/** Third person: where the crosshair (the middle of the screen) points in the world. */
 	FVector GetCrosshairTarget() const;
 	void OnMove(const FInputActionValue& Value);
