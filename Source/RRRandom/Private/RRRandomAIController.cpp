@@ -2,6 +2,7 @@
 #include "RRRandomCharacter.h"
 #include "RRRandomCover.h"
 #include "RRRandomDiceBuffComponent.h"
+#include "RRRandomDiceTown.h"
 #include "RRRandomGameState.h"
 #include "RRRandomVehicle.h"
 #include "Components/CapsuleComponent.h"
@@ -37,6 +38,15 @@ namespace
 	constexpr float PatrolRadiusMax = 1800.f;
 	constexpr float PatrolTimeMin = 3.f;
 	constexpr float PatrolTimeMax = 6.f;
+	// On a map with walking routes (Dice Town, much bigger): roam between spots this far from the middle, a new one on
+	// arrival or after this long; a new route this often or when the goal moves this far; a corner counts as reached this
+	// close; stopped this long at a ledge, jump
+	constexpr float RoutePatrolRadius = 5500.f;
+	constexpr float RoutePatrolTime = 25.f;
+	constexpr float RouteRefreshTime = 1.5f;
+	constexpr float RouteRefreshDistance = 300.f;
+	constexpr float RouteArriveRadius = 60.f;
+	constexpr float RouteStuckJumpTime = 0.5f;
 	// Between bursts with this few rounds left, the bot reloads instead of running dry mid-fight
 	constexpr int32 LowAmmo = 3;
 	// BurstSize is meant for a magazine this big; other guns scale it
@@ -155,13 +165,32 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	}
 	LastSeenTimer -= DeltaSeconds;
 
-	// Nobody in sight and no trail to follow: roam the middle until someone shows up
+	// A map with walking routes, if this is one
+	if (!bLookedForTown)
+	{
+		bLookedForTown = true;
+		TActorIterator<ARRRandomDiceTown> It(GetWorld());
+		Town = It && It->IsBuilt() ? *It : nullptr;
+		bLookedForTown = Town.IsValid() || !It;
+	}
+	const ARRRandomDiceTown* Map = Town.Get();
+
+	// Nobody in sight and no trail to follow: roam the middle until someone shows up (on a map with routes, anywhere on
+	// its ground, upstairs and rooftops included)
 	PatrolTimer -= DeltaSeconds;
 	if (!Opponent.IsValid() && LastSeenTimer <= 0.f && bHasArenaCenter
 		&& (PatrolTimer <= 0.f || FVector::Dist2D(Self->GetActorLocation(), PatrolGoal) <= ArenaCenterArriveRadius))
 	{
-		PatrolGoal = ArenaCenter + FVector(Stream.FRandRange(PatrolRadiusMin, PatrolRadiusMax), 0.f, 0.f).RotateAngleAxis(Stream.FRandRange(0.f, 360.f), FVector::UpVector);
-		PatrolTimer = Stream.FRandRange(PatrolTimeMin, PatrolTimeMax);
+		if (Map)
+		{
+			PatrolGoal = Map->GetRandomWalkSpot(Stream, RoutePatrolRadius);
+			PatrolTimer = RoutePatrolTime;
+		}
+		else
+		{
+			PatrolGoal = ArenaCenter + FVector(Stream.FRandRange(PatrolRadiusMin, PatrolRadiusMax), 0.f, 0.f).RotateAngleAxis(Stream.FRandRange(0.f, 360.f), FVector::UpVector);
+			PatrolTimer = Stream.FRandRange(PatrolTimeMin, PatrolTimeMax);
+		}
 	}
 
 	// Getting hit: dodge the other way right away, and stay wary for a moment
@@ -239,12 +268,28 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		bHasCoverSpot = false;
 		Wanted = ChooseFightDirection(Self, Target, Distance, bCanSee);
 	}
+	// On a map with routes, out of a close fight: along the route to the opponent, where it was last seen, or the roaming
+	// spot (feet heights)
+	bool bOnRoute = false;
+	if (Map && !bWantsCover && !(Target && bCanSee && Distance <= Self->GetAttackRange() * PreferredShare + DistanceSlack))
+	{
+		const FVector Goal = Target ? Target->GetActorLocation() - FVector(0.f, 0.f, Target->GetCapsuleComponent()->GetScaledCapsuleHalfHeight())
+			: LastSeenTimer > 0.f ? LastSeenLocation - FVector(0.f, 0.f, Self->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight())
+			: PatrolGoal;
+		Wanted = FollowRoute(Self, Goal, DeltaSeconds);
+		bOnRoute = true;
+	}
+	else
+	{
+		RouteStuckTimer = 0.f;
+	}
 
 	// Vehicles: only out of a fight (an opponent in sight near its range, or being hit)
 	const bool bInFight = bWantsCover || UnderFireTimer > 0.f || (Target && Distance <= Self->GetAttackRange() * EngageRangeShare);
 	UpdateVehicles(Self, Target, bInFight, Wanted, DeltaSeconds);
 
-	const FVector Move = SteerAroundObstacles(Self, Wanted) + GetSeparation(Self);
+	// (a route already goes round walls, and its stairs would look like walls to the steering's probe)
+	const FVector Move = (bOnRoute ? Wanted : SteerAroundObstacles(Self, Wanted)) + GetSeparation(Self);
 	if (!Move.IsNearlyZero())
 	{
 		Self->AddMovementInput(Move.GetSafeNormal2D());
@@ -267,6 +312,45 @@ FVector ARRRandomAIController::GetTravelGoal(const ARRRandomCharacter* Self, con
 		return LastSeenLocation;
 	}
 	return bHasArenaCenter ? PatrolGoal : Self->GetActorLocation();
+}
+
+FVector ARRRandomAIController::FollowRoute(ARRRandomCharacter* Self, const FVector& Goal, float DeltaSeconds)
+{
+	const ARRRandomDiceTown* Map = Town.Get();
+	const FVector Feet = Self->GetActorLocation() - FVector(0.f, 0.f, Self->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	RouteTimer -= DeltaSeconds;
+	if (Map && (RouteTimer <= 0.f || RouteIndex >= Route.Num() || FVector::Dist(Goal, RouteGoal) > RouteRefreshDistance))
+	{
+		RouteTimer = RouteRefreshTime;
+		RouteGoal = Goal;
+		RouteIndex = 0;
+		if (!Map->FindPath(Feet, Goal, Route))
+		{
+			Route.Reset();
+		}
+	}
+	// Past the corners already reached
+	while (Route.IsValidIndex(RouteIndex) && FVector::Dist2D(Feet, Route[RouteIndex]) < RouteArriveRadius && FMath::Abs(Feet.Z - Route[RouteIndex].Z) < 150.f)
+	{
+		++RouteIndex;
+	}
+	const FVector Next = Route.IsValidIndex(RouteIndex) ? Route[RouteIndex] : Goal;
+	const FVector Toward = Next - Feet;
+	if (Toward.Size2D() < RouteArriveRadius)
+	{
+		RouteStuckTimer = 0.f;
+		return FVector::ZeroVector;
+	}
+	// Stopped against something: jump (at a ledge a jump climbs it), and soon look for another route
+	const bool bStopped = Self->GetVelocity().Size2D() < StuckSpeed && !Self->GetVehicle();
+	RouteStuckTimer = bStopped ? RouteStuckTimer + DeltaSeconds : 0.f;
+	if (RouteStuckTimer >= RouteStuckJumpTime)
+	{
+		Self->Jump();
+		RouteStuckTimer = -RouteStuckJumpTime;
+		RouteTimer = FMath::Min(RouteTimer, 0.5f);
+	}
+	return Toward.GetSafeNormal2D();
 }
 
 bool ARRRandomAIController::IsStillWorthRiding(const ARRRandomCharacter* Self, const ARRRandomVehicle* Ride) const

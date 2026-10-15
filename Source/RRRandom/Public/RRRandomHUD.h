@@ -101,6 +101,9 @@ private:
 
 	/** Text with a dark drop shadow so it reads over any background. */
 	void DrawShadowedText(const FString& Text, const FLinearColor& Color, float X, float Y, UFont* Font);
+
+	/** Seconds the big "TIGER SPIRIT xN!" stays up after my ultimate die lands. */
+	static constexpr float UltimateBannerTime = 1.8f;
 	/** A downward triangle with a dark border, its top edge at Top, centered on CenterX. */
 	void DrawFriendOrFoeMarker(float CenterX, float Top, const FLinearColor& Color);
 

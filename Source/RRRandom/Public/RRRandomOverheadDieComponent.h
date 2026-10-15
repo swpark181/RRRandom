@@ -9,6 +9,9 @@
  * When the brawler's dice component throws a die it pops up, tumbles along a little arc for the die's RollSpinTime,
  * lands with the rolled face toward this machine's camera (when the roll takes effect), stays up for HoldTime
  * and shrinks away. The HUD tells it where its indicator stack ends (SetStackTop) so the die floats just above it.
+ * The tiger's ultimate die makes more of it: polished glowing gold with deep red pips, bigger, thrown higher and turning
+ * more for its longer tumble, a swirl of gold round it and a beam of light up from its owner, and a big burst when it lands
+ * (ARRRandomEffects::UltimateDieSpin / UltimateDieBurst).
  * Purely cosmetic: not replicated, no collision, no shadow.
  */
 UCLASS(ClassGroup = (RRRandom))
@@ -46,6 +49,14 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Dice")
 	float DefaultLift = 120.f;
 
+	/** The ultimate die: how much bigger, how much higher it's thrown, and how many turns it makes. */
+	UPROPERTY(EditAnywhere, Category = "Dice")
+	float UltimateScale = 1.8f;
+	UPROPERTY(EditAnywhere, Category = "Dice")
+	float UltimateHop = 1.5f;
+	UPROPERTY(EditAnywhere, Category = "Dice")
+	float UltimateTurns = 6.f;
+
 protected:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -61,4 +72,16 @@ private:
 	FVector TargetStackOffset = FVector::ZeroVector;
 	bool bHasStackTop = false;
 	bool bSnapStack = true;
+	/** The landing's pop of light has played for the roll being shown. */
+	bool bLandBurstShown = true;
+
+	/** Shows the die as the ultimate one (gold) or a plain one. */
+	void SetGold(bool bGold);
+	bool bGold = false;
+	UPROPERTY(Transient)
+	TObjectPtr<class UMaterialInstanceDynamic> GoldBody;
+	UPROPERTY(Transient)
+	TObjectPtr<class UMaterialInstanceDynamic> GoldPips;
+	UPROPERTY()
+	TObjectPtr<class UMaterialInterface> GoldMaterial;
 };

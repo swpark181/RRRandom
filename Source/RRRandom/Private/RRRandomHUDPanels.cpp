@@ -3,6 +3,8 @@
 #include "RRRandomCharacter.h"
 #include "RRRandomCover.h"
 #include "RRRandomDiceBuffComponent.h"
+#include "RRRandomDiceLand.h"
+#include "RRRandomDiceTown.h"
 #include "RRRandomFogOfWar.h"
 #include "RRRandomGameState.h"
 #include "RRRandomIsland.h"
@@ -112,7 +114,7 @@ namespace
 		TArray<FString> Bots;
 		for (TActorIterator<ARRRandomCharacter> It(World); It; ++It)
 		{
-			if (It->GetTeam() == Brawler.GetTeam() && !It->GetPlayerState() && *It != &Viewer)
+			if (It->GetTeam() == Brawler.GetTeam() && !It->GetPlayerState() && *It != &Viewer && !It->IsDecoy())
 			{
 				Bots.Add(It->GetName());
 			}
@@ -181,7 +183,7 @@ void ARRRandomHUD::DrawTeamPanel(const ARRRandomCharacter& Viewer)
 	TArray<const ARRRandomCharacter*> Mates;
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{
-		if (*It != &Viewer && It->GetTeam() == Viewer.GetTeam())
+		if (*It != &Viewer && It->GetTeam() == Viewer.GetTeam() && !It->IsDecoy())
 		{
 			Mates.Add(*It);
 		}
@@ -211,9 +213,11 @@ void ARRRandomHUD::DrawTeamCard(const ARRRandomCharacter& Mate, const ARRRandomC
 	const float PortraitY = Top + (CardHeight - PortraitSize) * 0.5f;
 	DrawRect(bAlive ? Tint : FLinearColor(0.35f, 0.35f, 0.35f), PortraitX - 2.f, PortraitY - 2.f, PortraitSize + 4.f, PortraitSize + 4.f);
 	DrawRect(FLinearColor(0.08f, 0.09f, 0.12f), PortraitX, PortraitY, PortraitSize, PortraitSize);
-	if (Portrait)
+	// The mate's own species (the fox's picture if its own is missing)
+	UTexture2D* Face = Mate.GetPortrait() ? Mate.GetPortrait() : Portrait.Get();
+	if (Face)
 	{
-		DrawTexture(Portrait, PortraitX, PortraitY, PortraitSize, PortraitSize, 0.f, 0.f, 1.f, 1.f, bAlive ? FLinearColor::White : FLinearColor(0.3f, 0.3f, 0.3f));
+		DrawTexture(Face, PortraitX, PortraitY, PortraitSize, PortraitSize, 0.f, 0.f, 1.f, 1.f, bAlive ? FLinearColor::White : FLinearColor(0.3f, 0.3f, 0.3f));
 	}
 	if (!bAlive)
 	{
@@ -280,12 +284,17 @@ FVector2D ARRRandomHUD::MapPixelToWorld(int32 X, int32 Y) const
 bool ARRRandomHUD::BuildMinimapBase()
 {
 	TActorIterator<ARRRandomIsland> IslandIt(GetWorld());
-	const ARRRandomIsland* Island = IslandIt ? *IslandIt : nullptr;
-	if (!Island || Island->TypeRows.Num() == 0)
+	const ARRRandomIsland* Island = IslandIt && IslandIt->TypeRows.Num() > 0 ? *IslandIt : nullptr;
+	// The third person mode's map instead: it has no cells, so it says what each spot shows
+	TActorIterator<ARRRandomDiceLand> LandIt(GetWorld());
+	const ARRRandomDiceLand* Land = !Island && LandIt && LandIt->IsBuilt() ? *LandIt : nullptr;
+	TActorIterator<ARRRandomDiceTown> TownIt(GetWorld());
+	const ARRRandomDiceTown* Town = !Island && !Land && TownIt && TownIt->IsBuilt() ? *TownIt : nullptr;
+	if (!Island && !Land && !Town)
 	{
 		return false;
 	}
-	MapBounds = Island->GetMapBounds();
+	MapBounds = Island ? Island->GetMapBounds() : Land ? Land->GetMapBounds() : Town->GetMapBounds();
 
 	// Each pixel's cell: its color, and its height so faces down the screen can be shaded
 	MapBase.SetNumUninitialized(MapPixels * MapPixels);
@@ -300,7 +309,15 @@ bool ARRRandomHUD::BuildMinimapBase()
 			int32 Levels = -1;
 			int32 Row;
 			int32 Col;
-			if (Island->GetCellAt(World, Row, Col))
+			if (Land)
+			{
+				Color = Land->GetMapColor(World, Levels);
+			}
+			else if (Town)
+			{
+				Color = Town->GetMapColor(World, Levels);
+			}
+			else if (Island->GetCellAt(World, Row, Col))
 			{
 				const TCHAR Type = Island->TypeRows[Row][Col];
 				const TCHAR Digit = Island->HeightRows[Row][Col];

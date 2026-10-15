@@ -68,6 +68,10 @@ private:
 	UPROPERTY()
 	TObjectPtr<UTexture2D> FoxTail;
 
+	/** Each brawler's HUD card picture (RRSpecies order), shown on the brawler page's buttons. */
+	UPROPERTY()
+	TArray<TObjectPtr<UTexture2D>> Portraits;
+
 	/** The sea in the background rippling, flowing and glinting (char-pipeline/scripts/ue_make_title_water.py). */
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> Water;

@@ -1,4 +1,5 @@
 #include "RRRandomOverheadDieComponent.h"
+#include "RRRandomEffects.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -6,6 +7,7 @@
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -54,6 +56,9 @@ URRRandomOverheadDieComponent::URRRandomOverheadDieComponent()
 	{
 		SetStaticMesh(DiceMesh.Object);
 	}
+	// The ultimate die's body (char-pipeline/scripts/ue_make_gold_die.py)
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Gold(TEXT("/Game/Props/Dice/M_DiceGold.M_DiceGold"));
+	GoldMaterial = Gold.Succeeded() ? Gold.Object : nullptr;
 
 	SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
 	SetGenerateOverlapEvents(false);
@@ -86,6 +91,41 @@ FQuat URRRandomOverheadDieComponent::FaceToward(int32 Face, const FQuat& Camera)
 	return Wanted * Local.Inverse();
 }
 
+void URRRandomOverheadDieComponent::SetGold(bool bInGold)
+{
+	if (bGold == bInGold || !GetStaticMesh())
+	{
+		return;
+	}
+	bGold = bInGold;
+	for (int32 Slot = 0; Slot < GetNumMaterials(); ++Slot)
+	{
+		UMaterialInterface* Plain = GetStaticMesh()->GetMaterial(Slot);
+		const bool bPips = GetMaterialSlotNames().IsValidIndex(Slot) && GetMaterialSlotNames()[Slot].ToString().Contains(TEXT("Pip"));
+		if (!bGold)
+		{
+			SetMaterial(Slot, Plain);
+		}
+		else if (bPips)
+		{
+			if (!GoldPips)
+			{
+				GoldPips = UMaterialInstanceDynamic::Create(Plain, this);
+				GoldPips->SetVectorParameterValue(TEXT("PipColor"), FLinearColor(0.45f, 0.02f, 0.01f));
+			}
+			SetMaterial(Slot, GoldPips);
+		}
+		else if (GoldMaterial)
+		{
+			if (!GoldBody)
+			{
+				GoldBody = UMaterialInstanceDynamic::Create(GoldMaterial, this);
+			}
+			SetMaterial(Slot, GoldBody);
+		}
+	}
+}
+
 void URRRandomOverheadDieComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -95,7 +135,7 @@ void URRRandomOverheadDieComponent::TickComponent(float DeltaTime, ELevelTick Ti
 	// Turned toward this machine's own view, so each player reads the face head-on
 	const APlayerCameraManager* Camera = UGameplayStatics::GetPlayerCameraManager(this, 0);
 	const float Age = Dice ? Dice->GetTimeSinceLastRoll() : UE_BIG_NUMBER;
-	const float SpinTime = Dice ? Dice->RollSpinTime : 0.f;
+	const float SpinTime = Dice ? Dice->GetSpinTime() : 0.f;
 	if (!Dice || !Camera || !Brawler->IsAlive() || Age >= SpinTime + HoldTime + ExitTime)
 	{
 		if (IsVisible())
@@ -118,6 +158,9 @@ void URRRandomOverheadDieComponent::TickComponent(float DeltaTime, ELevelTick Ti
 		bSnapStack = true;
 	}
 
+	const bool bUltimate = Dice->GetLastRoll().bUltimate;
+	SetGold(bUltimate);
+	const float Size = bUltimate ? UltimateScale : 1.f;
 	const FQuat View = Camera->GetCameraRotation().Quaternion();
 	const FVector ScreenUp = View.GetUpVector();
 
@@ -128,7 +171,7 @@ void URRRandomOverheadDieComponent::TickComponent(float DeltaTime, ELevelTick Ti
 	}
 	StackOffset = bSnapStack ? TargetStackOffset : FMath::VInterpTo(StackOffset, TargetStackOffset, DeltaTime, StackFollowSpeed);
 	bSnapStack = false;
-	const float HalfSize = 50.f * DieScale;
+	const float HalfSize = 50.f * DieScale * Size;
 	FVector Location = Brawler->GetActorLocation() + StackOffset + ScreenUp * (HalfSize + StackGap);
 
 	FQuat Rotation = FaceToward(Dice->GetLastRoll().Face, View);
@@ -137,8 +180,8 @@ void URRRandomOverheadDieComponent::TickComponent(float DeltaTime, ELevelTick Ti
 	{
 		// Pops up, tumbles along an arc fast at first and slows to a stop on the rolled face
 		const float Alpha = Age / SpinTime;
-		Location += ScreenUp * HopHeight * FMath::Sin(PI * Alpha);
-		const float TurnsLeft = SpinTurns * FMath::Pow(1.f - Alpha, 3.f);
+		Location += ScreenUp * HopHeight * (bUltimate ? UltimateHop : 1.f) * FMath::Sin(PI * Alpha);
+		const float TurnsLeft = (bUltimate ? UltimateTurns : SpinTurns) * FMath::Pow(1.f - Alpha, 3.f);
 		Rotation = FQuat(SpinAxis, TurnsLeft * 2.f * PI) * Rotation;
 		Scale = EaseOutBack(Age / PopTime);
 	}
@@ -154,7 +197,30 @@ void URRRandomOverheadDieComponent::TickComponent(float DeltaTime, ELevelTick Ti
 	}
 
 	SetWorldLocationAndRotation(Location, Rotation);
-	SetWorldScale3D(FVector(DieScale * FMath::Max(Scale, KINDA_SMALL_NUMBER)));
+	SetWorldScale3D(FVector(DieScale * Size * FMath::Max(Scale, KINDA_SMALL_NUMBER)));
+	// The gold glows brighter as it spins down, and flares on landing
+	if (bUltimate && GoldBody)
+	{
+		const float Pulse = 0.25f + 0.35f * FMath::Abs(FMath::Sin(Age * 9.f)) + (Age >= SpinTime ? 1.5f * FMath::Max(0.f, 1.f - (Age - SpinTime) / 0.4f) : 0.f);
+		GoldBody->SetScalarParameterValue(TEXT("Glow"), Pulse);
+	}
+
+	// Glitter while it tumbles, a pop of light when it lands
+	if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+	{
+		const FVector Feet = Brawler->GetActorLocation() - FVector(0.f, 0.f, Brawler->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+		if (Age < SpinTime)
+		{
+			bUltimate ? Effects->UltimateDieSpin(Location, HalfSize * Scale, Feet, Age / SpinTime, DeltaTime)
+				: Effects->DiceSpinSparkle(Location, HalfSize * Scale, DeltaTime);
+			bLandBurstShown = false;
+		}
+		else if (!bLandBurstShown)
+		{
+			bLandBurstShown = true;
+			bUltimate ? Effects->UltimateDieBurst(Location, HalfSize, Feet) : Effects->DiceLandBurst(Location, HalfSize);
+		}
+	}
 	if (!IsVisible())
 	{
 		SetVisibility(true);

@@ -1,11 +1,14 @@
 #include "RRRandomPlayerController.h"
 #include "RRRandomFogOfWar.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomDiceBuffComponent.h"
 #include "RRRandomGameMode.h"
 #include "RRRandomGameState.h"
 #include "RRRandomHUD.h"
 #include "RRRandomResultsDirector.h"
 #include "RRRandomSessionSubsystem.h"
+#include "RRRandomUltimate.h"
+#include "RRRandomVehicle.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
 #include "EnhancedInputComponent.h"
@@ -31,6 +34,8 @@ namespace
 	constexpr float CrosshairRange = 20000.f;
 	// Third person: the most one frame's mouse movement turns the camera (in mouse counts)
 	constexpr float MaxLookDelta = 60.f;
+	// Third person: how far (in pixels) the hidden cursor may drift from the middle of the view before it is put back
+	constexpr int32 MouseRecenterSlack = 40;
 }
 
 ARRRandomPlayerController::ARRRandomPlayerController()
@@ -121,6 +126,11 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 		CheatGodAction = NewObject<UInputAction>(this, TEXT("IA_CheatGod"));
 		CheatGodAction->ValueType = EInputActionValueType::Boolean;
 	}
+	if (!CheatUltimateAction)
+	{
+		CheatUltimateAction = NewObject<UInputAction>(this, TEXT("IA_CheatUltimate"));
+		CheatUltimateAction->ValueType = EInputActionValueType::Boolean;
+	}
 	if (!CheatThirdPersonAction)
 	{
 		CheatThirdPersonAction = NewObject<UInputAction>(this, TEXT("IA_CheatThirdPerson"));
@@ -181,6 +191,9 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 	MappingContext->MapKey(CheatGiantAction, EKeys::F7);
 	// F9 is the engine's screenshot key; F10 is free
 	MappingContext->MapKey(CheatGodAction, EKeys::F10);
+	// U, and F11 (which the editor's viewport keeps for itself when playing in the editor)
+	MappingContext->MapKey(CheatUltimateAction, EKeys::U);
+	MappingContext->MapKey(CheatUltimateAction, EKeys::F11);
 	MappingContext->MapKey(CheatThirdPersonAction, EKeys::F9);
 	MappingContext->MapKey(CheatFlyAction, EKeys::F8);
 	MappingContext->MapKey(CheatWinAction, EKeys::F6);
@@ -219,6 +232,11 @@ void ARRRandomPlayerController::BeginPlay()
 		if (URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>())
 		{
 			Sessions->OnArenaReady();
+			// The brawler picked on the title (the host's own was spawned as it already)
+			if (!HasAuthority())
+			{
+				ServerChooseSpecies(static_cast<uint8>(Sessions->GetSpecies()));
+			}
 		}
 		// Fog of war for this screen only (none in a third-person game: PlayerTick also takes it away if the game state
 		// says so only after this)
@@ -228,6 +246,19 @@ void ARRRandomPlayerController::BeginPlay()
 			FogParams.Owner = this;
 			FogOfWar = GetWorld()->SpawnActor<ARRRandomFogOfWar>(FogParams);
 		}
+	}
+}
+
+void ARRRandomPlayerController::ServerChooseSpecies_Implementation(uint8 Species)
+{
+	if (Species >= RRSpecies::Count)
+	{
+		return;
+	}
+	ChosenSpecies = Species;
+	if (ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		Brawler->SetSpecies(Species);
 	}
 }
 
@@ -261,6 +292,7 @@ void ARRRandomPlayerController::SetupInputComponent()
 	EnhancedInput->BindAction(CheatWinAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRWin);
 	EnhancedInput->BindAction(CheatGiantAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRGiant);
 	EnhancedInput->BindAction(CheatGodAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRGod);
+	EnhancedInput->BindAction(CheatUltimateAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRUltimate);
 	EnhancedInput->BindAction(CheatThirdPersonAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRThirdPerson);
 	EnhancedInput->BindAction(LookAction, ETriggerEvent::Triggered, this, &ARRRandomPlayerController::OnLook);
 	EnhancedInput->BindAction(AimAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnAimStart);
@@ -302,7 +334,9 @@ void ARRRandomPlayerController::PlayerTick(float DeltaTime)
 	// Alt+Tab): the mouse is then the player's again; clicking back into the game takes it over again
 	if (bThirdPerson && IsLocalController())
 	{
-		const bool bWantCursor = bPauseMenuOpen || ARRRandomGameState::IsMatchOver(this) || bCursorFreed || !IsViewportFocused();
+		const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+		const bool bWantCursor = bPauseMenuOpen || ARRRandomGameState::IsMatchOver(this) || bCursorFreed || !IsViewportFocused()
+			|| (Mine && Mine->GetUltimate() && Mine->GetUltimate()->KeepsOverview());
 		if (bShowMouseCursor != bWantCursor)
 		{
 			bShowMouseCursor = bWantCursor;
@@ -316,6 +350,39 @@ void ARRRandomPlayerController::PlayerTick(float DeltaTime)
 			{
 				SetInputMode(FInputModeGameOnly());
 			}
+			LockMouse(!bWantCursor);
+		}
+		// While the game has it, the hidden cursor stays in the middle of the view: held inside the window, and put back in
+		// the middle whenever it has wandered (where the system doesn't keep it still by itself)
+		if (!bWantCursor)
+		{
+			LockMouse(true);
+			CenterMouse();
+		}
+	}
+
+	// My ultimate wants spots: the view goes up over the arena to pick them, and back down after
+	if (IsLocalController() && !ResultsDirector)
+	{
+		const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+		ARRRandomUltimate* Ultimate = Mine ? Mine->GetUltimate() : nullptr;
+		ARRRandomUltimate* Picking = Ultimate && Ultimate->KeepsOverview() ? Ultimate : nullptr;
+		if (Picking && GetViewTarget() != Picking)
+		{
+			SetViewTargetWithBlend(Picking, 0.8f, VTBlend_EaseInOut, 2.f);
+			bViewingSpirit = true;
+		}
+		// The area's hologram under the cursor
+		if (Ultimate)
+		{
+			FVector Spot;
+			const bool bSpot = Ultimate->IsPicking() && GetUltimateSpot(Spot);
+			Ultimate->ShowCursorSpot(bSpot, Spot);
+		}
+		if (!Picking && bViewingSpirit && GetPawn())
+		{
+			SetViewTargetWithBlend(GetPawn(), 0.8f, VTBlend_EaseInOut, 2.f);
+			bViewingSpirit = false;
 		}
 	}
 
@@ -531,6 +598,54 @@ void ARRRandomPlayerController::RRGod()
 	ServerCheatGod();
 }
 
+void ARRRandomPlayerController::RRUltimate()
+{
+	ServerCheatUltimate();
+}
+
+void ARRRandomPlayerController::ServerCheatUltimate_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+	ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	if (!RandomCharacter || !RandomCharacter->IsAlive())
+	{
+		return;
+	}
+	RandomCharacter->GetDiceBuffs()->GiveUltimateDie();
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, %s gets an ultimate die."), *RandomCharacter->GetName());
+#endif
+}
+
+void ARRRandomPlayerController::ServerUltimateStrike_Implementation(FVector_NetQuantize Spot)
+{
+	const ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	if (RandomCharacter && RandomCharacter->GetUltimate())
+	{
+		RandomCharacter->GetUltimate()->RequestSpot(Spot);
+	}
+}
+
+bool ARRRandomPlayerController::GetUltimateSpot(FVector& OutSpot) const
+{
+	const ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	FVector Origin;
+	FVector Direction;
+	if (!RandomCharacter || !RandomCharacter->GetUltimate() || !DeprojectMousePositionToWorld(Origin, Direction))
+	{
+		return false;
+	}
+	// Where the cursor's line meets the floor's height (anywhere, past the edge too: the strike's spot is a place on the
+	// floor, not someone, nor the top of something tall in the way), then down onto the ground there
+	const ARRRandomUltimate* Spirit = RandomCharacter->GetUltimate();
+	if (Direction.Z >= -0.01f)
+	{
+		return false;
+	}
+	const FVector OnFloor = Origin + Direction * ((Spirit->GetGroundZ() - Origin.Z) / Direction.Z);
+	OutSpot = Spirit->FindGround(OnFloor);
+	return true;
+}
+
 void ARRRandomPlayerController::ServerCheatGod_Implementation()
 {
 #if !UE_BUILD_SHIPPING
@@ -618,6 +733,19 @@ void ARRRandomPlayerController::OnFire()
 		return;
 	}
 	ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	// My ultimate wants spots: the button picks one (once per hit, however long it's held; a click while the last one is
+	// under way waits for its turn)
+	const ARRRandomUltimate* Ultimate = RandomCharacter ? RandomCharacter->GetUltimate() : nullptr;
+	if (Ultimate && Ultimate->IsPicking())
+	{
+		FVector Spot;
+		if (GetWorld()->GetTimeSeconds() - LastStrikeRequestTime > 0.3f && GetUltimateSpot(Spot))
+		{
+			LastStrikeRequestTime = GetWorld()->GetTimeSeconds();
+			ServerUltimateStrike(Spot);
+		}
+		return;
+	}
 	if (RandomCharacter && bThirdPerson)
 	{
 		// Not with the cursor out (Alt held, or the click that takes the mouse back into the game)
@@ -722,6 +850,10 @@ void ARRRandomPlayerController::SetThirdPersonView(bool bOn)
 	if (!RandomCharacter)
 	{
 		return;
+	}
+	if (!bOn)
+	{
+		LockMouse(false);
 	}
 	bThirdPerson = bOn;
 	if (bThirdPerson)
@@ -884,4 +1016,45 @@ void ARRRandomPlayerController::OnFreeCursorStart()
 void ARRRandomPlayerController::OnFreeCursorStop()
 {
 	bCursorFreed = false;
+}
+
+void ARRRandomPlayerController::LockMouse(bool bLock)
+{
+	UGameViewportClient* ViewportClient = GetWorld() ? GetWorld()->GetGameViewport() : nullptr;
+	FViewport* Viewport = ViewportClient ? ViewportClient->Viewport : nullptr;
+	if (!Viewport)
+	{
+		return;
+	}
+	ViewportClient->SetMouseLockMode(bLock ? EMouseLockMode::LockAlways : EMouseLockMode::DoNotLock);
+	ViewportClient->SetMouseCaptureMode(bLock ? EMouseCaptureMode::CapturePermanently_IncludingInitialMouseDown : EMouseCaptureMode::CaptureDuringMouseDown);
+	ViewportClient->SetHideCursorDuringCapture(bLock);
+	if (bLock && !Viewport->HasMouseCapture())
+	{
+		Viewport->CaptureMouse(true);
+	}
+	else if (!bLock && Viewport->HasMouseCapture())
+	{
+		Viewport->CaptureMouse(false);
+	}
+	Viewport->LockMouseToViewport(bLock);
+}
+
+void ARRRandomPlayerController::CenterMouse()
+{
+	const UGameViewportClient* ViewportClient = GetWorld() ? GetWorld()->GetGameViewport() : nullptr;
+	FViewport* Viewport = ViewportClient ? ViewportClient->Viewport : nullptr;
+	if (!Viewport)
+	{
+		return;
+	}
+	const FIntPoint Size = Viewport->GetSizeXY();
+	const FIntPoint Middle(Size.X / 2, Size.Y / 2);
+	const FIntPoint Mouse(Viewport->GetMouseX(), Viewport->GetMouseY());
+	// Only once it has drifted a bit, so a system that keeps the cursor still isn't nudged every frame
+	if (FMath::Abs(Mouse.X - Middle.X) > MouseRecenterSlack || FMath::Abs(Mouse.Y - Middle.Y) > MouseRecenterSlack)
+	{
+		// (the camera turns by the raw mouse movement, so the jump back doesn't turn it)
+		Viewport->SetMouse(Middle.X, Middle.Y);
+	}
 }

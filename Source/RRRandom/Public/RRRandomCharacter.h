@@ -5,10 +5,12 @@
 #include "Math/RandomStream.h"
 #include "RRRandomWeapon.h"
 #include "RRRandomAimAnimations.h"
+#include "RRRandomSpecies.h"
 #include "RRRandomCharacter.generated.h"
 
 class ARRRandomProjectile;
 class ARRRandomVehicle;
+class ARRRandomUltimate;
 class UAnimSequence;
 class UCameraComponent;
 class UMaterialInterface;
@@ -62,6 +64,23 @@ public:
 
 	URRRandomEventComponent* GetRandomEvents() const { return RandomEvents; }
 	URRRandomDiceBuffComponent* GetDiceBuffs() const { return DiceBuffs; }
+
+	/** The ultimate running (ARRRandomUltimate: each species has its own), or null. */
+	ARRRandomUltimate* GetUltimate() const { return Ultimate; }
+	/** The ultimate holds this brawler: it can't move, shoot, roll or be hurt meanwhile (the tiger's giant, the rabbit's hops). */
+	bool IsUsingUltimate() const;
+	/** Server: the ultimate is over; the brawler is back. */
+	void EndUltimate(ARRRandomUltimate* Which);
+
+	/**
+	 * A fox's clone (ARRRandomFoxClones): looks and fights like its fox, run by a bot, but its shots do nothing, it vanishes
+	 * at the first hit, scores nothing, holds no team spot and leaves no trace in the results.
+	 */
+	bool IsDecoy() const { return bDecoy; }
+	/** Server, before begin play: a clone of Source (look, team, health, gun). */
+	void MakeDecoyOf(const ARRRandomCharacter* Source);
+	/** Server: the clone goes up in smoke. */
+	void VanishDecoy();
 	URRRandomOverheadDieComponent* GetOverheadDie() const { return OverheadDie; }
 
 	/**
@@ -85,11 +104,24 @@ public:
 	/** Set on the server before the brawler finishes spawning; replicates and changes its body color. */
 	void SetTeam(int32 NewTeam) { Team = NewTeam; }
 	int32 GetTeam() const { return Team; }
+
+	/**
+	 * Which brawler this is (RRSpecies: fox, rabbit, squirrel, tiger). Server only; set before begin play when it can be
+	 * (bots, the host's own brawler), otherwise the body changes on the spot (a joiner's pick arriving after its brawler).
+	 */
+	void SetSpecies(int32 NewSpecies);
+	int32 GetSpecies() const { return Species; }
+	/** The species' picture for the HUD's team cards. */
+	UTexture2D* GetPortrait() const;
 	static FLinearColor GetTeamColor(int32 InTeam);
 
 	bool IsAlive() const { return bAlive; }
-	/** Dancing the victory animation after the match (the winners and the MVP); the gun is put away meanwhile. */
+	/** Dancing after the match (the winners in the dance line and the MVP); the gun is put away meanwhile. */
 	bool IsCelebrating() const;
+	/** Hanging its head after the match (the losers, but not the MVP); the gun is put away meanwhile. */
+	bool IsDespairing() const;
+	/** Server, when the match ends: which dance or which slump this brawler does (taken round the list it falls in). */
+	void SetCelebrationPick(int32 Pick) { CelebrationPick = static_cast<uint8>(Pick & 0xFF); }
 	/**
 	 * F: gets on the nearest free vehicle in reach (ARRRandomVehicle::MountRange), or off the one ridden. Asks the server
 	 * when this is a client. Not while knocked out, climbing, flying or before the match starts.
@@ -103,6 +135,26 @@ public:
 	void SetCelebrationViewPoint(const FVector& ViewPoint) { CelebrationViewPoint = ViewPoint; }
 	float GetHealth() const { return Health; }
 	float GetMaxHealth() const { return MaxHealth; }
+
+	/**
+	 * A vehicle driving into this brawler at this ground velocity, said just before the vehicle's damage lands: a knockout
+	 * that comes from it throws the body backward through the air (FlyBackAnimation) instead of dropping it on the spot.
+	 */
+	void SetRamImpact(const FVector& Velocity);
+	/**
+	 * Server, when the match ends: the brawler's spot in the dance line round the MVP. It gets off any vehicle and loses
+	 * its powers; if there is a way there on foot (FRRGridPath) it dashes along it like a speedster, as fast as it takes to
+	 * arrive within VictoryGatherTime, leaving afterimages and sparks; with no way there, or if time runs out, it is
+	 * teleported. Once there it dances.
+	 */
+	void SetFormationSpot(const FVector& Spot);
+	/** Server: the MVP, already in place at the front of the line. */
+	void SetFormationLeader();
+	/** Standing in the dance line (the MVP from the start, the rest once they've got there). */
+	bool IsInFormation() const { return bInFormation; }
+
+	/** Walking speed with no vehicle, buff or event: what the vehicles' speeds and the car's ramming are measured against. */
+	float GetBaseWalkSpeed() const { return BaseWalkSpeed; }
 	/** Rounds left in the magazine. */
 	int32 GetAmmo() const { return Ammo; }
 	/** The current gun's magazine size. */
@@ -148,6 +200,8 @@ public:
 	void ReviveNow();
 
 	bool IsGiant() const { return bGiant; }
+	/** The flight ceiling in normal body heights above the arena floor; a map with tall buildings raises it. */
+	void SetFlightMaxHeightInBodies(float Bodies) { FlightMaxHeightInBodies = Bodies; }
 	/** Cheat (RRGod): takes no damage at all, foam finger pokes in the back included, and is put back home instead of falling out. Server only to set. */
 	bool IsInvincible() const { return bInvincible; }
 	void SetInvincible(bool bNewInvincible) { bInvincible = bNewInvincible; }
@@ -261,6 +315,21 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Health")
 	float KnockdownSpeed = 500.f;
 
+	/** The chance for each die earned to be an ultimate die (URRRandomDiceBuffComponent::UltimateDieChance). */
+	UPROPERTY(EditAnywhere, Category = "Random")
+	float UltimateDieChance = 0.15f;
+
+	/**
+	 * Run over: the body flies off along the vehicle's way at this share of its speed (between FlingSpeedRange), and up at
+	 * FlingLift, which lands it about when the fly-back animation hits the ground (0.9 s in).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Health")
+	float FlingSpeedShare = 0.8f;
+	UPROPERTY(EditAnywhere, Category = "Health")
+	FVector2D FlingSpeedRange = FVector2D(600.f, 1300.f);
+	UPROPERTY(EditAnywhere, Category = "Health")
+	float FlingLift = 480.f;
+
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	TSubclassOf<ARRRandomProjectile> ProjectileClass;
 
@@ -370,6 +439,10 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	float MaxShotPitch = 50.f;
 
+	/** The same in third person, where the player aims up and down at the crosshair. */
+	UPROPERTY(EditAnywhere, Category = "Combat")
+	float ThirdPersonMaxShotPitch = 80.f;
+
 	/** How early, in seconds, the server still accepts a client's shot; covers network jitter. */
 	UPROPERTY(EditAnywhere, Category = "Network")
 	float FireTimeSlack = 0.05f;
@@ -392,9 +465,20 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Animation")
 	TObjectPtr<UAnimSequence> DeathAnimation;
 
-	/** Loops once the match is over, for the winning team and the MVP (the gun is put away meanwhile). */
+	/** Played once when a vehicle's knockout throws the body (SetRamImpact), holding its last frame. */
+	UPROPERTY(EditAnywhere, Category = "Animation")
+	TObjectPtr<UAnimSequence> FlyBackAnimation;
+
+	/** Loops once the match is over, for the winning team and the MVP (the gun is put away meanwhile); each brawler gets one
+	 * of the dances (CelebrationPick). The first is VictoryAnimation, kept for the code that checks for any dance. */
 	UPROPERTY(EditAnywhere, Category = "Animation")
 	TObjectPtr<UAnimSequence> VictoryAnimation;
+	UPROPERTY(EditAnywhere, Category = "Animation")
+	TArray<TObjectPtr<UAnimSequence>> VictoryAnimations;
+
+	/** Loops once the match is over, for the losing team: one of these slumps each (CelebrationPick). */
+	UPROPERTY(EditAnywhere, Category = "Animation")
+	TArray<TObjectPtr<UAnimSequence>> DefeatAnimations;
 
 	/** Seconds after the last shot that the aiming pose holds (and the brawler keeps facing where it shot instead of where it walks). */
 	UPROPERTY(EditAnywhere, Category = "Animation")
@@ -458,9 +542,37 @@ private:
 	void OnGiantDie(int32 Face);
 	/** Grows toward giant size or shrinks back, on every machine. */
 	void UpdateGiantSize(float DeltaSeconds);
+	/** The glowing effects of the powers (ARRRandomEffects) on every machine: bursts as they start and end, auras and trails meanwhile. */
+	void UpdatePowerEffects(float DeltaSeconds);
+	/** Fades the body's flash after a hit. */
+	void UpdateHitFlash(float DeltaSeconds);
+	/** After the match: walks to the spot in the dance line, or is teleported there if it's too far (see SetFormationSpot). */
+	void UpdateFormation(float DeltaSeconds);
+	/** Ends giant and flight at once (for the dance line). */
+	void EndPowers();
+
+	/** Every machine, while dashing to the dance line: afterimages of the body, streaks and sparks; a boom as it sets off
+	 * and as it stops. */
+	void UpdateDashEffects(float DeltaSeconds);
+	/** Dashing to the dance line right now (on every machine, from the replicated route). */
+	bool IsDashingToFormation() const { return bHasFormation && !bInFormation && FormationDashSpeed > 0.f; }
+
+	/** Every machine: a puff of light where a brawler vanishes on its way to the dance line and where it appears. */
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastFormationTeleport(const FVector_NetQuantize& From, const FVector_NetQuantize& To);
 	/** Scales the whole brawler, keeping its feet where they are. */
 	void SetBodyScale(float NewScale);
 	void OnFlightDie(int32 Face);
+
+	UPROPERTY(Replicated)
+	bool bDecoy = false;
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastDecoyPoof();
+	/** Server: an ultimate die landed; the tiger calls its spirit for Face strikes. */
+	void OnUltimateDie(int32 Face);
+
+	UPROPERTY(Replicated)
+	TObjectPtr<ARRRandomUltimate> Ultimate;
 	/** Jump and glide settings for the flight power, on every machine so movement prediction agrees. */
 	void UpdateFlight();
 	/** Starts a dash if flying and this flight's dash is unused. Only where the brawler is controlled; tells the server when that is a client. */
@@ -524,6 +636,9 @@ private:
 	void OnRep_Team();
 
 	UFUNCTION()
+	void OnRep_Species();
+
+	UFUNCTION()
 	void OnRep_Alive();
 
 	UFUNCTION()
@@ -534,6 +649,21 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimSequence> CurrentAnimation;
+
+	/** Every species' body and animations (FRRSpeciesLook::GetAll), so they stay loaded. */
+	UPROPERTY()
+	TArray<FRRSpeciesLook> SpeciesLooks;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Species)
+	uint8 Species = 0;
+
+	/** The species the body shows. */
+	int32 ShownSpecies = 0;
+
+	/** Takes a species' mesh, material and animations (the mesh component's materials are set at begin play). */
+	void UseLook(const FRRSpeciesLook& Look);
+	/** Shows Species, if it isn't shown yet; after begin play also renews the body's materials and pose. */
+	void ApplySpecies();
 
 	/** 0 facing ahead .. 1 turned into the fire animation's bladed stance (FireStanceYaw). */
 	float FireStanceAlpha = 0.f;
@@ -587,6 +717,22 @@ private:
 	/** Which way the final shot threw the body, so every machine drops the ragdoll the same way. */
 	UPROPERTY(Replicated)
 	FVector_NetQuantizeNormal KnockdownDirection = FVector::ForwardVector;
+
+	/** Set on a knockout by a vehicle: the velocity the body was thrown with (zero for any other knockout). */
+	UPROPERTY(Replicated)
+	FVector_NetQuantize10 FlingVelocity = FVector::ZeroVector;
+
+	/** The last vehicle impact (SetRamImpact) and when; a knockout in the same moment is a fling. */
+	FVector RamImpact = FVector::ZeroVector;
+	double RamImpactTime = -1.0;
+	/** In the air after a fling (until it lands, or gets back up), and for how long. */
+	bool bFlinging = false;
+	float FlingTime = 0.f;
+	FVector FlingStart = FVector::ZeroVector;
+	void UpdateFling(float DeltaSeconds);
+	void EndFling();
+	/** How the capsule met pawns before a fling made it pass through them. */
+	ECollisionResponse CapsulePawnResponse = ECR_Block;
 
 	/** Sent to the owner only, who shows the countdown. */
 	UPROPERTY(Replicated)
@@ -649,6 +795,39 @@ private:
 	UPROPERTY(Replicated)
 	bool bThirdPerson = false;
 	bool bAimingDownSights = false;
+
+	/** The dance line after the match: given a spot (and where it is), standing in it, and seconds since it set off. */
+	/** Which dance (or slump) this brawler does after the match, picked by the server so every machine shows the same. */
+	UPROPERTY(Replicated)
+	uint8 CelebrationPick = 0;
+	UPROPERTY(Replicated)
+	bool bHasFormation = false;
+	UPROPERTY(Replicated)
+	bool bInFormation = false;
+	UPROPERTY(Replicated)
+	FVector FormationSpot = FVector::ZeroVector;
+	/** The way there on foot (corners, the last one the spot) and the speed that makes it in time; 0 with no way there. */
+	UPROPERTY(Replicated)
+	TArray<FVector_NetQuantize> FormationPath;
+	UPROPERTY(Replicated)
+	float FormationDashSpeed = 0.f;
+	float GatherTime = 0.f;
+	/** Each machine: the corner of the route being run to, and whether the dash's start boom has played. */
+	int32 FormationPathIndex = 0;
+	bool bDashShown = false;
+	/** Afterimages of the dashing body (pose copies in a glowing see-through material), and the time to the next one. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<class UPoseableMeshComponent>> Afterimages;
+	TArray<float> AfterimageAges;
+	int32 NextAfterimage = 0;
+	float AfterimageTimer = 0.f;
+
+	/** The powers as last seen by the effects, to burst when they change (on every machine, from the replicated state). */
+	bool bWasGiant = false;
+	bool bWasFlying = false;
+	/** The body's flash after a hit: 1 just hit, fading to 0; and whether the material still shows some. */
+	float HitFlash = 0.f;
+	bool bHitFlashShown = false;
 	float ThirdPersonBlend = 0.f;
 	float SightsBlend = 0.f;
 	void UpdateCamera(float DeltaSeconds);

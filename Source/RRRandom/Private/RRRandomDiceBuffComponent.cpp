@@ -20,6 +20,7 @@ void URRRandomDiceBuffComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProp
 	DOREPLIFETIME(URRRandomDiceBuffComponent, RollCount);
 	DOREPLIFETIME(URRRandomDiceBuffComponent, GaugeTime);
 	DOREPLIFETIME(URRRandomDiceBuffComponent, Charges);
+	DOREPLIFETIME(URRRandomDiceBuffComponent, UltimateCharges);
 }
 
 void URRRandomDiceBuffComponent::OnRep_RollCount()
@@ -64,6 +65,11 @@ void URRRandomDiceBuffComponent::TickComponent(float DeltaTime, ELevelTick TickT
 	{
 		GaugeTime -= GaugeFillTime;
 		++Charges;
+		// Now and then (one at a time) it is an ultimate die
+		if (UltimateDieChance > 0.f && UltimateCharges == 0 && Stream.FRand() < UltimateDieChance)
+		{
+			++UltimateCharges;
+		}
 	}
 
 	for (FRRDiceBuff& Buff : ActiveBuffs)
@@ -90,21 +96,30 @@ bool URRRandomDiceBuffComponent::RollDice()
 	--Charges;
 	LastRoll = FRRDiceRoll();
 	LastRoll.Face = Stream.RandRange(1, 6);
-	// One draw picks the kind: weapon, giant, flight, or else a buff
-	const float Kind = Stream.FRand();
-	LastRoll.bWeapon = Kind < WeaponDieChance;
-	LastRoll.bGiant = !LastRoll.bWeapon && Kind < WeaponDieChance + GiantDieChance;
-	LastRoll.bFlight = !LastRoll.bWeapon && !LastRoll.bGiant && Kind < WeaponDieChance + GiantDieChance + FlightDieChance;
-	if (!LastRoll.bWeapon && !LastRoll.bGiant && !LastRoll.bFlight)
+	// A stored ultimate die goes first
+	if (UltimateCharges > 0)
 	{
-		LastRoll.Stat = static_cast<ERRDiceBuffStat>(Stream.RandRange(0, 2));
+		--UltimateCharges;
+		LastRoll.bUltimate = true;
+	}
+	else
+	{
+		// One draw picks the kind: weapon, giant, flight, or else a buff
+		const float Kind = Stream.FRand();
+		LastRoll.bWeapon = Kind < WeaponDieChance;
+		LastRoll.bGiant = !LastRoll.bWeapon && Kind < WeaponDieChance + GiantDieChance;
+		LastRoll.bFlight = !LastRoll.bWeapon && !LastRoll.bGiant && Kind < WeaponDieChance + GiantDieChance + FlightDieChance;
+		if (!LastRoll.bWeapon && !LastRoll.bGiant && !LastRoll.bFlight)
+		{
+			LastRoll.Stat = static_cast<ERRDiceBuffStat>(Stream.RandRange(0, 2));
+		}
 	}
 	LastRollTime = GetWorld()->GetTimeSeconds();
 	++RollCount;
 
 	// It takes effect when it lands (TickComponent)
 	bRollPending = true;
-	if (RollSpinTime <= 0.f)
+	if (GetSpinTime() <= 0.f)
 	{
 		bRollPending = false;
 		ApplyRoll(LastRoll);
@@ -112,9 +127,22 @@ bool URRRandomDiceBuffComponent::RollDice()
 	return true;
 }
 
+void URRRandomDiceBuffComponent::GiveUltimateDie()
+{
+	if (GetOwner()->HasAuthority() && UltimateDieChance > 0.f)
+	{
+		++Charges;
+		++UltimateCharges;
+	}
+}
+
 void URRRandomDiceBuffComponent::ApplyRoll(const FRRDiceRoll& Roll)
 {
-	if (Roll.bWeapon)
+	if (Roll.bUltimate)
+	{
+		OnUltimateDie.Broadcast(Roll.Face);
+	}
+	else if (Roll.bWeapon)
 	{
 		OnWeaponDie.Broadcast(Roll.Face);
 	}

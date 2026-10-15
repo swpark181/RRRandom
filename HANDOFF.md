@@ -25,6 +25,428 @@
 - (13차) Tripo 잔디 타일(캐릭터 크기)로 바닥을 깔되, 이어 붙인 티가 덜 나게 랜덤 배치.
 - (14차) 참고 그림(복셀 섬: 절벽, 폭포, 물, 선착장, 언덕, 길) 같은 레벨. 사용자 선택: 가운데는 평평하게 싸우고 절벽/폭포/물은 가장자리 배경, 바위/모래/나무는 임시 블록으로 먼저(Tripo 블록이 오면 교체).
 - (15차) 스타크래프트 같은 전장의 안개: 처음엔 다 가려져 있고 캐릭터 주변 원형 시야, 지나간 곳은 안개가 걷힘.
+- (21차) TPS 모드 전용 맵 "주사위 랜드": 파스텔 → (피드백) 진하고 생동감 있는 사탕색 주사위 섬, 무지개 주사위, 주사위 숲, 구름. TPS 용으로 엄폐물 많이, 디자인을 해치지 않게 자연스럽게. Tripo 로 3D 를 뽑아 TPS 로 시작할 때 나오게.
+- (22차) TPS 카메라: 거인·비행 때 각도/거리 조절, 조준 줌 때 캐릭터가 화면을 너무 가림. 거대화·날개·피격 이펙트를 만들어 강화.
+- (23차) 토끼·다람쥐·호랑이를 여우와 비슷한 느낌으로 추가, 시작할 때 고름. 봇은 랜덤. Tripo + Mixamo 로.
+- (24차) 차에 치이면 뒤로 날아가는 모션과 함께 날아가며 쓰러짐. Mixamo 에서 모션.
+- (26차) 궁극기 주사위를 얻는 치트, 궁극기 주사위를 굴릴 때 더 화려하게.
+- (27차) 호랑이 기운 범위 지정: 캐릭터와 상관없이 주변 원하는 곳으로 뛸 수 있고, 범위 안 적은 모두 피해.
+- (28차) 범위 표시가 바닥에 고정 안 되고 멀수록 커짐 → 홀로그램 같은 이펙트로, 데미지도 정상으로.
+- (29차) 여우·토끼·다람쥐 궁극기(추천 조합): 여우 둔갑술, 토끼 달토끼 낙하, 다람쥐 도토리 비.
+- (25차) 호랑이 뒤통수 호피무늬, 다람쥐 머리-꼬리 사이 깨짐, 토끼 주둥이를 더 귀여운 카툰으로, 호랑이 궁극기 "호랑이 기운"(궁극기 주사위 → 레벨만큼 거대해져 주사위 숫자만큼 앞발 내려치기, 범위 캐릭터의 약 10배).
+- (30차) 드래곤 캐릭터 추가 시작: 서양 문화권의 붉은 드래곤. 먼저 Tripo 로 컨셉아트를 앞·뒤·옆·위 4각도로. → (덧붙임) 정면 그림으로 3D 모델 만들고 리깅까지.
+- (31차) 드래곤 궁극기에 쓸 고전적인 네 발 드래곤 모습: 앞뒤옆위 컨셉아트 + 3D 모델. 아트 느낌은 크게 벗어나지 않으면서 멋지게.
+- (32차) 드래곤 캐릭터를 게임에 추가. 궁극기: 두 번째(고전) 용이 하늘을 날며 지정한 경로에 브레스를 뿜고 맵을 가로질러 날아감. 브레스 굵기와 용의 크기는 궁극기 주사위 숫자만큼.
+- (33차) 용이 더 날렵하고 빠르게. 범위는 캐릭터 위치부터 쭉 브레스를 뿜으며 가야 하고, 주사위로 좌우 브레스 폭이 넓어짐.
+- (34차) 용 디자인은 그대로, 자세만 고속으로 나는 모습으로 모델링을 새로.
+- (35차) 그 모델을 궁극기에 바로 적용.
+- (36차) TPS 맵 컨셉으로 10배쯤 큰 맵: 평지보다 들어가고 올라갈 건물·구조물이 많게, 메이플스토리2처럼 사각 블록을 쌓은 느낌. 컨셉 3장 중 첫 번째(전경) 스타일로 제작. TPS 시작할 때 맵 고르는 UI. 2층이 있는 건물은 올라갈 길이 꼭 있어야 하고, 창문은 모든 캐릭터가 뛰어내릴 수 있게 커야.
+- (37차) 궁극기 용을 지금의 두 배로. 주사위 숫자에 따라 용 크기·브레스 폭이 커지는지 확인하고 아니면 커지게.
+- (38차) 용 궁극기 방향 설정 이펙트가 방향을 지시하는 느낌이 나게.
+- (39차) 방향을 설정하면 용이 나타나서 빠르게 주변을 한바퀴 돌고 출발.
+- (40차) 빙글 돌고 나서 그대로 이어서 날아가게, 용한테 중간에 보이는 이펙트 없애기.
+- (41차) 용 인간폼 뒷모습 티셔츠를 컨셉 뒷모습 참고해서 보정.
+- (42차) 트라이포 원본부터 다시 작업해서 덮어쓰기: 날개에 흰색이 침범하지 않게, 등 돌기는 무시하고 날개만 셔츠를 뚫고 나온 것처럼.
+- (43차) 용은 티셔츠 없는 버전으로.
+- (44차) 기존 걸 고치지 말고 트라이포 단계부터 티셔츠 없는 모델링을 새로 뽑아서 적용(입은 상태로 뽑힌 모델이라 이상함).
+- (45차) 용 궁극기 브레스가 지나간 자리에 작은 불씨가 남고 3초 동안 도트 데미지.
+- (46차) 불씨가 더 잘 보이게, 궁극기가 지나간 자리에 생기는 텍스처를 어울리게 변경.
+- (47차) 레퍼런스 그림(사용자 `Downloads\level_design.png`: 파스텔 주사위 탑, 주사위 무지개로 이은 떠 있는 섬, 지붕 위 주사위, 물길·폭포)을 보고 주사위 마을 레벨 디자인 보완. 상자만 쌓이고 반복되는 디자인이라 꿈나라 같은 오브젝트와 주사위가 강조되는 오브젝트가 필요. 게임에 실제 올리기 전에 먼저 보여줄 것. 트라이포든 직접이든 더 나은 쪽으로. → 비교 페이지를 보고 "적용해줘".
+- (48차) 건물의 지붕이나 나무 같은 오브젝트까지 블록 형태일 필요는 없음. 필요하면 트라이포를 써서 보완.
+
+## 48차 — 지붕·나무류를 블록 대신 모델로 (사용자: 지붕이나 나무 같은 오브젝트까지 블록일 필요 없음, 필요하면 트라이포)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지). 꿈나라 패스(`bDream`, `-RRTownClassic` 이면 예전 그대로)에만 들어감.
+- 방향: 벽·주사위 구조물(오르고 숨는 곳)은 블록 그대로. 장식은 모델로 — 나무류는 트라이포, 지붕·기둥·덤불은 크기·색을 바꿔 써야 해서 블렌더/엔진 도형. 충돌·봇 길은 계속 격자: 새 "숨은 룩"(`FLook::bUnderMesh`, `HiddenLook(색)`) = 격자에선 단단하지만 블록으로 안 그림(다른 메시가 그림), 미니맵엔 그 색. (멤버 이름 `bHidden`/`Solid`/`Puffs` 는 AActor·클래스 멤버와 겹쳐 C4458 — 피함.)
+- 지붕: `C:\work\char-pipeline\scripts\blender_dream_roof.py <out>` → `output\dream_shapes\SM_BTRoof`(모임지붕, 바닥 100×100(처마 ±50, 기와 띠 ±55) 높이 100, 겹친 기와 띠 4단 + 처마 판·꼭대기 캡은 Accent; 볼록 껍질 → `dissolve_limit` 로 평면 합치고 모서리만 둥글게 — 그냥 매끈하게 하면 얼룩 음영) → `ue_import_dream_shapes.py <dir> SM_BTRoof`(이름 인자 추가). `AddBuilding` 의 계단식 지붕 칸은 숨은 룩(충돌 그대로), 그 위에 `Roofs` 인스턴스(가로 (W+2)/1.1, 세로 (D+2)/1.1, 높이 = 단 수, 몸 = 지붕 색, Accent = 지붕 색 + 흰 65%). 지붕·마시멜로·기둥 MID 는 `PixelStrength` 0.02, 거칠기 0.42.
+- 트라이포(Claude in Chrome, studio.tripo3d.ai): 이미지(Nano Banana Pro, 1:1, 2장, 무료 — 프롬프트 여러 개를 연달아 넣으면 동시에 생성됨, 한 번은 클릭이 빠져 다시) → 왼쪽 그림마다 "Generate 3D" → HD Model(H3.1, 2K PBR, 2만, 30씩 × 5 = 150, 23,250 → 23,100). 둥근 나무(공 셋), 층층 나무(연두·민트 3단), 솜사탕 나무(분홍·라일락 + 스프링클, 줄무늬 기둥), 점박이 버섯(빨강 + 흰 점), 막대사탕(4색 소용돌이 + 풀 받침). 사용자 허락 후 FBX(Blender, 2K, 이름 `form_input` 으로 `dt_*`) → `C:\work\char-pipeline\input\dicetown_props\<이름>\`(각 2.3~3.1MB zip).
+  - `blender_props.py`(`PROPS_TARGET_TRIS` 환경 변수 추가 — 3만으로 줄이지 않음; 21차 때 6000 감축이 음영을 망쳤음) `=100h` → `output\dicetown_props\SM_DT*`(높이 100, 피벗 바닥 가운데; 미리보기 렌더는 백그라운드 텍스처 오류로 검게 나옴 — 무시) → `ue_import_props.py`(`nanite` 옵션 추가, 머티리얼 `used_with_nanite`) `/Game/Environment/DiceTown/Props|SM_DTRoundTree=…=gloss=nanite|…` → `SM_DTRoundTree/TierTree/CandyTree/Mushroom/Lollipop` + `M_DT*`(사탕 광택).
+  - `AddPropTree`(나무 Kind 0 작은 초록 → 둥근 430~520, 1 큰 초록 → 둥근/층층 620~740, 2 솜사탕 580~680, 3 버섯 460~540, 4 막대사탕 640~720; 막대사탕은 축 방향 ±12°, 나머지 아무 방향): 줄기만 숨은 룩(높이 × 0.3/0.15/0.4/0.45), 버섯은 + 자 기둥과 갓(반경 √5 원판 한 단). 잎은 충돌 없음(총알·시야 통과). 다섯 개가 다 있어야 쓰고 아니면 블록 나무. 하늘 섬 나무도 이 모델(꿈 섬: 솜사탕 6배 + 둥근 4배, 먼 섬: 층층/둥근 5.5배). 꿈나라면 나무 배치 시도 4배(숲이 듬성해서).
+- 덤불(엄폐물 1번): 2칸×2칸 숨은 룩 + `Marshmallows`(SM_BTPuff) 큰 것 하나 + 작은 것 둘. 별 가로등 기둥: 숨은 룩 + 엔진 Cylinder 6띠(흰/분홍, 지름 38) + 받침 원판(`Poles`).
+- 확인: 빌드 경고 없음. 로그 `dice town meshes: 24 roofs, 56 Tripo trees, 48 marshmallows`. 캡처 `output\screens\dicetown_dream\props_final\`(11시점), 비교 페이지 갱신(https://claude.ai/artifact/23Z95m1iY47DXo7MaDGGZY, "보완 후" = 이번). `-nullrhi` 봇전 170초: 넉아웃 15, 탈것, 오류 없음(한 번은 90초에 넉아웃 0 — 우연). `-RRTownClassic` 은 예전 수치(54705 blocks …) 그대로.
+- 확인 못 한 것: 프레임(트라이포 2만 삼각형 × 56, 나나이트), 나무 잎에 충돌이 없어 생기는 손맛 차이, 지붕(매끈)과 숨은 계단 충돌의 어긋남(지붕 위에 서면 계단 모서리에 걸림 — 보통 못 올라감).
+
+## 47차 — 주사위 마을 꿈나라 보완, 미리보기 후 적용 (사용자: 레퍼런스 보고 보완, 꿈나라 같은·주사위 강조 오브젝트, 게임에 올리기 전에 먼저 보여줘 → 적용해줘)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지). 처음엔 `-RRTownDream` 미리보기로만 보여 줌 → 사용자 "적용해줘" → **기본으로 켜짐**. `-RRTownClassic` 이면 예전 마을(같은 시드, 같은 배치) 그대로. 메시 셋(`SM_BTPuff/Star/Moon`)이 없으면 자동으로 예전 마을.
+- 방향: 트라이포 대신 전부 블록으로 직접. 트라이포 메시는 매끈해 블록 마을과 안 어울리고, 충돌·봇 길이 격자에서 나오므로 격자에 칠해야 새 구조물이 저절로 막히고 봇이 오름. 새 메시는 셋뿐: `C:\work\char-pipeline\scripts\blender_dream_shapes.py <out>` → `output\dream_shapes\SM_BTPuff`(모서리를 크게 둥글린 마시멜로 블록, 윗면 Accent), `SM_BTStar`(두꺼운 오각별, +X 를 봄), `SM_BTMoon`(초승달) → `ue_import_dream_shapes.py <dir>`(새, 블록 머티리얼 재사용) → `/Game/Environment/DiceTown/`. (주의: `-script=` 경로에 역슬래시 `\u…` 가 있으면 파이썬이 이스케이프로 먹음 — 슬래시로.)
+- 코드(`RRRandomDiceTown.cpp` 의 "The dreamier pass" 구역 + 헤더): `bDream` 일 때
+  - 숲의 주사위 언덕 → `AddDiceMountain`(4블록 주사위 3×3 + 2×2(뒤쪽) + 1(뒤 구석), 계단 Rise 4 세 번 → 꼭대기 높이 12, 위에 도는 별). 프레임 `Sub(Island, -39, -66, 2)`. 2·3번째 계단은 층 앞 띠를 꽉 채워 첫 칸 앞에 디딜 곳이 없었음(봇 길도 1층에서 끊김) → 계단 앞에 작은 주사위 4×4 디딤대 둘(앞쪽 땅 위 U 3~6·V -1 높이 1~4, 1층 띠 위 U 0~3·V 3 높이 5~8), 둘째 계단은 U 4~5 로.
+  - `AddDiceArch`: 7색 주사위 블록(`MakeLook(색, 흰, bDie)`) 반원 띠(반지름 11.5~4.5, 두께 2칸) — 큰길 X(기지 뒤 x -54/-55)와 Y(시내 밖 y -45/-44), 점대칭으로 넷. 길 위 빈 높이 4블록(거인 통과). 발치에 마시멜로 구름.
+  - `AddDieHouse`: 12칸 정육면체(색 몸 + 밝은 모서리 + 흰 2×2 눈; 정면 3·오른쪽 2·뒤 4·왼쪽 5, 옥상 6은 한 칸 솟은 엄폐물), 문 앞·왼쪽(3×4), 평지붕 건물과 같은 바깥 계단 두 번 → 옥상. 안에 상자와 매달린 별. 팀마다 시내 1 + 바깥 1(배치 전에 예약 → 시내 일반 건물 6 → 5, 다른 배치도 바뀜). (처음엔 흰 몸 + 남색 눈이었는데 얼굴처럼 보여 색 몸 + 흰 눈으로.)
+  - 나무: 3분의 1만 초록, 나머지 `AddDreamTree` — 2 솜사탕(줄무늬 기둥, 반지름 2.5 둥근 머리, 스프링클), 3 점박이 버섯(+자 기둥, 3단 갓, 윗면 흰 점, 반경 3), 4 막대사탕(소용돌이 원판).
+  - `AddBuilding`: 흰 테두리 → 벽 색 파스텔, 흰 창틀 → 지붕 색 계열, 윗층 무늬(체크/세로줄/가로 띠) 무작위, 정문 위 줄무늬 차양(`Decor`, 충돌 없음, 높이 ~455), 뾰족 지붕 꼭대기 2칸 주사위, 평지붕 앞 왼쪽 구석 주사위 2 + 1, 1층 집 40% 는 지붕 대신 테두리 + 거대 주사위(3~5). 이 선택들은 `FRandomStream(Seed + 4701)` 로 — 상자 배치 난수는 그대로.
+  - `AddStarLamps`(배치 끝): 큰길 양옆 6칸마다 주변이 비어 있으면 사탕 줄무늬 기둥 3 + 도는 별(팀마다 21).
+  - `MakeDreamSky`: 섬 아래 -6500 에 연하늘 구름 바닥(어두운 남색 지면 대신), 팀 끝 밖 떠 있는 섬 2(분홍·라일락 밑면, 솜사탕 나무, 주사위) + 주사위 무지개, 먼 하늘 초승달 2(빛남 0.45) + 별, 광장 거대 주사위 위를 도는 주사위 6, 섬 위·바깥을 떠다니는 주사위 52·별 20. 구름 메시를 `SM_BTPuff` 로.
+  - 떠다니는 것(`FFloater`: 흔들림·자전·구르기·공전)은 `Tick` → `AnimateFloaters`(전용 서버 제외, 인스턴스 변환 갱신 후 렌더 상태 한 번).
+  - 새 컴포넌트: `Decor`(블록, 충돌 없음), `Stars`/`Moons`(빛나는 MID: `M_BTBlock` Glow 0.9/0.45), `FloatDice`.
+- 확인: 빌드 경고 없음. 로그 `dice town 56829 blocks, 2880 dice, 604 steps, ... 2801 solid boxes, 74 stairs, 33917 walk nodes (27541 roamable)`, `dream pass: 272 decor, 82 stars, 2 moons, 58 floating dice, 140 floaters`. 화면 없이 봇전 ~90초(`-RRTownDream`): 에러 없음, 넉아웃·드래곤 비행·탈것 정상. 같은 시점 11곳 전후 캡처(스크래치 `town_views.py`/`townshots.sh` — 플레이어 시작점을 카메라로, `showhud` 끔): `C:\work\char-pipeline\output\screens\dicetown_dream\before|after\`, 비교 페이지 https://claude.ai/artifact/23Z95m1iY47DXo7MaDGGZY (전후 슬라이더).
+- 적용 뒤 확인: 임시 `-RRTEMPDreamWalk`(플레이어 브롤러를 땅에서 `FindPath` 길 따라 걷게 — 지움): 주사위 산 꼭대기(1200), 주사위 집 옥상 두 채(1200) 모두 걸어서 도착(8~12초). 스위치 없이 시작해 꿈나라 마을로 뜨는 것 캡처 `output\screens\dicetown_dream\applied\`.
+- 확인 못 한 것: 프레임(떠다니는 것 140개를 매 프레임 갱신), LAN 참가자 화면(같은 코드·시드라 같아야 함), 실제 마우스·키로 오르는 손맛.
+
+## 46차 — 불씨 더 잘 보이게 + 지나간 자리를 그을린 바닥으로 (사용자: 불씨가 더 잘 보이게, 궁극기가 지나간 자리에 생기는 텍스처 어울리게)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지).
+- 지나간 자리의 "텍스처" = 경고 홀로그램 띠(`WarnHolo`, `M_FXHolo` — 원래 호랑이 원기둥용이라 상자에 씌우면 줄무늬·동심원)가 비행 내내 선 전체를 덮고 있던 것, 그리고 45차의 납작한 붉은 바닥 빛. 이제:
+  - `WarnHolo` 는 활강(Pass) 중 **브레스 앞쪽(아직 탈 곳)만** 덮음(`PlaceStrip(WarnHolo, OnLine(Front), LineEnd, …)`), 지나간 뒤쪽엔 없음.
+  - 지나간 자리엔 **그을린 바닥** `Scorch`(새 컴포넌트: 엔진 큐브를 납작하게(두께 1) 선 전체 + 양끝 1.2R 더, 바닥 4 위) + `/Game/Effects/DiceFX/M_FXScorch`(새, `C:\work\char-pipeline\scripts\ue_make_scorch.py`): 로컬 위치로 선 위 위치(S)·옆(A)을 계산 → 앞머리(`Front`)까지만, 시작은 둥글게, 가장자리는 노이즈로 들쭉날쭉; 검갈색 그을음 + 주황 **빛나는 균열·불씨 점**(깜빡임, 막 지나간 곳일수록 밝고 3초에 걸쳐 식음), 지점마다 나이(`PassTime - S/FlySpeed`)가 `BurnSeconds` 되면 사라짐. 파라미터 `Length/Pad/Width/Radius/Front/PassTime/FlySpeed/BurnSeconds/Glow/EmberColor/CharColor`.
+  - 머티리얼: **언릿 + 마스크(디더 커버리지, TAA 가 섞음)**. 시행착오: ①디퍼드 데칼 → 이 프로젝트에선 데칼이 색과 상관없이 검게 나옴(스키드 마크는 원래 검정이라 몰랐음), 월드 위치도 데칼에서 이상. ②반투명 언릿(기본 패스) → 툰 후처리가 어두운 덮개를 땅의 그림자 띠로 바꿈. ③반투명 After Motion Blur → 깊이 가림이 안 돼 나무 위에 그려짐. ④월드 위치 기준 → 사각형으로 꽉 참(원인 미확인) → 로컬 위치(`M_FXHoloArrow` 와 같은 방식)로.
+- 불씨(`GroundEmbers`): 지름 26~42, 초당 26개(지점당), 주황·빨강 위주(노랑 12%, 밝기 2.4~3.4 — 더 밝거나 노라면 하얀 금가루처럼 바램), 작은 불꽃이 피어오름(초당 5), 불티 별 늘림. 45차의 납작한 바닥 빛은 뺌(그을음 머티리얼이 대신).
+- 확인(엔진 안 HighResShot, 스크래치 `game_ult.py`): 섬(직후: 그을린 띠 + 빛나는 균열, 1~2초 뒤: 식어 가는 그을음 + 불씨), 주사위 마을 TPS(길 위 그을음·불씨, 건물·가운데 단상이 가림). 도트는 그대로(마을에서 2.8초까지). `C:\work\char-pipeline\output\screens\dragon_embers\scorch_*.png`.
+- 시험용 `/Game/Scratch/M_DecalTest*` 는 만들었다가 스크래치로 옮김(콘텐츠에 없음).
+
+## 45차 — 브레스 자리에 불씨 3초 + 도트 (사용자: 용 궁극기 브레스가 지나간 자리에 작은 불씨가 남고 3초 동안 도트 데미지)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지).
+- 전: 지나간 자리가 `BurnSeconds` 2.5초 동안 큰 불길(`GroundFire`, 점점 약하게)로 타며 그 안의 적 0.25초마다 4.
+- 지금(`ARRRandomDragonFlight`): 브레스가 지난 지점마다 `BlazeSeconds` 0.7초 동안만 불길, 0.35초부터 **작은 불씨**(`ARRRandomEffects::GroundEmbers` 새: 바닥에 흩어진 지름 20~34 작은 숯이 깜빡이듯 밝아졌다 어두워짐, 은은한 붉은 바닥 빛(납작한 공), 가끔 위로 떠오르는 불티)가 **`BurnSeconds` 3초**까지(끝으로 갈수록 줄어듦). 도트는 그대로 그 띠 안의 적에게 `BurnTick` 0.25초마다 `BurnDamage` 4(3초 = 최대 48), 이제 3초까지. 공 파티클 풀 1400 → 2200(선 7000·불씨가 많을 때).
+- 끝 로그에 도트 횟수와 가장 늦은 도트가 브레스 지난 뒤 몇 초였는지(`BurnHits`, `LastBurnAge`): "the dragon flight is over: N hits, M burn ticks (the last X s after the breath went by)".
+- 확인(PC 잠김 → `-RenderOffscreen` + `-ExecCmds="py …"`, 스크래치 `game_ult.py`: `RRGod`·`RRUltimate` 후 `Input.+key E`/`Input.-key E` 로 굴림, 적 하나를 선 위에 계속 옮겨 둠): 적이 브레스 지난 뒤 **2.9초까지** 도트를 받고 쓰러짐(봇 용 궁극기도 3.0초). 화면 `C:\work\char-pipeline\output\screens\dragon_embers\`(지난 띠가 주황 바닥 빛 + 작은 불씨 점).
+- 참고: 처음 불씨(지름 8~16, 초당 14)는 궁극기 시점(멀리서 옆으로)에선 거의 안 보여서 키움.
+
+## 44차 — 드래곤 브롤러를 Tripo 부터 새로: 처음부터 셔츠 없는 모델 (사용자: 기존 걸 고치지 말고 트라이포 단계부터 티셔츠 없는 모델링 새로 뽑아서 적용)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지; 코드 변경 없음, 에셋만). 43차의 텍스처 덧칠 방식은 대체됨.
+- 그림: Tripo Image(Nano Banana Pro, 1:1, `input\dragon\concept\dragon_front.png` 참고)로 셔츠 없는 정면 → `input\dragon_v2\concept\dragon_front_noshirt_capture.png`. 프롬프트에 "no shirt / no clothes" 를 쓰면 가이드라인 오류가 나서 안 씀.
+- 3D: Tripo HD Model(H3.1, 2K PBR, 20k, 30 크레딧, 23,280 → 23,250) → 19,346 삼각형. FBX(Blender, 2K) → `input\dragon_v2\tripo\`(베이스컬러 `…fbm\dragon_noshirt_basecolor.JPEG`) → `blender_tripo_to_obj.py` → `input\dragon_v2\mixamo_obj\dragon.obj`(9,677 정점).
+- **Mixamo 오토리거가 이날 모든 메시에서 실패**("ERROR occured on rig: Unknown error while generating motion") — 날개·꼬리를 위치로 잘라낸 몸(`scripts\blender_strip_region.py` 새, 규칙 `input\dragon_v2\strip_rule.py`, 구멍 메움), 전체 메시, 그리고 **예전에 성공했던 옛 용 `input\dragon\dragon_mixamo.zip` 까지** 같은 오류(2 Chain Fingers·Standard 둘 다). Mixamo 의 남은 캐릭터는 그대로 `dragon_body_mixamo`(실패한 업로드는 안 바꿈).
+- 대신 `scripts\blender_transfer_rig.py <옛 리그 fbx> <옛 obj> <새 obj> <out fbx> [미리보기]`(새): 새 Tripo 메시가 옛 것과 거의 같은 모양(같은 정면 그림에서 나옴)이라, 옛 최종 리그 `input\dragon\dragon_rig.fbx`(Mixamo 몸 41뼈 + 꼬리·날개 8뼈 = 49)를 그대로 쓰고 가중치만 옮김: 새 OBJ 를 옛 OBJ↔리그 메시 경계 매핑으로 리그 좌표에 넣고 이동만으로 옛 표면에 맞춤(높이 대비 거리 중앙 0.3%, 90% 1.1%), 정점마다 옛 표면의 가장 가까운 점(같은 쪽을 보는 면 중, 721개는 뒤쪽 면 대신 다음 면) 무게를 면 안에서 보간, 큰 4개 정규화 → `input\dragon_v2\dragon_rig.fbx`. 같은 뼈대라 **옛 Mixamo 애니메이션(`input\dragon\mixamo\`)과 게임 튜닝(`{Dragon, 2.15, 20.4}`)을 그대로 씀**. 블렌더 확인 `input\dragon_v2\check_transfer\`(걷기·사격·죽음 프레임, 시험 자세).
+- 언리얼: 옛 `Content\Characters\Dragon` 은 스크래치 `backup_dragon_content\Dragon` 으로 옮겨 두고 `ue_import_animal.py Dragon|input/dragon/mixamo|<새 베이스컬러 JPEG>|input/dragon_v2/dragon_rig.fbx`(뼈 41 → 49, 다른 뼈 변화 0) → `ue_import_flyback.py input/dragon/mixamo/dragon_flyback.fbx|20.4|Dragon=20.4` → 얼굴: 리그 FBX 엔 애니메이션·텍스처가 없어서 스크래치 래퍼 `portrait\run_portrait2.py`(불러온 뒤 `dragon_SK.fbx` 의 소총 대기 자세 + 새 베이스컬러) → `output\ui\T_DragonPortrait.png` → `/Game/UI/T_DragonPortrait`.
+- 확인(PC 가 잠겨 창 캡처가 안 돼서 `-RenderOffscreen` + `-ExecCmds="py <스크립트>"` 로 엔진 안 HighResShot; 앞모습은 PlayerStart 를 움직여 시점으로 씀): TPS 주사위 마을에서 앞·좌우 40°·뒤 모두 셔츠 없는 새 모델, 날개·꼬리 정상, 봇 얼굴 그림 새 것 → `C:\work\char-pipeline\output\screens\dragon_v2\`.
+- Mixamo 가 다시 되면 정식 리그로 바꿀 수 있음: `input\dragon_v2\dragon_whole_mixamo.zip`(전체) 또는 `dragon_body_mixamo.zip`(날개·꼬리 뺀 몸) → 30차 방식(`blender_merge_parts.py` + `blender_animal_tail.py`).
+
+## 43차 — 드래곤은 티셔츠 없이 (사용자: 그냥 용은 티셔츠 없는 버전으로)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지; 텍스처만). 41·42차의 등 셔츠 텍스처는 버림(스크립트 `blender_dragon_shirt_back.py` 는 남음).
+- `C:\work\char-pipeline\scripts\blender_dragon_no_shirt.py <rig fbx> <베이스컬러> <png> [미리보기]`(새): Tripo 원본 베이스컬러에서, 게임 메시(`input\dragon\dragon_rig.fbx`)의 z 0.33~0.53(몸통·윗팔, 벨트 아래·얼굴 위 제외) 면 텍셀마다 색을 "빨간 비늘(위 등에서 딴 0.69, 0.06, 0.16) ↔ 셔츠 흰색(앞 소매에서 딴)" 선으로 나눠 셔츠 성분 t 와 선에서 벗어난 정도를 봄 — 선 가까운 색(흰색·주름 회색·분홍 경계)만 빨간 비늘로(주름 명암 0.75~1.1 유지), 선에서 0.1~0.2 넘게 벗어난 크림색 배·주황 날개막은 그대로. (처음엔 벗어남을 안 봐서 배와 날개막까지 빨개졌음.) 소매의 살짝 솟은 형상은 메시라 주름처럼 남음.
+- 결과 `output\animals\T_Dragon_BaseColor_noshirt.png` → `T_Dragon_BaseColor` 다시 들여옴(스크래치 `ue_reimport_tex.py`). 미리보기 `output\animals\dragon_noshirt\p2_*.png`(`p2_sheet.png`).
+- 얼굴 그림도: `blender_portrait.py input\dragon\mixamo\dragon_SK.fbx` 가 FBX 에 묶인 원래 텍스처를 써서 소매가 보였음 → 스크래치 래퍼(불러온 뒤 이미지를 새 베이스컬러로 바꿔 렌더) → `output\ui\T_DragonPortrait.png` → `ue_import_ui_texture.py /Game/UI|…=T_DragonPortrait`.
+- 확인: 게임 TPS 용 뒷모습 빨간 비늘 + 날개(`C:\work\char-pipeline\output\screens\dragon_noshirt`), 얼굴 그림 셔츠 없음.
+
+## 42차 — 등 티셔츠 다시: 날개는 셔츠를 뚫고 나온 것만 (사용자: 트라이포 원본부터 다시 작업해서 덮어쓰기, 날개에 흰색이 침범해서 더 이상해짐, 등 돌기는 무시하고 날개만 뚫고 나온 걸 표현)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지; 텍스처만).
+- 41차 문제: 날개 뿌리 쪽 막·뼈가 희게 칠해짐 — 날개 정점 대부분은 날개 뼈 가중치 0.8 이상이지만 뿌리 쪽 막 일부는 30차에 날개를 고를 때 빠져 가중치 0이고, 0.15~0.45 로 서서히 빼던 경계가 면 안에서 보간돼 날개 쪽으로 번짐.
+- `blender_dragon_shirt_back.py` 다시(인자 `<rig fbx> <베이스컬러> <png> [미리보기]`): Tripo 원본 베이스컬러(`input\dragon\tripo\…fbm\dragon_tripo_basecolor.JPEG`)에서 새로 시작, 게임 메시 `input\dragon\dragon_rig.fbx` 로 직접(위치·법선·날개 가중치 — 척추 x 는 허리 높이 몸통 폭 가운데 -0.06 으로 자동). 날개는 통째로 뺌: 꼭짓점 하나라도 날개 가중치 > 0.01 이면 그 면 전체, 또 척추에서 0.035 넘게 떨어진 곳 중 등면(y -0.058, 몸통 등은 가시 빼고 이보다 뒤로 안 나옴)보다 뒤로 튀어나온 곳. 등 가시는 빼지 않음(셔츠 아래 흰 돌기). 셔츠 영역·흰색·텍셀 한 번 칠하기는 41차 그대로. 미리보기에 게임 카메라처럼 뒤 위 25° 시점 추가.
+- 결과 `output\animals\dragon_back\v5.png` → `output\animals\T_Dragon_BaseColor_shirt.png` 덮어씀 → `T_Dragon_BaseColor` 다시 들여옴. 미리보기 `output\animals\dragon_back\v5_*.png`(`v5_sheet.png`).
+- 확인: 게임 TPS 용 뒷모습 — 날개 전체 원래 색, 셔츠는 날개 뿌리에서 끝남(`C:\work\char-pipeline\output\screens\dragon_shirt2`).
+
+## 41차 — 드래곤 브롤러 등 티셔츠를 컨셉 뒷모습대로 (사용자: 인간폼 뒷모습 티셔츠가 애매, 컨셉 뒷모습 참고해서 보정)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지; 코드 변경 없음, 텍스처만).
+- 문제: Tripo 가 정면 그림만으로 만들어 등은 허리 위 가는 흰 띠뿐, 그 위 등·어깨는 빨간 비늘, 띠 위에 빨간 얼룩. 컨셉(`input\dragon\concept\dragon_back.png`)은 목 아래부터 벨트 바로 위까지 흰 반팔 티, 날개가 셔츠에서 나오고 등 가시가 셔츠를 뚫고 나옴.
+- `C:\work\char-pipeline\scripts\blender_dragon_shirt_back.py <tripo fbx> <rig fbx> <베이스컬러> <png> [미리보기]`(새, 호랑이 줄무늬 스크립트 방식): Tripo FBX(높이 1, 등 +Y, 척추 x 0)의 등 쪽 면 텍셀 중 셔츠 영역(z 0.356~0.505, 반폭 몸통 0.115 / 어깨 위 z ≥0.42 는 소매 포함 0.165)을 앞 소매에서 딴 흰색(60 백분위, 가장자리·밑단 쪽 5% 어둡게)으로. 빼는 곳: 등 가시(가운데 |x| <0.05 에서 등 곡면 y = -0.028 - 6x² 보다 0.007 넘게 튀어나온 곳), 날개(`input\dragon\dragon_rig.fbx` 의 WingL/R 가중치를 UV 로 찾아 면 안에서 보간, 0.15~0.45 사이로 서서히), 밑단 아래(원래 밑단과 벨트 위 빨간 띠·가시는 컨셉처럼 그대로). 법선은 정점 법선 보간. **텍셀마다 한 번만**(자기 면이 정한 값, 없으면 틈 메우기로 가장 큰 값) 정해서 한 번 섞음 — 면마다 섞으면 경계마다 흰색이 겹쳐 털처럼 들쭉날쭉했음.
+- 결과 `C:\work\char-pipeline\output\animals\T_Dragon_BaseColor_shirt.png`(2048²) → 스크래치 `ue_reimport_tex.py <png>|/Game/Characters/Dragon/Textures/T_Dragon_BaseColor`(sRGB·압축·LOD 그룹 유지). 미리보기 `output\animals\dragon_back\after4_*.png`(앞·옆·3/4 뒤·뒤, `before_*` 와 비교).
+- 확인: 게임 TPS 에서 용 뒷모습 — 흰 셔츠 등에 빨간 가시, 날개는 셔츠에서(`C:\work\char-pipeline\output\screens\dragon_shirt`).
+
+## 40차 — 한 바퀴에서 그대로 이어서 비행, 중간 이펙트 없앰 (사용자: 빙글 돌고 나서 그대로 이어서 날아가는 모습, 용한테 중간에 이펙트가 보임)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지).
+- 중간 이펙트 = 바퀴 끝에서 서 있는 용 → 고속 비행 용으로 바꾸며 터지던 불꽃(`TakeFlightForm`). 이제 처음부터 고속 비행 모델 하나(`FlightBody`)만: 서 있는 용 `Body`(SK_DragonClassic), `StandRig`, 서 있는 자세 코드, `TakeFlightForm`, `bFlightForm`, `GetRig` 없앰. 에셋 `/Game/Characters/DragonClassic` 은 남음(코드에서 안 씀). `PoseBody(Time, bBreathing)`.
+- 이어지는 비행: 꺾어 들어가던 `Approach` 단계와 `SwoopTime` 을 없애고, 바퀴를 선 위 `LapExit`(시작점에서 `Lead` 뒤, `Height`) 에서 시작·끝나게: 중심은 그 옆(선의 왼쪽) 반지름 `Lead + CircleExtraRadius`, 반시계라 끝에서 진행 방향이 선 방향과 같음. 각도는 시간의 3차식(한 바퀴, 처음 1.5바퀴 속도로 빠르게 → 끝에서 `FlySpeed` 와 같은 속도), 솟음은 sin² 라 끝에서 수평 → 바퀴 끝에서 곧장 `Pass`(위치·방향·속도 연속). 브레스 시작 때 입의 불꽃 펑(FireBurst 0.8)도 뺌. 나타날 때의 불꽃은 그대로.
+- 확인: 빌드 경고 없음. 창 + `-RRSpecies=Dragon -ExecCmds="RRUltimate"` + E(LV2): 나타남(불꽃) → 시작점 옆을 한 바퀴 → 그대로 선을 따라 브레스 → 떠남, 중간 불꽃 없음, 적 맞힘 정상. 0.2초 간격 캡처 `C:\work\char-pipeline\output\screens\dragon_lap2`(`sheet.png`).
+
+## 39차 — 방향을 정하면 용이 나타나 한 바퀴 돌고 출발 (사용자: 방향을 설정하면 용이 나타나서 빠르게 주변을 한바퀴 돌고 출발)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지).
+- `ARRRandomDragonFlight` 흐름: 시작 = 작은 용 자리 불꽃만(큰 용 안 보임, `Hover` 는 보이지 않게 대기 — `TakeOff` 단계와 `TakeOffTime` 없앰) → 화살표로 방향 고르기 → `MulticastFly` 에서 서 있는 용(Body)이 불꽃 속에 나타나 새 단계 `Circle`: 시작점 위(`Height`) 를 중심으로 반지름 `Lead + CircleExtraRadius`(600) 를 반시계로 한 바퀴, `CircleTime` 1.2 + `CirclePerScale` 0.05 × Scale 초(LV1 1.7초, LV6 2.2초), 등속, 중간에 300 솟음, 처음 0.35초 동안 0.3 → 1 크기로 자람. 끝점은 시작점 바로 뒤(선 반대 방향) → 거기서 고속 비행 용으로 바뀌며(불꽃) `Approach`(`SwoopTime` 1.1 → 0.7초, 나가는 접선 = 바퀴 끝 속도 × 0.6) → `Pass` 이후 그대로.
+- 옆 카메라: 도는 동안 바퀴 중심을 보며 반지름 × 1.4 만큼 더 물러나고 14° 더 내려다봄(`ViewExtra`, 다이브 때 다시 들어옴).
+- 확인: 빌드 경고 없음. 창 + `-RRSpecies=Dragon -ExecCmds="RRUltimate"` + E(Dice Land, LV1): 고르는 동안 용 없음 → 방향 확정(6초 자동) → 용이 나타나 시작점 둘레를 기울어 돌고 → 내려꽂아 브레스 → 떠남, 적 맞힘 정상. 연속 캡처 `C:\work\char-pipeline\output\screens\dragon_lap`(`sheet.png` 에 24장).
+
+## 38차 — 용 궁극기 방향 고르기를 화살표로 (사용자: 방향 설정 이펙트가 방향을 지시하는 느낌이 나게)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지).
+- 새 머티리얼 `C:\work\char-pipeline\scripts\ue_make_holo_arrow.py` → `/Game/Effects/DiceFX/M_FXHoloArrow`(엔진 큐브를 X 로 늘린 띠용; unlit 반투명, 양면, 깊이 무시 — M_FXHolo 와 같음). Custom HLSL `HoloArrow`: 로컬 위치로 띠 위 거리 S·폭 V 를 구해 ① 시작에서 끝으로 흐르는 "∧" 갈매기 무늬(`Speed` 900/초, 간격 `Spacing` 260 과 폭 ×1.3 중 큰 쪽, 끝으로 갈수록 밝게, 시작은 서서히) ② 양옆 레일 ③ 마지막 구간(폭 ×1.8, 길이의 40% 이하)은 끝이 뾰족한 화살촉. 게임이 `Length`(띠 길이 = 선 + 양끝 브레스 반경)·`Radius`(브레스 폭) 를 넘김.
+- `ARRRandomDragonFlight`: 고르는 띠(`PathHolo`)만 이 머티리얼(색 1, 0.32, 0.02, Glow 1.5, Opacity 0.9±0.1 깜빡임). 비행 중 남에게 보이는 경고 띠(`WarnHolo`)는 그대로 M_FXHolo.
+- 확인: 빌드 경고 없음. 창 + `-RRSpecies=Dragon -ExecCmds="RRUltimate"` + E 로 Dice Land·Dice Town 에서 고르는 화면 — 용 자리에서 맵 끝으로 주황 화살표가 흐르고 끝이 뾰족(`C:\work\char-pipeline\output\screens\dragon_arrow3`, `dragon_arrow4`). 처음엔 밝은 바닥에서 너무 흐려서(`dragon_arrow2`) 갈매기를 굵게·진하게, 색을 더 주황으로.
+
+## 37차 — 궁극기 용 2배 (사용자: 궁극기 용이 지금의 두 배는 되어야, 주사위 숫자에 따라 용·브레스 폭이 커지는지 확인하고 아니면 커지게)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지).
+- 확인: 이미 주사위 숫자로 커지고 있었음 — 크기 `BaseScale + ScalePerFace × 숫자`(4 + 숫자: 5~10), 브레스 좌우 폭 `140 + 55 × 숫자`(195~470, 불꽃 입자 끝 크기도 폭 / 50 에 비례, 바닥 불·경고 띠도 같은 폭), 나는 높이·옆 카메라 거리도 크기에 비례.
+- 바꿈: `ARRRandomDragonFlight::BaseScale` 4 → 8, `ScalePerFace` 1 → 2(10~20 배, 모든 숫자에서 두 배). 브레스 폭(피해 범위)은 그대로.
+- 확인: 빌드 경고 없음. 창 + `-RRSpecies=Dragon -ExecCmds="RRUltimate"` + E: 로그 `level 6: scale 20.0, breath 470 wide each side, 1800 up`, 비행·브레스 피해·넉아웃 정상(`C:\work\char-pipeline\output\screens\dragon_x2`).
+
+## 36차 — TPS 큰 맵 "주사위 마을"(Dice Town) + 맵 고르기 (사용자: 첫 번째 스타일로 시작, TPS 는 맵 고르는 UI, 2층 건물엔 올라갈 길 필수, 창문은 모든 캐릭터가 뛰어내릴 만큼 크게)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지).
+- 컨셉: Tripo 웹 이미지(Nano Banana Pro, 16:9) 3장 — 전경/마을 TPS 시점/주사위 성. 화면 캡처만 `C:\work\char-pipeline\output\dice_land_v2_concept\01_overview.png`(이걸로 제작), `02_town_tps.png`, `03_dice_castle.png`. 원본은 Tripo 기록에만.
+- 블록 메시: `C:\work\char-pipeline\scripts\blender_block_town.py <out>`(Blender 5.2) → `output\block_town\SM_BTBlock`(100 블록, 모서리 베벨 4.5, 슬롯 Body = 옆·바닥, Accent = 윗면 + 옆면 위 18% 띠 — 잔디 블록 테두리), `SM_BTDieBlock`(같은 블록 + 눈, Accent = 눈) + 미리보기. `ue_import_block_town.py <dir>` → `/Game/Environment/DiceTown/`: `M_BTBlock`(커스텀 데이터 0~2 = 몸 색, "Accent" 1 이면 3~5; 면마다 12.5 단위 8×8 "픽셀" 밝기 흔들림 — Custom HLSL `BlockPixels`, `PixelSize`/`PixelStrength` 0.1; 거칠기 0.6, `Glow`, `Saturation`/`Brightness`), `MI_BTAccent`, `MI_BTCloud`, `MI_BTWater`. 나나이트, 충돌 없음. (UV 가 없어 FBX 탄젠트 경고가 뜨지만 노멀맵을 안 써서 무관.)
+- `ARRRandomDiceTown`(새, 복제, 같은 시드로 모든 기기가 같게): 100 블록 격자(셀 ±88 = 17,600 정사각, 레벨 -3~30; 레벨 L 은 (L-1)×100~L×100, 레벨 0 윗면 = 바닥) 에 룩(몸/액센트 색, 최대 254) 번호를 칠하고 → 보이는 면이 있는 블록만 인스턴스(색 ±5% 흔들림) → 충돌은 격자에서 욕심쟁이 상자 병합(X→Y→위로, 숨은 큐브 BlockAll ≈ 2,800개). 255 = 단단하지만 큰 주사위가 대신 그림.
+  - 점대칭(파랑 -X, 빨강 +X): `FFrame`(원점 셀 + 4분의 1 회전, `Mirror()` 는 가운데 기준 반 바퀴 + `bRed`), `Both()`. 무작위 배치는 `IsFree`(섬 안 가장자리 2칸, 길·광장 밖, 예약 사각형과 그 거울과 안 겹침)/`Reserve`.
+  - 지역: 광장(체비셰프 <13, 분홍/크림 체크, 2단 받침대 + 6블록 거대 주사위, 네 방향 경사) / 큰길 X·Y(폭 6, |좌표| <56) + 순환로(체비셰프 46~52) / 시내(≤42): 2층 집(경사 지붕)·상가(평지붕+난간) 6쌍 / 각 팀 기지 마당(X -45~-33, 팀 색, 낮은 벽, 상자, 앞 모서리 감시탑 2) + 큰길 입구 문 2(기둥·보, 차 지나감) / 기지 뒤 3단 언덕 + 꼭대기 감시탑 / 팀 오른쪽 운하 구역(Y 72~75, 가장자리에서 폭포, 아치 다리 3) + 집 / 팀 왼쪽 숲(나무 55쌍) + 거대 주사위 언덕(3단, 첫 단 계단) / 바깥 오두막(1층) 8쌍, 감시탑 5쌍, 엄폐물(블록 벽·덤불·상자·주사위) 약 50쌍. 섬 아래 큰 블록 원뿔(흙→복숭아→분홍→라일락), 블록 구름 바다, 픽셀 무지개 2, 떠 있는 작은 섬 4.
+  - 건물(`AddBuilding`): 층 = 6블록(바닥 1 + 방 5 = 500, 거인 384). 문(앞·왼쪽)·창문 모두 3×4 블록(300×400, 거인 168×384 가 지나감), 창턱 1블록. 2층이면 오른쪽 바깥 계단(폭 2) → 2층 문 앞 층계참(바깥 난간); 평지붕이면 층계참을 뒤까지 늘이고 뒤쪽 벽 위로 두 번째 계단 → 옥상(난간 틈). 1층 건물은 모두 경사 지붕(올라갈 2층이 없음). 층마다 상자 몇 개. 창·문 둘레는 틀 색.
+  - 계단(`AddStairs`): 반 블록 깊이·높이 45° 단(보이는 건 단마다 늘린 블록); 막는 건 단 앞모서리를 지나는 45° 판 + 칸마다 아래 상자 + 마지막 반 칸. 이 맵에선 Tick 이 모든 캐릭터에 `SetWalkableFloorAngle(46)`(기본 44.77 이면 45° 못 걸음)과 `SetFlightMaxHeightInBodies(9)`(새 세터, 옥상까지 날기).
+  - 봇 길(`FindPath`): 칸마다 서 있을 곳(위로 2블록 비어 있음; 계단 칸은 계단 위 한 곳), 이웃 링크 = 같은 높이(대각선은 모서리 안 자름) / 계단 진행 방향 ±100 / 한 블록 오르기(점프로 기어오름, 비용 3배) / 650 까지 떨어지기. A*(최대 8만 확장, 못 가면 가장 가까운 곳) 후 평지에선 스윕으로 곧게. `GetRandomWalkSpot`: 광장에서 닿는 곳 중 무작위.
+  - 미니맵 `GetMapColor`(칸 맨 위 색·높이), 드래곤 비행 `GetMapBounds`.
+- 게임 모드: `InitGame` 에서 타이틀 선택이 TPS + 주사위 마을이면 `bDiceTown`, `TeamSpawnDistance` 8000(로컬 플레이어는 StartPlay 전 로그인 때 놓이므로 여기서). `StartPlay` 맨 앞에서 마을 생성. 탈것 자리는 그대로(기지 마당·Y 길 위).
+- 타이틀: THIRD PERSON 다음 "PICK A MAP" 페이지(DICE TOWN / DICE LAND / BACK, 마지막 선택이 선택된 채). 캐릭터 페이지 BACK/Esc → 맵 페이지 → 보기 페이지. `URRRandomSessionSubsystem::Set/GetThirdPersonMap`(`ERRThirdPersonMap`, 기본 DiceTown), 명령줄 `-RRMap=DiceLand|DiceTown`. 참가자는 호스트 맵(복제 액터).
+- 캐릭터: `UpdateLedgeWalking` 이 바닥이 주사위 마을이면 어디서나 가장자리에서 걸어 내려감(계단 옆·층계참·옥상·창턱; 섬 가장자리는 숨은 벽). `TryClimb` 가 가슴 높이에 벽이 없으면 무릎 높이(발+75)도 봄 — 거인의 가슴은 창턱 위로 지나가서 창을 못 넘었음.
+- 봇: 마을이 있으면 가까운 교전(보이고 선호 거리 안)이 아닐 때 `FollowRoute`(1.5초마다·목표가 300 움직이면 새 길, 모서리 60 안이면 다음, 0.5초 멈추면 점프)로 이동하고 장애물 회피 스윕은 안 씀(계단 판을 벽으로 봄). 순찰은 반경 5500 안 걸을 수 있는 아무 곳(옥상·2층 포함), 25초.
+- 확인: 빌드 경고 없음. 로그 `dice town 54705 blocks, 460 dice, 592 steps, ... 2843 solid boxes, 72 stairs, 33747 walk nodes (28253 roamable)`. `-nullrhi` 봇전 끝까지(10킬 종료), 봇이 높이 314·572 까지 올라감, 기지끼리 8000 을 길 따라 이동. 임시 `-RRTEMPWindow`/`-RRTEMPWindowGiant`(2층 앞 창 안쪽에 세우고 바깥으로 걷기 + 점프 — 지움): 보통·거인 모두 바닥 605 → 창턱 702 → 떨어져 지면 2. 타이틀을 실제 키로(Enter, S, Enter → 맵 페이지, Esc 로 돌아오기, DICE TOWN → FOX → 시작). Dice Land TPS·탑뷰 섬도 그대로. 캡처 `C:\work\char-pipeline\output\screens\dicetown1~2`, `dicetown_window2`, `dicetown_title`(전경은 임시 `-RRTEMPCam` — 지움).
+- 확인 못 한 것: 실제 마우스로 계단 오르기 손맛, LAN 참가자 화면(같은 시드라 같아야 함), 프레임(블록 5.5만 + 계단 등, 나나이트), 봇이 창문을 쓰지 않음(길에 창 링크 없음), 밀폐된 경사 지붕 속 다락에도 길 점이 생김(광장에서 안 닿아 순찰엔 안 쓰임).
+
+## 35차 — 고속 비행 모델을 드래곤 비행에 (사용자: 바로 진행시켜)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지).
+- 리그: `blender_creature_base.py` → `input\dragon_flight\rig_chains.sh`(`blender_animal_tail.py` 4번: Neck1~3(머리 포함, 반경 0.16), Tail1~4(뒷다리 뒤부터, 0.08), WingL/R 1~2(가운데 선, 0.20, 몸 비율 1.0, 연결 모드). 다리는 접힌 채라 뼈 없음) → `dragon_flight_rig.fbx`(12뼈) → `ue_import_creature.py DragonFlight|DragonFlight|…` → `/Game/Characters/DragonFlight/SK_DragonFlight`, `M_DragonFlight`. 부위 칠 `output\animals\dragon_flight\parts_sheet.png`.
+- 코드(`ARRRandomDragonFlight`): 메시 둘 — `Body`(서 있는 고전 용: 이륙·맴돌기), `FlightBody`(고속 비행: 활강부터). 뼈 다루기를 `FRig`(메시, 뼈, 부모, 참조 회전, 지금 회전, 주둥이, 엉덩이 높이)로 묶고 `SetupRig`/`ApplyPose`/`GetRig()`. 클릭으로 선이 정해지면(`MulticastFly`) `TakeFlightForm`: 서 있는 용을 숨기고 비행 용을 보이며 불꽃 펑(크기 Scale×0.3). 비행 용 자세: 날개는 젖힌 기본 자세에서 빠르고 얕게(8±24°, 바깥 4±12° 늦게), 목 살짝, 브레스 때 머리 24° 숙임, 꼬리는 좌우·위아래 잔물결. 불이 닿는 앞거리 `Lead` 는 비행 용 주둥이(0, 54, 21) 기준.
+- 확인: 빌드 경고 없음, 스마트 앱 컨트롤 막힘 없음. 창 + 실제 키·클릭(E 키가 한 번 안 들어가 여러 번 누르게 다시): 맴돌기(서 있는 용) → 클릭 → 불꽃 속에 비행 용으로 → 옆 시점 돌진·브레스 → 맵 끝 너머로(`output\screens\dragon_flightform`, LV4).
+
+## 34차 — 고전 용 고속 비행 자세 모델 (사용자: 용 디자인 자체는 바꾸지 말고 자세를 조금 더 고속으로 나는 모습으로 모델링을 새로)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지; 게임 프로젝트 파일 변경 없음 — 아직 게임에 넣지 않음).
+- 그림(Tripo Image, Nano Banana Pro, 무료): 31차 고전 용 옆·정면 그림을 참고로 "디자인 전부 그대로, 자세만 제트기처럼 고속 비행 — 몸 수평으로 길게, 목·머리 앞으로 일직선, 입 다묾, 날개 펼쳐 뒤로 젖힘, 앞다리 가슴에 접고 뒷다리 꼬리 쪽으로 뻗음, 꼬리 곧게" 옆모습(왼쪽 프로필) 2장 중 고름 → 그 그림을 참고로 정면·뒤 각 2장. 정면·뒤는 살짝 위에서 본 느낌.
+  - 결과 `C:\work\char-pipeline\input\dragon_flight\concept\dragon_flight_side|front|back.png`, 모음 `dragon_flight_concept_sheet.png`.
+- 3D: Tripo HD 멀티뷰(Front = 정면, Left = 옆, Back = 뒤; H3.1, 2K, 20k, 30 크레딧 → 23,280 남음) → 19,030 삼각형. FBX(Blender, 2K, 이름은 `form_input` 으로) → `input\dragon_flight\tripo\`(크기 비 가로 0.92 × 길이 1.0 × 높이 0.41). 확인 렌더 `output\animals\dragon_flight\model_sheet.png`(앞/뒤/옆/위/3/4): 수평 몸, 뒤로 젖힌 날개, 접은 다리, 곧은 꼬리.
+- 다음(요청 시): 리그(날개 2마디씩, 꼬리, 목 — `blender_creature_base.py` + `blender_animal_tail.py`, 다리는 고정이라 뼈 불필요) → `ue_import_creature.py` → `ARRRandomDragonFlight` 의 활강·비행·떠나기 단계에서 이 모델로(이륙·맴돌기는 지금 모델 그대로 두고 바꿀 때 불꽃으로 가리거나, 전부 이 모델로).
+
+## 33차 — 드래곤 비행: 캐릭터 자리부터 맵 끝까지, 더 빠르고 날렵하게 (사용자: 용이 조금 더 날렵하고 빠르게, 범위는 캐릭터 위치부터 쭉 브레스를 발사하면서, 주사위로 좌우 브레스 넓이)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지).
+- 선: 클릭 두 번(시작·끝) → **한 번(방향)**. 불길은 작은 용이 서 있던 자리(`StartFeet`)부터 그 방향으로 **맵 끝까지**(`GetLineLength`: 섬/주사위 랜드 `GetMapBounds` 사각형을 나가는 거리, 1500~7000). 고르는 동안 미리보기 띠도 자기 자리에서 커서 방향으로 맵 끝까지(브레스 폭 그대로). 상태 줄 `[CLICK THE WAY TO BREATHE FIRE]`. 봇: 적이 가장 많은 곳 쪽(기반 `PickTarget`), 플레이어가 6초 안에 안 고르면 바라보던 쪽. `MulticastStart`·`bHasStart`·봇 끝점 기억 없앰.
+- 주사위: 브레스 좌우 폭(반지름 140 + 55×눈 = 195~470)과 용 크기(5~10) 그대로.
+- 빠르게: `FlySpeed` 1500 → 2800(맵을 1.5~2초에 가로지름), 이륙 1.1 → 0.8초, 떠나기 1.8 → 1.2초, 활강 `SwoopTime` 1.1초 고정.
+- 날렵하게: 활강은 머리 위에서 뒤·옆으로 크게 돌아(Hermite 시작 접선 = 뒤 0.6 + 옆 0.9 + 위) 선 뒤에서 다이빙해 들어옴(뱅크). 활강부터 `Dash` 0→1(부드럽게): 날갯짓 1.6배 빠르고 얕게(22±42° → 40±18°), 날개를 뒤로 28° 젖힘(위 축 회전: 왼날개 끝 +X → -Y), 목 12° 더 앞으로, 다리 10° 더 접음, 꼬리 거의 곧게. 날갯짓 위상은 `FlapPhase` 로 누적(속도를 바꿀 때 위상이 튀지 않게).
+- 브레스 불덩이는 앞머리가 움직이는 만큼 앞을 겨눔(`DragonBreath` 의 `Carry`), 따라가는 시점은 더 빨리 붙음(보간 6 → 9, 처음 돌아가는 시간 1.2 → 0.8초).
+- 확인: 빌드 경고 없음. 창 + 실제 키·클릭 한 번(첫 시도는 E 키가 안 들어가 다시): 미리보기 띠가 자기 자리→맵 끝, 옆 시점으로 다이빙 후 자기 자리부터 불, 맵 끝 너머로 날아감(`output\screens\dragon_dash`, LV1). 화면 없이 임시 `-RRTEMPDragonTest`(지움): 모든 선이 각 용의 자리에서 시작해 맵 끝(±3240)까지, 봇 선이 적 쪽, 맞힘·피해 정상.
+- 확인 못 한 것: 높은 레벨에서의 화면(폭은 32차 그대로라 수치만), LAN 에서 새 흐름(32차와 같은 멀티캐스트 하나라 로그 확인은 생략), TPS 에서의 고르기.
+- 그 뒤 "실행이 안 된다": Windows 스마트 앱 컨트롤(코드 무결성 이벤트 3077/3033, 정책 {0283ac0f-…})이 새로 빌드한 `UnrealEditor-RRRandom.dll` 로드를 막음(로그 `GetLastError=4551` → "The game module 'RRRandom' could not be loaded"). 파일 시간만 바꿔 다시 링크하면 같은 바이너리라 계속 막힘 → 로그 문구 하나를 바꿔(드래곤 변신 로그 "breath %.0f wide each side") 다시 빌드하니 통과. 확인: 화면 없이 솔로 시작, 브롤러 6명 생성.
+
+## 32차 — 드래곤 브롤러 + 궁극기 "드래곤 비행" (사용자: 드래곤 캐릭터 추가, 궁극기를 쓰면 두 번째 용이 하늘을 날며 지정한 경로에 브레스를 뿜으면서 맵을 가로질러 날아가게, 브레스 굵기와 용 크기는 주사위 숫자)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지).
+- 브롤러(30차 리그): `ue_import_animal.py Dragon|input/dragon/mixamo|<베이스컬러>|input/dragon/dragon_rig.fbx` → `/Game/Characters/Dragon`(뼈 41 → 49: Tail1~4, WingL/R1~2, 다른 뼈 변화 0), `ue_import_flyback.py dragon_flyback.fbx|20.4|Dragon=20.4`(자기 리그라 그대로), 얼굴 `blender_portrait.py mixamo/dragon_SK.fbx` → `/Game/UI/T_DragonPortrait`. 코드: `RRSpecies::Dragon = 4`, `Count = 5`, 튜닝 `{Dragon, 2.15, 20.4}`(여우 엉덩이 맞춤 2.43과 머리 맞춤 1.8 사이, 뿔이 높아 엉덩이 쪽으로), 꼬리 흔들기는 Tail1~4 그대로(날개 뼈는 브롤러에선 안 움직임). 타이틀 `ERRTitleChoice::Dragon`("Little red dragon. Its true form breathes fire."), 봇 랜덤 5종.
+- 고전 용(31차 모델) 리그 — Mixamo 는 네 발이 안 되므로 블렌더에서: `scripts\blender_creature_base.py <tripo fbx> <out> <grid>`(새: 메시 합치고 발 바닥 0·가운데, 뼈 하나 Hips 에 전부, 옆/뒤/위 10cm 격자 렌더) → `input\dragon_classic\rig_chains.sh`(`blender_animal_tail.py` 8번: Neck1~3(머리 포함), Tail1~4, LegFL/FR/BL/BR 1~2, WingL/R 1~2(몸 비율 1.0, 연결 모드 — 마지막에)) → `dragon_classic_rig.fbx`(20뼈). 블렌더 자세 시험(날개 위/중간/아래, 다리 접기, 목 앞으로): 목을 45° 숙이면 머리가 늘어나서 게임에선 15°만. → `scripts\ue_import_creature.py`(새) → `/Game/Characters/DragonClassic/SK_DragonClassic`, `M_DragonClassic`(평평, "Glow" 발광 파라미터). (처음엔 머티리얼 슬롯이 비어 회색으로 나옴 — 읽어 온 항목을 고쳐 넣는 방식이 이 메시에선 안 먹어서 `unreal.SkeletalMaterial` 새로 만들어 넣게 고침.)
+- `ARRRandomDragonFlight`(새, `RRRandomDragonFlight.h/.cpp`, 궁극기 기반 위):
+  - 흐름: 작은 용 자리에서 불꽃 펑(`FireBurst`) → 고전 용이 커지며 떠오름(TakeOffTime 1.1) → 머리 위에서 날갯짓하며 맴돎(Hover) → 클릭 두 번(`Left` = 2: 불 시작점, 끝점; 상태 줄 `[CLICK WHERE THE FIRE STARTS/ENDS]`) → 선으로 부드럽게 활강(Hermite, `Approach`) → 선을 따라 `FlySpeed` 1500 으로 날며 브레스(`Pass`, 불이 닿는 곳은 용보다 `Lead` = 주둥이 + 높이×0.55 앞) → 계속 날아 올라가며 작아져 불꽃으로 사라짐(`Leave` 1.8 s) → 땅의 불이 꺼지면 끝, 작은 용이 그 자리에 다시 펑.
+  - 주사위 눈(1~6): 크기 `Scale` = 4 + 1×눈(5~10, 모델 1m → 날개폭 5~10m), 브레스 반지름 140 + 55×눈(195~470), 높이 400 + 70×Scale.
+  - 선: 두 번째 클릭은 첫 클릭에서 700~3800 사이로 맞춤. 첫 클릭 뒤엔 시작점 원(경고 홀로그램)과, 이 기기 플레이어에게 시작점→커서 띠(`PathHolo`, 엔진 큐브 + `M_FXHolo`, 높이 70); 날기 시작하면 모든 기기에 경고 띠(`WarnHolo`, 아주 옅게 — 처음엔 밝아서 용과 불을 가렸음). `ShowCursorSpot` 을 기반 클래스에서 virtual 로.
+  - 피해(서버): 브레스 앞머리가 닿은 적 25 + 선 바깥으로 450/320 튕김(한 번), 지나간 자리는 BurnSeconds 2.5 동안 불타며 그 안의 적 0.25초마다 4. 자기 궁극기에 붙잡힌(숨은) 브롤러는 제외(처음엔 변신 중인 드래곤도 '맞음'으로 셌음). 너무 높이 나는 적 제외.
+  - 봇: 적이 가장 많은 곳(기반 `PickTarget`)을 지나는 선, 용→무리 방향, 길이 ≥ 1400 + 2×반지름. 플레이어가 6초 안에 안 고르면 앞쪽(첫 점) / 첫 점에서 용이 보는 쪽 1600(끝점).
+  - 몸: `UPoseableMeshComponent`, 매 프레임 코드로 — 날개 위아래(1.6 회/s, 바깥쪽이 늦게), 다리 뒤로 접기, 목 15° 앞, 브레스 때 머리 32° 숙임, 꼬리 살랑. 각 뼈의 회전은 참조 자세 축 기준(부모 회전에 실려 감, FBX 가 Y 를 뒤집어서 X·Z 축 회전은 블렌더와 부호 반대). 참조 자세는 컴포넌트가 아니라 에셋의 RefSkeleton 에서. 몸 기울기: 진행 방향, 선회 땐 뱅크(최대 35°), 오르내림 피치.
+  - 시점: 고르는 동안은 기반 클래스의 높은 시점, 활강부터는 선 오른쪽에서 비스듬히(피치 -28, 거리 2600 + 220×Scale) 용을 따라가며 왼쪽→오른쪽으로 날아가게, 떠날 땐 선 끝, 그 뒤 불타는 선 가운데.
+  - 모든 기기: `MulticastStart`(첫 점), `MulticastFly`(선) 뒤 각자 시계로 같은 비행·불.
+- 이펙트(`ARRRandomEffects`): `DragonBreath`(입 → 착지점 불덩이 줄기, 착지 튀김, 불티), `GroundFire`(불길, 세기 따라 줄어듦), `FireBurst`(변신 펑). 공 풀 500 → 1400. 불은 Glow 1.6~2.4, 주황·빨강 위주(밝으면 하얗게 날아감).
+- 덤: `RRRandomMoonHop` 의 애니메이션 찾기가 `FObjectFinderOptional(*FString::Printf(...))` — 임시 문자열이 사라진 뒤 경로를 읽어 "Failed to find <깨진 글자>" 오류(토끼 달토끼 애니메이션이 못 잡힐 수 있었음) → 문자열을 지역 변수로.
+- 확인: 빌드 경고 없음. 임시 `-RRTEMPDragonTest`(봇 전부 드래곤 + 모두 궁극기 주사위 자동) — 지움. 화면 없이: 6마리 모두 비행, 브레스·불 피해, 넉아웃, 봇이 무리를 지나는 선. 창: 고르기 원/띠, 이륙, 옆 시점 비행과 브레스, 불타는 선(`output\screens\ult_dragon3`), **실제 마우스 클릭 두 번**으로 LV6 비행 성공(`dragon_click`), 타이틀 DRAGON 버튼과 드래곤으로 시작(`dragon_title`). LAN 호스트+참가자: 참가자 로그에 같은 선·같은 레벨 비행, 참가자 브롤러 여우 → 드래곤 전환, 에러 없음. 일반 솔로 1분 에러 없음.
+- 확인 못 한 것: 3인칭(TPS) 시점에서의 고르기·비행 시점, 참가자 화면에서 본 모습(로그만), 여러 마리가 동시에 불을 뿜을 때 파티클 풀(1400) 부족 여부, 비행 중 다른 탈것/거인 등과 겹칠 때, 고전 용 날갯짓을 가까이서 본 모습(멀리서만 봄), 작은 드래곤 브롤러의 날개(지금 고정).
+
+## 31차 — 궁극기용 고전 드래곤(네 발) 컨셉아트 + 3D 모델 (사용자: 사람 폼이 아니라 고전적인 드래곤 모습으로, 궁극기에 쓸, 아트 느낌은 유지하면서 멋진)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지; 게임 프로젝트 파일 변경 없음 — 전부 `char-pipeline` 쪽).
+- 그림(Tripo Image, Nano Banana Pro, 무료): 30차 드래곤 정면 그림을 참고로 "그 드래곤의 진짜 모습 — 네 발로 선 고전 서양 드래곤, 같은 뿔·볏·금색 눈, 크게 펼친 박쥐 날개(주황 막), 화살촉 꼬리, 진홍 비늘 + 크림색 배 비늘판, 같은 3D 애니메이션 영화 느낌이지만 위엄 있게". 고른 정면을 참고로 뒤·옆(왼쪽, 그림 왼쪽을 봄)·위를 뽑음(각 2장 중 고름; 정면은 날개 끝이 잘려 "줌 아웃" 넣어 한 번 더).
+  - 주의: 프롬프트에 "no clothes" 가 있으면 Tripo 가 "This image does not meet our content guidelines" 로 거절함(그림 탓이 아님 — 그림 없이도 같은 오류). "with no outfit and no accessories" 로 바꾸니 됨.
+  - 결과 `C:\work\char-pipeline\input\dragon_classic\concept\dragon_classic_front|back|side|top.png`, 모음 `dragon_classic_concept_sheet.png`.
+- 3D: Tripo HD Model **멀티뷰**(앞 = 정면, Left = 옆 그림, Back = 뒤, Right 비움; H3.1, 2K PBR, 20k, 30 크레딧 → 23,310 남음) → 19,810 삼각형, 날개·꼬리·등 가시까지 그림과 맞음. FBX(Blender, 2K) `input\dragon_classic\tripo\`(크기 비 가로 1.0 × 길이 0.96 × 높이 0.85, 날개 폭 기준).
+  - Export 창의 파일 이름 칸에 좌표로 클릭해 타이핑했더니 글자가 단축키로 들어가 뷰어가 다른 에셋(토끼·다람쥐)으로 넘어감(모델 손상 없음) — 이름은 `form_input` 으로 넣을 것.
+- 확인 렌더: `scripts\blender_turnaround.py`(새, 앞/뒤/옆/위/3/4) → `output\animals\dragon_classic\model_sheet.png`.
+- 아직: 리깅(네 발 + 날개 — Mixamo 는 두 발 사람형만 되므로 블렌더에서 직접 뼈를 만들거나 Tripo Rig 를 써야 함), 언리얼 들여오기, 궁극기 코드.
+
+## 30차 — 붉은 드래곤 컨셉아트 4각도 (사용자: 서양 붉은 드래곤을 형상화해서, 트라이포로 컨셉아트 앞뒤옆위 4각도)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지; 게임 프로젝트 파일 변경 없음 — 그림은 `char-pipeline` 쪽).
+- Tripo Image(Nano Banana Pro, 1:1, 무료 횟수 — 크레딧 안 씀, 23,370 그대로). 정면: 여우 정면(`output\animals\fox_front.png`)을 참고로 "같은 3D 카툰·치비 비율의 아기 붉은 드래곤"(진홍 비늘, 크림색 배 비늘판, 뒤로 휜 상아색 뿔 둘, 머리 뒤 작은 가시, 금색 눈, 박쥐 날개(주황빛 막), 화살촉 꼬리, 흰 티·짙은 반바지·주머니 달린 갈색 벨트, A 포즈). 뒤·옆·위: 고른 정면 그림을 참고 이미지로 넣고(페이지 JS 로 그림을 받아 파일 입력에 넣음 — 편집(Edit Image) 창은 3분 넘게 멈춰서 안 씀) 같은 캐릭터를 그 각도로. 각 2장씩 뽑아 고름(위는 두 번).
+- 결과: `C:\work\char-pipeline\input\dragon\concept\dragon_front|back|side|top.png`(1024²), 모음 `dragon_concept_sheet.png`. Tripo 이미지 기록에도 남아 있음.
+- 아쉬운 점: 위 그림은 머리가 몸을 거의 가리고(치비 비율이라 당연), 꼬리 끝 화살촉이 안 나옴(두 번 다). 정면 그림은 셔츠 앞이 열린 조끼처럼 보임(배 비늘이 보임).
+- 다음(요청 시): 정면 그림 → Tripo 3D(30 크레딧) → Mixamo 리깅 → 애니메이션 → 꼬리·날개 처리 → `RRSpecies::Dragon` + 궁극기.
+
+### 30차 덧붙임 — 드래곤 3D 모델 + 리깅 (사용자: 정면 그림으로 3D 모델 만들고 리깅까지)
+
+- 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지; 게임 프로젝트 파일 변경 없음 — 전부 `char-pipeline` 쪽, 언리얼 들여오기·코드는 아직).
+- 3D: `dragon_front.png` → Tripo HD Model(H3.1, 2K PBR, 20k, 30 크레딧, 23,370 → 23,340) → 18,824 삼각형. FBX(Blender, 2K) → `input\dragon\tripo\` → `blender_tripo_to_obj.py` → `input\dragon\dragon_mixamo.zip`.
+- 1차 Mixamo 리그(`input\dragon\mixamo_v1_badlegs\`, 쓰지 않음): 바닥에 깔린 꼬리가 발 옆에 있어서 **오른발 뼈가 몸 13cm 뒤**에 잡히고 꼬리는 왼발(469 정점), 날개 아래쪽은 팔에 스킨됨 → 걷기에서 꼬리가 왼발 따라 휘둘림.
+- 고친 방법(몸만 리깅 → 전체 메시로 되돌림):
+  1. 1차 리그 위에서 `blender_animal_tail.py` 로 꼬리·날개 정점을 골라(`input\dragon\picked_parts.fbx`) `scripts\blender_strip_parts.py`(새) 로 OBJ 에서 잘라냄(2,058 정점) → `dragon_body_mixamo.zip`.
+  2. 몸만 Mixamo 에 다시 올림(같은 마커, 2 Chain Fingers) → 다리 좌우 대칭(발 뼈 x ±7cm, 같은 y) 확인 후 18개 다운로드 → `input\dragon\mixamo\`(`dragon_SK.fbx` = 몸 리그). **지금 Mixamo 에 남은 캐릭터 = `dragon_body_mixamo`.** 다운로드 스크립트(상품 id 18개 포함)를 `scripts\mixamo_export.js` 로 저장해 둠 — Mixamo 페이지에서 실행 후 `__runAll('<접두어>')`.
+  3. `scripts\blender_merge_parts.py`(새): 전체 메시를 몸 리그 좌표로(몸 OBJ ↔ 몸 FBX 경계로 맞춤, 몸 정점 7,356개 정확히 일치) 옮기고 몸 정점은 Mixamo 무게 그대로, 잘린 정점은 높이로 뿌리 뼈(`Hips,0.35,Spine2`) → `input\dragon\dragon_merged.fbx`.
+  4. `blender_animal_tail.py` 세 번 → **`input\dragon\dragon_rig.fbx`(최종)**: 꼬리 `Tail1..4`(Hips, 61cm, 반경 0.15, 1,200 정점 — 0.10 이면 바닥에 닿은 꼬리 밑면이 왼허벅지에 남아 걸을 때 바닥 아래로 늘어남), 날개 `WingL1..2`/`WingR1..2`(Spine2, 34cm, 막 가운데를 지나는 선, 반경 0.20, 몸 비율 1.0, 연결 모드 — 840/745 정점; 윗변을 따라 잡으면 막 아래쪽이 팔(96%)에 남아 팔이 내려갈 때 20cm 넘게 늘어남).
+- `blender_animal_tail.py` 확장: 인자 `[NAME] [PARENT] [CONNECTED]`(기본 Tail, Hips, 끔 — 기존 호출 그대로). CONNECTED 1 = 고른 정점 중 끝 관절에 가장 가까운 정점과 고른 정점끼리 이어진 것만(날개 높이의 머리 옆 지느러미가 날개로 잡히던 것 제외). 꼬리엔 쓰지 않음(화살촉 끝이 따로 떨어진 조각이라 94개만 남음).
+- 확인(블렌더): 부위 칠 렌더(`output\animals\dragon_check\rig_sheet.png`), 17개 애니메이션 전부 모서리 늘어남 측정 — 최대 6~8cm(겨드랑이·꼬리 뿌리와 다리 뒤, 쓰러짐/날아감 13~15cm; 다른 동물과 같은 수준), 처음엔 20~48cm. 텍스처 렌더 `anim_walk|fire|death|victory.png`(앞/옆/뒤 × 4프레임): 다리 정상, 날개는 등에, 꼬리는 엉덩이 따라감.
+- 아직: 언리얼 들여오기(`ue_import_animal.py Dragon|…\mixamo|<베이스컬러>|…\dragon_rig.fbx`), 얼굴 그림, `RRSpecies::Dragon` 코드, 궁극기. 날개 뼈는 지금 움직이는 코드가 없음(Spine2 에 붙어 고정) — 날갯짓은 `URRRandomBodyAnimInstance` 에 꼬리처럼 추가해야 함. 쓰러짐·날아감에서 꼬리가 바닥을 뚫음(엉덩이에 고정이라).
+
+## 29차 — 여우 둔갑술, 토끼 달토끼 낙하, 다람쥐 도토리 비 (사용자: 추천 조합으로 모두 만들어 줘)
+
+- 29차 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 구조: 호랑이 기운의 공통 부분을 `ARRRandomUltimate`(`RRRandomUltimate.h/.cpp`, 추상)로 분리 — 브롤러·남은 수(`Left`)·주사위 눈(`Face`) 복제, 끝내기(`Finish` → 복제 `bEnding` → `OnEnding` → `Done` → `ARRRandomCharacter::EndUltimate`), 지점 고르기(`WantsSpots`, `IsBusy`, `IsReady`, `RequestSpot` + 예약, 플레이어 6초 → `GetDefaultSpot`, 봇 0.8초 → `PickTarget` 적 많은 곳), 높은 시점 `Overview`, 커서/경고 홀로그램(`ShowCursorSpot`, `ShowTargetHolo(지점, 반경, 세기)`, `ReleaseTargetHolo`), `FindGround`, `FindEnemiesNear`(원기둥), `HoldsBrawler`(못 움직이고 무적), `HidesBrawler`, `KeepsOverview`(고르는 동안 + 브롤러를 붙잡는 궁극기는 끝날 때까지 — 마지막 한 방을 보게), `GetTitle`/`GetStatusLine`(HUD). `ARRRandomTigerSpirit` 는 이 위로 옮김(동작 같음, `StrikeRadius` → `AreaRadius`).
+- 캐릭터: `Spirit` → 복제 `Ultimate`, `IsUsingUltimate()` = 붙잡는 궁극기일 때만. 궁극기 주사위 확률 `UltimateDieChance` 0.15 를 **모든 종**에(분신 제외). `OnUltimateDie` 가 종별 클래스 스폰. 치트 U/F11 = 지금 캐릭터에 궁극기 주사위(호랑이로 바꾸지 않음). HUD: 굴린 결과·배너·아래 줄이 종별 이름(`RRSpecies::GetUltimateName/GetUltimateBanner`: FOX CLONES xN / MOON HOP xN / ACORN RAIN Ns / TIGER SPIRIT xN), 치트 줄 `[U] ULTIMATE DIE`. `ARRRandomGameMode::GetArenaCenter` public 으로.
+- 여우 둔갑술(`ARRRandomFoxClones`): 지점 없음, 붙잡지 않음. 연기·나뭇잎 펑(`ARRRandomEffects::FoxPoof`) 속에서 여우 둘레 반지름 170 고리에 분신 N개 + 여우 자신이 무작위 자리로(`TeleportTo`), 모두 바깥으로 700 튕겨 흩어짐. 분신 = 같은 클래스 `ARRRandomCharacter` 에 복제 `bDecoy`(`MakeDecoyOf`: 팀·종·총·체력 복사) + 봇 AI. 분신 규칙: 총알 피해 0(맞는 쪽 `TakeDamage` 가 공격자가 분신이면 0, 숫자도 안 뜸), 진짜 피해를 받으면 펑 사라짐(`VanishDecoy` → `MulticastDecoyPoof`, 0.2초 뒤 파괴, 넉아웃·점수 없음), 주사위 안 굴림, 탈것 안 탐, 궁극기 주사위 없음, 체력은 여우 것으로 시작. MVP·승리 대열·결과표·팀원 카드·봇 이름 번호에서 제외(미니맵엔 보임 — 적에게는 속임수). 12초 뒤, 또는 여우가 쓰러지거나 경기가 끝나면 남은 분신 모두 펑.
+- 토끼 달토끼 낙하(`ARRRandomMoonHop`): 반지름 380, 파란 커서/보라 경고 홀로그램. 토끼 메시(×1.4)가 클릭한 곳으로 높이 1500 포물선 1.35초 — 앞구르기(공중제비) → 꼭대기에서 큰 달빛(`MoonFlash`: 크림색 원판 + 은빛 고리 + 별) → 낙하 자세 → 엉덩방아 착지(`TigerStrike` 이펙트 은빛): 가운데 45 → 가장자리 25 피해, 700/500 튕김. 날아가는 동안 은빛 궤적. 진짜 토끼는 숨고 무적, 끝나면 마지막 착지 자리로 순간이동. Mixamo(지금 Mixamo 에 남은 새 토끼 리그 그대로): Jumping Up, Big Front Flip, Mid-Air Falling Idle, Mid-Air Falling To A Hard Landing → `input\rabbit\mixamo_extra\` → `ue_import_extra_anims.py` → `A_Rabbit_JumpUp|FrontFlip|FallIdle|HardLanding`.
+- 다람쥐 도토리 비(`ARRRandomAcornRain`): 반지름 650 구역을 한 번 클릭(그동안만 붙잡음), 3 + 눈 초 동안 초당 32개 도토리가 높이 1400 에서 0.6초에 떨어짐. 각 도토리 착지(`AcornPop` 먼지·조각·별) 반지름 130 안 적 8 피해 + 520 으로 미끄러뜨림. 비는 모든 기기 같음(`MulticastRain` 의 지점·시드로 도토리마다 시간·자리 계산, 피해는 서버). 비가 오는 동안 구역 경고 옅게(세기 0.3), 다람쥐는 바로 다시 싸움. 도토리 = `scripts\blender_acorn.py`(열매 + 모자 + 꼭지 두 메시) → `scripts\ue_import_acorn.py` → `/Game/Effects/Acorn/SM_AcornNut|Cap`(M_DLCandy, 인스턴스 색 갈색/진갈색), 그리는 크기 ×2.5(만화처럼 크게 — 1배는 위에서 안 보였음).
+- 확인: 빌드 경고 없음. 임시 `-RRTEMPAutoUlt`(내 캐릭터가 시작 뒤 궁극기 주사위 두 번)·`-RRTEMPNear`(내 지점을 바로 앞에) — 지움. 화면 없이 네 종: 여우 분신 5·4개, 토끼 1·2번 착지(넉아웃 포함), 다람쥐 4·6초 비(20·23번 맞힘, 넉아웃 3), 호랑이 그대로; 봇 여우·다람쥐도 스스로 씀, 분신이 쓰러뜨려지거나 사라져도 점수 없음. 화면: 여우 TPS 펑·분신(`output\screens\ult_fox`), 토끼 탑뷰 연속 착지·달빛·홀로그램(`ult_rabbit2`, 봇 토끼 6번 `in_rabbit`), 다람쥐 탑뷰 큰 도토리 비(`ult_squirrel3`). LAN 호스트+참가자 150초: 봇 여우 분신 3번, 봇 토끼 6번 착지, 봇 호랑이 — 참가자 로그에도 궁극기 시작, 에러 없음.
+- 확인 못 한 것: 이번엔 자동 키·마우스 입력이 게임 창에 안 들어가서(사격도 안 됨 — 다른 창이 포커스를 잡은 듯) 플레이어가 직접 클릭해 고르는 토끼·다람쥐 시험은 못 함(같은 `RequestSpot` 경로는 27·28차 호랑이 클릭 시험에서 확인), TPS 에서 본 도토리 비, 참가자 화면의 분신 모습, 성능(분신 6 + 봇).
+
+## 28차 — 호랑이 기운 범위 홀로그램, 지점은 늘 바닥 (사용자: 범위 표시가 바닥에 고정 안 되고 멀어질수록 커짐, 홀로그램 같은 이펙트로, 데미지 정상으로)
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 원인: 27차의 지점 찾기가 커서 선이 처음 닿는 WorldStatic/Dynamic 을 지점으로 써서, 주사위 랜드 가장자리의 보이지 않는 림 벽(높이 6000), 나무·엄폐물 꼭대기 등 공중에 잡힘 → HUD 원이 공중(카메라 가까이)에 그려져 크게 보이고, 서버의 피해 원기둥(지점 −500 ~ +3500)도 공중에 떠서 바닥의 적이 빠짐.
+- 지점: 커서 선과 바닥 높이 평면의 교점(`ARRRandomTigerSpirit::GetGroundZ` = 호랑이가 서 있던 발 높이) → `FindGround`: 그 XY 에서 +250 위부터 아래로 WorldStatic 만, 폰 무시, 위를 향한 면(법선 Z > 0.6) 첫 번째. 서버 `MulticastStrike` 도 같은 `FindGround`(전엔 +600 위에서 Visibility 채널).
+- 홀로그램(`/Game/Effects/DiceFX/M_FXHolo`, `scripts\ue_make_holo.py`): 엔진 `/Engine/BasicShapes/Cylinder` 를 반지름 `StrikeRadius` 500, 높이 `HoloHeight` 260 으로. 반투명(가산은 주사위 랜드의 밝은 바닥에서 안 보였음), 언릿, 양면, 깊이 테스트 끔(거인 몸 너머로도 보임). 물체 좌표로 H(높이 0..1)·R(반경 0..1): 벽 = (1−H)² × (0.35 + 위로 흐르는 스캔라인), 바닥 = 0.12 + 바깥으로 퍼지는 물결 + R>0.88 테두리 + 테두리를 도는 점선 12개. 발광 = Color × Glow × (0.6 + 양), 불투명도 = 양 × 2.2 × "Opacity".
+  - 커서 홀로그램(`CursorHolo`, 주황): 그 호랑이 플레이어 기기에서만, 플레이어 컨트롤러 `PlayerTick` 이 매 프레임 `ShowCursorSpot`. 쓸 수 있는 동안 계속(치는 중 클릭 예약도). HUD 의 선 원은 지움.
+  - 칠 곳 경고(`TargetHolo`, 진한 빨강·맥동): 모든 기기에서 `MulticastStrike` 때 그 자리에, 앞발이 닿으면 0.35초에 사라짐 — 상대도 피할 곳을 봄.
+- 확인: 빌드 경고 없음. 주사위 랜드 TPS 에서 화면 여러 곳(가장자리 쪽 포함) 클릭 6번 → 지점 모두 바닥(Z 1.5), 임시 `-RRTEMPUltPlace`(지점 옆 100/400 에 적 둘 — 지움)로 매번 원 안 적 피해(넉아웃 포함). 탑뷰 섬·TPS 주사위 랜드 캡처(`output\screens\holo3`, `holo4`, `holo5`): 가까운 곳·먼 곳 원 크기 같음, 바닥에 붙어 물결·테두리·벽이 보임.
+- 확인 못 한 것: 언덕 위·다리 위처럼 호랑이 발 높이와 많이 다른 곳(교점이 조금 어긋날 수 있음 — FindGround 가 +250 위부터 찾음), 참가자 화면의 칠 곳 경고.
+
+## 27차 — 호랑이 기운: 아무 곳이나, 범위 안 적 전부 (사용자: 범위 지정은 캐릭터와 상관없이 주변 원하는 곳으로 뛸 수 있고 범위 내 적은 모두 피해)
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 고친 것 (`ARRRandomPlayerController::GetUltimateSpot`, `ARRRandomTigerSpirit`):
+  - 지점: 전엔 WorldStatic 지형에만 맞춰서 바다·맵 밖·하늘 쪽 클릭은 무시됨 → 캐릭터(모든 폰)·탈것·거인은 통과, WorldStatic+WorldDynamic 에 맞추고, 아무것도 없으면 바닥 높이(호랑이 발) 평면과 만나는 점.
+  - 내려치는 중·커지는 중 클릭: 전엔 버려짐 → 서버가 하나 기억(`QueuedTarget`, 마지막 클릭)했다가 준비되면 바로 침. 클라이언트 재요청 간격 0.5 → 0.3초. HUD 원은 치는 중에도 커서 아래 표시, 안내 `[CLICK ANYWHERE]`.
+  - 플레이어가 6초 안 고르면: 전엔 적이 모인 곳 → 거인 바로 앞(앞발 거리 × 1.5). 적 모인 곳 고르기는 봇 호랑이만.
+  - 피해: 전엔 높이 차 ±500 넘으면 제외 → 지점 아래 500 ~ 위 `GiantHeight` 원기둥(날거나 엄폐물 위 적도). 2D 거리 ≤ 반지름 500 + 캡슐 반경이면 모두. 맞을 때마다 로그 `tiger spirit hits X <거리> away: <체력> -> <체력>`(빗나감은 Verbose).
+  - 맞지 않는 예외(의도): 같은 팀, 이미 쓰러진 적, 무적(치트), 자기 호랑이 기운을 쓰는 중인 상대 호랑이(숨은 본체는 데미지 없음).
+- 확인: 빌드 경고 없음. 임시 `-RRTEMPUltTest`(지점 주변 150/480/700 에 적을 옮기고 그 지점을 침, 궁극기 주사위 자동 굴림 — 확인 후 지움)로 탑뷰·TPS 7번: 치는 순간 원 안(≤542) 적은 모두 맞음(36~526), 빗나간 3명은 모두 밖(591, 644, 700). 처음 몇 번 "가까이 놓은 적이 안 맞음"은 1초 사이 봇이 걸어 나간 것. 실제 클릭(탑뷰, `-ExecCmds="RRUltimate"` + E, `output\screens\ult_click`): 커지는 중 왼쪽 위 클릭 → 기억했다가 그 자리, 오른쪽 개울가, 맵 밖 바다(왼쪽 아래)까지 찍은 곳마다 뛰어가 내려침.
+- 캡처 스크립트(scratchpad `capture_keys.ps1`): 클릭마다 화면 위치 `"시간:1:dx:dy"`.
+
+## 26차 — 궁극기 주사위 치트, 굴릴 때 연출 (사용자: 궁극기 주사위를 얻는 치트, 굴릴 때 조금 더 화려하게)
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 치트: **U** 키(F11 도 그대로 — 단 에디터 PIE 에선 F11 이 에디터 전체 화면 키라 게임에 안 감) / 콘솔 `RRUltimate`. 호랑이가 아니면 먼저 호랑이로 바꾼 뒤(`SetSpecies`, 로그 `is now the Tiger`) 궁극기 주사위 하나 저장. E 로 굴림. 치트 줄 `[U] TIGER ULT DIE`.
+- 굴리기 연출(각 기기, 보는 사람 모두):
+  - `URRRandomDiceBuffComponent::GetSpinTime()`: 궁극기 주사위는 `UltimateSpinTime` 1.6초(보통 0.6) 동안 굴러간 뒤 효과. HUD 결과 표시·머리 위 주사위 모두 이 값을 씀.
+  - `URRRandomOverheadDieComponent`: 궁극기면 금색(`/Game/Props/Dice/M_DiceGold`, `scripts\ue_make_gold_die.py` — 금색 베이스, 금속 0.9, 거칠기 0.35, 발광 = 색 × "Glow") + 진한 빨강 눈(M_DicePip MID), 크기 × `UltimateScale` 1.8, 높이 × `UltimateHop` 1.5(2.4 는 TPS 에서 화면 위로 잘림), 회전 `UltimateTurns` 6바퀴, 빛 맥동 + 착지 때 번쩍.
+  - `ARRRandomEffects::UltimateDieSpin`: 주사위 둘레 3갈래 금빛 별 소용돌이(점점 빨라짐), 발밑에서 주사위까지 금빛 기둥, 기둥 타고 오르는 불꽃, 바닥 파동 고리. `UltimateDieBurst`(착지): 금·흰·주황 고리 3겹, 섬광, 빛 기둥, 별과 금 주사위 분수, `GiantBurst` 충격파.
+  - 내 HUD: 굴러가는 동안 화면 아래쪽(크로스헤어 밑) 금색 `ULTIMATE DIE!`(맥동), 착지하면 화면 전체 금빛 섬광 + `TIGER SPIRIT xN!` 크게 쾅 → 1.8초 뒤 사라짐(`ARRRandomHUD::UltimateBannerTime`). 처음엔 화면 위쪽 0.28 에 뒀다가 머리 위 표시들과 겹쳐서 0.66 으로.
+- 확인: 빌드 경고 없음. `-ExecCmds="RRUltimate"` + E 키로 여우(TPS)·토끼(TPS)·다람쥐(탑뷰)에서 시작 → 각각 호랑이로 바뀌고 궁극기 주사위 굴림 → 호랑이 기운까지 이어짐(로그·캡처 `output\screens\ultdie`, `ultdie_tps`, `ultdie_top`).
+- 확인 못 한 것: U 키를 사람이 직접 누른 것(자동 입력은 E 만, 치트는 콘솔 명령으로), 다른 사람(참가자) 화면에서 본 금색 주사위.
+
+## 25차 — 외형 손질 3가지 + 호랑이 기운 (사용자: 1 호랑이 뒤통수 호피무늬 2 다람쥐 머리와 꼬리 사이 그래픽 깨짐 3 토끼 주둥이 더 귀여운 카툰 4 호랑이 궁극기)
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 호랑이 뒤통수: `scripts\blender_tiger_back_stripes.py <tripo fbx> <베이스컬러> <png> [미리보기]` — 머리 가운데 기준 각도(뒤 0°, 옆 ±)·높이로 정의한 줄무늬 5개(정수리에서 굵고 아래로 뾰족, 이마 줄무늬와 같은 진갈색, 가장자리 1.6° 부드럽게)를 뒤를 향한 머리 면의 텍셀에만 칠함(UV 이음매 양쪽이 겹치게 1.5텍셀 여유, 옆 64° 넘으면 귀·흰 볼털이라 제외) → `output\animals\T_Tiger_BaseColor_striped.png` → `T_Tiger_BaseColor` 다시 들여옴(스크래치 `ue_reimport_tex.py`). 게임 TPS 뒤 화면에서 확인(`output\screens\look_Tiger`).
+- 다람쥐 깨짐: 원인은 Tripo 메시에서 꼬리와 뒤통수가 붙어 있어 꼬리 뼈 정점과 머리 정점이 같은 면 58개를 공유 → 머리가 돌거나 꼬리가 흔들리면 볼에서 꼬리까지 길쭉한 조각으로 늘어남(머리 35° 돌린 렌더로 재현, `output\animals\tail\seam_compare.png`). `blender_animal_tail.py` 에 6번째 인자 SEAM(m): 꼬리와 다른 부위(Hips 제외)가 만나는 면에서 그 거리 안 정점의 뼈 무게를 모든 그룹 스무딩 12번 + 정규화 → 다람쥐 6cm(411 정점). 늘어난 조각이 작은 볼록함 정도로 줄어듦. 게임 TPS 뒤 화면에서 확인(`look_Squirrel`).
+- 토끼 주둥이: 입이 벌어지고 이빨·잇몸이 보이는 모양이 메시에 파여 있어 텍스처로는 안 되므로 새로 만듦 — 기존 토끼 정면 렌더를 Tripo Image(Nano Banana Pro, 무료)에 넣고 "나머지는 그대로, 주둥이만: 작은 하얀 볼 주둥이, 하트 분홍 코, 다문 w 미소, 작은 앞니 두 개" → HD Model(30, 23,400 → 23,370) → FBX → Mixamo(호랑이를 덮어씀) 18개(날아가기 포함, 토끼 자기 리그) → 꼬리 2뼈 → 언리얼. 옛 토끼 원본은 `input\rabbit_v1`. 새 토끼는 다리가 짧고 귀·머리가 커서 엉덩이 17.5, 크기 2.45(걷기 실측 52/s), 얼굴 그림 다시 렌더.
+- 호랑이 기운(`RRRandomTigerSpirit.h/.cpp`):
+  - 주사위(`URRRandomDiceBuffComponent`): `UltimateDieChance`(호랑이만 `TigerUltimateDieChance` 0.15, 종 적용 때 설정) — 게이지로 얻는 주사위가 그 확률로 궁극기 주사위(한 번에 하나), 저장 수 `UltimateCharges` 복제, 굴리면 그것부터(`FRRDiceRoll::bUltimate`), 착지하면 `OnUltimateDie(눈)`. 치트 F11 / `RRUltimate`(`GiveUltimateDie`).
+  - 캐릭터: `OnUltimateDie` 가 `ARRRandomTigerSpirit` 를 스폰(Instigator = 호랑이 → 킬 인정), 복제 `Spirit`. 쓰는 동안 몸·총 숨김, 이동 속도 0, 사격·점프·주사위·데미지 없음(`IsUsingUltimate`). 끝나면 `EndUltimate`.
+  - 거인: 키 `GiantHeight` 3500(맵 지름 약 6000, 탑뷰 카메라 높이 약 4900 이하), 호랑이 메시·머티리얼 + 주황 빛 맥동(HitFlash 파라미터), `A_Tiger_Roar`(Mixamo Mutant Roaring)로 2초 동안 커짐 → 대기 → 내려치기 `A_Tiger_JumpAttack`(Mixamo Mutant Jump Attack: 1.7초에 두 앞발이 리그 앞 77.4·높이 9.5에 닿고 엉덩이는 50 앞으로 — 블렌더로 잼) 0.35초부터 1.3배속. 앞발이 정확히 지점에 떨어지게 지점 − 바라보는 방향 × 77.4 × 크기 자리로 도약하며 돌고, 끝나면 엉덩이가 간 만큼 앞에 섬. 반지름 `StrikeRadius` 500(캐릭터 폭의 약 10배) 안 상대 팀에게 가운데 70 → 가장자리 35 데미지, 살아남으면 밖으로 날림. 다 치면 1.2초 줄어들어 호랑이로.
+  - 지점: 호랑이 플레이어는 클릭(커서 아래 바닥, HUD 에 반지름 원), 6초 안 고르면 거인이 고름. 봇 호랑이는 0.8초 뒤 적이 가장 많이 모인 곳.
+  - 시점(그 플레이어만): 모든 캐릭터 평균 위치 위 높은 카메라(피치 -60, 7000 뒤, FOV 70)로 0.8초 블렌드, 커서 보임, 전장의 안개 즉시 걷힘(서서히 걷으면 시점이 넘어가는 순간 검은 화면 한 장이 나왔음), 끝나면 돌아옴.
+  - 다른 사람 화면: 카메라가 거인이 차지하는 공간(몸 + 앞발이 닿는 앞쪽) 안이면 그 기기에서만 거인을 `M_FXGhost` 반투명 주황으로(TPS 에서 화면이 털로 가득 찼음).
+  - 이펙트 `ARRRandomEffects::TigerStrike`(충격파 고리 3개, 섬광, 먼지, 별·주사위), 커질 때 `GiantBurst`, 서 있는 동안 `GiantAura`, 사라질 때 `TeleportPoof`.
+  - 네트워크: 거인 액터 복제(항상), 내려치기는 `MulticastStrike`, 줄어들기는 복제 `bEnding`; 참가자 기기에서 호랑이가 늦게 도착해도 그때 시작(`TryStart`).
+  - HUD: 궁극기 주사위가 있으면 머리 위 주사위 상자 금색 + 아래 `ULTIMATE DIE: TIGER SPIRIT!`, 굴린 결과 `6 TIGER SPIRIT`, 쓰는 동안 `TIGER SPIRIT [CLICK] PAW STRIKE xN LEFT`, 치트 줄에 `[F11] TIGER ULT`.
+- 확인: 빌드 경고 없음. 임시 `-RRTEMPUlt`(호랑이마다 시작 2초 뒤 궁극기 주사위를 주고 굴림)·`-RRTEMPAllTiger`(봇 모두 호랑이) — 확인 후 지움. 화면 없이 호랑이 3~4마리가 각자 1~6번씩 끝까지 치고 맞은 수 기록, 탑뷰 플레이어 호랑이 화면(`output\screens\ult2`, `ult_input2`), 토끼 TPS 에서 본 거인(`ult3` 불투명 → `ult5` 반투명), 실제 입력(F11 → E → 6 → 클릭 6번 모두 커서 자리, `ult_input`), LAN 참가자 화면에도 거인들 등장. 일반 실행 중 봇 호랑이가 확률로 얻어 쓰는 장면도 캡처됨(`rabbit2`).
+- 확인 못 한 것: 실제 사람이 탑뷰/TPS 에서 여러 곳을 골라 치는 손맛(시험은 커서 고정), 참가자 호랑이 플레이어의 클릭(서버 RPC 경로), 거인이 맵 밖 바다에 서는 모습, 성능(거인 그림자·이펙트). 자동 키 입력은 가끔 게임 창에 안 들어가서 몇 번은 `-ExecCmds="RRUltimate"` 로 대신함.
+- Mixamo 에 지금 남은 캐릭터: 새 토끼(호랑이 리그는 사라짐 — 호랑이에 쓰는 모션은 모두 받아 둠: `input\tiger\mixamo\tiger_roar|swipe|jumpattack|punch|flyback.fbx`).
+
+## 24차 — 차에 치이면 날아감 (사용자: 뒤로 날아가는 모션과 함께 날아가면서 죽게, Mixamo 에서 적당한 모션)
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 모션: Mixamo "Flying Back Death"(Dying Flying Backward, 3.0초, 엉덩이 0.4초에 가장 높고 0.93초에 땅, 뒤로 43cm). Mixamo 엔 호랑이만 남아 있어(23차 메모) 호랑이 리그로 받음 → `C:\work\char-pipeline\input\tiger\mixamo\tiger_flyback.fbx`.
+- 네 종에 옮기기: `scripts\ue_import_flyback.py <fbx>|26.3|Fox=27.5|Rabbit=22.1|Squirrel=21.2|Tiger=26.3` → `A_<Name>_FlyBack`. Mixamo 리그는 뼈 이름·축이 같아서 로컬 회전은 그대로, 뼈 길이(엉덩이 말고 모든 뼈의 이동)는 각자 스켈레톤 기준 포즈로, 엉덩이 높이는 엉덩이 높이 비로, 엉덩이의 땅 위 이동은 첫 프레임 자리로 고정(게임이 몸을 던짐). 다람쥐에 없는 엄지 트랙은 빠짐. 각 종 자기 대기 애니메이션 뼈 길이 = 기준 포즈(차 0.00) 확인. 주의: UE 파이썬이 트랙 이름을 소문자로 돌려줌, 이미 있는 애니메이션을 덮어쓰면 압축 설정이 깨져서 파일을 먼저 지우고 들여옴.
+- 코드:
+  - `FRRSpeciesLook::FlyBack` → `ARRRandomCharacter::FlyBackAnimation`.
+  - `ARRRandomVehicle::UpdateRam` 이 데미지 직전에 `Victim->SetRamImpact(속도)`. `KnockOut` 이 같은 순간(월드 시간 double 로 비교 — float 로 했다가 항상 달라서 안 됐음)의 충격이면 복제 `FlingVelocity` = 차 방향 × clamp(차 속도 × `FlingSpeedShare` 0.8, `FlingSpeedRange` 600~1300) + 위 `FlingLift` 480(중력 980 에서 약 1초, 모션 착지와 맞음).
+  - `ApplyKnockedOutBody`(서버·OnRep 모두): 날림이면 캡슐 충돌은 켠 채 Pawn 만 무시(다른 캐릭터·운전자 통과, 지형엔 막힘), 차 반대쪽을 보게 돌리고(움직임 방향/컨트롤러 회전 끔), `MOVE_Falling` + 속도, `FlyBackAnimation` 한 번. `UpdateFling`(쓰러진 동안 Tick): 0.2초 뒤 땅(또는 서버가 이미 멈춤)이면 `EndFling` — 이동 끄고 캡슐 충돌 끔, Pawn 응답 되돌림, 서버 로그 `run over, lands <거리> away after <초>`. 맵 밖으로 날아가면 부활 때까지 떨어짐. 부활(`ApplyStandingBody`)이 날던 중이면 정리.
+- 확인(임시 `-RRTEMPRam`: 시작 뒤 가까운 브롤러를 속도 1400 으로 옆/카메라 쪽으로 친 것처럼 — 확인 후 지움): 화면 없이 4번 모두 0.98~1.00초 뒤 착지, 약 11m(장애물에 걸리면 6.8m). TPS 창 캡처(`output\screens\fling2`)에서 호랑이가 팔다리를 뻗고 뒤로 날아 플레이어 뒤를 지나 등으로 떨어져 누움. LAN 호스트+참가자: 참가자 화면에서도 같은 몸이 0.99초 뒤 착지(732 vs 호스트 768). 일반 봇전 끝까지 에러 없음.
+- 확인 못 한 것: 실제 차가 사람을 치는 장면(봇이 차로 치는 경우가 드묾 — 경로는 같은 `SetRamImpact` → 데미지), 거인이 치였을 때, 탑뷰에서의 모습.
+
+## 23차 — 토끼·다람쥐·호랑이 (사용자: 여우와 비슷한 느낌으로 추가하고 시작할 때 고르게, 봇은 랜덤, Tripo·Mixamo 로)
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 그림: 여우 OBJ 정면 렌더(`scripts\blender_fullbody.py` → `output\animals\fox_front.png`)를 Tripo Image(Nano Banana Pro, 1:1, 무료)에 참고로 올려 "같은 스타일·비율·A 자세, 비슷한 옷(티셔츠, 반바지, 갈색 주머니 벨트)" — 토끼(흰 털, 하늘색 티, 청 반바지), 다람쥐(적갈색, 흰 티, 올리브 반바지, 등 뒤로 솟아 말린 큰 꼬리), 호랑이(주황 줄무늬, 흰 티, 짙은 회색 반바지, 옆으로 휜 줄무늬 꼬리).
+- 3D: 그림 → Tripo HD Model(H3.1, 2K PBR, 삼각형 20,000 목표, 1회 30 크레딧 × 3, 23,490 → 23,400). FBX(Blender, 2K)로 받음 → `C:\work\char-pipeline\input\<rabbit|squirrel|tiger>\tripo\`(19,290 / 19,262 / 19,842 삼각형).
+- Mixamo 용 OBJ: 새 Tripo FBX 는 1m 높이에 노드 변환이 있어서 `fbx_to_obj.py`(원시 좌표)로는 누워 나옴 → `scripts\blender_tripo_to_obj.py <fbx> <obj> <베이스컬러 파일명>`: 블렌더가 변환 적용, 높이 100(여우 OBJ 와 같게), 발(아래 6%) 기준 가운데, Y-up → `input\<동물>\<동물>_mixamo.zip`(obj+mtl+jpg).
+- Mixamo(사용자 계정, Claude in Chrome): 업로드 → 마커 → **2 Chain Fingers (41)**(여우와 같은 뼈 이름). Mixamo 는 대칭선을 모델 범위 가운데에 그려서 꼬리가 옆으로 큰 다람쥐·호랑이는 대칭을 끄고 마커를 하나씩 찍음. **Mixamo 는 올린 캐릭터를 하나만 보관** — 새로 올리면 이전 것(여우 `fox_mixamo_upload` → 토끼 → 다람쥐 → 지금 호랑이)이 사라짐. 여우 애니메이션을 더 받으려면 `C:\Users\user\Downloads\fox_mixamo_upload.zip` 을 다시 올려 리깅해야 함(리그가 조금 달라질 수 있음).
+- 다운로드(페이지 안 API, `X-Api-Key: mixamo2` + localStorage 토큰): 캐릭터마다 17개 — `<동물>_SK.fbx`(Two Hand Rifle Idle, With Skin), walk(Quickly Walk Forward With Rifle), fire(Firing A Rifle While Standing, 짧은 것), death(Rifle Getting Hit To Ground), victory(House Dance Variation Two), aim_idle, run_f/b/l/r(in place), dance1~4, defeat1~3 — 여우가 쓴 것과 같은 상품(프레임 수로 확인). 결과 파일은 CORS 때문에 fetch 로 못 받아 링크 클릭으로 받음, 너무 빨리 요청하면 429 → 4초 간격. → `input\<동물>\mixamo\`.
+- 꼬리: Mixamo 자동 리그가 다람쥐 꼬리는 **왼팔(56%)·목**, 호랑이 꼬리는 **왼허벅지 100%**, 토끼 꼬리 공은 **머리 83%** 에 붙임 → `scripts\blender_animal_tail.py <fbx> <out> "x,y,z;..." [반경] [몸 비율]`: 블렌더 좌표(m, +Y 뒤, +X 캐릭터 왼쪽) 중심선을 따라 Hips 자식 `Tail1..N`, 중심선에서 반경 안이고 다른 뼈보다 가까운(× 몸 비율) 정점만 꼬리 뼈로 다시 스킨(뼈마다 구간, 3cm 섞기, 뿌리 5cm 는 Hips 와 섞음). 중심선은 `scripts\blender_rest_grid.py`(옆/뒤 10cm 격자 렌더)에서 읽음. 다람쥐 4뼈 97cm(반경 0.34, 몸 비율 1.15, 4,003 정점), 호랑이 4뼈 53cm(0.08, 0.85, 801), 토끼 2뼈 8cm(0.05, 0.85, 233). 확인은 꼬리 무게 칠한 렌더(`output\animals\tail\*_paint_*.png`).
+  - 덤으로 찾은 것: `blender_fox_tail.py` 의 마지막 꼬리 뼈 무게 식(`hi = 1.0`)이 0 이 되어 여우 Tail4 엔 정점이 없고 끝을 지난 정점은 무게가 없을 수 있음. 새 스크립트에선 고침(`hi = 0.0`), 여우는 손대지 않음.
+- 언리얼: `scripts\ue_import_animal.py <Name>|<mixamo 폴더>|<베이스컬러>|<꼬리 fbx>` → `/Game/Characters/<Name>/`: `<name>_SK.fbx` 로 `SK_<Name>`+스켈레톤을 만들고 꼬리 FBX 를 그 스켈레톤으로 다시 들여옴(다른 뼈 기준 포즈 변화 0.000 확인), `Anims/A_<Name>_Idle..AimRunR`(걷기·춤은 엉덩이 이동 제거), `Textures/T_<Name>_BaseColor`, `M_<Name>` = 여우 머티리얼 지금 모양(베이스 × DiffuseColor 틴트, 평평, 그리고 `ue_fox_pastel.py`·`ue_fox_hitflash.py` 를 그대로 실행). 이미 있던 폴더를 다시 들여올 땐 게임 코드가 시작 때 에셋을 잡고 있어 지우기가 실패함 → `Content\Characters\<Name>` 을 먼저 파일로 지울 것. 다람쥐는 엄지 뼈가 없음(33 + 꼬리 4) — 코드가 쓰는 손 뼈(RightHand, RightHandIndex1, LeftHand)는 있음.
+- 얼굴: `blender_portrait.py <SK fbx> <png> 256 [머리 x]`(다람쥐는 꼬리 때문에 머리 x 0 지정) → `ue_import_ui_texture.py` → `/Game/UI/T_<Name>Portrait`.
+- 코드:
+  - `RRRandomSpecies.h/.cpp`: `RRSpecies`(Fox, Rabbit, Squirrel, Tiger; 이름 ↔ 번호), `FRRSpeciesLook`(메시, 머티리얼, 대기/걷기/사격/쓰러짐, 춤들, 좌절들, 조준 세트, 메시 크기, 메시 오프셋, 걷기 속도, 얼굴) — `GetAll()` 이 생성자에서 경로 규칙으로 찾음. 크기 = 여우 엉덩이 높이 맞춤과 머리 끝 맞춤의 중간(토끼 2.14, 다람쥐 2.05, 호랑이 1.75; 엉덩이만 맞추면 다람쥐 머리가 여우보다 훨씬 큼). 걷기/조준 달리기 속도 = 여우 값 × 엉덩이 높이 비 × 크기(토끼 걷기 실측 65 ≈ 계산 63.5). (처음엔 기본 자세 엉덩이 XY 로 메시 오프셋을 줬다가 24차에서 뺌: Mixamo 애니메이션은 기본 자세와 상관없이 엉덩이를 원점 근처(0.3, 0.8)에 두고 재생해서, 호랑이가 오히려 30cm 어긋났음.)
+  - `ARRRandomCharacter`: `SpeciesLooks`(모두 로드 유지), 복제 `Species`(OnRep), `SetSpecies`(서버), `UseLook`, `ApplySpecies`(시작 전이면 BeginPlay 가 적용; 시작 뒤면 메시·머티리얼 교체 + `URRRandomEventComponent::RefreshMesh` + 팀 색 + 잔상 지움 + 자세), `GetPortrait`. 클라이언트에서 시작할 때 `arrives as the <종>` 로그.
+  - 게임 모드: `SpawnBrawler(…, Species)` 지연 스폰에서 설정 + `is a <종> on team` 로그. 봇 = `FMath::RandRange` 4종, 플레이어 = 컨트롤러가 알려 준 값 또는 이 기기 플레이어면 세션 서브시스템 값.
+  - `URRRandomSessionSubsystem::Get/SetSpecies`(레벨 넘어 유지, `-RRSpecies=<이름>`). `ARRRandomPlayerController`: 참가자가 BeginPlay 에서 `ServerChooseSpecies` → 서버가 기억(`GetChosenSpecies`, 새 게임 때 스폰에 씀)하고 지금 브롤러를 바꿈.
+  - 타이틀: 시점(TOP VIEW / THIRD PERSON) 고른 뒤, 참가(JOIN)는 바로 `PICK YOUR BRAWLER` 페이지 — FOX / RABBIT / SQUIRREL / TIGER(버튼 왼쪽에 얼굴, 설명 한 줄) / BACK. 마지막 고른 것이 선택돼 있음, Esc/BACK 은 이전 페이지로.
+  - HUD 팀원 카드 얼굴 = 그 브롤러의 종(`GetPortrait`, 없으면 여우).
+- 확인:
+  - 빌드 경고 없음. `-nullrhi` 봇전(`-RRSpecies=Rabbit -RRScoreToWin=3`): 플레이어 토끼, 봇 여우·다람쥐×2·호랑이 등 랜덤, 경기 끝까지 에러 없음.
+  - 창 캡처: 탑뷰 호랑이(`output\screens\species1`), TPS 다람쥐(`species2`), 타이틀 키 입력(싱글 → THIRD PERSON → 캐릭터 페이지 → 다람쥐 → 시작, `species_title`; 캡처 스크립트에 키/마우스 입력 추가), 결과 화면에서 다람쥐·호랑이 춤(`species3`), TPS 에서 네 종 모두 마우스 왼쪽 누른 채 사격 — 총이 손에, 같은 조준 자세(`species_fire\compare.png`).
+  - LAN 두 프로세스(`-RRHost -RRLan -RRSpecies=Tiger` / `-RRJoin -RRLan -RRSpecies=Squirrel`): 호스트에서 참가자 브롤러가 여우로 생겼다가 `is now the Squirrel`, 참가자 화면에서도 자기 것이 다람쥐로 바뀌고 봇들은 호스트와 같은 구성(호랑이 3, 토끼 1, 다람쥐 2)으로 도착.
+- 확인 못 한 것: 실제 마우스로 해 본 타이틀 클릭, 참가자가 새 게임(`?Restart`) 뒤에도 고른 종 유지(서버가 컨트롤러에 기억하지만 재접속 때 컨트롤러가 새로 생기면 다시 RPC 로 보냄 — 로그로는 안 봄), 꼬리 흔들림의 실제 모습(다람쥐 꼬리는 크고 위로 솟아 여우용 흔들기 축이 덜 맞을 수 있음), 각 종의 쓰러짐·거인·비행 모습, 연습 더미(`ARRRandomDummy`)는 여전히 여우, 타이틀 그림도 여우.
+
+## 22차 — TPS 카메라, 거대화·날개·피격 이펙트
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 카메라(`ARRRandomCharacter::UpdateCamera`, 3인칭): 팔 길이와 어깨 오프셋에 몸 크기(`GetActorScale3D().Z`, 거인 2배)를 곱함 — 스프링암은 액터 크기를 따라 커지지 않아 거인이 화면을 덮었음. 비행·활공 중(`FlightCameraPull`, 이제 3인칭에서도 계산)엔 팔 × (1 + 0.55), 위로 +70, 화각 +8°. 조준: 200 / (0, 95, 115) / 50° → 290 / (0, 125, 95) / 52° — 캐릭터가 왼쪽 아래 가장자리에 어깨·귀만 걸침(145 까지 비켰더니 귀 끝만 보여 되돌림).
+- `ARRRandomEffects`(새, 기기마다 하나, 복제 안 함, `Get()` 이 처음 쓸 때 만듦): 풀 방식 파티클 — 구·링·별(날개 반짝이 메시)·주사위를 `/Game/Effects/DiceFX` 의 `M_FXGlow`(언릿 반투명, 인스턴스 커스텀 데이터 0~2 색, 3 밝기, 4 불투명) 인스턴스로, Tick 에서 날고 커지고 사라짐. 별과 일부 링은 카메라를 향함. 밝기 1 넘는 값은 `GlowSqueeze` 0.3 으로 눌러 넣음(그대로면 밝은 하늘 앞에서 색이 다 하얗게 탐). 카메라 500 안쪽 파티클은 반지름을 빼고 가까울수록 옅게(최저 0.1) — 내 캐릭터 주변 폭발이 화면을 덮던 것.
+  - 거대화 시작: 바닥 충격파 링 두 개(금색, 팀색), 먼지 고리 18, 위로 튀는 별 40·사탕색 주사위 14, 가슴 섬광, 가는 빛기둥. 유지 중: 발밑 링 초당 2.2, 몸 둘레로 올라가는 빛 알갱이 초당 16, 가끔 별. 끝: 작은 링 + 옅은 먼지 + 별.
+  - 날개 시작: 카메라를 향한 하늘색 링 + 바닥 링 + 섬광 + 별 32. 비행·활공 중: 날개 위치에서 별과 빛 뭉치가 꼬리처럼(속도에 비례).
+  - 피격(`MulticastDamagePopup` — 모든 기기): 총마다 색과 세기(`HitBurstStrengths`/`HitBurstColors`, ERRHitEffect 순서) 로 카메라 쪽으로 튀는 불꽃 + 별 + 카메라를 향한 링 + 섬광, 그리고 몸 번쩍임.
+  - 상태 변화는 각 기기에서 복제된 `bGiant`/`bFlying` 을 `bWasGiant`/`bWasFlying` 과 비교해 감지(쓰러진 동안은 조용히 맞춤 — 부활 때 엉뚱한 효과 안 나게).
+- 에셋: `C:\work\char-pipeline\scripts\ue_make_fx.py <dice_land fbx 폴더>` → `M_FXGlow`, `SM_FXBall/Ring/Die`(주사위 랜드 도형을 나나이트 없이 — 나나이트는 반투명을 못 그림). `ue_fox_hitflash.py /Game/Characters/Fox/M_Fox` → 이미시브 += `HitFlashColor` × `HitFlash`(기본 0); 캐릭터가 맞으면 1 → 0.18초에 사라짐(제곱 × 2.5).
+- 확인(임시 `-RRFxTest=giant|fly|aim|hit` — 5초마다 거인/비행 반복, 조준 고정, 0.6초마다 자기 피격; 확인 후 지움): 캡처 `C:\work\char-pipeline\output\screens\fx_giant*`, `fx_fly`, `fx_aim*`, `fx_hit` + `*_sheet.png`(여러 장 한 장으로). `-nullrhi` 80초: TPS 쓰러짐 6·거인 3·비행 3, 탑뷰 8·2·3, 오류 없음.
+- 수정 (사용자: 기존 2D 표시는 해골 말고 다 지우기): `ARRRandomHUD` 가 피격 스티커(`T_HitEffects`) 중 해골(폼 핑거 원킬)만 그림 — 총 스티커는 월드 이펙트로 대신. 데미지 숫자는 그대로. 캡처 `output\screens\nosticker*`(교전 중 스티커 없음).
+- 수정 (사용자: 바다를 TPS 에서 볼 때도 예쁘게 — 위에서 볼 때만 신경 쓴 것 같음): 섬의 바다(탑뷰 맵을 3인칭으로 볼 때, F9 치트 등).
+  - `ue_make_water.py`: 거칠기 0.28 → 파라미터 `Roughness` 0.08(엔진 반사로 하늘이 비침), 이미시브에 프레넬(Schlick, 물결 노멀 기준) × `SkySheen`(0.42, 0.78, 0.95) × `SheenAmount` 0.3 — 비스듬할수록 하늘빛, 먼 바다가 수평선으로 이어짐. 코스틱·반짝임·짧은 물결은 `PixelDepth` 와 `DetailFade` 3500 으로 멀수록 줄이되 비스듬히 볼 때만(카메라 벡터의 z 가 0.3~0.65 아래) — 탑뷰 카메라(약 70° 아래, 거리 약 5000)에선 그대로. 처음엔 거리만 봐서 탑뷰 코스틱이 다 사라질 뻔함. `SheenAmount` 0.6 은 바다가 하늘색으로 하얗게 떠서 0.3.
+  - `ARRRandomIsland`: 바닥 밖 바다 평면을 레벨 바닥 경계 + `SeaReach` 80000 까지 — 3인칭에서 수평선에 바다 끝 선(그 너머 대기 지면의 짙은 띠)이 보였음.
+  - 확인(임시 `-RRIslandTPS`(3인칭인데 섬) + `-RRLook=Yaw,Pitch`(시선 고정), 지움 — `FParse::Value` 는 기본으로 쉼표에서 끊으니 `false` 필요했음): `output\screens\sea_before3*`(납작한 청록 띠 + 수평선 끝 선) → `sea_after3`(하늘 반사, 수평선까지 이어짐), `sea_after3_high`(내려다보면 해안 코스틱·거품 그대로). `-nullrhi` 탑뷰 60초 정상.
+- 추가 (사용자: 머리 위 주사위가 돌 때 반짝임 / 탈것을 걷기보다 확실히 빠르게, 킥보드 < 오토바이 < 자동차 / 자동차로 걷기보다 빠르게 들이받으면 즉사, 그 이하는 속도 비례 데미지):
+  - 주사위: `URRRandomOverheadDieComponent` 가 구르는 동안 매 프레임 `ARRRandomEffects::DiceSpinSparkle`(주사위 둘레에서 사탕색 별 초당 65 + 흰 빛 알갱이 12), 착지하는 순간 한 번 `DiceLandBurst`(카메라를 향한 금색 링, 섬광, 별 14).
+  - 탈것(`Handlings`, 걷기 300 대비): 킥보드 1.3 → 2.0, 오토바이 1.6 → 2.7, 자동차 1.9 → 3.5. 가속 1800/1500/1300 → 2600/2400/2200, 제동 1600/700/600 → 2200/1100/1000.
+  - 자동차 돌진(`ARRRandomVehicle::UpdateRam`, 서버, 자동차만): 운전자 수평 속도 60 이상일 때, 다른 팀 캐릭터의 캡슐이 차체 메시 상자(+15)에 닿고 차가 그쪽으로 가고 있으면(옆·뒤에서 걸어와 닿은 건 제외) — 속도 > 운전자의 기본 걷기 속도(`GetBaseWalkSpeed`, 버프·이벤트 전) 면 최대 체력 × 100 데미지(거인도 즉사), 이하면 최대 체력 × 속도/걷기 + 속도 비례로 밀려남. 같은 상대는 0.8초에 한 번. `ApplyPointDamage`, 데미지 원인은 차, 차의 Instigator = 운전자(탈 때 지정, 내릴 때 해제) → 킬은 운전자 점수.
+  - 확인(임시 `-RRRamTest=fast|slow` — 플레이어를 자동차에 태워 앞에 고정한 적에게 돌진 / `-RRDiceTest` — 2초마다 주사위; 지움): fast `rams ... at 981 (walk 300): knockout` → `knocked out by RRRandomCharacter_0`, slow `at 126: 42 damage` 반복 후 쓰러짐. 주사위 캡처 `output\screens\dice_sparkle*`. `-nullrhi` 80초: TPS 쓰러짐 7·탑승 14, 탑뷰 13·8, 오류 없음.
+  - 확인 못 한 것: 실제로 몰아 본 속도감(코너링·드리프트가 빨라진 속도에 맞는지), 봇이 자동차로 일부러 들이받지는 않음(AI 는 그대로), 네트워크.
+- 추가 (사용자: 승리 화면에서 MVP 주변으로 캐릭터들이 몰려와 대열을 맞춰 춤, 너무 멀거나 3초 넘게 걸리면 오다가 순간이동):
+  - `ARRRandomGameMode::ArrangeVictoryFormation`(`EndMatch` 에서 MVP 부활 뒤): MVP 는 제자리(`SetFormationLeader`), 나머지는 쓰러진 사람도 부활시켜 MVP 뒤 V 자 — 둘씩 오른쪽·왼쪽, 한 쌍마다 뒤로 130 · 옆으로 150 더(MVP 팀 먼저, 그다음 진 팀). 자리는 `FindFormationSpot`: MVP 와 같은 바닥 높이(±60, 엄폐물 위 X), 캡슐이 WorldStatic/Dynamic 과 안 겹치고 다른 자리와 120 이상 — 원하는 점에서 바깥으로 70 씩 고리 5바퀴까지.
+  - `ARRRandomCharacter::SetFormationSpot`: 탈것에서 내리고 거인·비행 즉시 끝, `FormationSpot`/`bHasFormation`/`bInFormation` 복제. `UpdateFormation`(매 틱): 움직이는 쪽 기기(봇은 서버, 플레이어는 자기 기기)가 그 자리로 걷기 입력. 서버가 45 안이면 도착, 0.8초 걸은 뒤 남은 거리 ÷ 걷기 속도로 3초(`VictoryGatherTime`) 안에 못 오면, 또는 3초가 지나면 순간이동 + `MulticastFormationTeleport`(사라진 곳·나타난 곳에 `ARRRandomEffects::TeleportPoof` — 섬광, 금색 링, 별 16).
+  - `IsCelebrating`: 대열이 있으면 도착한 사람만(양 팀 모두) 춤, 없으면 예전처럼 이긴 팀 + MVP 제자리. 결과 카메라 거리 900 → 1100(대열이 들어오게).
+  - 처음엔 MVP 바로 뒤에 가로줄로 세워서 정면 카메라에서 MVP 몸에 가려 2~3명만 보임 → V 자로.
+  - 확인(임시 `-RRWinAt=초` 로 그때 플레이어 팀 승리; 지움): 캡처 `output\screens\victory_line2_sheet.png` — 이동 중엔 HUD, 결과 화면에서 여우 5~6이 V 자로 카메라 보며 춤. 로그 `5 brawlers line up ...`, 먼 봇은 `teleports into the dance line (1066 away after 0.8 s)`. `-RRScoreToWin=3` 탑뷰 자연 종료: 5명 중 4명 순간이동, 1명은 걸어서 도착.
+  - 확인 못 한 것: 걸어오는 모습을 화면으로(이번 판들은 대부분 멀어서 순간이동), 엄폐물 많은 곳에서 자리가 없을 때(로그 `no room in the dance line`, 그 캐릭터는 제자리), 네트워크 참가자 화면.
+- 수정 (사용자: 이긴 팀만 모여서 춤, 진 팀은 좌절 모션, Mixamo 로 춤을 몇 개 더 받아 랜덤으로):
+  - Mixamo(로그인된 사용자 계정, 기본 캐릭터 `fox_mixamo_upload`): 페이지 안에서 Mixamo API(`/api/v1/products`, `/animations/export`, `/characters/{id}/monitor`)로 스킨 없이 30fps FBX 7개 → `C:\work\char-pipeline\input\fox\mixamo_celebrate\`. 춤: Silly Dancing(Twist), Hip Hop Dancing Shimmy, Dancing The Running Man, Doing The Chicken Dance. 좌절: Defeated(Showing Frustration After A Loss), Crying(And Rubbing Eyes), Sad Idle(Standing In A Sad Disposition). 중간에 Mixamo 세션이 풀려 사용자가 다시 로그인함.
+  - `ue_import_fox_anim.py ...|A_Fox_Dance1..4|inplace`, `A_Fox_Defeat1..3` → `/Game/Characters/Fox/Anims/`(모두 시작=끝 엉덩이 위치, 반복 가능; 4.0~12.0초).
+  - `ARRRandomCharacter`: `VictoryAnimations`(A_Fox_Victory + Dance1~4), `DefeatAnimations`(Defeat1~3), 복제 `CelebrationPick` 로 각자 하나(`% 개수`). `IsDespairing()` = 경기 끝 + 살아 있음 + 진 팀 + MVP 아님 → 제자리에서 좌절 반복, 총 숨김, 카메라 쪽으로 몸 돌림(춤과 같이).
+  - 게임 모드: `ArrangeVictoryFormation` 이 이긴 팀만 V 자 대열(진 팀은 부활·이동 없음), 모든 캐릭터에 무작위 시작 + 순서대로 `CelebrationPick`(옆끼리 다른 춤). MVP 는 이긴 팀 안에서만(킬 → 살아 있음 순) — 진 팀 봇이 MVP 가 되어 이긴 팀이 진 팀 MVP 뒤에서 춤추던 것(캡처 `victory_dances`).
+  - 확인(임시 `-RRWinAt` + 애니메이션 로그, 지움): 이긴 팀 Dance2/3/4 — 셋이 서로 다른 춤(캡처 `output\screens\victory_dances2_sheet.png`), 진 팀 Defeat3/1/2. 탑뷰 3점 자연 종료 정상.
+  - 확인 못 한 것: 좌절 모션을 화면으로(진 팀은 제자리라 결과 카메라에 안 잡힘 — 로그로만), 네트워크.
+- 수정 (사용자: 길찾기가 되면 3초 안에 도착할 속도를 계산해 엄청 빠르게 달려오게, 플래시·소닉 같은 효과, 텔레포트는 걸어서 못 오거나 3초가 지나면):
+  - `FRRGridPath`(새, `RRRandomGridPath.h/.cpp`): 내비메시가 없어서(레벨을 런타임에 지음) 직접 A* — 시작~목표를 감싸는 사각형 + 1200 여유, 100 칸, 8방향(대각선은 양옆이 열려 있을 때만). 칸이 열림 = 아래로 바닥(Visibility, 법선 z ≥ 0.7)이 있고 그 위 캡슐이 WorldStatic/WorldDynamic(엄폐물·언덕·소품 상자·물가/가장자리 숨은 벽)과 안 겹침; 이웃 바닥 높이 차 50 넘으면 못 감. 캐릭터들은 무시. 칸은 필요할 때만 검사, 4만 칸 넘으면 포기. 결과는 캡슐 스윕으로 모서리를 건너뛰어 펴서 꺾이는 점만. 시작이 공중이면(비행 중 경기 끝) 아래 바닥 기준 — 처음엔 공중 높이를 그대로 써서 옆 칸과 490 차이 → "길 없음" 으로 텔레포트됐음.
+  - `SetFormationSpot`(서버): 길이 있으면 `FormationPath`(복제) + `FormationDashSpeed` = 길이 / `FormationDashTime`(처음 2.5초 → 사용자 요청으로 1.5초 안 도착, 출발·모서리 여유로 1.3초), 걷기 × 2.5 ~ 6000 사이(가까워도 번개처럼). 길이 없으면 바로 순간이동. `UpdateFormation`: 움직이는 기기가 다음 꺾임점으로 입력(속도에 비례한 거리 안이면 다음 점), 서버가 도착(45 또는 한 프레임 이동량 × 1.2) 판정, 3초가 지나면 순간이동. 달리는 동안 `MaxWalkSpeed` = 대시 속도, 가속·제동 30000, 회전 3000, 이동 방향으로 몸 돌림(3인칭 컨트롤러 회전 끔).
+  - 연출(`UpdateDashEffects`, 모든 기기): 잔상 — `UPoseableMeshComponent` 8개를 돌려 쓰며 0.035초마다 몸 자세 복사, `M_FXGhost`(새: 언릿 반투명, 프레넬 가장자리 발광, `Color`/`Opacity`, 스켈레탈용; `ue_make_fx.py` 에 추가)로 0.3초에 사라짐(금색 + 팀색). `ARRRandomEffects::SpeedTrail`: 진행 방향으로 늘린 빛줄기 초당 70, 튀는 전기 불꽃 55, 발밑 먼지 30. `SonicBoom`: 출발·도착 때 진행 방향을 축으로 선 링 두 개(금색, 팀색) + 섬광 + 불꽃 18.
+  - 확인(임시 `-RRWinAt` + 길찾기 실패 로그, 지움): 화면 없이 TPS/탑뷰 여러 판 — `dashes to the dance line: N corners, L long, at S` → `arrives ... after 0.2~2.5 s`, 순간이동 없음. 캡처 `output\screens\dash3_sheet.png`(빛줄기·금색 잔상으로 달려와 도착 링, 이어서 대열 춤). 탑뷰 3점 자연 종료 정상.
+  - 확인 못 한 것: 3초 안에 못 와서 순간이동하는 경우(이번 판들은 모두 도착), 네트워크 참가자(플레이어 폰은 자기 기기가 경로를 따라감 — 서버 이동 검증과 맞는지 미확인), 아주 높은 속도(이번엔 대부분 750~1100)에서 모서리 끼임.
+- 확인 못 한 것: 실제 마우스로 조준해 본 느낌, 탑뷰 시점에서 이펙트 크기(같은 이펙트가 나옴), 네트워크 참가자 화면, 많은 효과가 겹칠 때 프레임(풀 크기: 구 500, 링 80, 별 500, 주사위 120 — 넘치면 새 파티클 생략).
+
+## 21차 — TPS 전용 맵 "주사위 랜드" (사용자: 파스텔 주사위 랜드 컨셉 → 색 진하게 + 엄폐물 많이 → Tripo 3D 로 만들어 TPS 시작 시 나오게)
+
+- 21~28차와 함께 한 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 컨셉: Tripo 웹 이미지 생성(Nano Banana Pro, 16:9, 무료 할당)으로 5장씩 두 번(전경/TPS 어깨 너머/주사위 숲/하늘 섬/노을 폭포). 첫 판은 "물 빠짐" → 두 번째 판 "vibrant saturated candy colors ... not washed out" + 엄폐물(주사위 담, 바리케이드, 반쯤 묻힌 큰 주사위, 덤불, 기둥). 다운로드는 안 함(Tripo 기록에만). 같은 장면의 3D 스케치 아티팩트: https://claude.ai/artifact/43gnXuFWhYp7MeMM6o2xZm
+- Tripo 3D(Claude in Chrome 으로 studio.tripo3d.ai, 텍스트 → HD Model H3.1, 1회 30, 23,700 → 23,490 = 7개; 주사위 담은 뒤에 판 조각이 떠 있어 무료 재시도): 주사위 나무 A(분홍·보라·주황) / B(민트·하늘·노랑, 2층), 주사위 담(5×3), 둥근 덤불, 광장 받침대(보라·분홍 2단), 주사위 무지개 아치(양끝 구름), 구름. 프롬프트마다 "cute stylized cartoon ... chunky rounded balloon-like shapes, glossy soft clay look, vibrant saturated candy colors". 사용자 허락 후 FBX(Blender, 2K) → `C:\work\char-pipeline\input\dice_land\<treeA|treeB|dicewall|hedge|pedestal|rainbow|cloud>`.
+  - `blender_props.py` → `output\dice_land_props\SM_DL*.fbx`(나무 A 560h, B 640h, 덤불 150h, 담 165h(275 폭), 받침대 560w(높이 217), 무지개 1000w, 구름 600w) → `ue_import_props.py` 에 `=gloss` 옵션 추가(Tint 1, 거칠기 0.4, 스페큘러 0.5 — 사탕 광택) → `/Game/Environment/DiceLand/SM_DL*`, `M_DL*`.
+  - 주의: props 스크립트는 머티리얼 이름을 `SM_X` → `M_X` 로 만들므로 `SM_DLRainbow` 가 `M_DLRainbow` 를 덮어씀 → 무지개 주사위 머티리얼은 `M_DLRainbowDie`.
+- 절차 메시: `C:\work\char-pipeline\scriptslender_dice_land.py <out>` → `output\dice_land\SM_DLDie`(초타원체 p=6, 100 크기, 슬롯 Body/Pips, 마주 보는 면 합 7), `SM_DLDieBlank`(눈 없음), `SM_DLRainbowDie`(면마다 버텍스 컬러), `SM_DLTile`(쿠션 타일 200×200×50, 피벗은 윗면 가운데). `ue_import_dice_land.py <dir>` → 같은 폴더에 메시(충돌 없음, 나나이트) + `M_DLCandy`(인스턴스 커스텀 데이터 0~2 = 선형 색, 거칠기 0.35), `MI_DLTile`(거칠기 0.6), `M_DLRainbowDie`(버텍스 컬러), `M_DLPip`.
+- `ARRRandomDiceLand`(새, 복제, 모든 기기가 같은 시드로 같게 지음; 에셋은 BeginPlay 에서 `LoadObject` — 생성자 `ConstructorHelpers` 로 하면 에셋이 없을 때 커맨드렛이 CDO 오류로 종료됨):
+  - 게임 모드 `StartPlay`: `bSpawnDiceLand` + `ARRRandomGameState::IsThirdPersonMode` 면 섬·잔디·기본 엄폐물 대신 이것만. 탑뷰는 그대로(확인: 로그 `island 36 x 36 ...`).
+  - 바닥: 레벨 바닥 위(보이지 않게 숨김, 충돌은 그대로 — 밟는 건 레벨 바닥), 흔들리는 원(반지름 약 3050) 안에 쿠션 타일(체크, 잔디엔 가끔 라임/레몬/분홍), 타일 아래 어두운 판(이음매가 구멍 대신 줄눈으로). 길: 가운데 큰길(X), 팀 출발 줄(X ±1530 = `TeamSpawnDistance`/2), 양옆 차선(Y ±1800 — 게임 모드가 차를 세우는 -1890/1710 이 들어감), 폭 360. 광장 반지름 560, 테 720.
+  - 광장: Tripo 받침대(충돌 상자) 위에 무지개 주사위(2.6 배)가 돌며 떠 있음(Tick), 둘레에 작은 주사위 28개(길 쪽은 비움).
+  - 필드 엄폐물은 점대칭(파랑 쪽에 손으로 놓고 반 바퀴 돌려 빨강 쪽): 덤불 2, 주사위 담 4(+ 가운데 줄 1쌍), 큰 주사위 4, 바리케이드(주사위 2 + 위 1) 2. 바깥: 왼쪽 먼 끝/오른쪽 가까운 끝은 주사위 숲(나무·덤불·주사위), 반대 끝은 거대 주사위 들판, 팀 뒤뜰에 나무·덤불·작은 주사위 — `FRandomStream` 으로 뽑되 점과 그 반대편이 모두 비었을 때만(`IsClear`: 섬 안 `RimMargin` 170, 광장·길·출발 줄 밖, 서로 70 간격).
+  - 막는 것: 모두 숨긴 큐브(`BlockAll`, 섬과 같음) — 담/덤불/받침대는 메시 경계 × 비율, 나무는 줄기만, 주사위는 0.94 배. 가장자리: 높이 6000 숨은 벽 160조각(캐릭터만 막음, 비행해도 못 넘음), 그 안쪽에 작은 주사위 줄(보기만).
+  - 하늘: 섬 아래 주사위 원뿔(8단, 주황 → 분홍 → 보라, 14% 는 눈 있음), Tripo 구름 바다 240개(멀수록 크고 높게 — 32,000 까지, 먼 것은 바닥보다 조금 위까지 올라와 수평선을 덮음), 높은 하늘의 작은 구름 10, 양 끝 너머 무지개 아치 2(긴 쪽을 가로로, 발은 구름 속), 필드 위에 떠서 출렁이며 도는 무지개 주사위 26(Tick 에서 `BatchUpdateInstancesTransforms`), 닿지 않는 하늘 섬 3(주사위 탑 / 나무 / 나무 + 덤불).
+  - 색 보정: 바운드 없는 `APostProcessVolume`(노출 -0.35, 대비 1.1, 미드톤·하이라이트 채도 1.3) — 카메라가 전체 채도(1.08)를 덮어쓰므로 그것 외의 항목만. 이게 없으면 밝은 하늘 탓에 사탕색이 파스텔로 빠짐.
+  - 미니맵: `ARRRandomHUD::BuildMinimapBase` 가 섬이 없으면 `GetMapColor`(가장자리 밖 하늘색, 놓인 것들의 발자국 상자, 그 외 바닥색).
+  - 로그 `RRRandom: dice land 700 tiles, 1151 dice, 87 solid boxes, 14 trees, 17 hedges, 10 walls.`
+- 확인: 빌드 경고 없음. 창 캡처 `C:\work\char-pipeline\output\screens\diceland1~5_*`(TPS 시작 시점, 위에서 전경, 숲, 필드 — 임시 `-RRLandCam=X,Y,Z,Pitch,Yaw` 고정 카메라로 찍고 지움). `-nullrhi` 80초 봇전: TPS 쓰러짐 2번, 탑뷰 6번.
+- 수정 (사용자: 색을 전체적으로 파스텔로, "이전 게임 색감이 더 좋았어"; 오브젝트 퀄리티가 낮으니 Claude 가 그린 주사위 랜드 3D 스케치처럼 깔끔하게):
+  - 색 보정 볼륨(노출/대비/채도) 뺌 → 게임 원래 색감. 팔레트를 마카롱 파스텔로(분홍 255,143,177 / 복숭아 / 레몬 / 민트 / 하늘 / 페리윙클 / 라벤더; 바닥 민트 150,225,180 등). 처음엔 스케치 값 그대로(거의 흰색에 가까운 파스텔)를 넣었더니 밝은 하늘 아래 하얗게 날아가서 한 단계 진하게.
+  - Tripo 소품(나무/담/덤불/받침대/무지개/구름)은 더 안 씀(에셋과 `input\dice_land` 는 남음) — 울퉁불퉁한 표면 + 6000 삼각형 감축으로 음영이 깨져 보였음. 대신 스케치처럼 매끈한 기본 도형을 조합: `blender_dice_land.py` 에 `SM_DLBall`(구), `SM_DLTrunk`(위로 가늘어지고 윗모서리 둥근 줄기), `SM_DLRing`(얇은 링) 추가, 주사위 해상도 10 → 18 분할, 눈 32×12(주사위 18,672 삼각형, 나나이트), 무지개 주사위는 다각형 중심 기준으로 면 색을 칠해 모서리에서 색이 번지지 않게, 파스텔로.
+  - `ue_import_dice_land.py`: `M_DLCandy` 에 "Glow"(색 × 값 → 이미시브), `MI_DLCloud`(거칠기 0.85, Glow 0.2), `M_DLPip` 은 커스텀 데이터 3~5 로 눈 색(없으면 흰색) → 흰 주사위에 파스텔 눈, 색 주사위에 짙은 눈.
+  - `ARRRandomDiceLand` 다시: 나무 = 줄기 + 주사위 잎(하나 / 둘 쌓기 / 셋 묶음 + 위 하나), 덤불 = 공 5개 + 위 3개 + 작은 꽃 공(담 높이 약 143), 주사위 담 = 78 주사위 4×2(무지개 순서, 약간씩 틀어짐, 높이 156), 받침대 = 둥근 판 두 장(라벤더 500, 분홍 350, 45° 돌림) 위에 무지개 주사위 + 흰색·라일락 링 두 개가 반대로 돎, 구름 = 공 4~7개 더미(바다 170 더미 + 하늘 12 더미), 무지개 = 주사위 7줄 반원(앞쪽 반지름 7600, 뒤쪽 6800), 풀밭에 작은 덤불과 꽃 공 220개. 배치(점대칭, 바깥 숲/거대 주사위/뒤뜰)는 그대로.
+  - 로그 `dice land 700 tiles, 2173 dice, 474 balls, 988 cloud balls, 13 trunks, 88 solid boxes.` `-nullrhi` 80초: TPS 쓰러짐 4번, 탑뷰 12번(탑뷰 섬 그대로). 캡처 `output\screens\diceland6~8_*`.
+- 수정 (사용자: 배경 오브젝트 색만 조금 더 진하게): `Richer()`(채도 × 1.35 + 0.06, 밝기 × 0.95)를 무지개 아치, 가장자리 주사위 줄, 하늘 섬(타일·탑·덤불·주사위)에만 적용, 섬 아래 원뿔 색을 진하게(255,165,115 → 255,130,165 → 160,125,255), 구름 색조를 조금 더 분홍·라일락·하늘빛으로. 필드(바닥·엄폐물·나무)는 그대로. 캡처 `output\screens\diceland9_tps`.
+- 수정 (사용자: Claude 주사위 랜드 색감과 비슷하되 살짝 진하게, 캐릭터도 어울리는 톤으로 조금):
+  - 맵 전체: `AddColored` 가 모든 색을 `Toned()`(채도 × 1.12 + 0.03, 밝기 × 0.97)로 한 번 거침(흰 눈은 제외). 배경의 `Richer()` 는 그 위에 그대로.
+  - 여우: `C:\work\char-pipeline\scripts\ue_fox_pastel.py /Game/Characters/Fox/M_Fox` — 베이스 컬러 뒤에 `lerp(색, lerp(desaturate(색, PastelDesaturate 0.12), PastelCream (1, 0.92, 0.86), PastelLift 0.07), Pastel)`. "Pastel" 기본 0(탑뷰는 그대로), `ARRRandomDiceLand::Tick` 이 1초마다 모든 캐릭터 몸 MID 에 1 → 부드러운 살구색 털. 처음엔 0.28 / 0.2 로 했더니 선형 색에서 크림을 섞어서 털이 회색빛 베이지가 됨. 다시 실행하면 이전 노드는 연결 없이 그래프에 남음(셰이더엔 안 들어감, 경고 없음). 총 등 다른 머티리얼은 그대로.
+  - 캡처 `output\screens\diceland10_tps`(0.28 / 0.2, 너무 빠짐), `diceland11_tps`(0.12 / 0.07).
+  - 수정 (사용자: 조금 더 주황): Dice Land 가 `PastelDesaturate` 0.05, `PastelLift` 0.03 도 함께 넘김(`FoxDesaturate`, `FoxCreamLift` — 머티리얼 기본값 0.12 / 0.07 은 그대로). 캡처 `diceland12_tps`.
+- 수정 (사용자: 맵도 살짝 더 진하게, 보면서 조절할 수 있게 값을 따로): 콘솔 변수(게임 중 `~` 콘솔에서 바로 반영) `rr.DiceLand.Saturation`(1 = 만든 그대로, 기본 1.15), `rr.DiceLand.Brightness`(1), `rr.DiceLand.FoxDesaturate`(0.05), `rr.DiceLand.FoxCream`(0.03). 기본값은 `Config/DefaultEngine.ini` `[SystemSettings]`(로그에 `deferred - dummy variable created` 가 뜨지만 모듈이 변수를 등록할 때 값이 넘어감).
+  - `ue_import_dice_land.py` 의 `tone()`: 네 머티리얼(Candy/RainbowDie/Pip, 타일·구름 인스턴스 포함) 베이스 컬러를 `max(0, lerp(회색, 색, Saturation) × Brightness)` 로. `ARRRandomDiceLand` 가 다 지은 뒤 자기 메시 컴포넌트의 머티리얼을 전부 MID 로 바꿔 `Tunable` 에 모으고, Tick 에서 값이 바뀌면 모두에 넣음. 여우 값은 0.25초마다.
+  - 확인: 기본(1.15) `output\screens\diceland13_default`, `-dpcvars=rr.DiceLand.Saturation=1.6` `diceland13_sat16`(확연히 진해짐). 콘솔에 직접 쳐서 바꾸는 건 캡처로 못 해 봄(같은 Tick 경로).
+- 확인 못 한 것: 실제 마우스로 TPS 플레이 감각(엄폐물 높이 약 145~160 이 적당한지), 봇이 숲·담에 걸리는 빈도(로그에 `is stuck and failed to move` 가 가끔), 네트워크 참가자, 프레임 비용(타일 700 + 주사위 2,170 + 공 1,460, 나나이트), 비행으로 하늘 섬까지 가는지(가장자리 벽에 막혀야 함).
 
 ## 15차 — 전장의 안개
 
@@ -221,6 +643,17 @@
 - 참고: 이 빌드 직후 게임이 프로젝트 DLL 을 불러오기 직전에서 두 번 멈춤(창 없음, 로그는 Turnkey 장치 검사 뒤에서 끝) — 몇 분 뒤 다시 실행하니 정상. 스마트 앱 컨트롤이 새 DLL 을 검사하느라 붙잡은 것으로 보임(예전 4551 차단과 비슷).
 
 - 수정 (사용자: TPS 에서 마우스가 안 보이는 상태로 계속 움직여서 문제): 게임 창이 마우스를 쥐고 있는지 안 보고 마우스 움직임을 늘 시선으로 받았음. 이제 `IsViewportFocused`(뷰포트 포커스 + `FPlatformApplicationMisc::IsThisApplicationForeground`, 모듈 `ApplicationCore` 추가) 이고 커서가 숨었을 때만 시선 입력, 한 프레임 최대 60 카운트. 커서가 다시 나오는 때: 일시정지/결과 화면, **왼쪽 Alt 누르는 동안**(`IA_FreeCursor`), 다른 창 사용 중(Alt+Tab 등). 게임 창을 다시 클릭하면 다시 잡음(그 클릭은 사격 안 함). 커서가 나와 있을 땐 클릭이 사격 대신 미니맵 클릭. 확인(임시 로그): 게임 창 활성 = 커서 숨김, 다른 창으로 전환 = 커서 보임 + 시선 그대로.
+
+## 20차 덧붙임 — TPS 마우스 고정, 창 크기 변경 GPU 크래시 (사용자: TPS 에선 마우스를 가운데 고정, 사격 중 안 보이는 커서가 창 밖으로 나감 / 창 크기 바꿀 때 GPU crash)
+
+- 마우스: `ARRRandomPlayerController::LockMouse` — 게임이 마우스를 가진 동안(TPS, 커서 숨김) 뷰포트 `SetMouseLockMode(LockAlways)`, `SetMouseCaptureMode(CapturePermanently_IncludingInitialMouseDown)`, `CaptureMouse`, `LockMouseToViewport` → 창 안에 묶임; `CenterMouse` 가 매 틱 가운데에서 40 픽셀 넘게 벗어나면 가운데로(시선은 원시 마우스 이동으로 돌아서 되돌림은 회전 안 함). Alt/다른 창/메뉴/탑뷰로 돌아갈 땐 풀어 줌. 확인: 게임 창 앞에서 상대 이동 주입 → 커서 계속 창 가운데(1280,764), 시선 0 → 18.4°, 다른 창으로 바꾸면 풀림.
+- GPU 크래시: 크래시 기록(`SavedCrashesECC-...359758...`) — 창 크기 변경 중(TSR 1292X727 → 1352X760) ASYNC COMPUTE 큐 작업이 5초 타임아웃 → 다음 PRESENT 에서 `DXGI_ERROR_DEVICE_REMOVED`(RTX 5060 LAPTOP, 하이브리드 그래픽, SWAPCHAIN ALLOWTEARING=1). `CONFIGDEFAULTENGINE.INI [SYSTEMSETTINGS]` 에 `R.D3D12.ALLOWASYNCCOMPUTE=0`, `R.RDG.ASYNCCOMPUTE=0`, `R.D3D12.USEALLOWTEARING=0`. 확인: 창 크기 24번 연속 변경(800X500~1700X950) — GPU 타임아웃/크래시 없음, 게임 정상. (원래도 매번 나던 건 아니라 완전히 없어졌다고 단정은 못 함.)
+
+## 20차 덧붙임 — TPS 조준 사격 (사용자: TPS 모드에선 에임에 맞게 발사체가 날아가게)
+
+- `ARRRandomCharacter::ShootAt`: 3인칭 플레이어면 총구에서 조준점(`GetCrosshairTarget`)으로 곧장(같은 층이면 수평으로 펴던 것, 목표를 총구 높이로 올리던 것 없음), 위아래 한계 `ThirdPersonMaxShotPitch` 80°(탑뷰/봇은 그대로 50°, 같은 층 수평). 발사체는 원래 중력 없이 직선.
+- `URRRandomBodyAnimInstance`: 3인칭이면 조준 자세의 목표 방향을 `GetBaseAimRotation`(내 기기/서버는 카메라, 다른 기기는 복제된 시선 피치)의 피치로(±55°) → `PointGun` 이 가슴을 그만큼 기울여 총이 위아래로 조준점을 향함.
+- 확인(임시 `-RRShotTest`: 카메라 피치 고정 후 연사, 로그; 지움): 수평 조준(-10°) → 총알 -5.7° 로 조준점 바닥에, 위 조준(25°) → 25.3° 로 하늘의 조준점 쪽, 캡처에서 노란 총알이 조준점으로.
 
 ## 20차 덧붙임 — 물을 타이틀처럼 (사용자: 인게임 물 그래픽을 타이틀처럼)
 

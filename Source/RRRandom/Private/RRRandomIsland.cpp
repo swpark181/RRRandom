@@ -32,6 +32,8 @@ namespace
 	constexpr float PlankGap = 0.12f;
 	constexpr float PlankThickness = 8.f;
 	constexpr int32 LookSeed = 4242;
+	// How far the sea runs on past the level's floor
+	constexpr float SeaReach = 80000.f;
 	// Roads (Tripo, char-pipeline/scripts/blender_grass_tiles.py and blender_props.py): the dirt tiles' side, how many
 	// grass clumps (and how big) on each side where a road meets grass, how often a pebble cluster sits there too, and
 	// the seed
@@ -729,7 +731,8 @@ void ARRRandomIsland::Build()
 	}
 
 	// Water over the rest of the floor around the island, so its edge is a shore and not the end of the world
-	const FBox Floor = Hit.GetComponent()->Bounds.GetBox();
+	// Out past the level's floor to the horizon, so the third person camera sees open sea and not where it stops
+	const FBox Floor = Hit.GetComponent()->Bounds.GetBox().ExpandBy(FVector(SeaReach, SeaReach, 0.f));
 	const FVector2D IslandMin(Center.X - Rows * CellSize * 0.5f, Center.Y - Cols * CellSize * 0.5f);
 	const FVector2D IslandMax(Center.X + Rows * CellSize * 0.5f, Center.Y + Cols * CellSize * 0.5f);
 	auto Sea = [&](float MinX, float MaxX, float MinY, float MaxY)

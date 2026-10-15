@@ -1,4 +1,5 @@
 #include "RRRandomSessionSubsystem.h"
+#include "RRRandomSpecies.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/NetDriver.h"
@@ -142,6 +143,16 @@ void URRRandomSessionSubsystem::RunStartupCommand()
 	if (FParse::Param(FCommandLine::Get(), TEXT("RRThirdPerson")))
 	{
 		bThirdPersonMode = true;
+	}
+	FString MapName;
+	if (FParse::Value(FCommandLine::Get(), TEXT("RRMap="), MapName))
+	{
+		ThirdPersonMap = MapName.Equals(TEXT("DiceLand"), ESearchCase::IgnoreCase) ? ERRThirdPersonMap::DiceLand : ERRThirdPersonMap::DiceTown;
+	}
+	FString SpeciesName;
+	if (FParse::Value(FCommandLine::Get(), TEXT("RRSpecies="), SpeciesName) && RRSpecies::FromName(SpeciesName) != INDEX_NONE)
+	{
+		Species = RRSpecies::FromName(SpeciesName);
 	}
 
 	if (FParse::Param(FCommandLine::Get(), TEXT("RRHost")))

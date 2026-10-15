@@ -10,6 +10,15 @@ class FOnlineSessionSearch;
 class IOnlineSubsystem;
 class UNetDriver;
 
+/** The third person mode's maps. */
+enum class ERRThirdPersonMap : uint8
+{
+	/** The round pastel island of dice (ARRRandomDiceLand). */
+	DiceLand,
+	/** The big block town (ARRRandomDiceTown). */
+	DiceTown,
+};
+
 /**
  * Online play without a dedicated server: one player hosts (their game becomes a listen server) and others find and join it.
  *
@@ -68,6 +77,21 @@ public:
 	 */
 	void SetThirdPersonMode(bool bOn) { bThirdPersonMode = bOn; }
 	bool IsThirdPersonMode() const { return bThirdPersonMode; }
+
+	/**
+	 * The map the third person games this machine starts are played on, picked on the title after THIRD PERSON and kept
+	 * across levels. -RRMap=DiceLand or -RRMap=DiceTown on the command line sets it too. Joiners get the host's (its map
+	 * actor replicates).
+	 */
+	void SetThirdPersonMap(ERRThirdPersonMap InMap) { ThirdPersonMap = InMap; }
+	ERRThirdPersonMap GetThirdPersonMap() const { return ThirdPersonMap; }
+
+	/**
+	 * The brawler this machine's player plays (RRSpecies: fox, rabbit, squirrel, tiger), picked on the title and kept across
+	 * levels. -RRSpecies=<name> on the command line sets it too. Sent to the host by ARRRandomPlayerController.
+	 */
+	void SetSpecies(int32 InSpecies) { Species = InSpecies; }
+	int32 GetSpecies() const { return Species; }
 
 	/** True when online play goes through Epic Online Services, false for LAN. */
 	bool IsUsingEOS() const;
@@ -162,6 +186,8 @@ private:
 	bool bDelegatesBound = false;
 	bool bStartupCommandDone = false;
 	bool bThirdPersonMode = false;
+	ERRThirdPersonMap ThirdPersonMap = ERRThirdPersonMap::DiceTown;
+	int32 Species = 0;
 	int32 JoinRetriesLeft = 0;
 	FString Status;
 	TSharedPtr<FOnlineSessionSearch> Search;

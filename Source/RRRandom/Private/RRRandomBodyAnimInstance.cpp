@@ -23,6 +23,8 @@ namespace
 	// How fast the standing/running mix and the fire/aim mix follow (exponential, per second)
 	constexpr float MoveBlendSpeed = 10.f;
 	constexpr float FireBlendSpeed = 12.f;
+	// Third person: the most the spine tips the gun up or down after the aim (degrees)
+	constexpr float MaxAimPitch = 55.f;
 	// The spine bones that turn the upper body toward the aim, hips up, and each one's share of the turn;
 	// the chest (last) also takes the tilt and the kick
 	const FName SpineBones[] = { TEXT("Spine"), TEXT("Spine1"), TEXT("Spine2") };
@@ -216,7 +218,16 @@ void URRRandomBodyAnimInstance::UpdateAim(float DeltaSeconds)
 	const float Kick = FMath::Clamp(SinceShot / FMath::Max(KickTime, KINDA_SMALL_NUMBER), 0.f, 1.f);
 	Aim.Kick = SinceShot < KickTime ? KickAngle * (Kick < 0.2f ? Kick / 0.2f : FMath::Square((1.f - Kick) / 0.8f)) * Aim.MoveWeight : 0.f;
 
-	Aim.Facing = Mesh->GetComponentTransform().InverseTransformVectorNoScale(Brawler->GetActorForwardVector());
+	// Where the gun should point: ahead, level; in third person where the player aims, up or down too (the pawn's aim
+	// rotation: the camera's on its own machine and the server, the replicated view pitch elsewhere), within reach of a spine
+	FVector Look = Brawler->GetActorForwardVector();
+	if (Brawler->IsThirdPerson())
+	{
+		FRotator AimRotation = Brawler->GetBaseAimRotation();
+		AimRotation.Pitch = FMath::Clamp(FRotator::NormalizeAxis(AimRotation.Pitch), -MaxAimPitch, MaxAimPitch);
+		Look = FRotator(AimRotation.Pitch, Brawler->GetActorRotation().Yaw, 0.f).Vector();
+	}
+	Aim.Facing = Mesh->GetComponentTransform().InverseTransformVectorNoScale(Look);
 }
 
 void FRRRandomBodyAnimInstanceProxy::PreUpdate(UAnimInstance* InAnimInstance, float DeltaSeconds)
@@ -314,7 +325,9 @@ void FRRRandomBodyAnimInstanceProxy::PointGun(FPoseContext& Output) const
 	// Turned about the mesh's up axis, spread up the spine, until the gun lies over the facing; then tilted level at the
 	// chest (about the axis across the facing: positive tips the front up), plus the shot's kick back
 	const float Yaw = FMath::FindDeltaAngleRadians(FMath::Atan2(Gun.Y, Gun.X), FMath::Atan2(Facing.Y, Facing.X)) * Aim.Weight;
-	const float Pitch = -FMath::Asin(FMath::Clamp(Gun.Z, -1.f, 1.f)) * Aim.Weight + FMath::DegreesToRadians(Aim.Kick) * Aim.Weight;
+	// (Facing's own tilt is zero from above, the aim's pitch in third person)
+	const float Elevation = FMath::Asin(FMath::Clamp(Aim.Facing.GetSafeNormal().Z, -1.f, 1.f));
+	const float Pitch = (Elevation - FMath::Asin(FMath::Clamp(Gun.Z, -1.f, 1.f))) * Aim.Weight + FMath::DegreesToRadians(Aim.Kick) * Aim.Weight;
 	for (int32 Bone = 0; Bone < UE_ARRAY_COUNT(SpineBones); ++Bone)
 	{
 		TurnBone(Output.Pose, Spine[Bone], FQuat(FVector::UpVector, Yaw * SpineShares[Bone]));
