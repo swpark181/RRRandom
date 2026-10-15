@@ -113,7 +113,7 @@ namespace
 		TArray<FString> Bots;
 		for (TActorIterator<ARRRandomCharacter> It(World); It; ++It)
 		{
-			if (It->GetTeam() == Brawler.GetTeam() && !It->GetPlayerState() && *It != &Viewer)
+			if (It->GetTeam() == Brawler.GetTeam() && !It->GetPlayerState() && *It != &Viewer && !It->IsDecoy())
 			{
 				Bots.Add(It->GetName());
 			}
@@ -182,7 +182,7 @@ void ARRRandomHUD::DrawTeamPanel(const ARRRandomCharacter& Viewer)
 	TArray<const ARRRandomCharacter*> Mates;
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{
-		if (*It != &Viewer && It->GetTeam() == Viewer.GetTeam())
+		if (*It != &Viewer && It->GetTeam() == Viewer.GetTeam() && !It->IsDecoy())
 		{
 			Mates.Add(*It);
 		}

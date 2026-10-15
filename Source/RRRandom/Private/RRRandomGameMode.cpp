@@ -143,6 +143,11 @@ void ARRRandomGameMode::EndMatch(int32 Winner)
 	};
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{
+		// (a fox's clones are no one)
+		if (It->IsDecoy())
+		{
+			continue;
+		}
 		if (!MVP || Rank(*It) > Rank(MVP))
 		{
 			MVP = *It;
@@ -173,6 +178,10 @@ void ARRRandomGameMode::ArrangeVictoryFormation(ARRRandomCharacter* MVP, int32 W
 	TArray<ARRRandomCharacter*> Dancers;
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{
+		if (It->IsDecoy())
+		{
+			continue;
+		}
 		It->SetCelebrationPick(Pick++);
 		if (*It != MVP && It->GetTeam() == Winner)
 		{

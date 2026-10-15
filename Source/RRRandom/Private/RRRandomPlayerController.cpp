@@ -7,7 +7,7 @@
 #include "RRRandomHUD.h"
 #include "RRRandomResultsDirector.h"
 #include "RRRandomSessionSubsystem.h"
-#include "RRRandomTigerSpirit.h"
+#include "RRRandomUltimate.h"
 #include "RRRandomVehicle.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
@@ -336,7 +336,7 @@ void ARRRandomPlayerController::PlayerTick(float DeltaTime)
 	{
 		const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
 		const bool bWantCursor = bPauseMenuOpen || ARRRandomGameState::IsMatchOver(this) || bCursorFreed || !IsViewportFocused()
-			|| (Mine && Mine->IsUsingUltimate());
+			|| (Mine && Mine->GetUltimate() && Mine->GetUltimate()->KeepsOverview());
 		if (bShowMouseCursor != bWantCursor)
 		{
 			bShowMouseCursor = bWantCursor;
@@ -361,24 +361,25 @@ void ARRRandomPlayerController::PlayerTick(float DeltaTime)
 		}
 	}
 
-	// My tiger's spirit is out: the view goes up over the arena to pick where it strikes, and back down after
+	// My ultimate wants spots: the view goes up over the arena to pick them, and back down after
 	if (IsLocalController() && !ResultsDirector)
 	{
 		const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
-		ARRRandomTigerSpirit* Spirit = Mine ? Mine->GetSpirit() : nullptr;
-		if (Spirit && GetViewTarget() != Spirit)
+		ARRRandomUltimate* Ultimate = Mine ? Mine->GetUltimate() : nullptr;
+		ARRRandomUltimate* Picking = Ultimate && Ultimate->KeepsOverview() ? Ultimate : nullptr;
+		if (Picking && GetViewTarget() != Picking)
 		{
-			SetViewTargetWithBlend(Spirit, 0.8f, VTBlend_EaseInOut, 2.f);
+			SetViewTargetWithBlend(Picking, 0.8f, VTBlend_EaseInOut, 2.f);
 			bViewingSpirit = true;
 		}
-		// The strike area's hologram under the cursor
-		if (Spirit)
+		// The area's hologram under the cursor
+		if (Ultimate)
 		{
 			FVector Spot;
-			const bool bSpot = GetUltimateSpot(Spot);
-			Spirit->ShowCursorSpot(bSpot, Spot);
+			const bool bSpot = Ultimate->IsPicking() && GetUltimateSpot(Spot);
+			Ultimate->ShowCursorSpot(bSpot, Spot);
 		}
-		if (!Spirit && bViewingSpirit && GetPawn())
+		if (!Picking && bViewingSpirit && GetPawn())
 		{
 			SetViewTargetWithBlend(GetPawn(), 0.8f, VTBlend_EaseInOut, 2.f);
 			bViewingSpirit = false;
@@ -610,11 +611,6 @@ void ARRRandomPlayerController::ServerCheatUltimate_Implementation()
 	{
 		return;
 	}
-	// Only the tiger has an ultimate: anyone else becomes one first
-	if (RandomCharacter->GetSpecies() != RRSpecies::Tiger)
-	{
-		RandomCharacter->SetSpecies(RRSpecies::Tiger);
-	}
 	RandomCharacter->GetDiceBuffs()->GiveUltimateDie();
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, %s gets an ultimate die."), *RandomCharacter->GetName());
 #endif
@@ -623,9 +619,9 @@ void ARRRandomPlayerController::ServerCheatUltimate_Implementation()
 void ARRRandomPlayerController::ServerUltimateStrike_Implementation(FVector_NetQuantize Spot)
 {
 	const ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
-	if (RandomCharacter && RandomCharacter->GetSpirit())
+	if (RandomCharacter && RandomCharacter->GetUltimate())
 	{
-		RandomCharacter->GetSpirit()->RequestStrike(Spot);
+		RandomCharacter->GetUltimate()->RequestSpot(Spot);
 	}
 }
 
@@ -634,13 +630,13 @@ bool ARRRandomPlayerController::GetUltimateSpot(FVector& OutSpot) const
 	const ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
 	FVector Origin;
 	FVector Direction;
-	if (!RandomCharacter || !RandomCharacter->GetSpirit() || !DeprojectMousePositionToWorld(Origin, Direction))
+	if (!RandomCharacter || !RandomCharacter->GetUltimate() || !DeprojectMousePositionToWorld(Origin, Direction))
 	{
 		return false;
 	}
 	// Where the cursor's line meets the floor's height (anywhere, past the edge too: the strike's spot is a place on the
 	// floor, not someone, nor the top of something tall in the way), then down onto the ground there
-	const ARRRandomTigerSpirit* Spirit = RandomCharacter->GetSpirit();
+	const ARRRandomUltimate* Spirit = RandomCharacter->GetUltimate();
 	if (Direction.Z >= -0.01f)
 	{
 		return false;
@@ -737,13 +733,13 @@ void ARRRandomPlayerController::OnFire()
 		return;
 	}
 	ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
-	// My tiger's spirit is out: the button picks where it strikes (once per strike, however long it's held)
-	if (RandomCharacter && RandomCharacter->IsUsingUltimate())
+	// My ultimate wants spots: the button picks one (once per hit, however long it's held; a click while the last one is
+	// under way waits for its turn)
+	const ARRRandomUltimate* Ultimate = RandomCharacter ? RandomCharacter->GetUltimate() : nullptr;
+	if (Ultimate && Ultimate->IsPicking())
 	{
-		// (a click while the giant is still striking waits for its turn)
 		FVector Spot;
-		const ARRRandomTigerSpirit* Spirit = RandomCharacter->GetSpirit();
-		if (Spirit && Spirit->GetStrikesLeft() > 0 && GetWorld()->GetTimeSeconds() - LastStrikeRequestTime > 0.3f && GetUltimateSpot(Spot))
+		if (GetWorld()->GetTimeSeconds() - LastStrikeRequestTime > 0.3f && GetUltimateSpot(Spot))
 		{
 			LastStrikeRequestTime = GetWorld()->GetTimeSeconds();
 			ServerUltimateStrike(Spot);

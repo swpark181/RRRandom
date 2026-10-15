@@ -5,7 +5,7 @@
 #include "RRRandomOverheadDieComponent.h"
 #include "RRRandomPlayerController.h"
 #include "RRRandomSessionSubsystem.h"
-#include "RRRandomTigerSpirit.h"
+#include "RRRandomUltimate.h"
 #include "RRRandomVehicle.h"
 #include "Camera/PlayerCameraManager.h"
 #include "CanvasItem.h"
@@ -470,7 +470,9 @@ float ARRRandomHUD::DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float 
 	}
 
 	const FRRDiceRoll& Die = Dice.GetLastRoll();
-	const FString Text = FString::Printf(TEXT("%d %s"), Die.Face, Die.bUltimate ? TEXT("TIGER SPIRIT") : Die.bWeapon ? TEXT("GUN") : Die.bGiant ? TEXT("GIANT") : Die.bFlight ? TEXT("FLY") : *URRRandomDiceBuffComponent::GetStatShortName(Die.Stat));
+	const ARRRandomCharacter* Roller = Cast<ARRRandomCharacter>(Dice.GetOwner());
+	const FString UltimateName = RRSpecies::GetUltimateName(Roller ? Roller->GetSpecies() : RRSpecies::Tiger);
+	const FString Text = FString::Printf(TEXT("%d %s"), Die.Face, Die.bUltimate ? *UltimateName : Die.bWeapon ? TEXT("GUN") : Die.bGiant ? TEXT("GIANT") : Die.bFlight ? TEXT("FLY") : *URRRandomDiceBuffComponent::GetStatShortName(Die.Stat));
 	float Width = 0.f;
 	float TextHeight = 0.f;
 	GetTextSize(Text, Width, TextHeight, Font);
@@ -567,7 +569,7 @@ void ARRRandomHUD::DrawDicePanel(const ARRRandomCharacter& Viewer)
 		else
 		{
 			const float Landed = RollAge - Spin;
-			Banner = FString::Printf(TEXT("TIGER SPIRIT  x%d!"), Roll.Face);
+			Banner = RRSpecies::GetUltimateBanner(Viewer.GetSpecies(), Roll.Face);
 			// Slams in big, settles, fades out at the end
 			Scale = (3.4f + 2.f * FMath::Max(0.f, 1.f - Landed / 0.2f)) * S;
 			Alpha = FMath::Clamp((UltimateBannerTime - Landed) / 0.4f, 0.f, 1.f);
@@ -595,17 +597,14 @@ void ARRRandomHUD::DrawDicePanel(const ARRRandomCharacter& Viewer)
 		float CountWidth;
 		float CountHeight;
 		GetTextSize(FString::Printf(TEXT("DICE x%d  [E]"), Dice.GetCharges()), CountWidth, CountHeight, Font);
-		DrawText(TEXT("  ULTIMATE DIE: TIGER SPIRIT!"), URRRandomDiceBuffComponent::GetUltimateColor(), Margin + BarWidth + 10.f + CountWidth, BarY, Font);
+		DrawText(TEXT("  ULTIMATE DIE: ") + RRSpecies::GetUltimateName(Viewer.GetSpecies()) + TEXT("!"), URRRandomDiceBuffComponent::GetUltimateColor(), Margin + BarWidth + 10.f + CountWidth, BarY, Font);
 	}
 
-	// Powers (the tiger spirit, flight, giant), then active buffs, stacked upward from the gauge
+	// Powers (the ultimate, flight, giant), then active buffs, stacked upward from the gauge
 	float LineY = BarY - LineHeight - 4.f;
-	if (const ARRRandomTigerSpirit* Spirit = Viewer.GetSpirit())
+	if (const ARRRandomUltimate* Ultimate = Viewer.GetUltimate())
 	{
-		const FString Line = Spirit->IsReady()
-			? FString::Printf(TEXT("TIGER SPIRIT  [CLICK ANYWHERE] PAW STRIKE  x%d LEFT"), Spirit->GetStrikesLeft())
-			: FString::Printf(TEXT("TIGER SPIRIT  x%d LEFT"), Spirit->GetStrikesLeft());
-		DrawText(Line, URRRandomDiceBuffComponent::GetUltimateColor(), Margin, LineY, Font);
+		DrawText(Ultimate->GetStatusLine(), URRRandomDiceBuffComponent::GetUltimateColor(), Margin, LineY, Font);
 		LineY -= LineHeight;
 	}
 	if (Viewer.CanFly())
@@ -658,7 +657,7 @@ void ARRRandomHUD::DrawOnlinePanel()
 	DrawShadowedText(TEXT("[F1] HOST   [F2] JOIN   [F3] LEAVE   [ESC] MENU   [M] MAP"), FLinearColor::Gray, Margin, Y, Font);
 	Y += LineHeight;
 #if !UE_BUILD_SHIPPING
-	DrawShadowedText(TEXT("CHEATS  [F6] WIN   [F7] GIANT   [F8] FLY   [F9] 3RD PERSON   [F10] GOD   [U] TIGER ULT DIE   [1-7] PISTOL MINIGUN SMG RIFLE BLASTER CANNON FINGER"), FLinearColor::Gray, Margin, Y, Font);
+	DrawShadowedText(TEXT("CHEATS  [F6] WIN   [F7] GIANT   [F8] FLY   [F9] 3RD PERSON   [F10] GOD   [U] ULTIMATE DIE   [1-7] PISTOL MINIGUN SMG RIFLE BLASTER CANNON FINGER"), FLinearColor::Gray, Margin, Y, Font);
 	Y += LineHeight;
 #endif
 	if (!Sessions->GetStatus().IsEmpty())
@@ -752,7 +751,7 @@ namespace
 		TArray<const ARRRandomCharacter*> Members;
 		for (TActorIterator<ARRRandomCharacter> It(World); It; ++It)
 		{
-			if (It->GetTeam() == Team)
+			if (It->GetTeam() == Team && !It->IsDecoy())
 			{
 				Members.Add(*It);
 			}

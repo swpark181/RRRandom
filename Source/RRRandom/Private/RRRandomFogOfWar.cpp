@@ -1,5 +1,6 @@
 #include "RRRandomFogOfWar.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomUltimate.h"
 #include "RRRandomCover.h"
 #include "RRRandomGameState.h"
 #include "RRRandomIsland.h"
@@ -197,7 +198,7 @@ float ARRRandomFogOfWar::GetSightAt(const FVector& WorldLocation, bool* OutExplo
 {
 	const APlayerController* Viewer = Cast<APlayerController>(GetOwner());
 	const ARRRandomCharacter* Self = Viewer ? Cast<ARRRandomCharacter>(Viewer->GetPawn()) : nullptr;
-	if (!bReady || Size <= 0.f || ARRRandomGameState::IsMatchOver(this) || (Self && Self->IsUsingUltimate()))
+	if (!bReady || Size <= 0.f || ARRRandomGameState::IsMatchOver(this) || (Self && Self->GetUltimate() && Self->GetUltimate()->KeepsOverview()))
 	{
 		if (OutExplored)
 		{
@@ -378,7 +379,7 @@ void ARRRandomFogOfWar::Tick(float DeltaSeconds)
 		}
 	}
 	// My tiger's spirit is out: the whole arena on show while it picks where to strike, the fog back after
-	if (Self->IsUsingUltimate())
+	if (Self->GetUltimate() && Self->GetUltimate()->KeepsOverview())
 	{
 		// At once: the view jumps to unseen ground that would otherwise show black while the fog faded
 		ShowAll();

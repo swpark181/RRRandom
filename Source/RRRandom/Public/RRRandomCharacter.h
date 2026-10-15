@@ -10,7 +10,7 @@
 
 class ARRRandomProjectile;
 class ARRRandomVehicle;
-class ARRRandomTigerSpirit;
+class ARRRandomUltimate;
 class UAnimSequence;
 class UCameraComponent;
 class UMaterialInterface;
@@ -65,14 +65,22 @@ public:
 	URRRandomEventComponent* GetRandomEvents() const { return RandomEvents; }
 	URRRandomDiceBuffComponent* GetDiceBuffs() const { return DiceBuffs; }
 
+	/** The ultimate running (ARRRandomUltimate: each species has its own), or null. */
+	ARRRandomUltimate* GetUltimate() const { return Ultimate; }
+	/** The ultimate holds this brawler: it can't move, shoot, roll or be hurt meanwhile (the tiger's giant, the rabbit's hops). */
+	bool IsUsingUltimate() const;
+	/** Server: the ultimate is over; the brawler is back. */
+	void EndUltimate(ARRRandomUltimate* Which);
+
 	/**
-	 * The tiger's ultimate is on (ARRRandomTigerSpirit): the giant does the fighting while this body stands hidden, still and
-	 * untouchable. Its player picks where the giant strikes (ARRRandomPlayerController).
+	 * A fox's clone (ARRRandomFoxClones): looks and fights like its fox, run by a bot, but its shots do nothing, it vanishes
+	 * at the first hit, scores nothing, holds no team spot and leaves no trace in the results.
 	 */
-	bool IsUsingUltimate() const { return Spirit != nullptr; }
-	ARRRandomTigerSpirit* GetSpirit() const { return Spirit; }
-	/** Server: the spirit is gone; the tiger is back. */
-	void EndUltimate();
+	bool IsDecoy() const { return bDecoy; }
+	/** Server, before begin play: a clone of Source (look, team, health, gun). */
+	void MakeDecoyOf(const ARRRandomCharacter* Source);
+	/** Server: the clone goes up in smoke. */
+	void VanishDecoy();
 	URRRandomOverheadDieComponent* GetOverheadDie() const { return OverheadDie; }
 
 	/**
@@ -305,9 +313,9 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Health")
 	float KnockdownSpeed = 500.f;
 
-	/** The tiger's chance for each die it earns to be an ultimate die (URRRandomDiceBuffComponent::UltimateDieChance). */
+	/** The chance for each die earned to be an ultimate die (URRRandomDiceBuffComponent::UltimateDieChance). */
 	UPROPERTY(EditAnywhere, Category = "Random")
-	float TigerUltimateDieChance = 0.15f;
+	float UltimateDieChance = 0.15f;
 
 	/**
 	 * Run over: the body flies off along the vehicle's way at this share of its speed (between FlingSpeedRange), and up at
@@ -553,11 +561,16 @@ private:
 	/** Scales the whole brawler, keeping its feet where they are. */
 	void SetBodyScale(float NewScale);
 	void OnFlightDie(int32 Face);
+
+	UPROPERTY(Replicated)
+	bool bDecoy = false;
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastDecoyPoof();
 	/** Server: an ultimate die landed; the tiger calls its spirit for Face strikes. */
 	void OnUltimateDie(int32 Face);
 
 	UPROPERTY(Replicated)
-	TObjectPtr<ARRRandomTigerSpirit> Spirit;
+	TObjectPtr<ARRRandomUltimate> Ultimate;
 	/** Jump and glide settings for the flight power, on every machine so movement prediction agrees. */
 	void UpdateFlight();
 	/** Starts a dash if flying and this flight's dash is unused. Only where the brawler is controlled; tells the server when that is a client. */

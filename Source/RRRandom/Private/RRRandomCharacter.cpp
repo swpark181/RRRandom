@@ -15,6 +15,9 @@
 #include "RRRandomOverheadDieComponent.h"
 #include "RRRandomProjectile.h"
 #include "RRRandomTigerSpirit.h"
+#include "RRRandomFoxClones.h"
+#include "RRRandomMoonHop.h"
+#include "RRRandomAcornRain.h"
 #include "RRRandomVehicle.h"
 #include "RRRandomWingsComponent.h"
 #include "Animation/AnimSequence.h"
@@ -304,8 +307,8 @@ void ARRRandomCharacter::ApplySpecies()
 	}
 	ShownSpecies = Species;
 	UseLook(SpeciesLooks[Species]);
-	// Only the tiger has an ultimate
-	DiceBuffs->UltimateDieChance = Species == RRSpecies::Tiger ? TigerUltimateDieChance : 0.f;
+	// Every species has its ultimate (OnUltimateDie); a clone rolls nothing
+	DiceBuffs->UltimateDieChance = bDecoy ? 0.f : UltimateDieChance;
 	CurrentAnimation = nullptr;
 	if (!HasActorBegunPlay())
 	{
@@ -340,6 +343,7 @@ void ARRRandomCharacter::BeginPlay()
 	// The species picked before begin play (on a joiner's machine: replicated with the brawler), then (before Super, so the
 	// random event component picks up the tintable material when it begins play) the body's materials
 	ApplySpecies();
+	DiceBuffs->UltimateDieChance = bDecoy ? 0.f : UltimateDieChance;
 	UE_CLOG(!HasAuthority(), LogTemp, Log, TEXT("RRRandom: %s arrives as the %s."), *GetName(), RRSpecies::GetAssetName(ShownSpecies));
 	USkeletalMeshComponent* BodyMesh = GetMesh();
 	if (BodyBaseMaterial)
@@ -379,7 +383,11 @@ void ARRRandomCharacter::BeginPlay()
 		DiceBuffs->OnGiantDie.AddUObject(this, &ARRRandomCharacter::OnGiantDie);
 		DiceBuffs->OnUltimateDie.AddUObject(this, &ARRRandomCharacter::OnUltimateDie);
 		DiceBuffs->OnFlightDie.AddUObject(this, &ARRRandomCharacter::OnFlightDie);
-		Health = MaxHealth;
+		// (a fox's clone starts with its fox's health)
+		if (!bDecoy)
+		{
+			Health = MaxHealth;
+		}
 		Ammo = GetMaxAmmo();
 	}
 
@@ -429,7 +437,8 @@ void ARRRandomCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ARRRandomCharacter, Kills);
 	DOREPLIFETIME(ARRRandomCharacter, KnockdownDirection);
 	DOREPLIFETIME(ARRRandomCharacter, FlingVelocity);
-	DOREPLIFETIME(ARRRandomCharacter, Spirit);
+	DOREPLIFETIME(ARRRandomCharacter, Ultimate);
+	DOREPLIFETIME(ARRRandomCharacter, bDecoy);
 	DOREPLIFETIME_CONDITION(ARRRandomCharacter, RespawnRemaining, COND_OwnerOnly);
 	DOREPLIFETIME(ARRRandomCharacter, bGiant);
 	DOREPLIFETIME(ARRRandomCharacter, GiantRemaining);
@@ -523,31 +532,78 @@ void ARRRandomCharacter::StartGiant(float Seconds)
 void ARRRandomCharacter::OnUltimateDie(int32 Face)
 {
 	UWorld* World = GetWorld();
-	if (!bAlive || Spirit || !World)
+	if (!bAlive || bDecoy || Ultimate || !World)
 	{
 		return;
 	}
-	// Off any vehicle, standing still and untouchable while the giant fights
-	GetOffVehicle();
+	// Each species' own: the tiger's giant, the fox's clones, the rabbit's moon hops, the squirrel's acorn rain
+	UClass* Kind = ShownSpecies == RRSpecies::Fox ? ARRRandomFoxClones::StaticClass()
+		: ShownSpecies == RRSpecies::Rabbit ? ARRRandomMoonHop::StaticClass()
+		: ShownSpecies == RRSpecies::Squirrel ? ARRRandomAcornRain::StaticClass()
+		: ARRRandomTigerSpirit::StaticClass();
 	FActorSpawnParameters Params;
 	Params.Owner = this;
 	Params.Instigator = this;
 	Params.bDeferConstruction = true;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	ARRRandomTigerSpirit* NewSpirit = World->SpawnActor<ARRRandomTigerSpirit>(ARRRandomTigerSpirit::StaticClass(), GetActorTransform(), Params);
-	if (!NewSpirit)
+	ARRRandomUltimate* NewUltimate = World->SpawnActor<ARRRandomUltimate>(Kind, GetActorTransform(), Params);
+	if (!NewUltimate)
 	{
 		return;
 	}
-	NewSpirit->Setup(this, Face);
-	NewSpirit->FinishSpawning(GetActorTransform());
-	Spirit = NewSpirit;
-	GetCharacterMovement()->StopMovementImmediately();
+	NewUltimate->Setup(this, Face);
+	Ultimate = NewUltimate;
+	// Off any vehicle, standing still, if it holds the brawler
+	if (NewUltimate->HoldsBrawler())
+	{
+		GetOffVehicle();
+		GetCharacterMovement()->StopMovementImmediately();
+	}
+	NewUltimate->FinishSpawning(GetActorTransform());
 }
 
-void ARRRandomCharacter::EndUltimate()
+bool ARRRandomCharacter::IsUsingUltimate() const
 {
-	Spirit = nullptr;
+	return Ultimate && Ultimate->HoldsBrawler();
+}
+
+void ARRRandomCharacter::EndUltimate(ARRRandomUltimate* Which)
+{
+	if (Ultimate == Which)
+	{
+		Ultimate = nullptr;
+	}
+}
+
+void ARRRandomCharacter::MakeDecoyOf(const ARRRandomCharacter* Source)
+{
+	bDecoy = true;
+	Team = Source->Team;
+	SetSpecies(Source->Species);
+	Weapon = Source->Weapon;
+	Health = Source->Health;
+	bThirdPerson = false;
+}
+
+void ARRRandomCharacter::VanishDecoy()
+{
+	if (!HasAuthority() || !bDecoy || IsActorBeingDestroyed() || !bAlive)
+	{
+		return;
+	}
+	bAlive = false;
+	MulticastDecoyPoof();
+	SetLifeSpan(0.2f);
+}
+
+void ARRRandomCharacter::MulticastDecoyPoof_Implementation()
+{
+	if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+	{
+		Effects->FoxPoof(GetActorLocation());
+	}
+	SetActorHiddenInGame(true);
+	SetActorEnableCollision(false);
 }
 
 void ARRRandomCharacter::OnFlightDie(int32 Face)
@@ -625,10 +681,11 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 
 	UpdateDamagePopups(DeltaSeconds);
 	UpdateHitFlash(DeltaSeconds);
-	// The tiger's body stays out of sight while its giant spirit fights
-	if (GetMesh()->IsVisible() == IsUsingUltimate())
+	// Out of sight while its ultimate stands in for it (the tiger's giant, the rabbit's hops)
+	const bool bStandIn = Ultimate && Ultimate->HidesBrawler();
+	if (GetMesh()->IsVisible() == bStandIn)
 	{
-		GetMesh()->SetVisibility(!IsUsingUltimate());
+		GetMesh()->SetVisibility(!bStandIn);
 	}
 	if (!bAlive)
 	{
@@ -1085,6 +1142,11 @@ void ARRRandomCharacter::UpdateVehicleHandling()
 ARRRandomVehicle* ARRRandomCharacter::FindVehicleInReach() const
 {
 	ARRRandomVehicle* Nearest = nullptr;
+	// A clone stays on its feet
+	if (bDecoy)
+	{
+		return nullptr;
+	}
 	float NearestDistance = ARRRandomVehicle::MountRange * GetActorScale3D().Z;
 	for (TActorIterator<ARRRandomVehicle> It(GetWorld()); It; ++It)
 	{
@@ -1550,7 +1612,7 @@ void ARRRandomCharacter::ServerStartReload_Implementation()
 
 void ARRRandomCharacter::RollDice()
 {
-	if (!bAlive || IsUsingUltimate() || ARRRandomGameState::IsPlayLocked(this))
+	if (!bAlive || bDecoy || IsUsingUltimate() || ARRRandomGameState::IsPlayLocked(this))
 	{
 		return;
 	}
@@ -1859,6 +1921,20 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 	// Shots still in the air when the match ends do nothing
 	if (!HasAuthority() || !bAlive || bInvincible || IsUsingUltimate() || ARRRandomGameState::IsPlayLocked(this) || (Attacker && Attacker != this && Attacker->GetTeam() == Team))
 	{
+		return 0.f;
+	}
+
+	// A fox's clone's shots are only for show; the clone itself goes up in smoke at the first real hit
+	if (Attacker && Attacker->IsDecoy())
+	{
+		return 0.f;
+	}
+	if (bDecoy)
+	{
+		if (DamageAmount > 0.f)
+		{
+			VanishDecoy();
+		}
 		return 0.f;
 	}
 

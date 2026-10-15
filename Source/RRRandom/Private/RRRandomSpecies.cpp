@@ -63,6 +63,24 @@ int32 RRSpecies::FromName(const FString& Name)
 	return INDEX_NONE;
 }
 
+FString RRSpecies::GetUltimateName(int32 Species)
+{
+	switch (Species)
+	{
+	case Fox: return TEXT("FOX CLONES");
+	case Rabbit: return TEXT("MOON HOP");
+	case Squirrel: return TEXT("ACORN RAIN");
+	default: return TEXT("TIGER SPIRIT");
+	}
+}
+
+FString RRSpecies::GetUltimateBanner(int32 Species, int32 Face)
+{
+	// The squirrel's face is seconds of rain on top of three (ARRRandomAcornRain::BaseSeconds)
+	return Species == Squirrel ? FString::Printf(TEXT("%s  %ds!"), *GetUltimateName(Species), Face + 3)
+		: FString::Printf(TEXT("%s  x%d!"), *GetUltimateName(Species), Face);
+}
+
 const TArray<FRRSpeciesLook>& FRRSpeciesLook::GetAll()
 {
 	static TArray<FRRSpeciesLook> Looks;

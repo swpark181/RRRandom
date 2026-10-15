@@ -665,6 +665,96 @@ void ARRRandomEffects::SonicBoom(const FVector& Where, const FVector& Direction,
 	Spray(EShape::Star, Where, 18, -Way, 70.f, FVector2D(300.f, 800.f), FVector2D(3.f, 5.5f), FVector2D(0.25f, 0.45f), Lightning, 8.f, 300.f);
 }
 
+void ARRRandomEffects::FoxPoof(const FVector& Where, float Size)
+{
+	// A thick cloud of smoke...
+	for (int32 Index = 0; Index < FMath::RoundToInt(14 * Size); ++Index)
+	{
+		FParticle Puff;
+		Puff.Shape = EShape::Ball;
+		Puff.Location = Where + FMath::VRand() * FVector(60.f, 60.f, 50.f) * Size;
+		Puff.Velocity = FMath::VRand() * FMath::FRandRange(120.f, 320.f) * Size + FVector(0.f, 0.f, 80.f);
+		Puff.Drag = 2.5f;
+		Puff.Gravity = -60.f;
+		Puff.Life = FMath::FRandRange(0.6f, 1.1f);
+		const float Start = FMath::FRandRange(0.6f, 1.1f) * Size;
+		Puff.StartSize = FVector(Start);
+		Puff.EndSize = FVector(Start * 2.f);
+		Puff.Color = FMath::FRand() < 0.5f ? FLinearColor(0.95f, 0.92f, 0.88f) : FLinearColor(0.85f, 0.8f, 0.78f);
+		Puff.Glow = 1.1f;
+		Puff.Opacity = 0.55f;
+		Puff.FadeIn = 0.03f;
+		Spawn(Puff);
+	}
+	// ...leaves whirling out of it, and a few orange sparks
+	const FLinearColor Leaves[] = { FLinearColor(0.35f, 0.75f, 0.2f), FLinearColor(0.95f, 0.55f, 0.1f), FLinearColor(0.6f, 0.85f, 0.25f) };
+	for (int32 Index = 0; Index < 3; ++Index)
+	{
+		Spray(EShape::Star, Where, FMath::RoundToInt(6 * Size), FVector::UpVector, 80.f, FVector2D(250.f, 550.f) * Size, FVector2D(3.f, 5.f), FVector2D(0.8f, 1.3f), Leaves[Index], 3.f, 350.f);
+	}
+	FParticle Ring;
+	Ring.Shape = EShape::Ring;
+	Ring.Location = Where - FVector(0.f, 0.f, 70.f);
+	Ring.Life = 0.4f;
+	Ring.StartSize = FVector(0.5f * Size, 0.5f * Size, 2.f);
+	Ring.EndSize = FVector(3.f * Size, 3.f * Size, 1.f);
+	Ring.Color = FLinearColor(1.f, 0.55f, 0.15f);
+	Ring.Glow = 5.f;
+	Spawn(Ring);
+}
+
+void ARRRandomEffects::MoonFlash(const FVector& Where, float Size)
+{
+	const FLinearColor Moon(1.f, 0.95f, 0.72f);
+	const FLinearColor Silver(0.75f, 0.85f, 1.f);
+	FParticle Disc;
+	Disc.Shape = EShape::Ball;
+	Disc.Location = Where;
+	Disc.Life = 0.9f;
+	Disc.StartSize = FVector(2.5f * Size);
+	Disc.EndSize = FVector(3.2f * Size);
+	Disc.Color = Moon;
+	Disc.Glow = 3.f;
+	Disc.Opacity = 0.45f;
+	Disc.FadeIn = 0.12f;
+	Spawn(Disc);
+	FParticle Halo;
+	Halo.Shape = EShape::Ring;
+	Halo.Location = Where;
+	Halo.Life = 0.8f;
+	Halo.StartSize = FVector(2.6f * Size, 2.6f * Size, 2.f);
+	Halo.EndSize = FVector(4.2f * Size, 4.2f * Size, 1.f);
+	Halo.Color = Silver;
+	Halo.Glow = 5.f;
+	Halo.FadeIn = 0.05f;
+	Halo.bFacesCamera = true;
+	Spawn(Halo);
+	Spray(EShape::Star, Where, FMath::RoundToInt(12 * Size), FVector::UpVector, 180.f, FVector2D(150.f, 400.f) * Size, FVector2D(3.f, 5.f) * FMath::Sqrt(Size), FVector2D(0.6f, 1.f), Silver, 7.f, 0.f);
+}
+
+void ARRRandomEffects::AcornPop(const FVector& Where, float Size)
+{
+	const FLinearColor Brown(0.55f, 0.32f, 0.12f);
+	for (int32 Index = 0; Index < FMath::RoundToInt(4 * Size); ++Index)
+	{
+		FParticle Dust;
+		Dust.Shape = EShape::Ball;
+		Dust.Location = Where;
+		Dust.Velocity = FMath::VRandCone(FVector::UpVector, 1.2f) * FMath::FRandRange(80.f, 200.f) * Size;
+		Dust.Drag = 3.f;
+		Dust.Life = FMath::FRandRange(0.3f, 0.5f);
+		const float Start = 0.18f * Size;
+		Dust.StartSize = FVector(Start);
+		Dust.EndSize = FVector(Start * 2.2f);
+		Dust.Color = Cream;
+		Dust.Glow = 1.f;
+		Dust.Opacity = 0.4f;
+		Spawn(Dust);
+	}
+	Spray(EShape::Die, Where, FMath::RoundToInt(2 * Size), FVector::UpVector, 50.f, FVector2D(150.f, 300.f) * Size, FVector2D(0.04f, 0.07f) * Size, FVector2D(0.4f, 0.6f), Brown, 1.5f, 800.f);
+	Spray(EShape::Star, Where, FMath::RoundToInt(2 * Size), FVector::UpVector, 60.f, FVector2D(120.f, 260.f) * Size, FVector2D(2.f, 3.f) * Size, FVector2D(0.3f, 0.5f), Gold, 5.f, 300.f);
+}
+
 void ARRRandomEffects::TigerStrike(const FVector& Where, float Radius, const FLinearColor& Tint)
 {
 	// The rings are the 100 unit mesh: Radius / 50 spans the strike

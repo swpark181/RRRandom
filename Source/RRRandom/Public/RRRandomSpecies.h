@@ -29,6 +29,10 @@ namespace RRSpecies
 	FString GetDisplayName(int32 Species);
 	/** The species named (any case), or INDEX_NONE. */
 	int32 FromName(const FString& Name);
+	/** Its ultimate's name: FOX CLONES, MOON HOP, ACORN RAIN, TIGER SPIRIT. */
+	FString GetUltimateName(int32 Species);
+	/** The big words when its ultimate die lands on Face: "TIGER SPIRIT x4!", "ACORN RAIN 7s!"... */
+	FString GetUltimateBanner(int32 Species, int32 Face);
 }
 
 /** One brawler's body and animations, and how big it is drawn. */

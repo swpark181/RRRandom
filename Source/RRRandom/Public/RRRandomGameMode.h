@@ -22,6 +22,12 @@ class RRRANDOM_API ARRRandomGameMode : public AGameModeBase
 	GENERATED_BODY()
 
 public:
+	/**
+	 * The middle of the arena: the middle of the level's floor under the player start (the island is built around it
+	 * and both teams start either side of it), at the player start's height. Worked out once, before anything is spawned.
+	 */
+	FVector GetArenaCenter() const;
+
 	ARRRandomGameMode();
 
 	virtual void StartPlay() override;
@@ -140,11 +146,6 @@ private:
 	void SpawnIslandIfNoneExists();
 	void SpawnDiceLandIfNoneExists();
 	FVector GetPlayerStartLocation() const;
-	/**
-	 * The middle of the arena: the middle of the level's floor under the player start (the island is built around it
-	 * and both teams start either side of it), at the player start's height. Worked out once, before anything is spawned.
-	 */
-	FVector GetArenaCenter() const;
 
 	/** Places a point on the floor beneath it, or returns false if there is no floor there. */
 	bool FindFloorSpot(const FVector& Spot, float HalfHeight, FVector& OutLocation) const;

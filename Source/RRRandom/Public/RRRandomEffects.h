@@ -53,6 +53,12 @@ public:
 	void SonicBoom(const FVector& Where, const FVector& Direction, const FLinearColor& Tint);
 	/** A brawler vanishing or appearing (teleported into the dance line): a flash, a ring and a pop of stars at its middle. */
 	void TeleportPoof(const FVector& Where, const FLinearColor& Tint);
+	/** A fox's smoke-and-leaves poof (its clones springing up, or one vanishing): Size 1 is one brawler's worth. */
+	void FoxPoof(const FVector& Where, float Size = 1.f);
+	/** A big glowing full moon flaring up behind a spot, with a ring and silver sparkles (the rabbit's moon hop). */
+	void MoonFlash(const FVector& Where, float Size);
+	/** An acorn landing: a bounce of crumbs and dust, and a few stars (Size 1 for one acorn). */
+	void AcornPop(const FVector& Where, float Size);
 	/** The tiger spirit's paws hitting the ground: shockwaves out to Radius, a flash, a ring of dust, stars and dice thrown up. */
 	void TigerStrike(const FVector& Where, float Radius, const FLinearColor& Tint);
 	/** A hit: sparks and stars thrown back toward where the shot came from, a quick ring and a flash; Strength 1 is a pistol shot. */

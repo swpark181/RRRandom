@@ -32,7 +32,19 @@
 - (26차) 궁극기 주사위를 얻는 치트, 궁극기 주사위를 굴릴 때 더 화려하게.
 - (27차) 호랑이 기운 범위 지정: 캐릭터와 상관없이 주변 원하는 곳으로 뛸 수 있고, 범위 안 적은 모두 피해.
 - (28차) 범위 표시가 바닥에 고정 안 되고 멀수록 커짐 → 홀로그램 같은 이펙트로, 데미지도 정상으로.
+- (29차) 여우·토끼·다람쥐 궁극기(추천 조합): 여우 둔갑술, 토끼 달토끼 낙하, 다람쥐 도토리 비.
 - (25차) 호랑이 뒤통수 호피무늬, 다람쥐 머리-꼬리 사이 깨짐, 토끼 주둥이를 더 귀여운 카툰으로, 호랑이 궁극기 "호랑이 기운"(궁극기 주사위 → 레벨만큼 거대해져 주사위 숫자만큼 앞발 내려치기, 범위 캐릭터의 약 10배).
+
+## 29차 — 여우 둔갑술, 토끼 달토끼 낙하, 다람쥐 도토리 비 (사용자: 추천 조합으로 모두 만들어 줘)
+
+- 29차 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
+- 구조: 호랑이 기운의 공통 부분을 `ARRRandomUltimate`(`RRRandomUltimate.h/.cpp`, 추상)로 분리 — 브롤러·남은 수(`Left`)·주사위 눈(`Face`) 복제, 끝내기(`Finish` → 복제 `bEnding` → `OnEnding` → `Done` → `ARRRandomCharacter::EndUltimate`), 지점 고르기(`WantsSpots`, `IsBusy`, `IsReady`, `RequestSpot` + 예약, 플레이어 6초 → `GetDefaultSpot`, 봇 0.8초 → `PickTarget` 적 많은 곳), 높은 시점 `Overview`, 커서/경고 홀로그램(`ShowCursorSpot`, `ShowTargetHolo(지점, 반경, 세기)`, `ReleaseTargetHolo`), `FindGround`, `FindEnemiesNear`(원기둥), `HoldsBrawler`(못 움직이고 무적), `HidesBrawler`, `KeepsOverview`(고르는 동안 + 브롤러를 붙잡는 궁극기는 끝날 때까지 — 마지막 한 방을 보게), `GetTitle`/`GetStatusLine`(HUD). `ARRRandomTigerSpirit` 는 이 위로 옮김(동작 같음, `StrikeRadius` → `AreaRadius`).
+- 캐릭터: `Spirit` → 복제 `Ultimate`, `IsUsingUltimate()` = 붙잡는 궁극기일 때만. 궁극기 주사위 확률 `UltimateDieChance` 0.15 를 **모든 종**에(분신 제외). `OnUltimateDie` 가 종별 클래스 스폰. 치트 U/F11 = 지금 캐릭터에 궁극기 주사위(호랑이로 바꾸지 않음). HUD: 굴린 결과·배너·아래 줄이 종별 이름(`RRSpecies::GetUltimateName/GetUltimateBanner`: FOX CLONES xN / MOON HOP xN / ACORN RAIN Ns / TIGER SPIRIT xN), 치트 줄 `[U] ULTIMATE DIE`. `ARRRandomGameMode::GetArenaCenter` public 으로.
+- 여우 둔갑술(`ARRRandomFoxClones`): 지점 없음, 붙잡지 않음. 연기·나뭇잎 펑(`ARRRandomEffects::FoxPoof`) 속에서 여우 둘레 반지름 170 고리에 분신 N개 + 여우 자신이 무작위 자리로(`TeleportTo`), 모두 바깥으로 700 튕겨 흩어짐. 분신 = 같은 클래스 `ARRRandomCharacter` 에 복제 `bDecoy`(`MakeDecoyOf`: 팀·종·총·체력 복사) + 봇 AI. 분신 규칙: 총알 피해 0(맞는 쪽 `TakeDamage` 가 공격자가 분신이면 0, 숫자도 안 뜸), 진짜 피해를 받으면 펑 사라짐(`VanishDecoy` → `MulticastDecoyPoof`, 0.2초 뒤 파괴, 넉아웃·점수 없음), 주사위 안 굴림, 탈것 안 탐, 궁극기 주사위 없음, 체력은 여우 것으로 시작. MVP·승리 대열·결과표·팀원 카드·봇 이름 번호에서 제외(미니맵엔 보임 — 적에게는 속임수). 12초 뒤, 또는 여우가 쓰러지거나 경기가 끝나면 남은 분신 모두 펑.
+- 토끼 달토끼 낙하(`ARRRandomMoonHop`): 반지름 380, 파란 커서/보라 경고 홀로그램. 토끼 메시(×1.4)가 클릭한 곳으로 높이 1500 포물선 1.35초 — 앞구르기(공중제비) → 꼭대기에서 큰 달빛(`MoonFlash`: 크림색 원판 + 은빛 고리 + 별) → 낙하 자세 → 엉덩방아 착지(`TigerStrike` 이펙트 은빛): 가운데 45 → 가장자리 25 피해, 700/500 튕김. 날아가는 동안 은빛 궤적. 진짜 토끼는 숨고 무적, 끝나면 마지막 착지 자리로 순간이동. Mixamo(지금 Mixamo 에 남은 새 토끼 리그 그대로): Jumping Up, Big Front Flip, Mid-Air Falling Idle, Mid-Air Falling To A Hard Landing → `input\rabbit\mixamo_extra\` → `ue_import_extra_anims.py` → `A_Rabbit_JumpUp|FrontFlip|FallIdle|HardLanding`.
+- 다람쥐 도토리 비(`ARRRandomAcornRain`): 반지름 650 구역을 한 번 클릭(그동안만 붙잡음), 3 + 눈 초 동안 초당 32개 도토리가 높이 1400 에서 0.6초에 떨어짐. 각 도토리 착지(`AcornPop` 먼지·조각·별) 반지름 130 안 적 8 피해 + 520 으로 미끄러뜨림. 비는 모든 기기 같음(`MulticastRain` 의 지점·시드로 도토리마다 시간·자리 계산, 피해는 서버). 비가 오는 동안 구역 경고 옅게(세기 0.3), 다람쥐는 바로 다시 싸움. 도토리 = `scripts\blender_acorn.py`(열매 + 모자 + 꼭지 두 메시) → `scripts\ue_import_acorn.py` → `/Game/Effects/Acorn/SM_AcornNut|Cap`(M_DLCandy, 인스턴스 색 갈색/진갈색), 그리는 크기 ×2.5(만화처럼 크게 — 1배는 위에서 안 보였음).
+- 확인: 빌드 경고 없음. 임시 `-RRTEMPAutoUlt`(내 캐릭터가 시작 뒤 궁극기 주사위 두 번)·`-RRTEMPNear`(내 지점을 바로 앞에) — 지움. 화면 없이 네 종: 여우 분신 5·4개, 토끼 1·2번 착지(넉아웃 포함), 다람쥐 4·6초 비(20·23번 맞힘, 넉아웃 3), 호랑이 그대로; 봇 여우·다람쥐도 스스로 씀, 분신이 쓰러뜨려지거나 사라져도 점수 없음. 화면: 여우 TPS 펑·분신(`output\screens\ult_fox`), 토끼 탑뷰 연속 착지·달빛·홀로그램(`ult_rabbit2`, 봇 토끼 6번 `in_rabbit`), 다람쥐 탑뷰 큰 도토리 비(`ult_squirrel3`). LAN 호스트+참가자 150초: 봇 여우 분신 3번, 봇 토끼 6번 착지, 봇 호랑이 — 참가자 로그에도 궁극기 시작, 에러 없음.
+- 확인 못 한 것: 이번엔 자동 키·마우스 입력이 게임 창에 안 들어가서(사격도 안 됨 — 다른 창이 포커스를 잡은 듯) 플레이어가 직접 클릭해 고르는 토끼·다람쥐 시험은 못 함(같은 `RequestSpot` 경로는 27·28차 호랑이 클릭 시험에서 확인), TPS 에서 본 도토리 비, 참가자 화면의 분신 모습, 성능(분신 6 + 봇).
 
 ## 28차 — 호랑이 기운 범위 홀로그램, 지점은 늘 바닥 (사용자: 범위 표시가 바닥에 고정 안 되고 멀어질수록 커짐, 홀로그램 같은 이펙트로, 데미지 정상으로)
 
