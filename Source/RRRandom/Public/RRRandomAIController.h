@@ -6,6 +6,7 @@
 #include "RRRandomAIController.generated.h"
 
 class ARRRandomCharacter;
+class ARRRandomDiceTown;
 class ARRRandomVehicle;
 
 /**
@@ -14,7 +15,8 @@ class ARRRandomVehicle;
  * and only shoots when no cover is in the way. Ducks behind cover to reload or heal, reloads early while
  * nobody is in sight, and rolls its stored dice when a fight starts. Out of a fight it rides vehicles for long trips
  * and hops in the back of a teammate's stopped car (RideTripDistance).
- * Steers directly (sliding around cover) instead of pathfinding, so it needs no navmesh.
+ * Steers directly (sliding around cover) instead of pathfinding, so it needs no navmesh; on a map with walking routes
+ * (Dice Town: houses, stairs, canals) it follows the map's routes instead whenever it isn't fighting up close.
  */
 UCLASS()
 class RRRANDOM_API ARRRandomAIController : public AAIController
@@ -134,6 +136,11 @@ private:
 	ARRRandomVehicle* FindVehicleToRide(const ARRRandomCharacter* Self, const ARRRandomCharacter* Target) const;
 	/** Whether a vehicle can still be ridden the way the bot set out to (driver's seat free, or the car still stopped for it). */
 	bool IsStillWorthRiding(const ARRRandomCharacter* Self, const ARRRandomVehicle* Ride) const;
+	/**
+	 * On a map with walking routes: the way toward Goal (feet height) along the route to it, asking for a new route now
+	 * and then or when the goal moves; jumps when it stops moving against a ledge (a jump climbs it).
+	 */
+	FVector FollowRoute(ARRRandomCharacter* Self, const FVector& Goal, float DeltaSeconds);
 
 public:
 	/** The vehicle this bot is walking over to, so teammates don't all head for the same one. */
@@ -179,4 +186,15 @@ private:
 	float FlightHopTimer = 0.f;
 	/** Seconds left holding jump; 0 when not holding. */
 	float FlightHoldRemaining = 0.f;
+
+	/** The map with walking routes, if this one has them (looked for once). */
+	TWeakObjectPtr<ARRRandomDiceTown> Town;
+	bool bLookedForTown = false;
+	/** The route being followed (corners at foot height), the next corner, the goal it was found for, until the next one. */
+	TArray<FVector> Route;
+	int32 RouteIndex = 0;
+	FVector RouteGoal = FVector::ZeroVector;
+	float RouteTimer = 0.f;
+	/** Seconds following a route without moving. */
+	float RouteStuckTimer = 0.f;
 };

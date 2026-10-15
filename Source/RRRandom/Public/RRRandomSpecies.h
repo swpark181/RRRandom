@@ -10,7 +10,7 @@ class USkeletalMesh;
 class UTexture2D;
 
 /**
- * The brawlers to pick from: the fox, the rabbit, the squirrel and the tiger. Each is a Tripo model rigged and animated in
+ * The brawlers to pick from: the fox, the rabbit, the squirrel, the tiger and the dragon. Each is a Tripo model rigged and animated in
  * Mixamo (char-pipeline/scripts/ue_import_animal.py), in /Game/Characters/<Name>: SK_<Name>, M_<Name> and
  * Anims/A_<Name>_Idle, Walk, Fire, Death, FlyBack, Victory, Dance1..4, Defeat1..3, AimIdle, AimRunF/B/L/R, with its HUD card picture at
  * /Game/UI/T_<Name>Portrait. Players pick one on the title (URRRandomSessionSubsystem::GetSpecies); bots get one at random.
@@ -21,17 +21,18 @@ namespace RRSpecies
 	constexpr int32 Rabbit = 1;
 	constexpr int32 Squirrel = 2;
 	constexpr int32 Tiger = 3;
-	constexpr int32 Count = 4;
+	constexpr int32 Dragon = 4;
+	constexpr int32 Count = 5;
 
-	/** "Fox", "Rabbit", "Squirrel", "Tiger": the asset names. */
+	/** "Fox", "Rabbit", "Squirrel", "Tiger", "Dragon": the asset names. */
 	const TCHAR* GetAssetName(int32 Species);
-	/** FOX, RABBIT, SQUIRREL, TIGER: for menus. */
+	/** FOX, RABBIT, SQUIRREL, TIGER, DRAGON: for menus. */
 	FString GetDisplayName(int32 Species);
 	/** The species named (any case), or INDEX_NONE. */
 	int32 FromName(const FString& Name);
-	/** Its ultimate's name: FOX CLONES, MOON HOP, ACORN RAIN, TIGER SPIRIT. */
+	/** Its ultimate's name: FOX CLONES, MOON HOP, ACORN RAIN, TIGER SPIRIT, DRAGON FLIGHT. */
 	FString GetUltimateName(int32 Species);
-	/** The big words when its ultimate die lands on Face: "TIGER SPIRIT x4!", "ACORN RAIN 7s!"... */
+	/** The big words when its ultimate die lands on Face: "TIGER SPIRIT x4!", "ACORN RAIN 7s!", "DRAGON FLIGHT LV4!"... */
 	FString GetUltimateBanner(int32 Species, int32 Face);
 }
 

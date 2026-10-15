@@ -61,6 +61,15 @@ public:
 	void AcornPop(const FVector& Where, float Size);
 	/** The tiger spirit's paws hitting the ground: shockwaves out to Radius, a flash, a ring of dust, stars and dice thrown up. */
 	void TigerStrike(const FVector& Where, float Radius, const FLinearColor& Tint);
+	/** The dragon's breath, every frame: a stream of fire from its mouth to the floor, Radius wide where it lands, splashing up.
+	 * Carry: how fast the spot it lands on moves (the fire is aimed where it will be when it gets there). */
+	void DragonBreath(const FVector& Mouth, const FVector& Impact, float Radius, float DeltaSeconds, const FVector& Carry = FVector::ZeroVector);
+	/** Fire left burning on the floor, every frame: flames licking up within Radius (Strength 1 fierce, toward 0 dying down). */
+	void GroundFire(const FVector& Where, float Radius, float Strength, float DeltaSeconds);
+	/** Small embers left glowing on the floor where fire went by, every frame: within Radius, Strength 1 fresh, toward 0 going out. */
+	void GroundEmbers(const FVector& Where, float Radius, float Strength, float DeltaSeconds);
+	/** A burst of flame (the little dragon turning into the big one and back): Size 1 is one brawler's worth. */
+	void FireBurst(const FVector& Where, float Size);
 	/** A hit: sparks and stars thrown back toward where the shot came from, a quick ring and a flash; Strength 1 is a pistol shot. */
 	void HitBurst(const FVector& Where, const FVector& FromDirection, float Strength, const FLinearColor& Tint);
 

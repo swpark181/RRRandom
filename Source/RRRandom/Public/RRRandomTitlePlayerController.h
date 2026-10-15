@@ -24,12 +24,16 @@ enum class ERRTitleChoice : uint8
 	Rabbit,
 	Squirrel,
 	Tiger,
+	Dragon,
+	/** The third person maps, picked after THIRD PERSON (ERRThirdPersonMap). */
+	DiceTown,
+	DiceLand,
 };
 
 /**
  * Title menu: SINGLE PLAY or NETWORK (then HOST GAME / JOIN GAME), and QUIT. SINGLE PLAY and HOST GAME then ask how to play:
  * TOP VIEW (the camera above, fog of war) or THIRD PERSON (over the shoulder, aiming, no fog); joining takes the host's.
- * Last, every way in asks which brawler to play: FOX, RABBIT, SQUIRREL or TIGER (the bots get theirs at random).
+ * THIRD PERSON then asks which map: DICE TOWN (the big block town) or DICE LAND (the small island of dice). Last, every way in asks which brawler to play: FOX, RABBIT, SQUIRREL, TIGER or DRAGON (the bots get theirs at random).
  * W/S or the arrow keys pick, Enter or Space presses, Esc goes back (or cancels a host/join in progress); the mouse works too.
  * Starting a game goes through URRRandomSessionSubsystem, which opens the arena or joins a host.
  */
@@ -50,6 +54,7 @@ public:
 	bool IsOnNetworkPage() const { return bNetworkPage; }
 	bool IsOnViewPage() const { return bViewPage; }
 	bool IsOnSpeciesPage() const { return bSpeciesPage; }
+	bool IsOnMapPage() const { return bMapPage; }
 	/** The species a button picks (RRSpecies), or INDEX_NONE for the other buttons. */
 	static int32 GetSpeciesOf(ERRTitleChoice Choice);
 
@@ -98,6 +103,10 @@ private:
 	bool bViewForHost = false;
 	/** The brawler page, and what it starts: a solo game, a hosted one, or joining. */
 	bool bSpeciesPage = false;
+	/** The third person map page, between the view page and the brawler page. */
+	bool bMapPage = false;
+	/** Opens the map page with the last pick selected. */
+	void OpenMapPage();
 	enum class EStart : uint8 { Solo, Host, Join } Start = EStart::Solo;
 	/** Opens the brawler page with the last pick selected. */
 	void OpenSpeciesPage(EStart InStart);

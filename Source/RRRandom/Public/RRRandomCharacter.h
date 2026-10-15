@@ -200,6 +200,8 @@ public:
 	void ReviveNow();
 
 	bool IsGiant() const { return bGiant; }
+	/** The flight ceiling in normal body heights above the arena floor; a map with tall buildings raises it. */
+	void SetFlightMaxHeightInBodies(float Bodies) { FlightMaxHeightInBodies = Bodies; }
 	/** Cheat (RRGod): takes no damage at all, foam finger pokes in the back included, and is put back home instead of falling out. Server only to set. */
 	bool IsInvincible() const { return bInvincible; }
 	void SetInvincible(bool bNewInvincible) { bInvincible = bNewInvincible; }

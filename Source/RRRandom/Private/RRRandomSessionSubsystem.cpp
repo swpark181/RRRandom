@@ -144,6 +144,11 @@ void URRRandomSessionSubsystem::RunStartupCommand()
 	{
 		bThirdPersonMode = true;
 	}
+	FString MapName;
+	if (FParse::Value(FCommandLine::Get(), TEXT("RRMap="), MapName))
+	{
+		ThirdPersonMap = MapName.Equals(TEXT("DiceLand"), ESearchCase::IgnoreCase) ? ERRThirdPersonMap::DiceLand : ERRThirdPersonMap::DiceTown;
+	}
 	FString SpeciesName;
 	if (FParse::Value(FCommandLine::Get(), TEXT("RRSpecies="), SpeciesName) && RRSpecies::FromName(SpeciesName) != INDEX_NONE)
 	{

@@ -4,6 +4,7 @@
 #include "RRRandomCover.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomDiceLand.h"
+#include "RRRandomDiceTown.h"
 #include "RRRandomFogOfWar.h"
 #include "RRRandomGameState.h"
 #include "RRRandomIsland.h"
@@ -287,11 +288,13 @@ bool ARRRandomHUD::BuildMinimapBase()
 	// The third person mode's map instead: it has no cells, so it says what each spot shows
 	TActorIterator<ARRRandomDiceLand> LandIt(GetWorld());
 	const ARRRandomDiceLand* Land = !Island && LandIt && LandIt->IsBuilt() ? *LandIt : nullptr;
-	if (!Island && !Land)
+	TActorIterator<ARRRandomDiceTown> TownIt(GetWorld());
+	const ARRRandomDiceTown* Town = !Island && !Land && TownIt && TownIt->IsBuilt() ? *TownIt : nullptr;
+	if (!Island && !Land && !Town)
 	{
 		return false;
 	}
-	MapBounds = Island ? Island->GetMapBounds() : Land->GetMapBounds();
+	MapBounds = Island ? Island->GetMapBounds() : Land ? Land->GetMapBounds() : Town->GetMapBounds();
 
 	// Each pixel's cell: its color, and its height so faces down the screen can be shaded
 	MapBase.SetNumUninitialized(MapPixels * MapPixels);
@@ -309,6 +312,10 @@ bool ARRRandomHUD::BuildMinimapBase()
 			if (Land)
 			{
 				Color = Land->GetMapColor(World, Levels);
+			}
+			else if (Town)
+			{
+				Color = Town->GetMapColor(World, Levels);
 			}
 			else if (Island->GetCellAt(World, Row, Col))
 			{

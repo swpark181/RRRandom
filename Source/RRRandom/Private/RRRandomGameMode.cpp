@@ -4,6 +4,7 @@
 #include "RRRandomAIController.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomDiceLand.h"
+#include "RRRandomDiceTown.h"
 #include "RRRandomDummy.h"
 #include "RRRandomGrassFloor.h"
 #include "RRRandomIsland.h"
@@ -55,8 +56,28 @@ ARRRandomGameMode::ARRRandomGameMode()
 	AddCover(-800.f, -1250.f, 360.f, 120.f);
 }
 
+void ARRRandomGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
+{
+	Super::InitGame(MapName, Options, ErrorMessage);
+
+	// Dice Town (the third person map picked on the title) is big: the teams start far apart, at their bases. Set before
+	// anyone logs in, since the host's own brawler is placed as it does (on the level's floor, level with the town's)
+	const URRRandomSessionSubsystem* Sessions = GetGameInstance() ? GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>() : nullptr;
+	bDiceTown = bSpawnDiceLand && Sessions && Sessions->IsThirdPersonMode() && Sessions->GetThirdPersonMap() == ERRThirdPersonMap::DiceTown;
+	if (bDiceTown)
+	{
+		TeamSpawnDistance = ARRRandomDiceTown::TeamSpawnDistance;
+	}
+}
+
 void ARRRandomGameMode::StartPlay()
 {
+	// Dice Town goes up as play begins, before the bots, whose floor traces land on it
+	if (bDiceTown)
+	{
+		SpawnDiceTownIfNoneExists();
+	}
+
 	Super::StartPlay();
 
 	// -RRScoreToWin=N on the command line, for quick tests of the end of a match
@@ -75,8 +96,11 @@ void ARRRandomGameMode::StartPlay()
 	GetArenaCenter();
 	if (bSpawnDiceLand && ARRRandomGameState::IsThirdPersonMode(this))
 	{
-		// The third person map brings its own ground and cover; it goes up before the bots, whose floor traces land beside it
-		SpawnDiceLandIfNoneExists();
+		// The third person map brings its own ground and cover; it goes up before the bots, whose floor traces land on it
+		if (!bDiceTown)
+		{
+			SpawnDiceLandIfNoneExists();
+		}
 	}
 	else
 	{
@@ -616,4 +640,15 @@ void ARRRandomGameMode::SpawnDummiesIfNoneExist()
 		const FRotator FacingPlayer(0.f, (Origin - Location).Rotation().Yaw, 0.f);
 		World->SpawnActor<ARRRandomDummy>(DummyClass, Location, FacingPlayer, Params);
 	}
+}
+
+void ARRRandomGameMode::SpawnDiceTownIfNoneExists()
+{
+	UWorld* World = GetWorld();
+	if (TActorIterator<ARRRandomDiceTown>(World))
+	{
+		return;
+	}
+	// Around the arena's center, halfway between the teams; each team starts at its base on the main road
+	World->SpawnActor<ARRRandomDiceTown>(ARRRandomDiceTown::StaticClass(), FTransform(GetArenaCenter()));
 }

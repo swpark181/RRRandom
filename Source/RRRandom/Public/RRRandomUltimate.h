@@ -12,7 +12,8 @@ class UStaticMeshComponent;
 /**
  * A brawler's ultimate, called by rolling an ultimate die (ARRRandomCharacter::OnUltimateDie); the die's face is Count
  * (how many strikes, clones, seconds...). Each species has its own (RRSpecies): the tiger's ARRRandomTigerSpirit, the
- * fox's ARRRandomFoxClones, the rabbit's ARRRandomMoonHop, the squirrel's ARRRandomAcornRain.
+ * fox's ARRRandomFoxClones, the rabbit's ARRRandomMoonHop, the squirrel's ARRRandomAcornRain, the dragon's
+ * ARRRandomDragonFlight.
  *
  * What they share lives here. Spawned by the server and replicated (always relevant); every machine plays it from its own
  * clock once the brawler is known there (OnStarted), the server alone decides and deals damage.
@@ -72,7 +73,7 @@ public:
 	/** The ground at a spot: the first walkable world surface going down from a little above it (or the spot itself). */
 	FVector FindGround(const FVector& Spot) const;
 	/** This machine's player is pointing at a spot: the area's hologram there (none with bShow false). */
-	void ShowCursorSpot(bool bShow, const FVector& Spot);
+	virtual void ShowCursorSpot(bool bShow, const FVector& Spot);
 	float GetAreaRadius() const { return AreaRadius; }
 
 	/** Everyone of the other team inside the area. */

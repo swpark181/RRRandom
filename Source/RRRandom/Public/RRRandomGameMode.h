@@ -30,6 +30,7 @@ public:
 
 	ARRRandomGameMode();
 
+	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
 	virtual void StartPlay() override;
 	virtual APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot) override;
 	virtual void Logout(AController* Exiting) override;
@@ -86,7 +87,10 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Island")
 	bool bSpawnIsland = true;
 
-	/** In the third person mode, builds Dice Land (ARRRandomDiceLand) instead of the island, its grass and the cover blocks. */
+	/**
+	 * In the third person mode, builds the map picked on the title (Dice Town, ARRRandomDiceTown, or Dice Land,
+	 * ARRRandomDiceLand) instead of the island, its grass and the cover blocks.
+	 */
 	UPROPERTY(EditAnywhere, Category = "Island")
 	bool bSpawnDiceLand = true;
 
@@ -145,6 +149,9 @@ private:
 	void SpawnGrassFloorIfNoneExists();
 	void SpawnIslandIfNoneExists();
 	void SpawnDiceLandIfNoneExists();
+	void SpawnDiceTownIfNoneExists();
+	/** This game is on Dice Town (decided in InitGame, from this machine's title picks). */
+	bool bDiceTown = false;
 	FVector GetPlayerStartLocation() const;
 
 	/** Places a point on the floor beneath it, or returns false if there is no floor there. */

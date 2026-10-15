@@ -16,7 +16,9 @@ namespace
 
 	UAnimSequence* FindRabbitAnim(const TCHAR* Name)
 	{
-		ConstructorHelpers::FObjectFinderOptional<UAnimSequence> Finder(*FString::Printf(TEXT("/Game/Characters/Rabbit/Anims/A_Rabbit_%s.A_Rabbit_%s"), Name, Name));
+		// The finder keeps the path's pointer and looks it up later: the string has to outlive it
+		const FString Path = FString::Printf(TEXT("/Game/Characters/Rabbit/Anims/A_Rabbit_%s.A_Rabbit_%s"), Name, Name);
+		ConstructorHelpers::FObjectFinderOptional<UAnimSequence> Finder(*Path);
 		return Finder.Succeeded() ? Finder.Get() : nullptr;
 	}
 }

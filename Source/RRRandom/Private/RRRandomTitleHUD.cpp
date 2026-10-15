@@ -378,6 +378,10 @@ void ARRRandomTitleHUD::DrawHUD()
 	{
 		DrawCenteredText(TEXT("PICK YOUR BRAWLER"), Muted, ColumnX, ScreenH * 0.36f, SmallFont, S);
 	}
+	else if (Menu->IsOnMapPage())
+	{
+		DrawCenteredText(TEXT("PICK A MAP"), Muted, ColumnX, ScreenH * 0.36f, SmallFont, S);
+	}
 	else if (Menu->IsOnViewPage())
 	{
 		DrawCenteredText(TEXT("HOW DO YOU WANT TO PLAY?"), Muted, ColumnX, ScreenH * 0.36f, SmallFont, S);
@@ -466,7 +470,7 @@ void ARRRandomTitleHUD::DrawHUD()
 		DrawCenteredText(TEXT("[ESC] CANCEL"), Muted, ColumnX, Y, SmallFont, S);
 	}
 
-	const FString Keys = Menu->IsOnNetworkPage() || Menu->IsOnViewPage() || Menu->IsOnSpeciesPage()
+	const FString Keys = Menu->IsOnNetworkPage() || Menu->IsOnViewPage() || Menu->IsOnSpeciesPage() || Menu->IsOnMapPage()
 		? TEXT("[W/S] SELECT     [ENTER] OK     [ESC] BACK")
 		: TEXT("[W/S] SELECT     [ENTER] OK");
 	DrawCenteredText(Keys, Muted, ColumnX, ScreenH - 40.f * S, SmallFont, S);

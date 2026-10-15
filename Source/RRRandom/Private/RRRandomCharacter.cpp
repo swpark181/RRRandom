@@ -3,6 +3,7 @@
 #include "RRRandomBodyAnimInstance.h"
 #include "RRRandomCover.h"
 #include "RRRandomDiceBuffComponent.h"
+#include "RRRandomDiceTown.h"
 #include "RRRandomEffects.h"
 #include "RRRandomGridPath.h"
 #include "Components/PoseableMeshComponent.h"
@@ -18,6 +19,7 @@
 #include "RRRandomFoxClones.h"
 #include "RRRandomMoonHop.h"
 #include "RRRandomAcornRain.h"
+#include "RRRandomDragonFlight.h"
 #include "RRRandomVehicle.h"
 #include "RRRandomWingsComponent.h"
 #include "Animation/AnimSequence.h"
@@ -536,10 +538,12 @@ void ARRRandomCharacter::OnUltimateDie(int32 Face)
 	{
 		return;
 	}
-	// Each species' own: the tiger's giant, the fox's clones, the rabbit's moon hops, the squirrel's acorn rain
+	// Each species' own: the tiger's giant, the fox's clones, the rabbit's moon hops, the squirrel's acorn rain, the
+	// dragon's flight
 	UClass* Kind = ShownSpecies == RRSpecies::Fox ? ARRRandomFoxClones::StaticClass()
 		: ShownSpecies == RRSpecies::Rabbit ? ARRRandomMoonHop::StaticClass()
 		: ShownSpecies == RRSpecies::Squirrel ? ARRRandomAcornRain::StaticClass()
+		: ShownSpecies == RRSpecies::Dragon ? ARRRandomDragonFlight::StaticClass()
 		: ARRRandomTigerSpirit::StaticClass();
 	FActorSpawnParameters Params;
 	Params.Owner = this;
@@ -829,9 +833,11 @@ bool ARRRandomCharacter::TryClimb()
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomClimb), false, this);
 	const FCollisionObjectQueryParams StaticOnly(ECC_WorldStatic);
 
-	// A wall right in front, at chest height
+	// A wall right in front, at chest height, or else a low one at the knees (a window sill, which a giant's chest is over)
 	FHitResult Wall;
-	if (!World->LineTraceSingleByObjectType(Wall, Location, Location + Forward * (Radius + ClimbReach), StaticOnly, Params)
+	const FVector Knees(Location.X, Location.Y, FeetZ + MinClimbHeight + 25.f);
+	const bool bChest = World->LineTraceSingleByObjectType(Wall, Location, Location + Forward * (Radius + ClimbReach), StaticOnly, Params);
+	if ((!bChest && !World->LineTraceSingleByObjectType(Wall, Knees, Knees + Forward * (Radius + ClimbReach), StaticOnly, Params))
 		|| FMath::Abs(Wall.ImpactNormal.Z) > MaxWallNormalZ)
 	{
 		return false;
@@ -1057,10 +1063,11 @@ void ARRRandomCharacter::UpdateClimb(float DeltaSeconds)
 
 void ARRRandomCharacter::UpdateLedgeWalking()
 {
-	// Standing on cover: walking off its edge drops to the floor. On the floor itself: the arena edge stops everyone.
+	// Standing on cover: walking off its edge drops to the floor. On the floor itself: the arena edge stops everyone. In
+	// Dice Town anywhere: off stairs, landings, roofs and window sills (a hidden wall round its rim stops the fall off it)
 	const UCharacterMovementComponent* Movement = GetCharacterMovement();
 	const AActor* Floor = Movement->CurrentFloor.HitResult.GetActor();
-	GetCharacterMovement()->bCanWalkOffLedges = Movement->IsMovingOnGround() && Floor && Floor->IsA<ARRRandomCover>();
+	GetCharacterMovement()->bCanWalkOffLedges = Movement->IsMovingOnGround() && Floor && (Floor->IsA<ARRRandomCover>() || Floor->IsA<ARRRandomDiceTown>());
 }
 
 void ARRRandomCharacter::UpdateAmmoAndHealth(float DeltaSeconds)

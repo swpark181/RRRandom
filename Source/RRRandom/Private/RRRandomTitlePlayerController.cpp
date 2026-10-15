@@ -18,7 +18,11 @@ TArray<ERRTitleChoice> ARRRandomTitlePlayerController::GetChoices() const
 {
 	if (bSpeciesPage)
 	{
-		return { ERRTitleChoice::Fox, ERRTitleChoice::Rabbit, ERRTitleChoice::Squirrel, ERRTitleChoice::Tiger, ERRTitleChoice::Back };
+		return { ERRTitleChoice::Fox, ERRTitleChoice::Rabbit, ERRTitleChoice::Squirrel, ERRTitleChoice::Tiger, ERRTitleChoice::Dragon, ERRTitleChoice::Back };
+	}
+	if (bMapPage)
+	{
+		return { ERRTitleChoice::DiceTown, ERRTitleChoice::DiceLand, ERRTitleChoice::Back };
 	}
 	if (bViewPage)
 	{
@@ -57,14 +61,17 @@ FString ARRRandomTitlePlayerController::GetLabel(ERRTitleChoice Choice)
 	case ERRTitleChoice::Fox:
 	case ERRTitleChoice::Rabbit:
 	case ERRTitleChoice::Squirrel:
-	case ERRTitleChoice::Tiger: return RRSpecies::GetDisplayName(GetSpeciesOf(Choice));
+	case ERRTitleChoice::Tiger:
+	case ERRTitleChoice::Dragon: return RRSpecies::GetDisplayName(GetSpeciesOf(Choice));
+	case ERRTitleChoice::DiceTown: return TEXT("DICE TOWN");
+	case ERRTitleChoice::DiceLand: return TEXT("DICE LAND");
 	}
 	return FString();
 }
 
 int32 ARRRandomTitlePlayerController::GetSpeciesOf(ERRTitleChoice Choice)
 {
-	return Choice >= ERRTitleChoice::Fox && Choice <= ERRTitleChoice::Tiger ? static_cast<int32>(Choice) - static_cast<int32>(ERRTitleChoice::Fox) : INDEX_NONE;
+	return Choice >= ERRTitleChoice::Fox && Choice <= ERRTitleChoice::Dragon ? static_cast<int32>(Choice) - static_cast<int32>(ERRTitleChoice::Fox) : INDEX_NONE;
 }
 
 FString ARRRandomTitlePlayerController::GetDescription(ERRTitleChoice Choice)
@@ -83,6 +90,9 @@ FString ARRRandomTitlePlayerController::GetDescription(ERRTitleChoice Choice)
 	case ERRTitleChoice::Rabbit: return TEXT("Bouncy rabbit with tall ears.");
 	case ERRTitleChoice::Squirrel: return TEXT("Cheeky squirrel with a big curly tail.");
 	case ERRTitleChoice::Tiger: return TEXT("Bold little tiger in stripes.");
+	case ERRTitleChoice::Dragon: return TEXT("Little red dragon. Its true form breathes fire.");
+	case ERRTitleChoice::DiceTown: return TEXT("Big block town: climb houses and towers, fight on rooftops, by canals and in the woods.");
+	case ERRTitleChoice::DiceLand: return TEXT("Small round island of candy dice. Quick fights in the open.");
 	}
 	return FString();
 }
@@ -112,8 +122,18 @@ void ARRRandomTitlePlayerController::Choose(ERRTitleChoice Choice)
 		Selected = 0;
 		break;
 	case ERRTitleChoice::TopView:
+		Sessions->SetThirdPersonMode(false);
+		OpenSpeciesPage(bViewForHost ? EStart::Host : EStart::Solo);
+		break;
 	case ERRTitleChoice::ThirdPerson:
-		Sessions->SetThirdPersonMode(Choice == ERRTitleChoice::ThirdPerson);
+		// Which map first
+		Sessions->SetThirdPersonMode(true);
+		OpenMapPage();
+		break;
+	case ERRTitleChoice::DiceTown:
+	case ERRTitleChoice::DiceLand:
+		Sessions->SetThirdPersonMap(Choice == ERRTitleChoice::DiceLand ? ERRThirdPersonMap::DiceLand : ERRThirdPersonMap::DiceTown);
+		bMapPage = false;
 		OpenSpeciesPage(bViewForHost ? EStart::Host : EStart::Solo);
 		break;
 	case ERRTitleChoice::Join:
@@ -123,17 +143,29 @@ void ARRRandomTitlePlayerController::Choose(ERRTitleChoice Choice)
 	case ERRTitleChoice::Rabbit:
 	case ERRTitleChoice::Squirrel:
 	case ERRTitleChoice::Tiger:
+	case ERRTitleChoice::Dragon:
 		Sessions->SetSpecies(GetSpeciesOf(Choice));
 		Start == EStart::Join ? Sessions->JoinGame() : Start == EStart::Host ? Sessions->HostGame() : Sessions->PlaySolo();
 		break;
 	case ERRTitleChoice::Back:
 		if (bSpeciesPage)
 		{
-			// Back to the way to play, or to the network page for a join
+			// Back to the map (third person) or the way to play, or to the network page for a join
 			bSpeciesPage = false;
 			bViewPage = Start != EStart::Join;
-			Selected = bViewPage ? GetChoices().IndexOfByKey(Sessions->IsThirdPersonMode() ? ERRTitleChoice::ThirdPerson : ERRTitleChoice::TopView)
-				: GetChoices().IndexOfByKey(ERRTitleChoice::Join);
+			if (bViewPage && Sessions->IsThirdPersonMode())
+			{
+				OpenMapPage();
+				break;
+			}
+			Selected = bViewPage ? GetChoices().IndexOfByKey(ERRTitleChoice::TopView) : GetChoices().IndexOfByKey(ERRTitleChoice::Join);
+			break;
+		}
+		if (bMapPage)
+		{
+			// Back to the way to play
+			bMapPage = false;
+			Selected = GetChoices().IndexOfByKey(ERRTitleChoice::ThirdPerson);
 			break;
 		}
 		if (bViewPage)
@@ -150,6 +182,13 @@ void ARRRandomTitlePlayerController::Choose(ERRTitleChoice Choice)
 		ConsoleCommand(TEXT("quit"));
 		break;
 	}
+}
+
+void ARRRandomTitlePlayerController::OpenMapPage()
+{
+	const URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>();
+	bMapPage = true;
+	Selected = GetChoices().IndexOfByKey(Sessions && Sessions->GetThirdPersonMap() == ERRThirdPersonMap::DiceLand ? ERRTitleChoice::DiceLand : ERRTitleChoice::DiceTown);
 }
 
 void ARRRandomTitlePlayerController::OpenSpeciesPage(EStart InStart)
@@ -258,7 +297,7 @@ void ARRRandomTitlePlayerController::OnBack()
 	{
 		Sessions->CancelPending();
 	}
-	else if (bNetworkPage || bViewPage || bSpeciesPage)
+	else if (bNetworkPage || bViewPage || bSpeciesPage || bMapPage)
 	{
 		Choose(ERRTitleChoice::Back);
 	}

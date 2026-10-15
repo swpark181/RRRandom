@@ -24,6 +24,8 @@ namespace
 		{ TEXT("Rabbit"), 2.45f, 17.5f },
 		{ TEXT("Squirrel"), 2.05f, 21.2f },
 		{ TEXT("Tiger"), 1.75f, 26.3f },
+		// Its horns stand tall: between the fox's hips height (2.43) and head height (1.8), a little toward the hips
+		{ TEXT("Dragon"), 2.15f, 20.4f },
 	};
 	const FSpeciesTuning& FoxTuning = Tunings[RRSpecies::Fox];
 
@@ -70,14 +72,17 @@ FString RRSpecies::GetUltimateName(int32 Species)
 	case Fox: return TEXT("FOX CLONES");
 	case Rabbit: return TEXT("MOON HOP");
 	case Squirrel: return TEXT("ACORN RAIN");
+	case Dragon: return TEXT("DRAGON FLIGHT");
 	default: return TEXT("TIGER SPIRIT");
 	}
 }
 
 FString RRSpecies::GetUltimateBanner(int32 Species, int32 Face)
 {
-	// The squirrel's face is seconds of rain on top of three (ARRRandomAcornRain::BaseSeconds)
+	// The squirrel's face is seconds of rain on top of three (ARRRandomAcornRain::BaseSeconds); the dragon's, how big
+	// it and its breath get (ARRRandomDragonFlight)
 	return Species == Squirrel ? FString::Printf(TEXT("%s  %ds!"), *GetUltimateName(Species), Face + 3)
+		: Species == Dragon ? FString::Printf(TEXT("%s  LV%d!"), *GetUltimateName(Species), Face)
 		: FString::Printf(TEXT("%s  x%d!"), *GetUltimateName(Species), Face);
 }
 

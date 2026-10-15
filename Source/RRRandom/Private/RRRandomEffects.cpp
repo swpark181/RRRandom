@@ -18,7 +18,8 @@ namespace
 		TEXT("/Game/Effects/Wings/SM_WingSparkle.SM_WingSparkle"),
 		TEXT("/Game/Effects/DiceFX/SM_FXDie.SM_FXDie"),
 	};
-	constexpr int32 PoolSizes[] = { 500, 80, 500, 120 };
+	// (Balls: the dragon's breath and the fire and embers it leaves take many at once)
+	constexpr int32 PoolSizes[] = { 2200, 80, 500, 120 };
 	const TCHAR* const GlowMaterial = TEXT("/Game/Effects/DiceFX/M_FXGlow.M_FXGlow");
 	// Custom data: linear color, brightness, opacity
 	constexpr int32 DataFloats = 5;
@@ -32,6 +33,10 @@ namespace
 
 	const FLinearColor Cream(1.f, 0.93f, 0.82f);
 	const FLinearColor Gold(1.f, 0.78f, 0.3f);
+	// Fire, hottest first
+	const FLinearColor FireYellow(1.f, 0.82f, 0.25f);
+	const FLinearColor FireOrange(1.f, 0.42f, 0.05f);
+	const FLinearColor FireRed(0.95f, 0.13f, 0.03f);
 	const FLinearColor Candy[] = { FLinearColor(1.f, 0.45f, 0.62f), FLinearColor(1.f, 0.62f, 0.3f), FLinearColor(1.f, 0.88f, 0.3f),
 		FLinearColor(0.35f, 0.9f, 0.6f), FLinearColor(0.35f, 0.75f, 1.f), FLinearColor(0.62f, 0.5f, 1.f) };
 
@@ -873,6 +878,174 @@ void ARRRandomEffects::HitBurst(const FVector& Where, const FVector& FromDirecti
 	Flash.Opacity = 0.8f;
 	Flash.FadeIn = 0.01f;
 	Spawn(Flash);
+}
+
+void ARRRandomEffects::DragonBreath(const FVector& Mouth, const FVector& Impact, float Radius, float DeltaSeconds, const FVector& Carry)
+{
+	// The stream: balls of fire leaving the mouth small and hot, swelling and reddening on their way to where it lands
+	const float Spread = Radius / 50.f;
+	for (int32 Index = CountThisFrame(110.f + Radius * 0.15f, DeltaSeconds); Index > 0; --Index)
+	{
+		FParticle Fire;
+		Fire.Shape = EShape::Ball;
+		Fire.Location = Mouth + FMath::VRand() * 15.f;
+		const FVector2D Disc = FMath::RandPointInCircle(Radius * 0.75f);
+		const float Travel = FMath::FRandRange(0.26f, 0.38f);
+		Fire.Velocity = (Impact + Carry * Travel + FVector(Disc.X, Disc.Y, 30.f) - Fire.Location) / Travel;
+		Fire.Life = Travel * FMath::FRandRange(0.95f, 1.2f);
+		Fire.StartSize = FVector(FMath::FRandRange(0.3f, 0.5f));
+		Fire.EndSize = FVector(Spread * FMath::FRandRange(0.35f, 0.6f));
+		Fire.Turn = FRotator(FMath::FRandRange(0.f, 360.f), FMath::FRandRange(0.f, 360.f), 0.f);
+		// Mostly orange and red: too bright or too yellow and it reads as white against the sunny map
+		const float Heat = FMath::FRand();
+		Fire.Color = Heat < 0.15f ? FireYellow : (Heat < 0.65f ? FireOrange : FireRed);
+		Fire.Glow = FMath::FRandRange(1.6f, 2.4f);
+		Fire.Opacity = 0.85f;
+		Fire.FadeIn = 0.02f;
+		Spawn(Fire);
+	}
+	// Where it lands: fire splashing up and out, and sparks
+	for (int32 Index = CountThisFrame(45.f, DeltaSeconds); Index > 0; --Index)
+	{
+		FParticle Splash;
+		Splash.Shape = EShape::Ball;
+		const FVector2D Disc = FMath::RandPointInCircle(Radius);
+		Splash.Location = Impact + FVector(Disc.X, Disc.Y, 20.f);
+		Splash.Velocity = FVector(Disc.X, Disc.Y, 0.f).GetSafeNormal() * FMath::FRandRange(80.f, 260.f) + FVector(0.f, 0.f, FMath::FRandRange(250.f, 550.f));
+		Splash.Gravity = 300.f;
+		Splash.Drag = 1.2f;
+		Splash.Life = FMath::FRandRange(0.45f, 0.75f);
+		Splash.StartSize = FVector(Spread * FMath::FRandRange(0.25f, 0.45f));
+		Splash.EndSize = FVector(0.05f);
+		Splash.Color = FMath::FRand() < 0.5f ? FireOrange : FireRed;
+		Splash.Glow = 1.8f;
+		Splash.Opacity = 0.85f;
+		Spawn(Splash);
+	}
+	Spray(EShape::Star, Impact + FVector(0.f, 0.f, 30.f), CountThisFrame(30.f, DeltaSeconds), FVector::UpVector, 60.f, FVector2D(400.f, 900.f),
+		FVector2D(4.f, 7.f), FVector2D(0.5f, 0.9f), FireYellow, 6.f, 500.f);
+}
+
+void ARRRandomEffects::GroundFire(const FVector& Where, float Radius, float Strength, float DeltaSeconds)
+{
+	// Flames rising and shrinking, smaller and fewer as the fire dies down
+	const float Spread = Radius / 50.f;
+	for (int32 Index = CountThisFrame(16.f * Strength, DeltaSeconds); Index > 0; --Index)
+	{
+		FParticle Flame;
+		Flame.Shape = EShape::Ball;
+		const FVector2D Disc = FMath::RandPointInCircle(Radius);
+		Flame.Location = Where + FVector(Disc.X, Disc.Y, 15.f);
+		Flame.Velocity = FVector(FMath::FRandRange(-30.f, 30.f), FMath::FRandRange(-30.f, 30.f), FMath::FRandRange(140.f, 320.f));
+		// Rising faster as it goes, like a flame
+		Flame.Gravity = -250.f;
+		Flame.Life = FMath::FRandRange(0.45f, 0.8f);
+		Flame.StartSize = FVector(Spread * FMath::FRandRange(0.18f, 0.32f) * (0.5f + 0.5f * Strength));
+		Flame.EndSize = FVector(0.03f);
+		const float Heat = FMath::FRand();
+		Flame.Color = Heat < 0.15f ? FireYellow : (Heat < 0.65f ? FireOrange : FireRed);
+		Flame.Glow = 1.8f;
+		Flame.Opacity = 0.8f;
+		Flame.FadeIn = 0.08f;
+		Spawn(Flame);
+	}
+	if (FMath::FRand() < Strength * DeltaSeconds * 6.f)
+	{
+		Spray(EShape::Star, Where + FVector(0.f, 0.f, 20.f), 1, FVector::UpVector, 40.f, FVector2D(200.f, 450.f), FVector2D(3.f, 5.f),
+			FVector2D(0.5f, 0.9f), FireYellow, 6.f, -100.f);
+	}
+}
+
+void ARRRandomEffects::GroundEmbers(const FVector& Where, float Radius, float Strength, float DeltaSeconds)
+{
+	// Coals scattered over the floor (the scorch decal glows under them), each glowing up and dimming again (a flicker),
+	// fewer as they go out; little flames licking up off them, and sparks drifting up
+	for (int32 Index = CountThisFrame(26.f * Strength, DeltaSeconds); Index > 0; --Index)
+	{
+		FParticle Ember;
+		Ember.Shape = EShape::Ball;
+		const FVector2D Disc = FMath::RandPointInCircle(Radius);
+		Ember.Location = Where + FVector(Disc.X, Disc.Y, 10.f);
+		Ember.Velocity = FVector(0.f, 0.f, FMath::FRandRange(0.f, 30.f));
+		Ember.Drag = 2.f;
+		Ember.Life = FMath::FRandRange(0.7f, 1.2f);
+		const float Size = FMath::FRandRange(0.26f, 0.42f) * (0.6f + 0.4f * Strength);
+		Ember.StartSize = FVector(Size, Size, Size * 0.7f);
+		Ember.EndSize = FVector(Size * 0.4f, Size * 0.4f, Size * 0.3f);
+		const float Heat = FMath::FRand();
+		// Mostly orange and red: brighter or yellower and they wash out to white against the sunny map
+		Ember.Color = Heat < 0.12f ? FireYellow : (Heat < 0.65f ? FireOrange : FireRed);
+		Ember.Glow = FMath::FRandRange(2.4f, 3.4f);
+		Ember.Opacity = 1.f;
+		Ember.FadeIn = Ember.Life * 0.35f;
+		Spawn(Ember);
+	}
+	for (int32 Index = CountThisFrame(5.f * Strength, DeltaSeconds); Index > 0; --Index)
+	{
+		FParticle Flame;
+		Flame.Shape = EShape::Ball;
+		const FVector2D Disc = FMath::RandPointInCircle(Radius * 0.9f);
+		Flame.Location = Where + FVector(Disc.X, Disc.Y, 15.f);
+		Flame.Velocity = FVector(FMath::FRandRange(-20.f, 20.f), FMath::FRandRange(-20.f, 20.f), FMath::FRandRange(90.f, 180.f));
+		Flame.Gravity = -200.f;
+		Flame.Life = FMath::FRandRange(0.35f, 0.6f);
+		Flame.StartSize = FVector(FMath::FRandRange(0.3f, 0.5f));
+		Flame.EndSize = FVector(0.03f);
+		Flame.Color = FMath::FRand() < 0.5f ? FireOrange : FireRed;
+		Flame.Glow = 2.5f;
+		Flame.Opacity = 0.85f;
+		Flame.FadeIn = 0.08f;
+		Spawn(Flame);
+	}
+	if (FMath::FRand() < Strength * DeltaSeconds * 6.f)
+	{
+		const FVector2D Disc = FMath::RandPointInCircle(Radius);
+		Spray(EShape::Star, Where + FVector(Disc.X, Disc.Y, 10.f), 1, FVector::UpVector, 30.f, FVector2D(100.f, 260.f), FVector2D(4.f, 6.f),
+			FVector2D(0.7f, 1.2f), FireYellow, 6.f, -60.f);
+	}
+}
+
+void ARRRandomEffects::FireBurst(const FVector& Where, float Size)
+{
+	// A flash, a ring of fire running out, flame balls thrown up and out, sparks
+	FParticle Flash;
+	Flash.Shape = EShape::Ball;
+	Flash.Location = Where;
+	Flash.Life = 0.3f;
+	Flash.StartSize = FVector(1.2f * Size);
+	Flash.EndSize = FVector(3.f * Size);
+	Flash.Color = FireYellow;
+	Flash.Glow = 6.f;
+	Flash.Opacity = 0.7f;
+	Spawn(Flash);
+	FParticle Ring;
+	Ring.Shape = EShape::Ring;
+	Ring.Location = Where - FVector(0.f, 0.f, 70.f * Size);
+	Ring.Life = 0.5f;
+	Ring.StartSize = FVector(0.5f * Size, 0.5f * Size, 1.f);
+	Ring.EndSize = FVector(4.5f * Size, 4.5f * Size, 1.f);
+	Ring.Color = FireOrange;
+	Ring.Glow = 4.f;
+	Spawn(Ring);
+	for (int32 Index = FMath::RoundToInt(36.f * Size); Index > 0; --Index)
+	{
+		FParticle Fire;
+		Fire.Shape = EShape::Ball;
+		Fire.Location = Where + FMath::VRand() * 30.f * Size;
+		Fire.Velocity = FMath::VRandCone(FVector::UpVector, FMath::DegreesToRadians(80.f)) * FMath::FRandRange(250.f, 650.f) * Size;
+		Fire.Gravity = -150.f;
+		Fire.Drag = 2.f;
+		Fire.Life = FMath::FRandRange(0.5f, 0.9f);
+		Fire.StartSize = FVector(FMath::FRandRange(0.4f, 0.8f) * Size);
+		Fire.EndSize = FVector(0.05f);
+		const float Heat = FMath::FRand();
+		Fire.Color = Heat < 0.3f ? FireYellow : (Heat < 0.75f ? FireOrange : FireRed);
+		Fire.Glow = 4.f;
+		Fire.Opacity = 0.85f;
+		Spawn(Fire);
+	}
+	Spray(EShape::Star, Where, FMath::RoundToInt(24.f * Size), FVector::UpVector, 100.f, FVector2D(300.f, 800.f) * Size, FVector2D(5.f, 9.f),
+		FVector2D(0.6f, 1.f), FireYellow, 7.f, 250.f);
 }
 
 void ARRRandomEffects::Tick(float DeltaSeconds)
