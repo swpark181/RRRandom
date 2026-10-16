@@ -13,8 +13,10 @@ class UTexture2D;
  * under a glowing die) filling the screen, brought to life with the game's own die spinning over the painted one
  * (a sprite sheet rendered in Blender) in a pulsing flash with twinkling sparkles, smoke drifting up from the
  * muzzle, the sea rippling and glinting, and the fox itself breathing, tilting its head, swinging its tail and flicking an ear (drawn on its own
- * layers over the scene without it, the tail turning whole and the body warped puppet style); then, in a column on the left, the game's name, the menu buttons of ARRRandomTitlePlayerController, what
- * the selected one does, and the online status while hosting or joining. Moving the mouse over a button selects it.
+ * layers over the scene without it, the tail turning whole and the body warped puppet style); then, in a column on the left
+ * over a white wash, in the pastel style of RRRandomUIStyle: the game's name, the menu buttons of
+ * ARRRandomTitlePlayerController (pills, or a row of portrait cards on the brawler page), what the selected one does, and
+ * the online status while hosting or joining. Moving the mouse over a button selects it.
  * Without the art it falls back to a plain dark background.
  */
 UCLASS()
@@ -31,8 +33,8 @@ public:
 	int32 GetButtonAt(const FVector2D& ScreenPoint) const;
 
 private:
-	/** Text centered on CenterX with its top at Y; returns its height. */
-	float DrawCenteredText(const FString& Text, const FLinearColor& Color, float CenterX, float Y, UFont* Font, float Scale);
+	/** Text in the pastel style's font (Weight is an RRUI::EWeight) centered on CenterX with its top at Y; returns its size. */
+	FVector2D DrawCenteredText(const FString& Text, const FLinearColor& Color, float CenterX, float Y, float Size, int32 Weight, float Tracking);
 
 	/** The art scaled to cover the screen (cropped evenly), and the animation on top of it. */
 	void DrawArt(float Time);
@@ -71,6 +73,13 @@ private:
 	/** Each brawler's HUD card picture (RRSpecies order), shown on the brawler page's buttons. */
 	UPROPERTY()
 	TArray<TObjectPtr<UTexture2D>> Portraits;
+
+	/** White sprites for rounded shapes and soft shadows (RRRandomUIStyle). */
+	UPROPERTY()
+	TObjectPtr<UTexture2D> UICircle;
+
+	UPROPERTY()
+	TObjectPtr<UTexture2D> UISoft;
 
 	/** The sea in the background rippling, flowing and glinting (char-pipeline/scripts/ue_make_title_water.py). */
 	UPROPERTY()

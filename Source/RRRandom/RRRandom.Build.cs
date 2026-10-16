@@ -23,7 +23,10 @@ public class RRRandom : ModuleRules
 			// Whether the game's window is the one in use (third person gives the mouse back otherwise)
 			"ApplicationCore",
 			// GWhiteTexture for the HUD's canvas triangles
-			"RenderCore"
+			"RenderCore",
+			// The HUD's runtime Nunito font: measured and rasterized by Slate's font services (RRRandomUIStyle)
+			"Slate",
+			"SlateCore"
 		});
 	}
 }

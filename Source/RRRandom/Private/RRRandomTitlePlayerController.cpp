@@ -223,6 +223,11 @@ void ARRRandomTitlePlayerController::CreateInputAssets()
 	MappingContext->MapKey(UpAction, EKeys::Up);
 	MappingContext->MapKey(DownAction, EKeys::S);
 	MappingContext->MapKey(DownAction, EKeys::Down);
+	// The brawler page lays its cards out in a row: left and right move along it too
+	MappingContext->MapKey(UpAction, EKeys::A);
+	MappingContext->MapKey(UpAction, EKeys::Left);
+	MappingContext->MapKey(DownAction, EKeys::D);
+	MappingContext->MapKey(DownAction, EKeys::Right);
 	MappingContext->MapKey(ConfirmAction, EKeys::Enter);
 	MappingContext->MapKey(ConfirmAction, EKeys::SpaceBar);
 	MappingContext->MapKey(BackAction, EKeys::Escape);

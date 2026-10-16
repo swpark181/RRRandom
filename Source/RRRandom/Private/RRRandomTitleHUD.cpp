@@ -2,6 +2,7 @@
 #include "RRRandomSessionSubsystem.h"
 #include "RRRandomSpecies.h"
 #include "RRRandomTitlePlayerController.h"
+#include "RRRandomUIStyle.h"
 #include "CanvasItem.h"
 #include "CanvasTypes.h"
 #include "Engine/Canvas.h"
@@ -18,23 +19,27 @@ namespace
 	constexpr float ReferenceHeight = 720.f;
 	constexpr float ButtonWidth = 340.f;
 	constexpr float ButtonHeight = 50.f;
-	constexpr float ButtonGap = 14.f;
-	constexpr float ButtonBorder = 2.f;
+	constexpr float ButtonGap = 12.f;
+	// The brawler page: a row of portrait cards this wide in all, each this tall, and BACK as a smaller pill under them
+	constexpr float CardRowWidth = 570.f;
+	constexpr float CardGap = 10.f;
+	constexpr float CardHeight = 128.f;
+	constexpr float CardFace = 80.f;
+	constexpr float CardLift = 8.f;
+	constexpr float SmallButtonWidth = 200.f;
+	constexpr float SmallButtonHeight = 44.f;
 	// The menu column's middle, as a share of the screen width (the fox stands on the right of the art)
 	constexpr float ColumnShare = 0.27f;
-	// The art is darkened from the left edge to this share of the screen, so the menu reads over it
+	// A white wash over the art from the left edge, so the menu reads over it: this strong at the edge, this strong at
+	// FadeShare of the screen, gone at ShadeShare
+	constexpr float WashEdge = 0.85f;
+	constexpr float WashMiddle = 0.6f;
+	constexpr float FadeShare = 0.42f;
 	constexpr float ShadeShare = 0.58f;
-	constexpr float ShadeAlpha = 0.5f;
-	constexpr int32 ShadeStrips = 32;
+	constexpr int32 ShadeStrips = 48;
 
 	// Picked as screen (sRGB) colors; the canvas takes linear ones
-	const FLinearColor Background = FLinearColor::FromSRGBColor(FColor(14, 16, 24));
-	const FLinearColor Accent = FLinearColor::FromSRGBColor(FColor(255, 196, 56));
-	const FLinearColor ButtonFill = FLinearColor::FromSRGBColor(FColor(30, 33, 44));
-	const FLinearColor ButtonEdge = FLinearColor::FromSRGBColor(FColor(72, 78, 96));
-	const FLinearColor SelectedText = FLinearColor::FromSRGBColor(FColor(24, 18, 6));
-	const FLinearColor Muted = FLinearColor::FromSRGBColor(FColor(200, 206, 222));
-	const FLinearColor StatusColor = FLinearColor::FromSRGBColor(FColor(255, 214, 110));
+	const FLinearColor Background = FLinearColor::FromSRGBColor(FColor(246, 244, 250));
 	const FLinearColor FlashColor(1.f, 0.93f, 0.75f);
 
 	// Where things are in the title art, in its own pixels (1376 x 768): the painted die and the rifle's muzzle
@@ -168,6 +173,10 @@ ARRRandomTitleHUD::ARRRandomTitleHUD()
 	Glow = GlowTexture.Succeeded() ? GlowTexture.Object : nullptr;
 	Sparkle = SparkleTexture.Succeeded() ? SparkleTexture.Object : nullptr;
 	Puff = PuffTexture.Succeeded() ? PuffTexture.Object : nullptr;
+	static ConstructorHelpers::FObjectFinder<UTexture2D> CircleSprite(TEXT("/Game/UI/T_UICircle.T_UICircle"));
+	UICircle = CircleSprite.Succeeded() ? CircleSprite.Object : nullptr;
+	static ConstructorHelpers::FObjectFinder<UTexture2D> SoftSprite(TEXT("/Game/UI/T_UISoft.T_UISoft"));
+	UISoft = SoftSprite.Succeeded() ? SoftSprite.Object : nullptr;
 	for (const FRRSpeciesLook& Look : FRRSpeciesLook::GetAll())
 	{
 		Portraits.Add(Look.Portrait);
@@ -179,16 +188,11 @@ int32 ARRRandomTitleHUD::GetButtonAt(const FVector2D& ScreenPoint) const
 	return ButtonRects.IndexOfByPredicate([&ScreenPoint](const FBox2D& Rect) { return Rect.IsInside(ScreenPoint); });
 }
 
-float ARRRandomTitleHUD::DrawCenteredText(const FString& Text, const FLinearColor& Color, float CenterX, float Y, UFont* Font, float Scale)
+FVector2D ARRRandomTitleHUD::DrawCenteredText(const FString& Text, const FLinearColor& Color, float CenterX, float Y, float Size, int32 Weight, float Tracking)
 {
-	float Width;
-	float Height;
-	GetTextSize(Text, Width, Height, Font, Scale);
-	const float X = CenterX - Width * 0.5f;
-	const float Shadow = FMath::Max(1.f, Scale);
-	DrawText(Text, FLinearColor(0.f, 0.f, 0.f, Color.A * 0.8f), X + Shadow, Y + Shadow, Font, Scale);
-	DrawText(Text, Color, X, Y, Font, Scale);
-	return Height;
+	const RRUI::EWeight Face = static_cast<RRUI::EWeight>(Weight);
+	const FVector2D Box = RRUI::MeasureText(Text, Size, Face, Tracking);
+	return RRUI::DrawText(Canvas, Text, FVector2D(CenterX - Box.X * 0.5f, Y), Size, Face, Color, Tracking);
 }
 
 FVector2D ARRRandomTitleHUD::ArtToScreen(const FVector2D& ArtPoint) const
@@ -272,15 +276,17 @@ void ARRRandomTitleHUD::DrawArt(float Time)
 		}
 	}
 
-	// Darken toward the left so the menu reads over the sky and the island
+	// Wash toward the left with white so the menu reads over the sky and the island
 	const float ShadeWidth = ScreenW * ShadeShare;
 	for (int32 Strip = 0; Strip < ShadeStrips; ++Strip)
 	{
-		// Whole-pixel edges that meet exactly: overlapping strips would show as darker lines
-		const float T = (Strip + 0.5f) / ShadeStrips;
+		// Whole-pixel edges that meet exactly: overlapping strips would show as brighter lines
+		const float Share = (Strip + 0.5f) / ShadeStrips * ShadeShare;
+		const float Alpha = Share < FadeShare ? FMath::Lerp(WashEdge, WashMiddle, Share / FadeShare)
+			: FMath::Lerp(WashMiddle, 0.f, FMath::SmoothStep(0.f, 1.f, (Share - FadeShare) / (ShadeShare - FadeShare)));
 		const float X0 = FMath::RoundToFloat(ShadeWidth * Strip / ShadeStrips);
 		const float X1 = FMath::RoundToFloat(ShadeWidth * (Strip + 1) / ShadeStrips);
-		DrawRect(FLinearColor(0.f, 0.f, 0.f, ShadeAlpha * FMath::Square(1.f - T)), X0, 0.f, X1 - X0, ScreenH);
+		DrawRect(FLinearColor(1.f, 1.f, 1.f, Alpha), X0, 0.f, X1 - X0, ScreenH);
 	}
 }
 
@@ -354,56 +360,92 @@ void ARRRandomTitleHUD::DrawHUD()
 	{
 		return;
 	}
+	RRUI::UseShapes(UICircle, UISoft);
 
 	const URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>();
 	const float ScreenW = Canvas->ClipX;
 	const float ScreenH = Canvas->ClipY;
 	const float S = ScreenH / ReferenceHeight;
-	UFont* LargeFont = GEngine->GetLargeFont();
-	UFont* MediumFont = GEngine->GetMediumFont();
-	UFont* SmallFont = GEngine->GetSmallFont();
+	constexpr int32 ExtraBold = static_cast<int32>(RRUI::EWeight::ExtraBold);
 
 	DrawArt(GetWorld()->GetRealTimeSeconds());
 	const float ColumnX = Art ? ScreenW * ColumnShare : ScreenW * 0.5f;
 
-	// Name and a short underline
-	float Y = ScreenH * 0.12f;
-	Y += DrawCenteredText(TEXT("RRRANDOM"), Accent, ColumnX, Y, LargeFont, 4.f * S);
-	DrawRect(Accent, ColumnX - 80.f * S, Y + 4.f * S, 160.f * S, 4.f * S);
-	Y += 18.f * S;
-	DrawCenteredText(TEXT("TEAM BRAWL PROTOTYPE"), Muted, ColumnX, Y, MediumFont, S);
+	// Name: RRR in lavender and the rest in ink, five pastel bars under it, then the tagline
+	float Y = ScreenH * 0.11f;
+	const float LogoSize = 62.f * S;
+	const float LogoTracking = LogoSize * 0.04f;
+	const FString Lead = TEXT("RRR");
+	const FString Rest = TEXT("ANDOM");
+	const FVector2D LogoBox = RRUI::MeasureText(Lead + Rest, LogoSize, RRUI::EWeight::Black, LogoTracking);
+	const float LeadWidth = RRUI::MeasureText(Lead, LogoSize, RRUI::EWeight::Black, LogoTracking).X + LogoTracking;
+	RRUI::DrawText(Canvas, Lead, FVector2D(ColumnX - LogoBox.X * 0.5f, Y), LogoSize, RRUI::EWeight::Black, RRUI::LavenderDeep, LogoTracking);
+	RRUI::DrawText(Canvas, Rest, FVector2D(ColumnX - LogoBox.X * 0.5f + LeadWidth, Y), LogoSize, RRUI::EWeight::Black, RRUI::Ink, LogoTracking);
+	Y += LogoBox.Y;
+	const FLinearColor Bars[] = { RRUI::Pink, RRUI::Mint, RRUI::Lavender, RRUI::Butter, RRUI::Sky };
+	const float BarWidth = 26.f * S;
+	const float BarGap = 4.f * S;
+	float BarX = ColumnX - (BarWidth * 5.f + BarGap * 4.f) * 0.5f;
+	for (const FLinearColor& Bar : Bars)
+	{
+		RRUI::DrawPill(Canvas, FBox2D(FVector2D(BarX, Y), FVector2D(BarX + BarWidth, Y + 4.f * S)), Bar);
+		BarX += BarWidth + BarGap;
+	}
+	Y += 12.f * S;
+	DrawCenteredText(TEXT("TEAM BRAWL PROTOTYPE"), RRUI::InkSoft, ColumnX, Y, 11.f * S, ExtraBold, 11.f * S * 0.32f);
 
 	// The brawler page asks who to play, the view page how
+	const float LabelSize = 11.f * S;
+	const float LabelY = ScreenH * 0.36f;
 	if (Menu->IsOnSpeciesPage())
 	{
-		DrawCenteredText(TEXT("PICK YOUR BRAWLER"), Muted, ColumnX, ScreenH * 0.36f, SmallFont, S);
+		DrawCenteredText(TEXT("PICK YOUR BRAWLER"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
 	}
 	else if (Menu->IsOnMapPage())
 	{
-		DrawCenteredText(TEXT("PICK A MAP"), Muted, ColumnX, ScreenH * 0.36f, SmallFont, S);
+		DrawCenteredText(TEXT("PICK A MAP"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
 	}
 	else if (Menu->IsOnViewPage())
 	{
-		DrawCenteredText(TEXT("HOW DO YOU WANT TO PLAY?"), Muted, ColumnX, ScreenH * 0.36f, SmallFont, S);
+		DrawCenteredText(TEXT("HOW DO YOU WANT TO PLAY?"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
 	}
 	// Which online service a network game would use
 	else if (Menu->IsOnNetworkPage() && Sessions)
 	{
 		const FString Service = Sessions->IsUsingEOS()
 			? TEXT("ONLINE VIA EPIC ONLINE SERVICES")
-			: TEXT("ONLINE VIA LAN  (EOS keys not set: same PC or home network)");
-		DrawCenteredText(Service, Muted, ColumnX, ScreenH * 0.36f, SmallFont, S);
+			: TEXT("ONLINE VIA LAN (EOS keys not set: same PC or home network)");
+		DrawCenteredText(Service, RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.1f);
 	}
 
-	// Buttons: lay them out, let a moving mouse select one, then draw
+	// Buttons: lay them out, let a moving mouse select one, then draw. The brawler page puts its brawlers on a row of
+	// portrait cards with BACK under them; the other pages stack pills.
 	const TArray<ERRTitleChoice> Choices = Menu->GetChoices();
-	const float Left = ColumnX - ButtonWidth * S * 0.5f;
+	const bool bCards = Menu->IsOnSpeciesPage();
 	const float Top = ScreenH * 0.42f;
 	ButtonRects.Reset();
+	int32 CardCount = 0;
+	for (const ERRTitleChoice Choice : Choices)
+	{
+		CardCount += bCards && ARRRandomTitlePlayerController::GetSpeciesOf(Choice) != INDEX_NONE ? 1 : 0;
+	}
+	const float CardWidth = CardCount > 0 ? (CardRowWidth - CardGap * (CardCount - 1)) / CardCount * S : 0.f;
+	// Room under the cards for the selected brawler's line
+	const float DescriptionRoom = 54.f * S;
+	float NextTop = Top;
 	for (int32 Index = 0; Index < Choices.Num(); ++Index)
 	{
-		const FVector2D Min(Left, Top + Index * (ButtonHeight + ButtonGap) * S);
-		ButtonRects.Add(FBox2D(Min, Min + FVector2D(ButtonWidth, ButtonHeight) * S));
+		if (Index < CardCount)
+		{
+			const FVector2D Min(ColumnX - CardRowWidth * S * 0.5f + Index * (CardWidth + CardGap * S), Top);
+			ButtonRects.Add(FBox2D(Min, Min + FVector2D(CardWidth, CardHeight * S)));
+			NextTop = Top + CardHeight * S + DescriptionRoom;
+			continue;
+		}
+		const FVector2D Size = bCards ? FVector2D(SmallButtonWidth, SmallButtonHeight) * S : FVector2D(ButtonWidth, ButtonHeight) * S;
+		const FVector2D Min(ColumnX - Size.X * 0.5f, NextTop);
+		ButtonRects.Add(FBox2D(Min, Min + Size));
+		NextTop += Size.Y + ButtonGap * S;
 	}
 
 	float MouseX;
@@ -424,54 +466,96 @@ void ARRRandomTitleHUD::DrawHUD()
 
 	// Buttons fade while a host or join is under way
 	const bool bBusy = Menu->IsBusy();
-	const float ButtonAlpha = bBusy ? 0.35f : 1.f;
+	const float Alpha = bBusy ? 0.35f : 1.f;
 	for (int32 Index = 0; Index < Choices.Num(); ++Index)
 	{
-		const FBox2D& Rect = ButtonRects[Index];
-		const FVector2D Size = Rect.GetSize();
 		const bool bSelected = Index == Menu->GetSelected();
-		const float Border = ButtonBorder * S;
-
-		DrawRect(WithAlpha(bSelected ? Accent : ButtonEdge, ButtonAlpha), Rect.Min.X, Rect.Min.Y, Size.X, Size.Y);
-		if (!bSelected)
-		{
-			DrawRect(WithAlpha(ButtonFill, ButtonAlpha), Rect.Min.X + Border, Rect.Min.Y + Border, Size.X - Border * 2.f, Size.Y - Border * 2.f);
-		}
-
 		const FString Label = ARRRandomTitlePlayerController::GetLabel(Choices[Index]);
-		float TextW;
-		float TextH;
-		GetTextSize(Label, TextW, TextH, LargeFont, 1.2f * S);
-		DrawText(Label, WithAlpha(bSelected ? SelectedText : FLinearColor::White, ButtonAlpha),
-			Rect.Min.X + (Size.X - TextW) * 0.5f, Rect.Min.Y + (Size.Y - TextH) * 0.5f, LargeFont, 1.2f * S);
-		// A brawler's face at the left end of its button
-		const int32 Species = ARRRandomTitlePlayerController::GetSpeciesOf(Choices[Index]);
-		if (Portraits.IsValidIndex(Species) && Portraits[Species])
+		if (Index < CardCount)
 		{
-			const float Face = Size.Y - Border * 4.f;
-			DrawTexture(Portraits[Species], Rect.Min.X + Border * 2.f, Rect.Min.Y + Border * 2.f, Face, Face, 0.f, 0.f, 1.f, 1.f,
-				WithAlpha(FLinearColor::White, ButtonAlpha));
+			// A see-through card; the picked one turns white, rises, and gets a pink ring and a line under its name
+			const FBox2D Rect = ButtonRects[Index].ShiftBy(FVector2D(0.f, bSelected ? -CardLift * S : 0.f));
+			const float Radius = 18.f * S;
+			if (bSelected)
+			{
+				RRUI::DrawSoftShadow(Canvas, Rect, Radius, 14.f * S, 6.f * S, RRUI::WithAlpha(RRUI::Shadow, Alpha));
+				RRUI::DrawRounded(Canvas, Rect.ExpandBy(2.f * S), Radius + 2.f * S, RRUI::WithAlpha(RRUI::Pink, Alpha));
+				RRUI::DrawRounded(Canvas, Rect, Radius, RRUI::WithAlpha(FLinearColor(1.f, 1.f, 1.f, 0.96f), Alpha));
+			}
+			else
+			{
+				RRUI::DrawSoftShadow(Canvas, Rect, Radius, 10.f * S, 3.f * S, RRUI::WithAlpha(RRUI::Shadow, 0.5f * Alpha));
+				RRUI::DrawRounded(Canvas, Rect, Radius, RRUI::WithAlpha(FLinearColor(1.f, 1.f, 1.f, 0.55f), Alpha));
+			}
+			const int32 Species = ARRRandomTitlePlayerController::GetSpeciesOf(Choices[Index]);
+			const float Face = CardFace * S;
+			const FVector2D FaceCenter(Rect.GetCenter().X, Rect.Min.Y + 10.f * S + Face * 0.5f);
+			if (Portraits.IsValidIndex(Species) && Portraits[Species])
+			{
+				RRUI::DrawDisc(Canvas, FaceCenter, Face * 0.5f + 2.f * S, RRUI::WithAlpha(RRUI::White, Alpha));
+				RRUI::DrawTextureRounded(Canvas, Portraits[Species], FBox2D(FaceCenter - FVector2D(Face * 0.5f), FaceCenter + FVector2D(Face * 0.5f)), Face * 0.5f,
+					RRUI::WithAlpha(FLinearColor::White, Alpha));
+			}
+			const float NameSize = 12.f * S;
+			const float Tracking = NameSize * 0.12f;
+			const FVector2D NameBox = RRUI::MeasureText(Label, NameSize, RRUI::EWeight::ExtraBold, Tracking);
+			const float NameY = Rect.Max.Y - 12.f * S - NameBox.Y;
+			RRUI::DrawText(Canvas, Label, FVector2D(FaceCenter.X - NameBox.X * 0.5f, NameY), NameSize, RRUI::EWeight::ExtraBold,
+				RRUI::WithAlpha(bSelected ? RRUI::Ink : RRUI::InkSoft, Alpha), Tracking);
+			if (bSelected)
+			{
+				const float LineY = NameY + NameBox.Y - 2.f * S;
+				RRUI::DrawPill(Canvas, FBox2D(FVector2D(FaceCenter.X - NameBox.X * 0.5f, LineY), FVector2D(FaceCenter.X + NameBox.X * 0.5f, LineY + 3.f * S)), RRUI::WithAlpha(RRUI::Pink, Alpha));
+			}
+			continue;
 		}
+
+		// A pill: see-through white, the selected one solid white in a pink ring
+		const FBox2D& Rect = ButtonRects[Index];
+		const float Radius = Rect.GetSize().Y * 0.5f;
+		if (bSelected)
+		{
+			RRUI::DrawSoftShadow(Canvas, Rect, Radius, 12.f * S, 4.f * S, RRUI::WithAlpha(RRUI::Shadow, Alpha));
+			RRUI::DrawRounded(Canvas, Rect.ExpandBy(2.f * S), Radius + 2.f * S, RRUI::WithAlpha(RRUI::Pink, Alpha));
+			RRUI::DrawRounded(Canvas, Rect, Radius, RRUI::WithAlpha(FLinearColor(1.f, 1.f, 1.f, 0.96f), Alpha));
+		}
+		else
+		{
+			RRUI::DrawRounded(Canvas, Rect, Radius, RRUI::WithAlpha(FLinearColor(1.f, 1.f, 1.f, 0.55f), Alpha));
+		}
+		const float Size = (bCards ? 14.f : 17.f) * S;
+		const float Tracking = Size * 0.06f;
+		const FVector2D Box = RRUI::MeasureText(Label, Size, RRUI::EWeight::Black, Tracking);
+		RRUI::DrawText(Canvas, Label, Rect.GetCenter() - Box * 0.5f, Size, RRUI::EWeight::Black, RRUI::WithAlpha(bSelected ? RRUI::Ink : RRUI::InkSoft, Alpha), Tracking);
 	}
 
-	// What the selected button does, then the online status
-	Y = (ButtonRects.Num() > 0 ? ButtonRects.Last().Max.Y : Top) + 22.f * S;
+	// What the selected button does: under the cards on the brawler page, under the buttons elsewhere; a pink mark then
+	// the line
+	const float DescriptionY = CardCount > 0 ? Top + CardHeight * S + 18.f * S : (ButtonRects.Num() > 0 ? ButtonRects.Last().Max.Y : Top) + 20.f * S;
 	if (Choices.IsValidIndex(Menu->GetSelected()) && !bBusy)
 	{
-		DrawCenteredText(ARRRandomTitlePlayerController::GetDescription(Choices[Menu->GetSelected()]), Muted, ColumnX, Y, MediumFont, S);
+		const FString Description = ARRRandomTitlePlayerController::GetDescription(Choices[Menu->GetSelected()]);
+		const float Size = 15.f * S;
+		const FVector2D Box = RRUI::MeasureText(Description, Size, RRUI::EWeight::SemiBold);
+		const float Mark = 3.f * S;
+		const float Left = ColumnX - (Box.X + Mark + 10.f * S) * 0.5f;
+		RRUI::DrawPill(Canvas, FBox2D(FVector2D(Left, DescriptionY + Box.Y * 0.15f), FVector2D(Left + Mark, DescriptionY + Box.Y * 0.85f)), RRUI::Pink);
+		RRUI::DrawText(Canvas, Description, FVector2D(Left + Mark + 10.f * S, DescriptionY), Size, RRUI::EWeight::SemiBold, RRUI::Ink);
 	}
-	Y += 32.f * S;
+
+	// Then the online status
+	Y = FMath::Max(DescriptionY + 32.f * S, (ButtonRects.Num() > 0 ? ButtonRects.Last().Max.Y : Top) + 20.f * S);
 	if (Sessions && !Sessions->GetStatus().IsEmpty())
 	{
-		Y += DrawCenteredText(Sessions->GetStatus(), StatusColor, ColumnX, Y, MediumFont, S) + 6.f * S;
+		Y += DrawCenteredText(Sessions->GetStatus(), RRUI::PinkDeep, ColumnX, Y, 13.f * S, ExtraBold, 0.f).Y + 6.f * S;
 	}
 	if (bBusy)
 	{
-		DrawCenteredText(TEXT("[ESC] CANCEL"), Muted, ColumnX, Y, SmallFont, S);
+		DrawCenteredText(TEXT("ESC  CANCEL"), RRUI::InkSoft, ColumnX, Y, 11.f * S, ExtraBold, 11.f * S * 0.12f);
 	}
 
-	const FString Keys = Menu->IsOnNetworkPage() || Menu->IsOnViewPage() || Menu->IsOnSpeciesPage() || Menu->IsOnMapPage()
-		? TEXT("[W/S] SELECT     [ENTER] OK     [ESC] BACK")
-		: TEXT("[W/S] SELECT     [ENTER] OK");
-	DrawCenteredText(Keys, Muted, ColumnX, ScreenH - 40.f * S, SmallFont, S);
+	const bool bCanGoBack = Menu->IsOnNetworkPage() || Menu->IsOnViewPage() || Menu->IsOnSpeciesPage() || Menu->IsOnMapPage();
+	const FString Select = bCards ? TEXT("A/D  SELECT") : TEXT("W/S  SELECT");
+	const FString Keys = bCanGoBack ? Select + TEXT("   ·   ENTER  OK   ·   ESC  BACK") : Select + TEXT("   ·   ENTER  OK");
+	DrawCenteredText(Keys, RRUI::InkSoft, ColumnX, ScreenH - 40.f * S, 11.f * S, ExtraBold, 11.f * S * 0.1f);
 }

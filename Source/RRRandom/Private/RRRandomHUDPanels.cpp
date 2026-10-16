@@ -9,59 +9,48 @@
 #include "RRRandomGameState.h"
 #include "RRRandomIsland.h"
 #include "RRRandomPlayerController.h"
+#include "RRRandomUIStyle.h"
 #include "RRRandomWeapon.h"
-#include "CanvasItem.h"
 #include "Engine/Canvas.h"
-#include "Engine/Engine.h"
-#include "Engine/Font.h"
 #include "Engine/Texture2D.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerState.h"
-#include "GlobalRenderResources.h"
-#include "UObject/ConstructorHelpers.h"
+
+using RRUI::EWeight;
 
 namespace
 {
-	// Shared with the rest of the HUD (RRRandomHUD.cpp): screen margin, and the colors for me, my team and the others
-	constexpr float PanelMargin = 20.f;
-	const FLinearColor SelfColor(0.3f, 1.f, 0.3f);
-	const FLinearColor AllyColor(0.25f, 0.6f, 1.f);
-	const FLinearColor EnemyColor(1.f, 0.25f, 0.2f);
-	const FLinearColor DiceColor(1.f, 0.85f, 0.1f);
-	const FLinearColor GiantColor(0.45f, 0.85f, 1.f);
-	const FLinearColor FlyColor(1.f, 0.55f, 0.85f);
-	const FLinearColor ReloadColor(1.f, 0.55f, 0.1f);
-	const FLinearColor CardBacking(0.f, 0.f, 0.f, 0.55f);
-	const FLinearColor GoColor = FLinearColor::FromSRGBColor(FColor(255, 196, 56));
-
+	// Shared with the rest of the HUD (RRRandomHUD.cpp): screen margin, on a 720 pixel tall screen
+	constexpr float PanelMargin = 22.f;
+	const FLinearColor Track(1.f, 1.f, 1.f, 0.78f);
+	
 	// Countdown: the number for each second pops in this much bigger, and GO stays this long after the start
 	constexpr float CountdownPop = 0.6f;
 	constexpr float GoTime = 1.f;
 
-	// Team cards
-	constexpr float CardWidth = 270.f;
-	constexpr float CardHeight = 62.f;
-	constexpr float CardGap = 6.f;
-	constexpr float PortraitSize = 54.f;
-	constexpr float CardBarWidth = 150.f;
-	constexpr float CardBarHeight = 9.f;
-	// Room left at the bottom right for the ammo panel (gun, hint and rounds)
-	constexpr float AmmoPanelRoom = 96.f;
+	// Team cards, stacked over the ammo panel
+	constexpr float CardWidth = 250.f;
+	constexpr float CardHeight = 56.f;
+	constexpr float CardGap = 8.f;
+	constexpr float PortraitSize = 46.f;
+	constexpr float CardBarHeight = 4.f;
+	// Room left at the bottom right for the ammo panel (gun, rounds)
+	constexpr float AmmoPanelRoom = 100.f;
 
 	// Minimap: texture pixels per side, how often the fog shading is redone, the full-screen map's share of the screen,
-	// how dark never-seen and not-seen-now places are, and the marker size on the corner map (scaled up full screen)
+	// how far fog veils never-seen and not-seen-now places, and the marker size on the corner map (scaled up full screen)
 	constexpr int32 MapPixels = 288;
 	constexpr float MapRefreshInterval = 0.12f;
 	constexpr float ExpandedShare = 0.86f;
-	constexpr float UnexploredShade = 0.22f;
-	constexpr float ExploredShade = 0.55f;
+	constexpr float UnexploredFog = 0.82f;
+	constexpr float ExploredFog = 0.45f;
+	// The terrain is lightened this much toward white, so the map sits in the pastel HUD
+	constexpr float MapPastel = 0.22f;
 	constexpr float MarkerRadius = 4.5f;
-	// See-through: the corner map shows the game under it; the full-screen one, over a dimmed game, is more solid.
-	// Framed by a thin light line.
-	constexpr float MinimapOpacity = 0.7f;
-	constexpr float ExpandedMapOpacity = 0.9f;
-	const FLinearColor MapFrameColor(1.f, 1.f, 1.f, 0.45f);
-	constexpr float MapFrameWidth = 1.f;
+	// A soft lavender haze for the fog of war on the map
+	const FLinearColor MapFogColor = FLinearColor::FromSRGBColor(FColor(222, 214, 236));
+	// See-through: the corner map shows the game under it; the full-screen one, over a veiled game, is solid
+	constexpr float MinimapOpacity = 0.92f;
 	// Map colors (sRGB): the island's cells, cover, and woods (cells of pines and round trees)
 	const FColor WaterColor(70, 168, 205);
 	const FColor SandColor(226, 205, 150);
@@ -80,11 +69,6 @@ namespace
 	{
 		Color.A *= Alpha;
 		return Color;
-	}
-
-	FLinearColor TeamTint(int32 Team)
-	{
-		return FMath::Lerp(ARRRandomCharacter::GetTeamColor(Team), FLinearColor::White, 0.35f);
 	}
 
 	FColor Shaded(const FColor& Color, float Factor)
@@ -122,59 +106,38 @@ namespace
 		Bots.Sort();
 		return FString::Printf(TEXT("BOT %d"), Bots.IndexOfByKey(Brawler.GetName()) + 1);
 	}
-
-	/** A filled circle as a fan of triangles. */
-	void DrawDisc(UCanvas* Canvas, const FVector2D& Center, float Radius, const FLinearColor& Color)
-	{
-		constexpr int32 Sides = 12;
-		for (int32 Side = 0; Side < Sides; ++Side)
-		{
-			const float A = 2.f * PI * Side / Sides;
-			const float B = 2.f * PI * (Side + 1) / Sides;
-			FCanvasTriangleItem Slice(Center, Center + FVector2D(FMath::Cos(A), FMath::Sin(A)) * Radius, Center + FVector2D(FMath::Cos(B), FMath::Sin(B)) * Radius, GWhiteTexture);
-			Slice.SetColor(Color);
-			Slice.BlendMode = SE_BLEND_Translucent;
-			Canvas->DrawItem(Slice);
-		}
-	}
-
-	void DrawTriangle(UCanvas* Canvas, const FVector2D& A, const FVector2D& B, const FVector2D& C, const FLinearColor& Color)
-	{
-		FCanvasTriangleItem Item(A, B, C, GWhiteTexture);
-		Item.SetColor(Color);
-		Item.BlendMode = SE_BLEND_Translucent;
-		Canvas->DrawItem(Item);
-	}
-}
-
-ARRRandomHUD::ARRRandomHUD()
-{
-	static ConstructorHelpers::FObjectFinder<UTexture2D> FoxPortrait(TEXT("/Game/UI/T_FoxPortrait.T_FoxPortrait"));
-	Portrait = FoxPortrait.Succeeded() ? FoxPortrait.Object : nullptr;
-	static ConstructorHelpers::FObjectFinder<UTexture2D> HitEffectSheet(TEXT("/Game/UI/T_HitEffects.T_HitEffects"));
-	HitEffects = HitEffectSheet.Succeeded() ? HitEffectSheet.Object : nullptr;
 }
 
 void ARRRandomHUD::DrawCountdown(const ARRRandomGameState& State)
 {
 	const float Remaining = State.GetCountdownRemaining();
-	const float S = Canvas->ClipY / 720.f;
-	UFont* Large = GEngine->GetLargeFont();
-	const float Y = Canvas->ClipY * 0.3f;
+	const float S = UIScale;
+	const float CenterX = Canvas->ClipX * 0.5f;
+	const float Y = Canvas->ClipY * 0.28f;
+	const float NumberSize = 96.f * S;
 	if (Remaining > 0.f)
 	{
-		// The number pops in at the start of each second and settles
+		// GET READY over a big number that pops in at the start of each second and settles
 		const int32 Number = FMath::CeilToInt(Remaining);
 		const float Fresh = Remaining - (Number - 1);
 		const float Pop = 1.f + CountdownPop * FMath::Pow(Fresh, 4.f);
-		DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.3f), 0.f, Y - 40.f * S, Canvas->ClipX, 160.f * S);
-		DrawCenteredText(TEXT("GET READY"), FLinearColor::White, Y - 30.f * S, GEngine->GetMediumFont(), 1.2f * S);
-		DrawCenteredText(FString::FromInt(Number), GoColor, Y, Large, 5.f * S * Pop);
+		const float LabelSize = 14.f * S;
+		const FString Label = TEXT("GET READY");
+		const FVector2D LabelBox = RRUI::MeasureText(Label, LabelSize, EWeight::ExtraBold, LabelSize * 0.3f);
+		RRUI::DrawGlowText(Canvas, Label, FVector2D(CenterX - LabelBox.X * 0.5f, Y - LabelBox.Y), LabelSize, EWeight::ExtraBold, RRUI::InkSoft, LabelSize * 0.3f);
+		const FString Text = FString::FromInt(Number);
+		const FVector2D Box = RRUI::MeasureText(Text, NumberSize, EWeight::Black);
+		const FLinearColor Stops[] = { RRUI::LavenderDeep, RRUI::PinkDeep };
+		RRUI::DrawGradientText(Canvas, Text, FVector2D(CenterX - Box.X * Pop * 0.5f, Y + Box.Y * (1.f - Pop) * 0.5f), NumberSize, EWeight::Black, Stops, 1.f, 0.f, Pop);
 	}
 	else if (-Remaining < GoTime)
 	{
 		const float T = -Remaining / GoTime;
-		DrawCenteredText(TEXT("GO!"), Faded(GoColor, 1.f - T * T), Y, Large, 5.f * S * (1.f + 0.4f * T));
+		const float Zoom = 1.f + 0.4f * T;
+		const FString Text = TEXT("GO!");
+		const FVector2D Box = RRUI::MeasureText(Text, NumberSize, EWeight::Black, NumberSize * 0.06f);
+		const FLinearColor Stops[] = { RRUI::PinkDeep, RRUI::Gold };
+		RRUI::DrawGradientText(Canvas, Text, FVector2D(CenterX - Box.X * Zoom * 0.5f, Y + Box.Y * (1.f - Zoom) * 0.5f), NumberSize, EWeight::Black, Stops, 1.f - T * T, NumberSize * 0.06f, Zoom);
 	}
 }
 
@@ -189,89 +152,84 @@ void ARRRandomHUD::DrawTeamPanel(const ARRRandomCharacter& Viewer)
 		}
 	}
 	Mates.Sort([](const ARRRandomCharacter& A, const ARRRandomCharacter& B) { return A.GetName() < B.GetName(); });
+	if (Mates.Num() == 0)
+	{
+		return;
+	}
 
 	// Stacked upward from over the ammo panel, the first teammate on top
-	const float Left = Canvas->ClipX - PanelMargin - CardWidth;
-	float Top = Canvas->ClipY - PanelMargin - AmmoPanelRoom - Mates.Num() * (CardHeight + CardGap) + CardGap;
+	const float S = UIScale;
+	const float Left = Canvas->ClipX - (PanelMargin + CardWidth) * S;
+	const float Height = Mates.Num() * (CardHeight + CardGap) * S - CardGap * S;
+	float Top = Canvas->ClipY - (PanelMargin + AmmoPanelRoom) * S - Height;
 	for (const ARRRandomCharacter* Mate : Mates)
 	{
 		DrawTeamCard(*Mate, Viewer, Left, Top);
-		Top += CardHeight + CardGap;
+		Top += (CardHeight + CardGap) * S;
 	}
 }
 
 void ARRRandomHUD::DrawTeamCard(const ARRRandomCharacter& Mate, const ARRRandomCharacter& Viewer, float Left, float Top)
 {
-	UFont* Small = GEngine->GetSmallFont();
+	// No box: a round portrait in a white and team-colored ring, the name, a thin health bar and what it has going
+	const float S = UIScale;
 	const bool bAlive = Mate.IsAlive();
-	const FLinearColor Tint = TeamTint(Mate.GetTeam());
-	DrawRect(CardBacking, Left, Top, CardWidth, CardHeight);
-	DrawRect(Tint, Left, Top, 3.f, CardHeight);
-
-	// Portrait in a team colored frame, greyed with KO over it while knocked out
-	const float PortraitX = Left + 8.f;
-	const float PortraitY = Top + (CardHeight - PortraitSize) * 0.5f;
-	DrawRect(bAlive ? Tint : FLinearColor(0.35f, 0.35f, 0.35f), PortraitX - 2.f, PortraitY - 2.f, PortraitSize + 4.f, PortraitSize + 4.f);
-	DrawRect(FLinearColor(0.08f, 0.09f, 0.12f), PortraitX, PortraitY, PortraitSize, PortraitSize);
-	// The mate's own species (the fox's picture if its own is missing)
-	UTexture2D* Face = Mate.GetPortrait() ? Mate.GetPortrait() : Portrait.Get();
-	if (Face)
+	const float Face = PortraitSize * S;
+	const FVector2D FaceCenter(Left + Face * 0.5f + 4.f * S, Top + CardHeight * 0.5f * S);
+	RRUI::DrawDisc(Canvas, FaceCenter, Face * 0.5f + 4.f * S, bAlive ? RRUI::TeamColor(Mate.GetTeam()) : RRUI::InkSoft);
+	RRUI::DrawDisc(Canvas, FaceCenter, Face * 0.5f + 2.f * S, RRUI::White);
+	// The mate's own species (the fox's picture if its own is missing), greyed with KO over it while knocked out
+	if (UTexture2D* Picture = Mate.GetPortrait() ? Mate.GetPortrait() : Portrait.Get())
 	{
-		DrawTexture(Face, PortraitX, PortraitY, PortraitSize, PortraitSize, 0.f, 0.f, 1.f, 1.f, bAlive ? FLinearColor::White : FLinearColor(0.3f, 0.3f, 0.3f));
+		RRUI::DrawTextureRounded(Canvas, Picture, FBox2D(FaceCenter - FVector2D(Face * 0.5f), FaceCenter + FVector2D(Face * 0.5f)), Face * 0.5f,
+			bAlive ? FLinearColor::White : FLinearColor(1.f, 1.f, 1.f, 0.4f));
 	}
 	if (!bAlive)
 	{
-		float W;
-		float H;
-		GetTextSize(TEXT("KO"), W, H, GEngine->GetLargeFont());
-		DrawShadowedText(TEXT("KO"), EnemyColor, PortraitX + (PortraitSize - W) * 0.5f, PortraitY + (PortraitSize - H) * 0.5f, GEngine->GetLargeFont());
+		const float Size = 18.f * S;
+		const FVector2D Box = RRUI::MeasureText(TEXT("KO"), Size, EWeight::Black);
+		RRUI::DrawGlowText(Canvas, TEXT("KO"), FaceCenter - Box * 0.5f, Size, EWeight::Black, RRUI::PinkDeep);
 	}
 
-	// Name, health bar and number
-	const float TextX = PortraitX + PortraitSize + 10.f;
-	DrawShadowedText(CardLabel(GetWorld(), Mate, Viewer), bAlive ? FLinearColor::White : FLinearColor::Gray, TextX, Top + 5.f, Small);
-	const float Share = FMath::Clamp(Mate.GetHealth() / FMath::Max(1.f, Mate.GetMaxHealth()), 0.f, 1.f);
-	const float BarY = Top + 24.f;
-	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.7f), TextX - 1.f, BarY - 1.f, CardBarWidth + 2.f, CardBarHeight + 2.f);
-	if (bAlive)
-	{
-		DrawRect(AllyColor, TextX, BarY, CardBarWidth * Share, CardBarHeight);
-	}
-	DrawShadowedText(FString::FromInt(FMath::CeilToInt(Mate.GetHealth())), FLinearColor::White, TextX + CardBarWidth + 8.f, BarY - 3.f, Small);
+	// Name and health on the first line, the bar, then the tags, on one soft white plate
+	const float TextX = FaceCenter.X + Face * 0.5f + 12.f * S;
+	const float Right = Left + CardWidth * S;
+	const float NameSize = 13.f * S;
+	const float SmallSize = 10.f * S;
+	RRUI::DrawPlate(Canvas, FBox2D(FVector2D(TextX, Top + 6.f * S), FVector2D(Right, Top + (CardHeight - 8.f) * S)), 14.f * S);
+	float Y = Top + 3.f * S;
+	const FVector2D Name = RRUI::DrawText(Canvas, CardLabel(GetWorld(), Mate, Viewer), FVector2D(TextX, Y), NameSize, EWeight::ExtraBold, bAlive ? RRUI::Ink : RRUI::InkSoft, NameSize * 0.04f);
+	const FString Health = FString::FromInt(FMath::CeilToInt(Mate.GetHealth()));
+	const FVector2D HealthBox = RRUI::MeasureText(Health, SmallSize, EWeight::ExtraBold);
+	RRUI::DrawText(Canvas, Health, FVector2D(Right - HealthBox.X, Y + (Name.Y - HealthBox.Y) * 0.6f), SmallSize, EWeight::ExtraBold, RRUI::InkSoft);
+	Y += Name.Y + 1.f * S;
+	const float Share = bAlive ? FMath::Clamp(Mate.GetHealth() / FMath::Max(1.f, Mate.GetMaxHealth()), 0.f, 1.f) : 0.f;
+	RRUI::DrawBar(Canvas, FBox2D(FVector2D(TextX, Y), FVector2D(Right, Y + CardBarHeight * S)), Share, RRUI::WithAlpha(RRUI::Ink, 0.12f), RRUI::MintDeep);
+	Y += CardBarHeight * S + 3.f * S;
 
-	// What it has going: dice, giant, flight, its gun, reloading
-	float X = TextX;
-	const float ChipY = Top + 40.f;
-	auto Chip = [&](const FString& Label, const FLinearColor& Color)
-	{
-		float W;
-		float H;
-		GetTextSize(Label, W, H, Small);
-		DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.6f), X, ChipY, W + 8.f, H + 2.f);
-		DrawRect(Color, X, ChipY + H + 1.f, W + 8.f, 1.f);
-		DrawText(Label, Color, X + 4.f, ChipY + 1.f, Small);
-		X += W + 12.f;
-	};
+	// What it has going: dice, giant, flight, its gun, reloading, e.g. "DICE 1 · CANNON"
+	TArray<FString> Going;
 	if (const URRRandomDiceBuffComponent* Dice = Mate.GetDiceBuffs())
 	{
-		Chip(FString::Printf(TEXT("DICE %d"), Dice->GetCharges()), DiceColor);
+		Going.Add(FString::Printf(TEXT("DICE %d"), Dice->GetCharges()));
 	}
 	if (Mate.IsGiant())
 	{
-		Chip(FString::Printf(TEXT("GIANT %ds"), FMath::CeilToInt(Mate.GetGiantRemaining())), GiantColor);
+		Going.Add(FString::Printf(TEXT("GIANT %ds"), FMath::CeilToInt(Mate.GetGiantRemaining())));
 	}
 	if (Mate.CanFly())
 	{
-		Chip(FString::Printf(TEXT("FLY %ds"), FMath::CeilToInt(Mate.GetFlightRemaining())), FlyColor);
+		Going.Add(FString::Printf(TEXT("FLY %ds"), FMath::CeilToInt(Mate.GetFlightRemaining())));
 	}
 	if (!Mate.GetWeapon().bIsDefault)
 	{
-		Chip(Mate.GetWeapon().Name, FRRWeapon::GetTierColor(Mate.GetWeapon().Tier));
+		Going.Add(Mate.GetWeapon().Name);
 	}
 	if (Mate.IsReloading())
 	{
-		Chip(TEXT("RELOAD"), ReloadColor);
+		Going.Add(TEXT("RELOAD"));
 	}
+	RRUI::DrawText(Canvas, FString::Join(Going, TEXT(" · ")), FVector2D(TextX, Y), SmallSize, EWeight::ExtraBold, RRUI::InkSoft, SmallSize * 0.06f);
 }
 
 FVector2D ARRRandomHUD::MapPixelToWorld(int32 X, int32 Y) const
@@ -436,9 +394,11 @@ void ARRRandomHUD::RefreshMinimap()
 		}
 	}
 
-	// Lit where the team sees now, dim where it has looked before, dark where it never has
+	// The terrain lightened into the pastel palette; clear where the team sees now, under a light lavender haze where it
+	// has looked before, and a thick one where it never has
 	const ARRRandomPlayerController* Controller = Cast<ARRRandomPlayerController>(PlayerOwner);
 	const ARRRandomFogOfWar* Fog = Controller ? Controller->GetFogOfWar() : nullptr;
+	const FColor FogColor = MapFogColor.ToFColor(true);
 	FColor* Pixels = new FColor[MapPixels * MapPixels];
 	for (int32 Y = 0; Y < MapPixels; ++Y)
 	{
@@ -447,7 +407,14 @@ void ARRRandomHUD::RefreshMinimap()
 			bool bExplored = true;
 			const FVector2D World = MapPixelToWorld(X, Y);
 			const float Sight = Fog ? Fog->GetSightAt(FVector(World.X, World.Y, 0.f), &bExplored) : 1.f;
-			Pixels[Y * MapPixels + X] = Shaded(MapBase[Y * MapPixels + X], FMath::Lerp(bExplored ? ExploredShade : UnexploredShade, 1.f, Sight));
+			const FColor& Base = MapBase[Y * MapPixels + X];
+			const float Veil = (1.f - Sight) * (bExplored ? ExploredFog : UnexploredFog);
+			auto Mix = [&](uint8 Channel, uint8 Haze)
+			{
+				const float Light = FMath::Lerp(float(Channel), 255.f, MapPastel);
+				return uint8(FMath::Clamp(FMath::RoundToInt(FMath::Lerp(Light, float(Haze), Veil)), 0, 255));
+			};
+			Pixels[Y * MapPixels + X] = FColor(Mix(Base.R, FogColor.R), Mix(Base.G, FogColor.G), Mix(Base.B, FogColor.B), 255);
 		}
 	}
 	FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, MapPixels, MapPixels);
@@ -467,34 +434,35 @@ void ARRRandomHUD::DrawMinimap(const ARRRandomCharacter* Viewer)
 		MapRefreshTimer = MapRefreshInterval;
 		RefreshMinimap();
 	}
-	MinimapRect = FBox2D(FVector2D(MinimapMargin, MinimapMargin), FVector2D(MinimapMargin + MinimapSize, MinimapMargin + MinimapSize));
+	const float S = UIScale;
+	MinimapRect = FBox2D(FVector2D(MinimapMargin, MinimapMargin) * S, FVector2D(MinimapMargin + MinimapSize, MinimapMargin + MinimapSize) * S);
 	if (!MapTexture)
 	{
 		return;
 	}
 
-	FBox2D Rect = MinimapRect;
 	if (bMapExpanded)
 	{
-		// Full screen: the game dimmed behind a big square map
+		// Full screen: the game under a light veil, the whole square map on a frosted panel with rounded corners
 		const float Side = FMath::Min(Canvas->ClipX, Canvas->ClipY) * ExpandedShare;
 		const FVector2D Min((Canvas->ClipX - Side) * 0.5f, (Canvas->ClipY - Side) * 0.5f);
-		Rect = FBox2D(Min, Min + FVector2D(Side, Side));
-		DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.6f), 0.f, 0.f, Canvas->ClipX, Canvas->ClipY);
-		DrawShadowedText(TEXT("MAP   [M] OR CLICK TO CLOSE"), FLinearColor::White, Rect.Min.X, Rect.Min.Y - 22.f, GEngine->GetSmallFont());
+		const FBox2D Rect(Min, Min + FVector2D(Side, Side));
+		RRUI::DrawBox(Canvas, FBox2D(FVector2D::ZeroVector, FVector2D(Canvas->ClipX, Canvas->ClipY)), FLinearColor::FromSRGBColor(FColor(244, 240, 252, 150)));
+		RRUI::DrawPanel(Canvas, Rect.ExpandBy(6.f * S), 26.f * S, S, RRUI::White);
+		RRUI::DrawTextureRounded(Canvas, MapTexture, Rect, 20.f * S, FLinearColor::White);
+		const float Size = 11.f * S;
+		RRUI::DrawGlowText(Canvas, TEXT("MAP · M OR CLICK TO CLOSE"), FVector2D(Rect.Min.X, Rect.Min.Y - 12.f * S - Size * 1.36f), Size, EWeight::ExtraBold, RRUI::Ink, Size * 0.12f);
+		DrawMapMarkers(Rect, Viewer);
+		return;
 	}
-	const FVector2D Size = Rect.GetSize();
-	DrawTexture(MapTexture, Rect.Min.X, Rect.Min.Y, Size.X, Size.Y, 0.f, 0.f, 1.f, 1.f,
-		FLinearColor(1.f, 1.f, 1.f, bMapExpanded ? ExpandedMapOpacity : MinimapOpacity), BLEND_Translucent);
-	DrawRect(MapFrameColor, Rect.Min.X - MapFrameWidth, Rect.Min.Y - MapFrameWidth, Size.X + MapFrameWidth * 2.f, MapFrameWidth);
-	DrawRect(MapFrameColor, Rect.Min.X - MapFrameWidth, Rect.Max.Y, Size.X + MapFrameWidth * 2.f, MapFrameWidth);
-	DrawRect(MapFrameColor, Rect.Min.X - MapFrameWidth, Rect.Min.Y, MapFrameWidth, Size.Y);
-	DrawRect(MapFrameColor, Rect.Max.X, Rect.Min.Y, MapFrameWidth, Size.Y);
-	DrawMapMarkers(Rect, Viewer);
-	if (!bMapExpanded)
-	{
-		DrawShadowedText(TEXT("[M] / CLICK: MAP"), FLinearColor(0.75f, 0.75f, 0.75f), Rect.Min.X, Rect.Max.Y + 4.f, GEngine->GetSmallFont());
-	}
+
+	// The corner map is round: a faint white halo, the map in the circle, a white rim
+	const FVector2D Center = MinimapRect.GetCenter();
+	const float Radius = MinimapRect.GetSize().X * 0.5f;
+	RRUI::DrawRing(Canvas, Center, Radius + 4.f * S, 6.f * S, FLinearColor(1.f, 1.f, 1.f, 0.35f));
+	RRUI::DrawTextureRounded(Canvas, MapTexture, MinimapRect, Radius, FLinearColor(1.f, 1.f, 1.f, MinimapOpacity));
+	RRUI::DrawRing(Canvas, Center, Radius, 2.f * S, RRUI::White);
+	DrawMapMarkers(MinimapRect, Viewer);
 }
 
 void ARRRandomHUD::DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* Viewer)
@@ -503,9 +471,17 @@ void ARRRandomHUD::DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* 
 	const FVector2D Size = Rect.GetSize();
 	const FVector2D Area = MapBounds.GetSize();
 	const float Scale = Size.X / MinimapSize;
+	const FVector2D Center = Rect.GetCenter();
+	const float Edge = Size.X * 0.5f - MarkerRadius * Scale;
 	auto ToScreen = [&](const FVector& World)
 	{
 		const FVector2D Point(Rect.Min.X + (World.Y - MapBounds.Min.Y) / Area.Y * Size.X, Rect.Min.Y + (MapBounds.Max.X - World.X) / Area.X * Size.Y);
+		if (!bMapExpanded)
+		{
+			// Kept inside the round corner map
+			const FVector2D Offset = Point - Center;
+			return Offset.Size() > Edge ? Center + Offset.GetSafeNormal() * Edge : Point;
+		}
 		return FVector2D(FMath::Clamp(Point.X, Rect.Min.X, Rect.Max.X), FMath::Clamp(Point.Y, Rect.Min.Y, Rect.Max.Y));
 	};
 
@@ -528,17 +504,17 @@ void ARRRandomHUD::DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* 
 		const FVector2D Point = ToScreen(Brawler->GetActorLocation());
 		if (!Brawler->IsAlive())
 		{
-			// A knocked-out teammate: a grey cross
+			// A knocked-out teammate: a soft ink cross
 			const float Arm = Radius * 0.9f;
-			DrawLine(Point.X - Arm, Point.Y - Arm, Point.X + Arm, Point.Y + Arm, FLinearColor(0.6f, 0.6f, 0.6f), 2.f * Scale);
-			DrawLine(Point.X - Arm, Point.Y + Arm, Point.X + Arm, Point.Y - Arm, FLinearColor(0.6f, 0.6f, 0.6f), 2.f * Scale);
+			DrawLine(Point.X - Arm, Point.Y - Arm, Point.X + Arm, Point.Y + Arm, RRUI::InkSoft, 2.f * Scale);
+			DrawLine(Point.X - Arm, Point.Y + Arm, Point.X + Arm, Point.Y - Arm, RRUI::InkSoft, 2.f * Scale);
 			continue;
 		}
-		DrawDisc(Canvas, Point, Radius + 1.5f * Scale, FLinearColor(0.f, 0.f, 0.f, 0.85f));
-		DrawDisc(Canvas, Point, Radius, bAlly ? AllyColor : EnemyColor);
+		RRUI::DrawDisc(Canvas, Point, Radius + 1.8f * Scale, RRUI::White);
+		RRUI::DrawDisc(Canvas, Point, Radius, bAlly ? RRUI::SkyDeep : RRUI::PinkDeep);
 	}
 
-	// Me last, on top: an arrow the way I face
+	// Me last, on top: a white arrow with an ink edge, the way I face
 	if (Viewer)
 	{
 		const FVector2D Point = ToScreen(Viewer->GetActorLocation());
@@ -547,12 +523,17 @@ void ARRRandomHUD::DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* 
 		const FVector2D Ahead(FMath::Sin(Yaw), -FMath::Cos(Yaw));
 		const FVector2D Side(-Ahead.Y, Ahead.X);
 		const float Length = Radius * 1.9f;
-		const FLinearColor Color = Viewer->IsAlive() ? SelfColor : FLinearColor(0.6f, 0.6f, 0.6f);
-		const float Edge = 1.6f * Scale;
-		DrawTriangle(Canvas, Point + Ahead * (Length + Edge * 2.f), Point - Ahead * (Length * 0.6f + Edge) + Side * (Length * 0.75f + Edge),
-			Point - Ahead * (Length * 0.6f + Edge) - Side * (Length * 0.75f + Edge), FLinearColor(0.f, 0.f, 0.f, 0.85f));
-		DrawTriangle(Canvas, Point + Ahead * Length, Point - Ahead * Length * 0.6f + Side * Length * 0.75f, Point - Ahead * Length * 0.6f - Side * Length * 0.75f, Color);
+		const FLinearColor Color = Viewer->IsAlive() ? RRUI::White : FLinearColor(0.8f, 0.8f, 0.8f);
+		const float Rim = 1.6f * Scale;
+		RRUI::DrawTriangle(Canvas, Point + Ahead * (Length + Rim * 2.f), Point - Ahead * (Length * 0.6f + Rim) + Side * (Length * 0.75f + Rim),
+			Point - Ahead * (Length * 0.6f + Rim) - Side * (Length * 0.75f + Rim), RRUI::WithAlpha(RRUI::Ink, 0.85f));
+		RRUI::DrawTriangle(Canvas, Point + Ahead * Length, Point - Ahead * Length * 0.6f + Side * Length * 0.75f, Point - Ahead * Length * 0.6f - Side * Length * 0.75f, Color);
 	}
+}
+
+bool ARRRandomHUD::IsOnCornerMap(const FVector2D& ScreenPoint) const
+{
+	return MinimapRect.bIsValid && FVector2D::Distance(ScreenPoint, MinimapRect.GetCenter()) <= MinimapRect.GetSize().X * 0.5f;
 }
 
 bool ARRRandomHUD::HandleMapClick(const FVector2D& ScreenPoint)
@@ -562,7 +543,7 @@ bool ARRRandomHUD::HandleMapClick(const FVector2D& ScreenPoint)
 		bMapExpanded = false;
 		return true;
 	}
-	if (MinimapRect.IsInside(ScreenPoint))
+	if (IsOnCornerMap(ScreenPoint))
 	{
 		bMapExpanded = true;
 		return true;
@@ -572,5 +553,5 @@ bool ARRRandomHUD::HandleMapClick(const FVector2D& ScreenPoint)
 
 bool ARRRandomHUD::IsPointOnMap(const FVector2D& ScreenPoint) const
 {
-	return bMapExpanded || MinimapRect.IsInside(ScreenPoint);
+	return bMapExpanded || IsOnCornerMap(ScreenPoint);
 }

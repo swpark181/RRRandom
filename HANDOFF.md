@@ -2,6 +2,8 @@
 
 최종 업데이트: 2026-10-07 (6차)
 
+Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMemory/` 에 복사해 둠 — 다른 PC 세션은 먼저 읽기.
+
 ## 요청 내용
 
 - 브롤스타즈를 참고해 기본적인 공방이 되는 상태까지 (스킬은 제외).
@@ -53,6 +55,26 @@
 - (46차) 불씨가 더 잘 보이게, 궁극기가 지나간 자리에 생기는 텍스처를 어울리게 변경.
 - (47차) 레퍼런스 그림(사용자 `Downloads\level_design.png`: 파스텔 주사위 탑, 주사위 무지개로 이은 떠 있는 섬, 지붕 위 주사위, 물길·폭포)을 보고 주사위 마을 레벨 디자인 보완. 상자만 쌓이고 반복되는 디자인이라 꿈나라 같은 오브젝트와 주사위가 강조되는 오브젝트가 필요. 게임에 실제 올리기 전에 먼저 보여줄 것. 트라이포든 직접이든 더 나은 쪽으로. → 비교 페이지를 보고 "적용해줘".
 - (48차) 건물의 지붕이나 나무 같은 오브젝트까지 블록 형태일 필요는 없음. 필요하면 트라이포를 써서 보완.
+- (49차) 프로젝트 전체 UI 를 깔끔한 파스텔톤, 단순하게. 트라이포와 클로드로 시안 3개씩 뽑아 먼저 보여주고, 적용은 확인 후. → 클로드 시안 A 마시멜로 / B 스티커 / C 에어 라인 비교 페이지. 사용자 선택(조합안): 인게임 HUD 는 에어 라인, 캐릭터 선택은 스티커 구조에 에어 라인 느낌, 결과 화면은 마시멜로 + 에어 라인, 결과 화면에 배경 음영 없음. → "조합안으로 적용해줘".
+
+## 49차 — 파스텔 UI 조합안 적용 (사용자: 깔끔한 파스텔톤·단순함; 인게임 HUD 는 에어 라인, 캐릭터 선택은 스티커 구조 + 에어 라인 느낌, 결과는 마시멜로 + 에어 라인, 결과 화면 배경 음영 없음)
+
+- 시안: 클로드 HTML 시안 3개(A 마시멜로: 반투명 흰 알약 패널 / B 스티커: 흰 테두리 납작한 색면 / C 에어 라인: 상자 없이 글자·가는 막대·동그란 미니맵) + 조합안, 비교 페이지 https://claude.ai/artifact/48P8TVxc3WhCP533pVnEHJ (원본 `scratchpad\ui-mockups\index.html`). **Tripo 시안은 못 뽑음** — 그 세션에 Chrome 확장이 연결 안 돼 있었고 사용자가 조합안으로 바로 적용을 골랐음.
+- 공통 스타일 `RRUI`(새 `Public/RRRandomUIStyle.h`, `Private/RRRandomUIStyle.cpp`):
+  - 팔레트(sRGB): Ink 74,63,92 / InkSoft 122,112,138(불투명 — 반투명이면 어두운 맵에서 묻힘) / Pink 247,168,196, PinkDeep 242,127,166 / Mint 143,221,190, MintDeep 124,203,172 / Lavender 189,166,240, LavenderDeep 154,123,224 / Butter 247,216,138 / Gold 233,169,63 / Sky 151,201,245, SkyDeep 102,165,230. 파랑 팀 = 하늘, 빨강 팀 = 분홍.
+  - 글꼴 Nunito SemiBold/ExtraBold/Black(Google Fonts 정적 TTF, OFL → `Content/Fonts/Nunito/`, 원본 `char-pipeline\input\fonts_nunito\`). **런타임 UFont**(`FontCacheType=Runtime`, `AppendFont(파일 경로, LazyLoad)`)를 한 번 만들어 루트에 두고 `FSlateFontInfo`(크기 = 픽셀 × 0.75 포인트, 정수로 반올림해 캐시 폭증 방지)로 `FCanvasTextItem` 에 그림 → 어떤 크기든 선명. 측정은 `FSlateApplication` 의 FontMeasure(Build.cs 에 Slate, SlateCore 추가). 매 프레임 크기가 변하는 글자(카운트다운 팝, 궁극기 배너)는 `Zoom`(아이템 Scale)으로. 패키징용 `DefaultGame.ini` `+DirectoriesToAlwaysStageAsNonUFS=(Path="Fonts/Nunito")`.
+    - Font Face 에셋으로 가져오기(`char-pipeline\scripts\ue_import_font.py`, 새)는 커맨드릿에서 **Slate 가 없어 `CurrentApplication.IsValid()` 어서트로 죽음** → 파일 직접 읽기로 감. 스크립트는 에디터 안에서 쓸 때를 위해 남김.
+  - 모양: 흰 스프라이트 두 장(`char-pipeline\scripts\make_ui_shapes.py`, 새 — 블렌더 파이썬으로 `python -I make_ui_shapes.py <out>` → `output\ui\T_UICircle.png`(256, 꽉 찬 원), `T_UISoft.png`(128, 가운데 20% 단단 + smoothstep 감쇠) → `ue_import_ui_texture.py` → `/Game/UI/T_UICircle`, `/Game/UI/T_UISoft`). 사분면을 모서리로 쓰는 9-슬라이스(조각끼리 안 겹쳐 반투명 색이 고름)로 둥근 사각형·알약·부드러운 그림자, 원은 원 스프라이트 통째, 고리·점선 고리는 삼각형 띠, **텍스처를 원/둥근 사각형으로 자르기**는 둘레 점(모서리마다 8단계 호)에서 가운데로 부채꼴 삼각형 + UV(초상화, 미니맵 — 새 텍스처 필요 없음). 스프라이트는 각 HUD 가 UPROPERTY 로 붙잡고 그리기 전에 `RRUI::UseShapes` 로 넘김.
+  - 게임 위 글자: 처음엔 흰 글자 복사본 고리(헤일로) + 큰 흰 번짐(wash)을 깔았는데, 섬 맵(진한 초록 + 안개)에선 작은 글자가 울퉁불퉁한 외곽선처럼 보이고 번짐이 안개 덩어리 같았음 → **`DrawPlate`**: 글자 몸통을 감싸는 반투명 흰 알약(0.5) + 바깥으로 부드러운 테두리(T_UISoft 9-슬라이스, 0.4). 점수·주사위 줄·탄약 줄·팀원 카드는 묶음마다 받침 하나, 나머지(머리 위 숫자·태그·온라인 줄)는 글자마다. 큰 제목(`DrawGradientText`: 글자마다 색 보간)은 받침 대신 흰 테두리 고리 12방향 두 겹 + 잉크 그림자.
+- 인게임 HUD(`RRRandomHUD.cpp`, `RRRandomHUDPanels.cpp` 거의 다시 씀; 모든 크기 화면 높이 720 기준 × `UIScale`):
+  - 점수: `BLUE 3 · 2 RED`(팀 글자색), 아래 가는 선이 양 끝에서 목표 쪽으로 차오름(하늘/분홍), `FIRST TO 10`.
+  - 미니맵: 지름 190 원(`MinimapSize` 220 → 190, 화면 비례), 흰 테두리 + 옅은 바깥 고리. 텍스처는 지형색을 22% 밝히고 안개는 검게 대신 라벤더(222,214,236)로 덮음(가 봄 45%, 안 가 봄 82%). 마커: 나 흰 화살표(잉크 테두리), 아군 SkyDeep·적 PinkDeep 점(흰 테두리), KO X. 원 밖 마커는 원 둘레에 붙임. 클릭 판정도 원(`IsOnCornerMap`). 전체 화면은 옅은 라벤더 막 + 흰 패널 + 둥근 모서리 지도.
+  - 머리 위: 둥근 체력 바(나 MintDeep / 아군 SkyDeep / 적 PinkDeep, 흰 트랙 + 잉크 테두리), 숫자, 오른쪽 ◆ 주사위 수(라벤더, 궁극기 금색), 왼쪽 총 이름(등급색을 잉크 쪽으로), 아래 탄창 칸(금색)·게이지(라벤더), 흰 테두리 피아 삼각형, 위로 태그(왼쪽 색 막대 + 글자)들과 굴림 결과.
+  - 왼쪽 아래: 큰 주사위 수 + `DICE` + 게이지 + `E` 키 캡(궁극기면 금색 수 + `ULTIMATE` 태그), 위로 궁극기·비행·거인·버프 태그(남은 시간, 3초 남으면 깜빡임). 오른쪽 아래: `PISTOL 12 / 15 R`(¼ 이하면 분홍), 재장전은 `RELOADING` + 버터 진행 바, 새 총이면 그 위에 `RARE RIFLE DMG x1.3 · SHOT SPD x1.3` 태그. 팀원 카드: 상자 없이 동그란 초상화(팀색 + 흰 고리), 이름·체력·민트 바·`DICE 1 · CANNON`. 데미지 숫자: 흰 글자 + 잉크 테두리(우리 편은 분홍 + 흰 테두리). 카운트다운 `GET READY` + 라벤더→분홍 숫자, `GO!` 분홍→금. 3인칭 조준점: 점 + 8조각 점선 고리(조준 시 좁아지고 쏘면 벌어짐). 온라인/치트 안내는 치트 줄이 화면 가운데까지 넘어가서 두 줄로 나눔.
+  - 결과: **음영·위아래 띠 없음**. `VICTORY`(라벤더→분홍→금) / `DEFEAT`(하늘→라벤더) / 관전 `BLUE WINS`, 점수 알약, 양쪽 반투명 흰 팀 패널(머리 줄 아래 팀색 선, 행마다 가는 구분선, YOU 라벤더, MVP 금색), 가운데 MVP 알약(동그란 초상화 + 버터 고리, 그 캐릭터의 그림), 버튼 NEW GAME(민트 + 진한 민트 바닥, 주 버튼)/TITLE(흰색), 마우스를 올리면 2 위로. 일시정지: 옅은 라벤더 막 + `PAUSED`(라벤더→분홍) + RESUME(민트)/TITLE.
+- 타이틀(`RRRandomTitleHUD.cpp`): 왼쪽 어둡게 → 흰 빛(가장자리 0.85, 화면 42% 에서 0.6, 58% 에서 0), 로고 `RRR`(라벤더)`ANDOM`(잉크) + 파스텔 막대 5개 + `TEAM BRAWL PROTOTYPE`, 버튼은 반투명 흰 알약(고른 것 흰색 + 분홍 테두리 + 그림자). 캐릭터 페이지: 폭 570 안에 카드 5장(높이 128, 초상화 원 80), 고른 카드는 8 떠오름 + 분홍 테두리 + 이름 밑줄, 그 아래 설명 한 줄(분홍 표시), BACK 은 작은 알약(200×44). 버튼 사각형이 카드 자리라 마우스 선택도 그대로. `ARRRandomTitlePlayerController` 에 A/←(위), D/→(아래) 키 추가, 안내 `A/D SELECT`.
+- 확인(창 캡처, 스크래치 `ui_tour.ps1`: 타이틀 → 페이지들 → 캐릭터 → 5초 카운트다운 → 게임 → E 굴림 → Esc 일시정지 → M 전체 지도 → F6 승리): 탑뷰 섬과 3인칭 주사위 마을 모두 → `C:\work\char-pipeline\output\screens\ui_pastel\`(`top3_*`, `tps_*`; `top_*` 는 받침 전 헤일로판). 빌드 경고 없음(UFont::CompositeFont 직접 접근 경고 → `GetMutableInternalCompositeFont`, 지역 변수 `Tags` 가 AActor::Tags 를 가려 C4458 → `Going`).
+- 확인 못 한 것: 해상도·DPI 가 다른 화면(캡처는 1280×720 창이 150% DPI 로 1920×1080), 온라인 참가자 화면(`WAITING FOR HOST` 버튼), DEFEAT 화면, 패키징 빌드에서 TTF 가 실제로 실려 가는지.
 
 ## 48차 — 지붕·나무류를 블록 대신 모델로 (사용자: 지붕이나 나무 같은 오브젝트까지 블록일 필요 없음, 필요하면 트라이포)
 
