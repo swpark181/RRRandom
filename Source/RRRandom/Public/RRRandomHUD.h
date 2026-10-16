@@ -20,7 +20,8 @@ class URRRandomDiceBuffComponent;
 class UTexture2D;
 
 /**
- * Plain canvas HUD. Over every brawler: health bar, stored dice count, dice gauge, active buffs,
+ * Canvas HUD in the pastel style of RRRandomUIStyle (airy text with a white halo and thin rounded bars over the game;
+ * frosted rounded panels on the results and pause screens). Over every brawler: health bar, stored dice count, dice gauge, active buffs,
  * the latest dice roll, damage numbers and a friend-or-foe marker (plus ammo over the player's own brawler).
  * On screen: team score, the player's dice gauge and buff list, magazine count, a respawn countdown, the online status
  * with its keys under the minimap, and:
@@ -51,8 +52,8 @@ public:
 	void ToggleMap() { bMapExpanded = !bMapExpanded; }
 	bool IsMapExpanded() const { return bMapExpanded; }
 
-	/** The corner map's side, and its distance from the screen edges. */
-	static constexpr float MinimapSize = 220.f;
+	/** The corner map's diameter and its distance from the screen edges, on a 720 pixel tall screen (scaled with it). */
+	static constexpr float MinimapSize = 190.f;
 	static constexpr float MinimapMargin = 20.f;
 
 	/** The enabled results or pause menu button under a screen point (None when there is none). */
@@ -60,13 +61,13 @@ public:
 
 private:
 	void DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer);
-	void DrawAmmoBar(const ARRRandomCharacter& Brawler, float Left, float Top);
+	void DrawAmmoBar(const ARRRandomCharacter& Brawler, float Left, float Top, float Width, float Height);
 	/** Draws the buff chips ending just above Bottom and returns the new top edge. */
-	float DrawBuffChips(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom, UFont* Font);
+	float DrawBuffChips(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom);
 	/** Draws power chips (GIANT, FLY) side by side ending just above Bottom and returns the new top edge. */
-	float DrawPowerChips(TArrayView<const FString> Labels, TArrayView<const FLinearColor> Colors, TArrayView<const float> Remaining, float CenterX, float Bottom, UFont* Font);
+	float DrawPowerChips(TArrayView<const FString> Labels, TArrayView<const FLinearColor> Colors, TArrayView<const float> Remaining, float CenterX, float Bottom);
 	/** The latest roll's result under its 3D die, ending just above Bottom; returns the new top edge (where the die goes). */
-	float DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom, UFont* Font);
+	float DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom);
 	void DrawDamagePopups(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer);
 	void DrawDicePanel(const ARRRandomCharacter& Viewer);
 	void DrawAmmoPanel(const ARRRandomCharacter& Brawler);
@@ -76,7 +77,7 @@ private:
 	 * spreading for a moment after each shot. */
 	void DrawCrosshair(const ARRRandomCharacter& Brawler);
 	/** Draws the gun's name chip ending at Right; nothing for the starting pistol. */
-	void DrawWeaponChip(const struct FRRWeapon& Weapon, float Right, float CenterY, UFont* Font);
+	void DrawWeaponChip(const struct FRRWeapon& Weapon, float Right, float CenterY);
 	void DrawScore();
 	/** Online role (solo, hosting, joined), the host/join/leave keys and the latest online status. */
 	void DrawOnlinePanel();
@@ -94,17 +95,14 @@ private:
 	/** The terrain colors shaded by the fog of war, into MapTexture. */
 	void RefreshMinimap();
 	FVector2D MapPixelToWorld(int32 X, int32 Y) const;
-	/** One team's brawlers by knockouts, from Top; returns the bottom edge. */
+	/** One team's brawlers by knockouts on a frosted panel, from Top; returns the bottom edge. */
 	float DrawTeamBoard(int32 Team, const ARRRandomCharacter* Viewer, const ARRRandomCharacter* MVP, float X, float Top, float Width, float Alpha, float Scale);
-	/** Text centered across the screen, with a shadow; returns its height. */
-	float DrawCenteredText(const FString& Text, const FLinearColor& Color, float Y, UFont* Font, float Scale);
-
-	/** Text with a dark drop shadow so it reads over any background. */
-	void DrawShadowedText(const FString& Text, const FLinearColor& Color, float X, float Y, UFont* Font);
+	/** Whether a screen point is on the round corner map. */
+	bool IsOnCornerMap(const FVector2D& ScreenPoint) const;
 
 	/** Seconds the big "TIGER SPIRIT xN!" stays up after my ultimate die lands. */
 	static constexpr float UltimateBannerTime = 1.8f;
-	/** A downward triangle with a dark border, its top edge at Top, centered on CenterX. */
+	/** A downward triangle with a white border, its top edge at Top, centered on CenterX. */
 	void DrawFriendOrFoeMarker(float CenterX, float Top, const FLinearColor& Color);
 
 	/** Real time the results screen first showed (negative while playing). */
@@ -116,8 +114,18 @@ private:
 		bool bEnabled = true;
 	};
 	TArray<FResultsButtonRect> ResultsButtons;
-	/** One of ResultsButtons, gold when the mouse is over it, faded when disabled. */
-	void DrawMenuButton(const FResultsButtonRect& Button, const FString& Label, float Alpha, float Scale);
+	/** One of ResultsButtons as a pill: mint for the main choice, frosted white otherwise; lifted under the mouse, faded when disabled. */
+	void DrawMenuButton(const FResultsButtonRect& Button, const FString& Label, bool bPrimary, float Alpha, float Scale);
+
+	/** This frame's screen scale (720 pixels tall = 1). */
+	float UIScale = 1.f;
+
+	/** White sprites for rounded shapes and soft shadows (RRRandomUIStyle). */
+	UPROPERTY()
+	TObjectPtr<UTexture2D> UICircle;
+
+	UPROPERTY()
+	TObjectPtr<UTexture2D> UISoft;
 
 	/** Head-and-shoulders picture for the team cards (char-pipeline/scripts/blender_portrait.py). */
 	UPROPERTY()
@@ -135,6 +143,6 @@ private:
 	int32 MapCoverCount = INDEX_NONE;
 	float MapRefreshTimer = 0.f;
 	bool bMapExpanded = false;
-	/** Where the corner map was last drawn. */
+	/** Where the corner map was last drawn (the square around its circle). */
 	FBox2D MinimapRect = FBox2D(ForceInit);
 };
