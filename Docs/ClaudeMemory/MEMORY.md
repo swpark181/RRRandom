@@ -1,0 +1,6 @@
+- [Tripo objects: cartoon style](tripo-cartoon-style.md) — RRRandom props from Tripo always cute cartoon, puffy/balloon-like, bold colors
+- [Dice Land art direction](dice-land-art-direction.md) — TPS map: vivid candy colors, lots of cover; v2 = 10x size, MapleStory2 block style, enterable buildings; Tripo web
+- [Mixamo keeps one character](mixamo-one-character.md) — uploading replaces the previous rig; export everything first
+- [Smart App Control blocks DLL](smart-app-control-dll.md) — RRRandom "module could not be loaded" (4551): rebuild with a real code change
+- [Tripo prompt filter](tripo-prompt-filter.md) — "no clothes" in a prompt gets a misleading "image does not meet guidelines" error
+- [Pastel UI direction](pastel-ui-direction.md) — RRRandom UI combo picked 2026-10-16: air-line HUD, card brawler pick, results w/o shading; mock up first
