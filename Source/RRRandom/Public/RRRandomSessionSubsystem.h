@@ -19,6 +19,15 @@ enum class ERRThirdPersonMap : uint8
 	DiceTown,
 };
 
+/** How a match is won. */
+enum class ERRMatchRule : uint8
+{
+	/** The first team to ScoreToWin knockouts. */
+	Knockout,
+	/** Meteors drop dice ore; a team holding 30 points of it for 12 seconds wins (ARRRandomMeteorRushDirector). */
+	MeteorRush,
+};
+
 /**
  * Online play without a dedicated server: one player hosts (their game becomes a listen server) and others find and join it.
  *
@@ -85,6 +94,13 @@ public:
 	 */
 	void SetThirdPersonMap(ERRThirdPersonMap InMap) { ThirdPersonMap = InMap; }
 	ERRThirdPersonMap GetThirdPersonMap() const { return ThirdPersonMap; }
+
+	/**
+	 * The rule the games this machine starts are played by, picked on the title after the view (and map) and kept across
+	 * levels. -RRRule=MeteorRush on the command line sets it too. Joiners play the host's (ARRRandomGameState::IsMeteorRush).
+	 */
+	void SetMatchRule(ERRMatchRule InRule) { MatchRule = InRule; }
+	ERRMatchRule GetMatchRule() const { return MatchRule; }
 
 	/**
 	 * The brawler this machine's player plays (RRSpecies: fox, rabbit, squirrel, tiger), picked on the title and kept across
@@ -187,6 +203,7 @@ private:
 	bool bStartupCommandDone = false;
 	bool bThirdPersonMode = false;
 	ERRThirdPersonMap ThirdPersonMap = ERRThirdPersonMap::DiceTown;
+	ERRMatchRule MatchRule = ERRMatchRule::Knockout;
 	int32 Species = 0;
 	int32 JoinRetriesLeft = 0;
 	FString Status;

@@ -35,8 +35,14 @@ public:
 	virtual APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot) override;
 	virtual void Logout(AController* Exiting) override;
 
-	/** Called by a brawler when it is knocked out. Attacker may be null. */
-	void OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRandomCharacter* Attacker);
+	/** Called by a brawler when it is knocked out. Attacker may be null; bFell when it fell off the arena. */
+	void OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRandomCharacter* Attacker, bool bFell = false);
+
+	/** Ends the match with Winner's win (Meteor Rush's director decides when). */
+	void EndMatchFor(int32 Winner) { EndMatch(Winner); }
+
+	/** How far apart the two teams start, along X either side of the arena's center. */
+	float GetTeamSpawnDistance() const { return TeamSpawnDistance; }
 
 	/** Starts a fresh match on the same map, taking everyone connected along. */
 	void RestartMatch();
@@ -127,10 +133,19 @@ private:
 	};
 
 	void EndMatch(int32 Winner);
-	/** Lines everyone up behind the MVP to dance: the winners in the row behind it, the others behind them. */
+	/** Lines the winners up to dance: in a row in front of the map's centerpiece (FindDanceLine), or a V behind the MVP. */
 	void ArrangeVictoryFormation(ARRRandomCharacter* MVP, int32 Winner);
 	/** A clear spot for a brawler near Wanted (on the floor, not in cover, apart from Taken), or false if none nearby. */
 	bool FindFormationSpot(const FVector& Wanted, float FloorZ, const ARRRandomCharacter* Brawler, const TArray<FVector>& Taken, FVector& OutSpot) const;
+	/**
+	 * A straight line of spots for these brawlers (the first in the middle, the rest alternating right and left of it) in
+	 * front of the map's centerpiece, facing out from it: on the ground the winners start on, as close to the middle as
+	 * there's room, open in front for the results camera. Tries the winners' side of the middle first, then the sides,
+	 * then the far side. False if there's no room anywhere.
+	 */
+	bool FindDanceLine(const TArray<ARRRandomCharacter*>& Line, int32 Winner, TArray<FVector>& OutSpots, float& OutYaw) const;
+	/** One spot in the dance line: on the ground at GroundZ, with room to dance and nothing solid just in front. */
+	bool FindDanceSpot(const FVector& Wanted, float GroundZ, const FVector& Front, const ARRRandomCharacter* Brawler, FVector& OutSpot) const;
 	void EnsureSlots();
 	/** The team a new player joins, or INDEX_NONE when both are full of players. */
 	int32 ChooseTeamForPlayer() const;
@@ -152,6 +167,8 @@ private:
 	void SpawnDiceTownIfNoneExists();
 	/** This game is on Dice Town (decided in InitGame, from this machine's title picks). */
 	bool bDiceTown = false;
+	/** This game is played by Meteor Rush's rule (ERRMatchRule, picked on this machine's title). */
+	bool bMeteorRush = false;
 	FVector GetPlayerStartLocation() const;
 
 	/** Places a point on the floor beneath it, or returns false if there is no floor there. */

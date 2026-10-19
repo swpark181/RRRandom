@@ -20,6 +20,34 @@ void ARRRandomGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ARRRandomGameState, bThirdPersonMode);
 	DOREPLIFETIME(ARRRandomGameState, WinningTeam);
 	DOREPLIFETIME(ARRRandomGameState, MVP);
+	DOREPLIFETIME(ARRRandomGameState, bHasDanceLine);
+	DOREPLIFETIME(ARRRandomGameState, DanceLineCenter);
+	DOREPLIFETIME(ARRRandomGameState, DanceLineYaw);
+	DOREPLIFETIME(ARRRandomGameState, DanceLineHalfWidth);
+	DOREPLIFETIME(ARRRandomGameState, bMeteorRush);
+	DOREPLIFETIME(ARRRandomGameState, MatchEndTime);
+	DOREPLIFETIME(ARRRandomGameState, bOvertime);
+	DOREPLIFETIME(ARRRandomGameState, HoldTeam);
+	DOREPLIFETIME(ARRRandomGameState, HoldEndTime);
+	DOREPLIFETIME(ARRRandomGameState, HoldLength);
+}
+
+bool ARRRandomGameState::IsMeteorRush(const UObject* WorldContext)
+{
+	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	const ARRRandomGameState* State = World ? World->GetGameState<ARRRandomGameState>() : nullptr;
+	return State && State->bMeteorRush;
+}
+
+void ARRRandomGameState::SetHold(int32 Team, float Seconds)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	HoldTeam = Team == 0 || Team == 1 ? Team : INDEX_NONE;
+	HoldLength = HoldTeam != INDEX_NONE ? Seconds : 0.f;
+	HoldEndTime = GetServerWorldTimeSeconds() + HoldLength;
 }
 
 bool ARRRandomGameState::IsThirdPersonMode(const UObject* WorldContext)

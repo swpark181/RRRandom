@@ -8,6 +8,8 @@
 #include "RRRandomFogOfWar.h"
 #include "RRRandomGameState.h"
 #include "RRRandomIsland.h"
+#include "RRRandomMeteor.h"
+#include "RRRandomOre.h"
 #include "RRRandomPlayerController.h"
 #include "RRRandomUIStyle.h"
 #include "RRRandomWeapon.h"
@@ -138,6 +140,28 @@ void ARRRandomHUD::DrawCountdown(const ARRRandomGameState& State)
 		const FVector2D Box = RRUI::MeasureText(Text, NumberSize, EWeight::Black, NumberSize * 0.06f);
 		const FLinearColor Stops[] = { RRUI::PinkDeep, RRUI::Gold };
 		RRUI::DrawGradientText(Canvas, Text, FVector2D(CenterX - Box.X * Zoom * 0.5f, Y + Box.Y * (1.f - Zoom) * 0.5f), NumberSize, EWeight::Black, Stops, 1.f - T * T, NumberSize * 0.06f, Zoom);
+	}
+
+	// Meteor Rush: a team holding the goal (or overtime's golden crystal) counts down to its win, high on the screen in
+	// its color, each second popping in like the start's
+	const int32 HoldTeam = State.GetHoldTeam();
+	if (State.IsMeteorRush() && HoldTeam != INDEX_NONE && State.HasPlayStarted())
+	{
+		const float Left = FMath::Max(0.f, State.GetHoldRemaining());
+		const int32 Number = FMath::Max(1, FMath::CeilToInt(Left));
+		const float Fresh = FMath::Clamp(Left - (Number - 1), 0.f, 1.f);
+		const float Pop = 1.f + CountdownPop * 0.6f * FMath::Pow(Fresh, 4.f);
+		const float HoldY = Canvas->ClipY * 0.17f;
+		const float LabelSize = 13.f * S;
+		const FString TeamName = HoldTeam == 0 ? TEXT("BLUE") : TEXT("RED");
+		const FString Label = State.IsOvertime() ? TeamName + TEXT(" HAS THE GOLDEN CRYSTAL") : TeamName + TEXT(" HOLDS THE ORE");
+		const FVector2D LabelBox = RRUI::MeasureText(Label, LabelSize, EWeight::Black, LabelSize * 0.24f);
+		RRUI::DrawGlowText(Canvas, Label, FVector2D(CenterX - LabelBox.X * 0.5f, HoldY - LabelBox.Y), LabelSize, EWeight::Black, RRUI::TeamColorDeep(HoldTeam), LabelSize * 0.24f);
+		const float HoldSize = 64.f * S;
+		const FString Text = FString::FromInt(Number);
+		const FVector2D Box = RRUI::MeasureText(Text, HoldSize, EWeight::Black);
+		const FLinearColor Stops[] = { RRUI::TeamColorDeep(HoldTeam), State.IsOvertime() ? RRUI::Gold : RRUI::LavenderDeep };
+		RRUI::DrawGradientText(Canvas, Text, FVector2D(CenterX - Box.X * Pop * 0.5f, HoldY + Box.Y * (1.f - Pop) * 0.5f), HoldSize, EWeight::Black, Stops, 1.f, 0.f, Pop);
 	}
 }
 
@@ -488,6 +512,56 @@ void ARRRandomHUD::DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* 
 	// Teammates always; opponents only while the team sees them (as on screen and for the bots)
 	const int32 Team = Viewer ? Viewer->GetTeam() : INDEX_NONE;
 	const float Radius = MarkerRadius * Scale;
+
+	// Meteor Rush: where meteors are coming down (a pulsing ring), the ore lying about (small dots in its color) and
+	// anyone carrying a crystal, seen or not (a gold ring)
+	if (ARRRandomGameState::IsMeteorRush(this))
+	{
+		for (TActorIterator<ARRRandomOre> It(GetWorld()); It; ++It)
+		{
+			const FVector2D Point = ToScreen(It->GetActorLocation());
+			const bool bCrystal = RROre::IsCrystal(It->GetKind());
+			RRUI::DrawDisc(Canvas, Point, (bCrystal ? 3.6f : 2.4f) * Scale + 1.2f * Scale, RRUI::White);
+			RRUI::DrawDisc(Canvas, Point, (bCrystal ? 3.6f : 2.4f) * Scale, RROre::GetColor(It->GetKind()));
+		}
+		// Meteors: coming down, a ring pulsing out round a dot with the seconds left beside it; landed and throwing, a
+		// solid disc in a white rim
+		for (TActorIterator<ARRRandomMeteor> It(GetWorld()); It; ++It)
+		{
+			const float Left = It->GetTimeToImpact();
+			const FLinearColor Color = It->IsGolden() ? RRUI::Gold : RRUI::PinkDeep;
+			const FVector2D Point = ToScreen(It->GetActorLocation());
+			if (Left > 0.f)
+			{
+				const float Pulse = FMath::Fmod(GetWorld()->GetTimeSeconds() * 1.5f, 1.f);
+				RRUI::DrawRing(Canvas, Point, (6.f + 10.f * Pulse) * Scale, 2.f * Scale, RRUI::WithAlpha(Color, 1.f - Pulse));
+				RRUI::DrawRing(Canvas, Point, 7.f * Scale, 2.4f * Scale, Color);
+				RRUI::DrawDisc(Canvas, Point, 3.5f * Scale, Color);
+				const FString Seconds = FString::FromInt(FMath::CeilToInt(Left));
+				const float TextSize = 10.f * Scale;
+				RRUI::DrawGlowText(Canvas, Seconds, Point + FVector2D(9.f * Scale, -TextSize * 0.7f), TextSize, EWeight::Black, Color);
+			}
+			else if (It->IsBursting())
+			{
+				RRUI::DrawDisc(Canvas, Point, 7.5f * Scale, RRUI::White);
+				RRUI::DrawDisc(Canvas, Point, 6.f * Scale, Color);
+			}
+		}
+		for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+		{
+			const URRRandomOreCarryComponent* Carry = It->GetOreCarry();
+			if (*It != Viewer && It->IsAlive() && Carry && Carry->HasCrystal())
+			{
+				const FVector2D Point = ToScreen(It->GetActorLocation());
+				RRUI::DrawRing(Canvas, Point, Radius + 4.f * Scale, 2.4f * Scale, Carry->HasGolden() ? RRUI::Butter : RRUI::Gold);
+				if (It->GetTeam() != Team)
+				{
+					RRUI::DrawDisc(Canvas, Point, Radius + 1.8f * Scale, RRUI::White);
+					RRUI::DrawDisc(Canvas, Point, Radius, RRUI::PinkDeep);
+				}
+			}
+		}
+	}
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{
 		const ARRRandomCharacter* Brawler = *It;

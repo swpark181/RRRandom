@@ -9,6 +9,8 @@
 #include "RRRandomGrassFloor.h"
 #include "RRRandomIsland.h"
 #include "RRRandomGameState.h"
+#include "RRRandomMeteorRush.h"
+#include "RRRandomOre.h"
 #include "RRRandomHUD.h"
 #include "RRRandomPlayerController.h"
 #include "RRRandomVehicle.h"
@@ -80,6 +82,14 @@ void ARRRandomGameMode::StartPlay()
 
 	Super::StartPlay();
 
+	// The rule picked on this machine's title (or -RRRule=MeteorRush): Meteor Rush holds ore points instead of counting
+	// knockouts, and has a clock
+	const URRRandomSessionSubsystem* Sessions = GetGameInstance() ? GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>() : nullptr;
+	bMeteorRush = Sessions && Sessions->GetMatchRule() == ERRMatchRule::MeteorRush;
+	if (bMeteorRush)
+	{
+		ScoreToWin = ARRRandomMeteorRushDirector::ScoreToWin;
+	}
 	// -RRScoreToWin=N on the command line, for quick tests of the end of a match
 	FParse::Value(FCommandLine::Get(), TEXT("RRScoreToWin="), ScoreToWin);
 	ScoreToWin = FMath::Max(1, ScoreToWin);
@@ -87,9 +97,20 @@ void ARRRandomGameMode::StartPlay()
 	{
 		State->SetScoreToWin(ScoreToWin);
 		// Third person or the top view, as picked on this machine's title (or -RRThirdPerson)
-		const URRRandomSessionSubsystem* Sessions = GetGameInstance() ? GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>() : nullptr;
 		State->SetThirdPersonMode(Sessions && Sessions->IsThirdPersonMode());
-		State->SetPlayStartTime(GetWorld()->GetTimeSeconds() + StartCountdown);
+		const float PlayStart = GetWorld()->GetTimeSeconds() + StartCountdown;
+		State->SetPlayStartTime(PlayStart);
+		if (bMeteorRush)
+		{
+			// -RRRushLength=N (seconds) shortens the clock for tests
+			float Length = ARRRandomMeteorRushDirector::MatchLength;
+			FParse::Value(FCommandLine::Get(), TEXT("RRRushLength="), Length);
+			State->SetMeteorRush(true);
+			State->SetMatchEndTime(PlayStart + FMath::Max(10.f, Length));
+			GetWorld()->SpawnActor<ARRRandomMeteorRushDirector>();
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: Meteor Rush, hold %d for %.0f seconds, %.0f second clock, a meteor every %.0f seconds."), ScoreToWin,
+				ARRRandomMeteorRushDirector::HoldSeconds, Length, ARRRandomMeteorRushDirector::MeteorInterval);
+		}
 	}
 
 	// Found on the bare level, before anything is built on its floor
@@ -131,11 +152,25 @@ void ARRRandomGameMode::StartPlay()
 	}
 }
 
-void ARRRandomGameMode::OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRandomCharacter* Attacker)
+void ARRRandomGameMode::OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRandomCharacter* Attacker, bool bFell)
 {
 	ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
 	if (State && State->IsMatchOver())
 	{
+		return;
+	}
+	if (bMeteorRush)
+	{
+		// No points for knockouts: the victim's ore flies out for anyone to grab (lost with it off the edge)
+		if (Attacker && Attacker->GetTeam() != Victim->GetTeam())
+		{
+			Attacker->AddKill();
+		}
+		if (URRRandomOreCarryComponent* Carry = Victim->GetOreCarry())
+		{
+			Carry->DropAll(bFell);
+		}
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) knocked out by %s."), *Victim->GetName(), Victim->GetTeam(), Attacker ? *Attacker->GetName() : TEXT("a fall"));
 		return;
 	}
 	// A knockout without an opposing attacker still goes to the other team
@@ -160,10 +195,12 @@ void ARRRandomGameMode::EndMatch(int32 Winner)
 {
 	// MVP: the winning team's one with the most knockouts (the results show the winners dancing round it), then whoever
 	// is still standing; anyone's only if the winners have nobody
+	// (Meteor Rush: the most ore picked up, then knockouts)
 	ARRRandomCharacter* MVP = nullptr;
-	auto Rank = [Winner](const ARRRandomCharacter* Brawler)
+	auto Rank = [Winner, this](const ARRRandomCharacter* Brawler)
 	{
-		return (Brawler->GetTeam() == Winner ? 100000 : 0) + Brawler->GetKills() * 4 + (Brawler->IsAlive() ? 1 : 0);
+		const int32 Ore = bMeteorRush && Brawler->GetOreCarry() ? Brawler->GetOreCarry()->GetCollected() : 0;
+		return (Brawler->GetTeam() == Winner ? 100000 : 0) + Ore * 400 + Brawler->GetKills() * 4 + (Brawler->IsAlive() ? 1 : 0);
 	};
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{
@@ -192,11 +229,6 @@ void ARRRandomGameMode::EndMatch(int32 Winner)
 
 void ARRRandomGameMode::ArrangeVictoryFormation(ARRRandomCharacter* MVP, int32 Winner)
 {
-	// A V of the winning team behind the MVP, like backup dancers: the results camera looks at the MVP's face, so each pair
-	// stands a step further back and further out to the sides, all in view. The losers stay where they are and slump.
-	constexpr float RowGap = 130.f;
-	constexpr float SideGap = 150.f;
-	MVP->SetFormationLeader();
 	// A different dance (or slump) each, starting somewhere random, so the line doesn't move in step
 	int32 Pick = FMath::RandRange(0, 255);
 	TArray<ARRRandomCharacter*> Dancers;
@@ -209,9 +241,39 @@ void ARRRandomGameMode::ArrangeVictoryFormation(ARRRandomCharacter* MVP, int32 W
 		It->SetCelebrationPick(Pick++);
 		if (*It != MVP && It->GetTeam() == Winner)
 		{
+			It->ReviveNow();
 			Dancers.Add(*It);
 		}
 	}
+
+	// A row in front of the map's centerpiece, the MVP in the middle, all dashing there: the results camera looks at the
+	// row from the open side, with the centerpiece behind it instead of in the way. The losers stay where they are and slump.
+	TArray<ARRRandomCharacter*> Line = { MVP };
+	Line.Append(Dancers);
+	TArray<FVector> Spots;
+	float LineYaw = 0.f;
+	if (FindDanceLine(Line, Winner, Spots, LineYaw))
+	{
+		float HalfWidth = 0.f;
+		for (int32 Index = 0; Index < Line.Num(); ++Index)
+		{
+			Line[Index]->SetFormationSpot(Spots[Index]);
+			HalfWidth = FMath::Max(HalfWidth, (float)FVector::Dist2D(Spots[Index], Spots[0]));
+		}
+		if (ARRRandomGameState* State = GetGameState<ARRRandomGameState>())
+		{
+			State->SetDanceLine(Spots[0], LineYaw, HalfWidth);
+		}
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %d winners line up to dance at %s, %.0f from the middle, facing %.0f."), Line.Num(), *Spots[0].ToString(),
+			FVector::Dist2D(Spots[0], GetArenaCenter()), LineYaw);
+		return;
+	}
+
+	// No room there: a V of the winning team behind the MVP where it stands, like backup dancers: the results camera looks
+	// at the MVP's face, so each pair stands a step further back and further out to the sides, all in view
+	constexpr float RowGap = 130.f;
+	constexpr float SideGap = 150.f;
+	MVP->SetFormationLeader();
 	const float Yaw = MVP->GetActorRotation().Yaw;
 	const FVector Front = FRotator(0.f, Yaw, 0.f).Vector();
 	const FVector Right = FRotator(0.f, Yaw + 90.f, 0.f).Vector();
@@ -224,7 +286,6 @@ void ARRRandomGameMode::ArrangeVictoryFormation(ARRRandomCharacter* MVP, int32 W
 		const int32 Step = Index / 2 + 1;
 		const float Side = Index % 2 == 0 ? 1.f : -1.f;
 		const FVector Wanted = MVP->GetActorLocation() - Front * RowGap * Step + Right * Side * SideGap * Step;
-		Dancer->ReviveNow();
 		FVector Spot;
 		if (!FindFormationSpot(Wanted, FloorZ, Dancer, Taken, Spot))
 		{
@@ -270,6 +331,102 @@ bool ARRRandomGameMode::FindFormationSpot(const FVector& Wanted, float FloorZ, c
 		}
 	}
 	return false;
+}
+
+bool ARRRandomGameMode::FindDanceLine(const TArray<ARRRandomCharacter*>& Line, int32 Winner, TArray<FVector>& OutSpots, float& OutYaw) const
+{
+	// Between neighbors (the dance sways the hips about 60 out of the capsule), how far out from the middle to look, and
+	// how far in front of the line the camera needs open ground
+	constexpr float Gap = 180.f;
+	constexpr float MinOut = 0.f;
+	constexpr float MaxOut = 3000.f;
+	constexpr float OutStep = 50.f;
+	constexpr float CameraRoom = 800.f;
+	OutSpots.Reset();
+	if (Line.Num() == 0)
+	{
+		return false;
+	}
+	// The ground the winners started on (not the centerpiece's tiers or steps), and the way out toward their base
+	const FVector Center = GetArenaCenter();
+	const float HalfHeight = Line[0]->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight();
+	FTransform Base;
+	if (!GetSlotTransform(Winner == 1 ? 1 : 0, 0, HalfHeight, Base))
+	{
+		return false;
+	}
+	const float GroundZ = Base.GetLocation().Z - HalfHeight;
+	FVector Toward = (Base.GetLocation() - Center).GetSafeNormal2D();
+	if (Toward.IsNearlyZero())
+	{
+		Toward = FVector::ForwardVector;
+	}
+	for (const float Turn : { 0.f, 90.f, -90.f, 180.f })
+	{
+		const FVector Front = Toward.RotateAngleAxis(Turn, FVector::UpVector);
+		const FVector Right = FVector::CrossProduct(FVector::UpVector, Front);
+		// From the middle outward (on a map with nothing there, right in the middle): the first place the whole line fits,
+		// with open ground in front of it
+		for (float Out = MinOut; Out <= MaxOut; Out += OutStep)
+		{
+			const FVector Middle = FVector(Center.X, Center.Y, GroundZ) + Front * Out;
+			OutSpots.Reset();
+			for (int32 Index = 0; Index < Line.Num(); ++Index)
+			{
+				const int32 Step = (Index + 1) / 2;
+				const float Side = Index % 2 == 1 ? 1.f : -1.f;
+				FVector Spot;
+				if (!FindDanceSpot(Middle + Right * Side * Step * Gap, GroundZ, Front, Line[Index], Spot))
+				{
+					break;
+				}
+				OutSpots.Add(Spot);
+			}
+			if (OutSpots.Num() < Line.Num())
+			{
+				continue;
+			}
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomDanceLine), false);
+			if (GetWorld()->SweepTestByObjectType(OutSpots[0], OutSpots[0] + Front * CameraRoom, FQuat::Identity, FCollisionObjectQueryParams(ECC_WorldStatic), FCollisionShape::MakeSphere(40.f), Params))
+			{
+				continue;
+			}
+			OutYaw = Front.Rotation().Yaw;
+			return true;
+		}
+	}
+	OutSpots.Reset();
+	return false;
+}
+
+bool ARRRandomGameMode::FindDanceSpot(const FVector& Wanted, float GroundZ, const FVector& Front, const ARRRandomCharacter* Brawler, FVector& OutSpot) const
+{
+	// Room round the capsule to dance in, and open ground this far in front (nothing between it and the camera)
+	constexpr float DanceRoom = 50.f;
+	constexpr float OpenAhead = 500.f;
+	const UCapsuleComponent* Capsule = Brawler->GetCapsuleComponent();
+	const float Radius = Capsule->GetUnscaledCapsuleRadius();
+	const float HalfHeight = Capsule->GetUnscaledCapsuleHalfHeight();
+	FVector Location;
+	if (!FindFloorSpot(Wanted, HalfHeight, Location) || FMath::Abs(Location.Z - HalfHeight - GroundZ) > 40.f)
+	{
+		return false;
+	}
+	// The room: the capsule widened, kept clear of the floor (a wide capsule is rounder, and would dip into the paving)
+	const float RoomRadius = Radius + DanceRoom;
+	const float RoomHalfHeight = FMath::Max(HalfHeight - 5.f, RoomRadius);
+	const FVector RoomCenter(Location.X, Location.Y, Location.Z - HalfHeight + RoomHalfHeight + 10.f);
+	FCollisionObjectQueryParams Solid;
+	Solid.AddObjectTypesToQuery(ECC_WorldStatic);
+	Solid.AddObjectTypesToQuery(ECC_WorldDynamic);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomDanceLine), false, Brawler);
+	if (GetWorld()->OverlapAnyTestByObjectType(RoomCenter, FQuat::Identity, Solid, FCollisionShape::MakeCapsule(RoomRadius, RoomHalfHeight), Params)
+		|| GetWorld()->SweepTestByObjectType(Location, Location + Front * OpenAhead, FQuat::Identity, FCollisionObjectQueryParams(ECC_WorldStatic), FCollisionShape::MakeSphere(Radius), Params))
+	{
+		return false;
+	}
+	OutSpot = Location;
+	return true;
 }
 
 void ARRRandomGameMode::CheatWin(int32 Team)
@@ -332,12 +489,26 @@ bool ARRRandomGameMode::GetSlotTransform(int32 Team, int32 Slot, float HalfHeigh
 	const FVector Origin = GetArenaCenter() + FVector(TeamSpawnDistance * (Team == 1 ? 0.5f : -0.5f), 0.f, 0.f);
 	// The middle spot first (the first player's), then alternating right and left of it
 	const float Side = Slot % 2 == 1 ? 1.f : -1.f;
-	const FVector Spot = Origin + FVector(0.f, Side * ((Slot + 1) / 2) * SpawnSpacing, 0.f);
-
+	const int32 Step = (Slot + 1) / 2;
 	FVector Location;
-	if (!FindFloorSpot(Spot, HalfHeight, Location))
+	if (!FindFloorSpot(Origin + FVector(0.f, Side * Step * SpawnSpacing, 0.f), HalfHeight, Location))
 	{
 		return false;
+	}
+	// Level with the middle spot: a spot up on something (a wall or a roof by a base, where bots would be stuck) moves
+	// further out to the side, half a gap at a time, until it finds the same ground
+	FVector Middle;
+	if (Step > 0 && FindFloorSpot(Origin, HalfHeight, Middle) && FMath::Abs(Location.Z - Middle.Z) > 60.f)
+	{
+		for (int32 Try = 1; Try <= 8; ++Try)
+		{
+			FVector Further;
+			if (FindFloorSpot(Origin + FVector(0.f, Side * (Step + Try * 0.5f) * SpawnSpacing, 0.f), HalfHeight, Further) && FMath::Abs(Further.Z - Middle.Z) <= 60.f)
+			{
+				Location = Further;
+				break;
+			}
+		}
 	}
 	OutTransform = FTransform(FRotator(0.f, Team == 1 ? 180.f : 0.f, 0.f), Location);
 	return true;

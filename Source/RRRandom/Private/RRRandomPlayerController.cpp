@@ -5,12 +5,15 @@
 #include "RRRandomGameMode.h"
 #include "RRRandomGameState.h"
 #include "RRRandomHUD.h"
+#include "RRRandomMeteor.h"
+#include "RRRandomOre.h"
 #include "RRRandomResultsDirector.h"
 #include "RRRandomSessionSubsystem.h"
 #include "RRRandomUltimate.h"
 #include "RRRandomVehicle.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
+#include "Engine/DamageEvents.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/GameInstance.h"
@@ -601,6 +604,108 @@ void ARRRandomPlayerController::RRGod()
 void ARRRandomPlayerController::RRUltimate()
 {
 	ServerCheatUltimate();
+}
+
+void ARRRandomPlayerController::RRMeteor()
+{
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, asking for a meteor."));
+	ServerCheatMeteor();
+}
+
+void ARRRandomPlayerController::RROre()
+{
+	ServerCheatOre();
+}
+
+void ARRRandomPlayerController::ServerCheatMeteor_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+	const ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
+	if (!RandomCharacter || !State)
+	{
+		return;
+	}
+	// On the floor 700 ahead (under the brawler's feet if there is none there)
+	const FVector Ahead = RandomCharacter->GetActorLocation() + RandomCharacter->GetActorForwardVector().GetSafeNormal2D() * 700.f;
+	FHitResult Floor;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomCheatMeteor), false, RandomCharacter);
+	const bool bFloor = GetWorld()->LineTraceSingleByObjectType(Floor, Ahead + FVector(0.f, 0.f, 300.f), Ahead - FVector(0.f, 0.f, 3000.f), FCollisionObjectQueryParams(ECC_WorldStatic), Params);
+	const FTransform Spot(bFloor ? Floor.ImpactPoint : RandomCharacter->GetActorLocation() - FVector(0.f, 0.f, RandomCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
+	if (ARRRandomMeteor* Meteor = GetWorld()->SpawnActorDeferred<ARRRandomMeteor>(ARRRandomMeteor::StaticClass(), Spot, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+	{
+		Meteor->Setup(State->GetServerWorldTimeSeconds() + ARRRandomMeteor::WarnTime, false);
+		Meteor->FinishSpawning(Spot);
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, a meteor comes down at %s."), *Spot.GetLocation().ToString());
+	}
+#endif
+}
+
+void ARRRandomPlayerController::RRStar()
+{
+	ServerCheatStar();
+}
+
+void ARRRandomPlayerController::RRHurt(float Amount)
+{
+	ServerCheatHurt(Amount);
+}
+
+void ARRRandomPlayerController::ServerCheatHurt_Implementation(float Amount)
+{
+#if !UE_BUILD_SHIPPING
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()); RandomCharacter && RandomCharacter->IsAlive())
+	{
+		RandomCharacter->TakeDamage(FMath::Max(0.f, Amount), FDamageEvent(), nullptr, nullptr);
+	}
+#endif
+}
+
+void ARRRandomPlayerController::ServerCheatStar_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+	const ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	if (!RandomCharacter)
+	{
+		return;
+	}
+	const FVector Ahead = RandomCharacter->GetActorLocation() + RandomCharacter->GetActorForwardVector().GetSafeNormal2D() * 500.f;
+	FHitResult Floor;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomCheatStar), false, RandomCharacter);
+	if (!GetWorld()->LineTraceSingleByObjectType(Floor, Ahead + FVector(0.f, 0.f, 300.f), Ahead - FVector(0.f, 0.f, 3000.f), FCollisionObjectQueryParams(ECC_WorldStatic), Params))
+	{
+		return;
+	}
+	const FTransform From(Floor.ImpactPoint + FVector(-900.f, 300.f, 2800.f));
+	if (ARRRandomOre* Star = GetWorld()->SpawnActorDeferred<ARRRandomOre>(ARRRandomOre::StaticClass(), From, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+	{
+		Star->SetupFallingStar(FMath::RandBool() ? ERROreKind::Ore : ERROreKind::Big, Floor.ImpactPoint);
+		Star->FinishSpawning(From);
+	}
+#endif
+}
+
+void ARRRandomPlayerController::ServerCheatOre_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+	const ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	if (!RandomCharacter)
+	{
+		return;
+	}
+	// In a line straight ahead, so walking forward picks them up one after another
+	const FVector Forward = RandomCharacter->GetActorForwardVector().GetSafeNormal2D();
+	const ERROreKind Kinds[] = { ERROreKind::Shard, ERROreKind::Ore, ERROreKind::Big, ERROreKind::Golden };
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Kinds); ++Index)
+	{
+		const FTransform Spot(RandomCharacter->GetActorLocation() + Forward * (260.f + Index * 170.f));
+		if (ARRRandomOre* Piece = GetWorld()->SpawnActorDeferred<ARRRandomOre>(ARRRandomOre::StaticClass(), Spot, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+		{
+			Piece->Setup(Kinds[Index], FVector(0.f, 0.f, 200.f));
+			Piece->FinishSpawning(Spot);
+		}
+	}
+#endif
 }
 
 void ARRRandomPlayerController::ServerCheatUltimate_Implementation()

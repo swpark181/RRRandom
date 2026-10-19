@@ -19,7 +19,8 @@ namespace
 		TEXT("/Game/Effects/DiceFX/SM_FXDie.SM_FXDie"),
 	};
 	// (Balls: the dragon's breath and the fire and embers it leaves take many at once)
-	constexpr int32 PoolSizes[] = { 2200, 80, 500, 120 };
+	// (Balls and stars: also the shooting-star tails of falling ore, a dozen or more at once when a brawler drops a pile)
+	constexpr int32 PoolSizes[] = { 3400, 100, 900, 120 };
 	const TCHAR* const GlowMaterial = TEXT("/Game/Effects/DiceFX/M_FXGlow.M_FXGlow");
 	// Custom data: linear color, brightness, opacity
 	constexpr int32 DataFloats = 5;
@@ -372,6 +373,184 @@ void ARRRandomEffects::FlightTrail(const FVector& Back, const FVector& Velocity,
 		Glow.Glow = 3.f;
 		Glow.Opacity = 0.6f;
 		Spawn(Glow);
+	}
+}
+
+void ARRRandomEffects::StarTail(const FVector& From, const FVector& Head, float Width, float Length, const FLinearColor& Tint, float DeltaSeconds)
+{
+	const FVector Path = Head - From;
+	const float Moved = Path.Size();
+	if (Moved < 1.f || DeltaSeconds <= 0.f)
+	{
+		return;
+	}
+	const FVector Way = Path / Moved;
+	const FRotator Along = Way.Rotation();
+	const float Speed = Moved / DeltaSeconds;
+	// The tail is glowing pieces left lying along the path, each thinning and fading as it ages: it reaches as far back as
+	// the head goes in a piece's life
+	const float Life = FMath::Clamp(Length / Speed, 0.2f, 1.2f);
+	const int32 Pieces = FMath::Clamp(FMath::CeilToInt(Moved / FMath::Max(Width * 0.35f, 8.f)), 1, 24);
+	const float Step = Moved / Pieces;
+	const FLinearColor Hot = FMath::Lerp(Tint, FLinearColor::White, 0.6f);
+	for (int32 Index = 0; Index < Pieces; ++Index)
+	{
+		const float Share = (Index + 0.5f) / Pieces;
+		FParticle Piece;
+		Piece.Shape = EShape::Ball;
+		Piece.Location = From + Path * Share;
+		// Laid earlier this frame further back: as old as the time since the head went by
+		Piece.Age = (1.f - Share) * DeltaSeconds;
+		Piece.Turn = Along;
+		Piece.FadeIn = 0.f;
+		// Long ovals overlapping their neighbours, so the tail is one smooth streak
+		const float Long = FMath::Max(Step * 2.6f, Width * 0.8f) / 100.f;
+		// The colored glow round it...
+		Piece.Life = Life;
+		Piece.StartSize = FVector(Long, Width / 100.f, Width / 100.f);
+		Piece.EndSize = FVector(Long, Width * 0.04f / 100.f, Width * 0.04f / 100.f);
+		Piece.Color = Tint;
+		Piece.Glow = 2.5f;
+		Piece.Opacity = 0.7f;
+		Spawn(Piece);
+		// ...and a white-hot core, shorter
+		Piece.Life = Life * 0.6f;
+		Piece.StartSize = FVector(Long, Width * 0.3f / 100.f, Width * 0.3f / 100.f);
+		Piece.EndSize = FVector(Long, Width * 0.02f / 100.f, Width * 0.02f / 100.f);
+		Piece.Color = Hot;
+		Piece.Glow = 5.f;
+		Piece.Opacity = 0.85f;
+		Spawn(Piece);
+	}
+	// A soft halo round the head
+	FParticle Halo;
+	Halo.Shape = EShape::Ball;
+	Halo.Location = Head;
+	Halo.Life = 0.08f;
+	Halo.StartSize = FVector(Width * 1.1f / 100.f);
+	Halo.EndSize = FVector(Width * 0.9f / 100.f);
+	Halo.Color = Hot;
+	Halo.Glow = 5.f;
+	Halo.Opacity = 0.25f;
+	Halo.FadeIn = 0.f;
+	Spawn(Halo);
+	// Stars shed all along it, twinkling a while after the tail has gone
+	const float StarSize = FMath::Clamp(Width * 0.35f, 25.f, 90.f) / 10.f;
+	for (int32 Index = CountThisFrame(Moved / FMath::Max(Width * 0.5f, 18.f), 1.f); Index > 0; --Index)
+	{
+		FParticle Star;
+		Star.Shape = EShape::Star;
+		Star.Location = From + Path * FMath::FRand() + FMath::VRand() * Width * FMath::FRandRange(0.2f, 0.7f);
+		Star.Velocity = Way * Speed * 0.04f + FMath::VRand() * FMath::FRandRange(20.f, 90.f);
+		Star.Gravity = 90.f;
+		Star.Drag = 2.f;
+		Star.Life = FMath::FRandRange(0.55f, 1.1f);
+		const float Start = StarSize * FMath::FRandRange(0.6f, 1.3f);
+		Star.StartSize = FVector(Start);
+		Star.EndSize = FVector(Start * 0.15f);
+		Star.Spin = FRotator(0.f, 0.f, FMath::FRandRange(-240.f, 240.f));
+		const float Pick = FMath::FRand();
+		Star.Color = Pick < 0.4f ? Tint : Pick < 0.65f ? Gold : Candy[FMath::RandRange(0, UE_ARRAY_COUNT(Candy) - 1)];
+		Star.Glow = 6.f;
+		Star.FadeIn = 0.04f;
+		Star.bFacesCamera = true;
+		Spawn(Star);
+	}
+}
+
+void ARRRandomEffects::StarImpact(const FVector& Where, const FVector& Way, float Size, const FLinearColor& Tint)
+{
+	const FVector Ground = Where + FVector(0.f, 0.f, 8.f);
+	const FVector Ahead = Way.GetSafeNormal2D();
+	const FLinearColor Hot = FMath::Lerp(Tint, FLinearColor::White, 0.6f);
+	// A flash, flattened on the floor (small enough not to white out a close camera)
+	FParticle Flash;
+	Flash.Shape = EShape::Ball;
+	Flash.Location = Ground + FVector(0.f, 0.f, 25.f * Size);
+	Flash.Life = 0.22f;
+	Flash.StartSize = FVector(0.9f * Size, 0.9f * Size, 0.6f * Size);
+	Flash.EndSize = FVector(2.f * Size, 2.f * Size, 0.9f * Size);
+	Flash.Color = Hot;
+	Flash.Glow = 6.f;
+	Flash.Opacity = 0.4f;
+	Flash.FadeIn = 0.01f;
+	Spawn(Flash);
+	// Two rings rushing out along the floor, white then the star's color
+	for (int32 Index = 0; Index < 2; ++Index)
+	{
+		FParticle Wave;
+		Wave.Shape = EShape::Ring;
+		Wave.Location = Ground + FVector(0.f, 0.f, Index * 4.f);
+		Wave.Life = 0.4f + Index * 0.15f;
+		Wave.StartSize = FVector(0.3f * Size, 0.3f * Size, 3.f);
+		Wave.EndSize = FVector((3.4f + Index * 1.2f) * Size, (3.4f + Index * 1.2f) * Size, 1.5f);
+		Wave.Color = Index == 0 ? FLinearColor::White : Tint;
+		Wave.Glow = 7.f;
+		Wave.FadeIn = 0.01f;
+		Spawn(Wave);
+	}
+	// Rays of light shooting out flat along the floor, like the points of a star
+	const int32 Rays = 10;
+	const float RayStart = FMath::FRandRange(0.f, 360.f);
+	for (int32 Index = 0; Index < Rays; ++Index)
+	{
+		const FVector Out = FVector(1.f, 0.f, 0.f).RotateAngleAxis(RayStart + Index * 360.f / Rays + FMath::FRandRange(-8.f, 8.f), FVector::UpVector);
+		const float Reach = (Index % 2 == 0 ? 1.f : 0.6f) * FMath::FRandRange(0.85f, 1.15f);
+		FParticle Ray;
+		Ray.Shape = EShape::Ball;
+		Ray.Location = Ground + Out * 30.f * Size + FVector(0.f, 0.f, 6.f);
+		Ray.Velocity = Out * 900.f * Size * Reach;
+		Ray.Drag = 5.f;
+		Ray.Life = 0.32f;
+		Ray.StartSize = FVector(0.5f * Size, 0.09f * Size, 0.05f * Size);
+		Ray.EndSize = FVector(2.2f * Size * Reach, 0.015f * Size, 0.01f * Size);
+		Ray.Turn = Out.Rotation();
+		Ray.Color = Index % 2 == 0 ? FMath::Lerp(Tint, FLinearColor::White, 0.25f) : Gold;
+		Ray.Glow = 8.f;
+		Ray.Opacity = 0.9f;
+		Ray.FadeIn = 0.01f;
+		Spawn(Ray);
+	}
+	// A glow left on the floor where it hit, cooling off
+	FParticle Mark;
+	Mark.Shape = EShape::Ball;
+	Mark.Location = Ground;
+	Mark.Life = 1.4f;
+	Mark.StartSize = FVector(1.4f * Size, 1.4f * Size, 0.04f * Size);
+	Mark.EndSize = FVector(0.7f * Size, 0.7f * Size, 0.02f * Size);
+	Mark.Color = Tint;
+	Mark.Glow = 3.f;
+	Mark.Opacity = 0.5f;
+	Mark.FadeIn = 0.03f;
+	Spawn(Mark);
+	// Stars splashed up (most) and on the way it was going, raining back down
+	const int32 Stars = FMath::Clamp(FMath::RoundToInt(16.f * FMath::Sqrt(Size)), 10, 40);
+	for (int32 Index = 0; Index < Stars; ++Index)
+	{
+		const bool bOn = !Ahead.IsNearlyZero() && Index % 3 == 0;
+		const FVector Direction = bOn ? (Ahead + FVector(0.f, 0.f, 0.7f)).GetSafeNormal() : FVector::UpVector;
+		Spray(EShape::Star, Ground + FVector(0.f, 0.f, 20.f * Size), 1, Direction, bOn ? 30.f : 55.f, FVector2D(300.f, 700.f) * FMath::Sqrt(Size),
+			FVector2D(3.f, 5.5f) * FMath::Min(Size, 2.5f), FVector2D(0.6f, 1.1f), Index % 2 == 0 ? Tint : Candy[Index % UE_ARRAY_COUNT(Candy)], 7.f, 900.f);
+	}
+	// A little dust round the foot
+	for (int32 Index = 0; Index < 8; ++Index)
+	{
+		const FVector Out = FVector(1.f, 0.f, 0.f).RotateAngleAxis(Index * 45.f + FMath::FRandRange(-12.f, 12.f), FVector::UpVector);
+		FParticle Puff;
+		Puff.Shape = EShape::Ball;
+		Puff.Location = Ground + Out * 25.f * Size + FVector(0.f, 0.f, 15.f * Size);
+		Puff.Velocity = Out * FMath::FRandRange(250.f, 450.f) * Size + FVector(0.f, 0.f, FMath::FRandRange(40.f, 120.f));
+		Puff.Drag = 3.f;
+		Puff.Gravity = -40.f;
+		Puff.Life = FMath::FRandRange(0.6f, 0.9f);
+		const float Start = FMath::FRandRange(0.12f, 0.2f) * Size;
+		Puff.StartSize = FVector(Start, Start, Start * 0.7f);
+		Puff.EndSize = FVector(Start * 1.8f, Start * 1.8f, Start * 1.1f);
+		Puff.Color = Cream;
+		Puff.Glow = 1.2f;
+		Puff.Opacity = 0.25f;
+		Puff.FadeIn = 0.05f;
+		Spawn(Puff);
 	}
 }
 

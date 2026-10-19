@@ -1,6 +1,7 @@
 #include "RRRandomResultsDirector.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomFirework.h"
+#include "RRRandomGameState.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/DirectionalLightComponent.h"
@@ -25,6 +26,11 @@ namespace
 	};
 	// Camera angles tried, round from straight in front of the MVP: three-quarter views first, the back last
 	const float CandidateAngles[] = { 25.f, -25.f, 0.f, 50.f, -50.f, 75.f, -75.f, 105.f, -105.f, 140.f, -140.f, 180.f };
+	// For the dance line in front of the centerpiece: straight on first, never round the side where the centerpiece would
+	// come between
+	const float LineAngles[] = { 0.f, 12.f, -12.f, 24.f, -24.f };
+	// Room in the frame beyond each end of the dance line
+	constexpr float LineFrameMargin = 160.f;
 	// Aims at the capsule's middle
 	constexpr float AimLift = 0.f;
 	// The view's line is checked this thick, so it clears cover by a little
@@ -88,12 +94,24 @@ void ARRRandomResultsDirector::Setup(ARRRandomCharacter* InMVP, const FMinimalVi
 	// The player's look (the toon post process), faded out as the camera moves in
 	Camera->PostProcessSettings = FromView.PostProcessSettings;
 	Camera->PostProcessBlendWeight = FromView.PostProcessBlendWeight;
+	// The winners' dance line in front of the map's centerpiece: straight at it from its open side (the centerpiece behind
+	// it), far enough back for the whole line, only a little to the side if something's in the way
+	float LineYaw = 0.f;
+	float LineHalfWidth = 0.f;
+	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
+	bDanceLine = State && State->GetDanceLine(DanceLineCenter, LineYaw, LineHalfWidth);
+	TArrayView<const float> Angles(CandidateAngles);
+	if (bDanceLine)
+	{
+		Angles = TArrayView<const float>(LineAngles);
+		Distance = FMath::Max(Distance, (LineHalfWidth + LineFrameMargin) / FMath::Tan(FMath::DegreesToRadians(FieldOfView * 0.5f)));
+	}
 	// In front of the MVP and a little to the side, or the first angle round from there with the most open view (cover
 	// nearby): the whole sway checked, the frame's sides as well as its middle
-	const float Facing = (InMVP ? InMVP->GetActorRotation().Yaw : 0.f) + 180.f;
-	StartYaw = Facing - CandidateAngles[0];
+	const float Facing = (bDanceLine ? LineYaw : InMVP ? InMVP->GetActorRotation().Yaw : 0.f) + 180.f;
+	StartYaw = Facing - Angles[0];
 	float BestScore = -1.f;
-	for (const float Angle : CandidateAngles)
+	for (const float Angle : Angles)
 	{
 		float Score = UE_BIG_NUMBER;
 		for (const float Sway : { -SwayAngle, 0.f, SwayAngle })
@@ -128,14 +146,15 @@ void ARRRandomResultsDirector::Setup(ARRRandomCharacter* InMVP, const FMinimalVi
 	// Everyone dancing turns to face where the camera ends up
 	if (InMVP)
 	{
-		const FVector ViewPoint = InMVP->GetActorLocation() - FRotator(Pitch, StartYaw, 0.f).Vector() * BestReach;
+		const FVector ViewPoint = GetTarget() - FRotator(Pitch, StartYaw, 0.f).Vector() * BestReach;
+		ShotPoint = ViewPoint;
 		for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 		{
 			It->SetCelebrationViewPoint(ViewPoint);
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("RRRandom: results camera on %s from yaw %.0f (clear %.0f of %.0f%s, view %.0f%% open)."), InMVP ? *InMVP->GetName() : TEXT("nobody"), StartYaw, BestReach, Distance * Scale,
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: results camera on %s from yaw %.0f (clear %.0f of %.0f%s, view %.0f%% open)."), bDanceLine ? TEXT("the dance line") : InMVP ? *InMVP->GetName() : TEXT("nobody"), StartYaw, BestReach, Distance * Scale,
 		BrawlerReach < Distance * Scale ? TEXT(", in front of a brawler") : TEXT(""), BestScore * 100.f);
 
 	// Dusk: turn down the sun and the sky (lights that can change at run time)
@@ -181,6 +200,17 @@ void ARRRandomResultsDirector::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
+FVector ARRRandomResultsDirector::GetTarget() const
+{
+	// The line's middle stays put while the MVP dashes there
+	if (bDanceLine)
+	{
+		return DanceLineCenter;
+	}
+	const ARRRandomCharacter* Hero = MVP.Get();
+	return Hero ? Hero->GetActorLocation() + FVector(0.f, 0.f, Hero->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() * AimLift) : GetActorLocation();
+}
+
 void ARRRandomResultsDirector::UpdateCamera()
 {
 	const ARRRandomCharacter* Hero = MVP.Get();
@@ -189,7 +219,7 @@ void ARRRandomResultsDirector::UpdateCamera()
 		return;
 	}
 	const float Scale = Hero->GetActorScale3D().Z;
-	const FVector Target = Hero->GetActorLocation() + FVector(0.f, 0.f, Hero->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() * AimLift);
+	const FVector Target = GetTarget();
 	const FRotator View(Pitch, StartYaw + SwayAngle * FMath::Sin(2.f * PI * Elapsed / FMath::Max(SwayPeriod, 1.f)), 0.f);
 	// Don't end up inside cover or a hill: stop in front of whatever is in the way (and in front of the brawler that no
 	// angle could avoid, see Setup)
@@ -243,8 +273,9 @@ float ARRRandomResultsDirector::GetBrawlerReach(const FRotator& View, float Reac
 	}
 	// The other brawlers standing (or dancing) where they are when the match ends, each a widened upright cylinder, in
 	// the frame of a camera Reach back from the MVP: right in front of the MVP (hiding it), or anywhere in the frame
-	// well nearer the camera (big on screen). Those beside the MVP are in the shot with it, not in the way.
-	const FVector Target = Hero->GetActorLocation() + FVector(0.f, 0.f, Hero->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() * AimLift);
+	// well nearer the camera (big on screen). Those beside the MVP are in the shot with it, not in the way, and so are
+	// those headed for the dance line (wherever they are now).
+	const FVector Target = GetTarget();
 	const FRotationMatrix Axes(View);
 	const FVector Back = -Axes.GetUnitAxis(EAxis::X);
 	const FVector Right = Axes.GetUnitAxis(EAxis::Y);
@@ -256,7 +287,7 @@ float ARRRandomResultsDirector::GetBrawlerReach(const FRotator& View, float Reac
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{
 		// Knocked-out brawlers lie below the view
-		if (*It == Hero || !It->IsAlive())
+		if (*It == Hero || !It->IsAlive() || (bDanceLine && It->HasFormation()))
 		{
 			continue;
 		}
@@ -286,7 +317,7 @@ float ARRRandomResultsDirector::GetClearReach(const FRotator& View, float Reach)
 	{
 		return Reach;
 	}
-	const FVector Target = Hero->GetActorLocation() + FVector(0.f, 0.f, Hero->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() * AimLift);
+	const FVector Target = GetTarget();
 	FHitResult Hit;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomResultsCamera), false, Hero);
 	if (GetWorld()->SweepSingleByObjectType(Hit, Target, Target - View.Vector() * Reach, FQuat::Identity, FCollisionObjectQueryParams(ECC_WorldStatic), FCollisionShape::MakeSphere(ViewRadius), Params))
@@ -309,7 +340,7 @@ void ARRRandomResultsDirector::UpdateLights(float DeltaSeconds)
 	{
 		return;
 	}
-	const FVector Center = Hero->GetActorLocation();
+	const FVector Center = GetTarget();
 	const FVector ToCamera = (GetActorLocation() - Center).GetSafeNormal2D();
 
 	// Key: from above the camera down onto the MVP, coming up with the dusk
@@ -334,8 +365,20 @@ void ARRRandomResultsDirector::LaunchFirework()
 	// Behind the MVP as the camera sees it (once moved in), spread across the frame
 	const FVector Forward = FRotator(0.f, StartYaw, 0.f).Vector();
 	const FVector Right = FVector::CrossProduct(FVector::UpVector, Forward);
-	const FVector Feet = Hero->GetActorLocation() - FVector(0.f, 0.f, Hero->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
-	const FVector Ground = Feet + Forward * Stream.FRandRange(FireworkDepth.X, FireworkDepth.Y) + Right * Stream.FRandRange(-FireworkSpread, FireworkSpread);
+	const FVector Feet = GetTarget() - FVector(0.f, 0.f, Hero->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	// Where the burst can be seen from the camera, not behind the centerpiece (or a wall): a few tries, then wherever
+	FVector Ground;
+	float Height = 0.f;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomFireworkView), false);
+	for (int32 Try = 0; Try < 6; ++Try)
+	{
+		Ground = Feet + Forward * Stream.FRandRange(FireworkDepth.X, FireworkDepth.Y) + Right * Stream.FRandRange(-FireworkSpread, FireworkSpread);
+		Height = Stream.FRandRange(FireworkHeight.X, FireworkHeight.Y);
+		if (!GetWorld()->LineTraceTestByObjectType(ShotPoint, Ground + FVector(0.f, 0.f, Height), FCollisionObjectQueryParams(ECC_WorldStatic), Params))
+		{
+			break;
+		}
+	}
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.Owner = this;
@@ -350,7 +393,7 @@ void ARRRandomResultsDirector::LaunchFirework()
 				WeakThis->OnFireworkBurst(Color);
 			}
 		};
-		Firework->Launch(Ground, Stream.FRandRange(FireworkHeight.X, FireworkHeight.Y),
+		Firework->Launch(Ground, Height,
 			FireworkColors[Stream.RandRange(0, UE_ARRAY_COUNT(FireworkColors) - 1)], Stream.RandHelper(MAX_int32));
 	}
 }

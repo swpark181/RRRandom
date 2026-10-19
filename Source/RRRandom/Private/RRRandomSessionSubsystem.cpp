@@ -149,6 +149,11 @@ void URRRandomSessionSubsystem::RunStartupCommand()
 	{
 		ThirdPersonMap = MapName.Equals(TEXT("DiceLand"), ESearchCase::IgnoreCase) ? ERRThirdPersonMap::DiceLand : ERRThirdPersonMap::DiceTown;
 	}
+	FString RuleName;
+	if (FParse::Value(FCommandLine::Get(), TEXT("RRRule="), RuleName))
+	{
+		MatchRule = RuleName.Equals(TEXT("MeteorRush"), ESearchCase::IgnoreCase) ? ERRMatchRule::MeteorRush : ERRMatchRule::Knockout;
+	}
 	FString SpeciesName;
 	if (FParse::Value(FCommandLine::Get(), TEXT("RRSpecies="), SpeciesName) && RRSpecies::FromName(SpeciesName) != INDEX_NONE)
 	{

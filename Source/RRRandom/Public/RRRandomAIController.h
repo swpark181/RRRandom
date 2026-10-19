@@ -130,6 +130,14 @@ private:
 	void UpdateFlight(ARRRandomCharacter* Self, float Distance, float DeltaSeconds);
 	/** Where the bot is heading when not fighting. */
 	FVector GetTravelGoal(const ARRRandomCharacter* Self, const ARRRandomCharacter* Target) const;
+	/**
+	 * Meteor Rush: what to go for when not fighting up close (RushGoal, at foot height): back home with the ore while the
+	 * team holds the goal, else the most worthwhile ore lying about (crystals first), else a meteor coming down (waiting
+	 * at the edge of where it lands).
+	 */
+	void UpdateRushGoal(const ARRRandomCharacter* Self, float DeltaSeconds);
+	/** Meteor Rush: the nearest opponent carrying a crystal (seen on every map), if near enough to chase. */
+	ARRRandomCharacter* FindCrystalCarrier(const ARRRandomCharacter* Self) const;
 	/** Gets on and off vehicles (see RideTripDistance). Returns true and sets Wanted while walking over to one. */
 	bool UpdateVehicles(ARRRandomCharacter* Self, const ARRRandomCharacter* Target, bool bInFight, FVector& Wanted, float DeltaSeconds);
 	/** The vehicle worth walking to now, if any: a teammate's stopped car with room behind, or a free one for a long trip. */
@@ -197,4 +205,10 @@ private:
 	float RouteTimer = 0.f;
 	/** Seconds following a route without moving. */
 	float RouteStuckTimer = 0.f;
+
+	/** Meteor Rush (UpdateRushGoal): where to go, whether there is anywhere, keeping the ore safe, until the next look. */
+	FVector RushGoal = FVector::ZeroVector;
+	bool bHasRushGoal = false;
+	bool bGuardingOre = false;
+	float RushTimer = 0.f;
 };
