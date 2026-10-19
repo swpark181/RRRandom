@@ -12,8 +12,8 @@ class UPointLightComponent;
 class USpotLightComponent;
 
 /**
- * The results screen's show, on one machine: a camera at the MVP's height in front of it (from the first angle with
- * nothing in the way) and swaying gently from side to side, which it moves to from the player's view by itself, rounding
+ * The results screen's show, on one machine: a camera at the MVP's height in front of it (straight at the winners' dance
+ * line in front of the map's centerpiece, when there is one; else from the first angle with nothing in the way) and swaying gently from side to side, which it moves to from the player's view by itself, rounding
  * the MVP and keeping it in sight (a plain view blend swung up to the sky on the way), the dancers turned to face it, fireworks (ARRRandomFirework)
  * going up behind it, and the sun and sky dimmed so their lights stand out. The MVP stays readable against the bright
  * bursts: a soft key light from above the camera, and a glow in front of it that flashes in each burst's color, as if
@@ -77,6 +77,8 @@ public:
 	FVector2D GlowOffset = FVector2D(220.f, 120.f);
 
 private:
+	/** What the camera looks at: the middle of the dance line in front of the map's centerpiece, or else the MVP. */
+	FVector GetTarget() const;
 	void LaunchFirework();
 	void UpdateCamera();
 	void UpdateLights(float DeltaSeconds);
@@ -102,6 +104,11 @@ private:
 	FLinearColor GlowColor = FLinearColor::White;
 
 	TWeakObjectPtr<ARRRandomCharacter> MVP;
+	/** The winners' dance line (ARRRandomGameState::GetDanceLine): its middle, where the MVP is headed. */
+	bool bDanceLine = false;
+	FVector DanceLineCenter = FVector::ZeroVector;
+	/** Where the camera ends up (before the sway), to keep fireworks from going up behind the centerpiece. */
+	FVector ShotPoint = FVector::ZeroVector;
 	float Elapsed = 0.f;
 	float StartYaw = 0.f;
 	/** The camera stays this close to the MVP, in front of another brawler no angle could avoid (huge when none). */

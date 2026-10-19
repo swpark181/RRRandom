@@ -21,6 +21,7 @@ class URRRandomOverheadDieComponent;
 class URRRandomWingsComponent;
 class URRRandomFlightEffectsComponent;
 class URRRandomGunComponent;
+class URRRandomOreCarryComponent;
 
 /** A damage number floating over a brawler's head, drawn by the HUD. */
 struct FRRDamagePopup
@@ -64,6 +65,10 @@ public:
 
 	URRRandomEventComponent* GetRandomEvents() const { return RandomEvents; }
 	URRRandomDiceBuffComponent* GetDiceBuffs() const { return DiceBuffs; }
+	/** The dice ore carried in Meteor Rush. */
+	URRRandomOreCarryComponent* GetOreCarry() const { return OreCarry; }
+	/** Where this brawler starts and gets back up. */
+	const FVector& GetHomeLocation() const { return HomeLocation; }
 
 	/** The ultimate running (ARRRandomUltimate: each species has its own), or null. */
 	ARRRandomUltimate* GetUltimate() const { return Ultimate; }
@@ -152,6 +157,8 @@ public:
 	void SetFormationLeader();
 	/** Standing in the dance line (the MVP from the start, the rest once they've got there). */
 	bool IsInFormation() const { return bInFormation; }
+	/** Has a spot in the dance line, there yet or not. */
+	bool HasFormation() const { return bHasFormation; }
 
 	/** Walking speed with no vehicle, buff or event: what the vehicles' speeds and the car's ramming are measured against. */
 	float GetBaseWalkSpeed() const { return BaseWalkSpeed; }
@@ -275,6 +282,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Random")
 	TObjectPtr<URRRandomDiceBuffComponent> DiceBuffs;
+
+	UPROPERTY(VisibleAnywhere, Category = "Random")
+	TObjectPtr<URRRandomOreCarryComponent> OreCarry;
 
 	/** The 3D die that tumbles over the head on each roll. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Random")
@@ -531,8 +541,8 @@ private:
 	bool ShootAt(const FVector& TargetLocation, float CooldownSlack);
 	/** Turns the body toward the target and returns that flat direction. */
 	FVector FaceToward(const FVector& TargetLocation);
-	/** Server only: drops the brawler, scores for the other team and starts the respawn countdown. */
-	void KnockOut(const FVector& ShotDirection, ARRRandomCharacter* Attacker);
+	/** Server only: drops the brawler, scores for the other team and starts the respawn countdown. bFell: off the arena. */
+	void KnockOut(const FVector& ShotDirection, ARRRandomCharacter* Attacker, bool bFell = false);
 	/** Ragdoll and no movement, on every machine. */
 	void ApplyKnockedOutBody();
 	/** Back on its feet with movement and collision, on every machine. */

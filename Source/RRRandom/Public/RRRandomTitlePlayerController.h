@@ -28,12 +28,16 @@ enum class ERRTitleChoice : uint8
 	/** The third person maps, picked after THIRD PERSON (ERRThirdPersonMap). */
 	DiceTown,
 	DiceLand,
+	/** The rules (ERRMatchRule), picked after the view (and map), before the brawler. */
+	Knockout,
+	MeteorRush,
 };
 
 /**
  * Title menu: SINGLE PLAY or NETWORK (then HOST GAME / JOIN GAME), and QUIT. SINGLE PLAY and HOST GAME then ask how to play:
  * TOP VIEW (the camera above, fog of war) or THIRD PERSON (over the shoulder, aiming, no fog); joining takes the host's.
- * THIRD PERSON then asks which map: DICE TOWN (the big block town) or DICE LAND (the small island of dice). Last, every way in asks which brawler to play: FOX, RABBIT, SQUIRREL, TIGER or DRAGON (the bots get theirs at random).
+ * THIRD PERSON then asks which map: DICE TOWN (the big block town) or DICE LAND (the small island of dice). Then the rule:
+ * KNOCKOUT (first to 10 knockouts) or METEOR RUSH (grab the ore meteors drop, hold 30). Last, every way in asks which brawler to play: FOX, RABBIT, SQUIRREL, TIGER or DRAGON (the bots get theirs at random).
  * W/S or the arrow keys pick, Enter or Space presses, Esc goes back (or cancels a host/join in progress); the mouse works too.
  * Starting a game goes through URRRandomSessionSubsystem, which opens the arena or joins a host.
  */
@@ -55,6 +59,7 @@ public:
 	bool IsOnViewPage() const { return bViewPage; }
 	bool IsOnSpeciesPage() const { return bSpeciesPage; }
 	bool IsOnMapPage() const { return bMapPage; }
+	bool IsOnRulePage() const { return bRulePage; }
 	/** The species a button picks (RRSpecies), or INDEX_NONE for the other buttons. */
 	static int32 GetSpeciesOf(ERRTitleChoice Choice);
 
@@ -107,6 +112,10 @@ private:
 	bool bMapPage = false;
 	/** Opens the map page with the last pick selected. */
 	void OpenMapPage();
+	/** The rule page, between the view (or map) page and the brawler page. */
+	bool bRulePage = false;
+	/** Opens the rule page with the last pick selected. */
+	void OpenRulePage();
 	enum class EStart : uint8 { Solo, Host, Join } Start = EStart::Solo;
 	/** Opens the brawler page with the last pick selected. */
 	void OpenSpeciesPage(EStart InStart);

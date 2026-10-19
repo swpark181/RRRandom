@@ -97,6 +97,22 @@ public:
 	UFUNCTION(Exec)
 	void RRUltimate();
 
+	/** Cheat: a dice meteor comes down 700 in front of my brawler, after its usual warning (console only). Not in shipping builds. */
+	UFUNCTION(Exec)
+	void RRMeteor();
+
+	/** Cheat: one piece of each dice ore (shard, ore, crystal, golden) in a row in front of my brawler (console only). Not in shipping builds. */
+	UFUNCTION(Exec)
+	void RROre();
+
+	/** Cheat: a piece of dice ore falls like a shooting star 500 in front of my brawler (console only). Not in shipping builds. */
+	UFUNCTION(Exec)
+	void RRStar();
+
+	/** Cheat: my brawler takes this much damage, as from a fall (console only). Not in shipping builds. */
+	UFUNCTION(Exec)
+	void RRHurt(float Amount = 70.f);
+
 	/** While my tiger's spirit is out: the floor under the cursor, where a strike would land (false off the arena). */
 	bool GetUltimateSpot(FVector& OutSpot) const;
 
@@ -228,6 +244,14 @@ private:
 	void ServerCheatGod();
 	UFUNCTION(Server, Reliable)
 	void ServerCheatUltimate();
+	UFUNCTION(Server, Reliable)
+	void ServerCheatMeteor();
+	UFUNCTION(Server, Reliable)
+	void ServerCheatOre();
+	UFUNCTION(Server, Reliable)
+	void ServerCheatStar();
+	UFUNCTION(Server, Reliable)
+	void ServerCheatHurt(float Amount);
 
 	/** My tiger's spirit strikes at this spot (if it's ready for one). */
 	UFUNCTION(Server, Reliable)

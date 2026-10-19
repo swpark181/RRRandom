@@ -401,6 +401,10 @@ void ARRRandomTitleHUD::DrawHUD()
 	{
 		DrawCenteredText(TEXT("PICK YOUR BRAWLER"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
 	}
+	else if (Menu->IsOnRulePage())
+	{
+		DrawCenteredText(TEXT("PICK A RULE"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
+	}
 	else if (Menu->IsOnMapPage())
 	{
 		DrawCenteredText(TEXT("PICK A MAP"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
@@ -554,7 +558,7 @@ void ARRRandomTitleHUD::DrawHUD()
 		DrawCenteredText(TEXT("ESC  CANCEL"), RRUI::InkSoft, ColumnX, Y, 11.f * S, ExtraBold, 11.f * S * 0.12f);
 	}
 
-	const bool bCanGoBack = Menu->IsOnNetworkPage() || Menu->IsOnViewPage() || Menu->IsOnSpeciesPage() || Menu->IsOnMapPage();
+	const bool bCanGoBack = Menu->IsOnNetworkPage() || Menu->IsOnViewPage() || Menu->IsOnSpeciesPage() || Menu->IsOnMapPage() || Menu->IsOnRulePage();
 	const FString Select = bCards ? TEXT("A/D  SELECT") : TEXT("W/S  SELECT");
 	const FString Keys = bCanGoBack ? Select + TEXT("   ·   ENTER  OK   ·   ESC  BACK") : Select + TEXT("   ·   ENTER  OK");
 	DrawCenteredText(Keys, RRUI::InkSoft, ColumnX, ScreenH - 40.f * S, 11.f * S, ExtraBold, 11.f * S * 0.1f);

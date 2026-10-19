@@ -2,6 +2,8 @@
 #include "RRRandomCharacter.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomGameState.h"
+#include "RRRandomMeteor.h"
+#include "RRRandomOre.h"
 #include "RRRandomOverheadDieComponent.h"
 #include "RRRandomPlayerController.h"
 #include "RRRandomSessionSubsystem.h"
@@ -130,6 +132,8 @@ void ARRRandomHUD::DrawHUD()
 		DrawOverhead(**It, Viewer);
 	}
 
+	DrawMeteorCartoons();
+	DrawMeteorWarnings();
 	DrawScore();
 	DrawOnlinePanel();
 	if (Viewer)
@@ -151,6 +155,8 @@ void ARRRandomHUD::DrawHUD()
 	{
 		DrawCountdown(*State);
 	}
+	UpdateOreFeedback(Viewer);
+	DrawOreFeedback(Viewer);
 	// Last, so the full-screen map covers the rest
 	DrawMinimap(Viewer);
 
@@ -265,6 +271,13 @@ void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRand
 		// The cheat: never runs out, so it never blinks
 		PowerLabels.Add(TEXT("GOD"));
 		PowerColors.Add(RRUI::Butter);
+		PowerRemaining.Add(UE_BIG_NUMBER);
+	}
+	// Meteor Rush: the ore carried (gold with a crystal)
+	if (const URRRandomOreCarryComponent* Carry = Brawler.GetOreCarry(); Carry && Carry->GetPoints() > 0)
+	{
+		PowerLabels.Add(FString::Printf(TEXT("ORE %d"), Carry->GetPoints()));
+		PowerColors.Add(Carry->HasGolden() ? RRUI::Butter : Carry->HasCrystal() ? RRUI::Gold : RRUI::MintDeep);
 		PowerRemaining.Add(UE_BIG_NUMBER);
 	}
 	if (PowerLabels.Num() > 0)
@@ -644,9 +657,16 @@ void ARRRandomHUD::DrawDicePanel(const ARRRandomCharacter& Viewer)
 		RRUI::DrawTag(Canvas, TEXT("ULTIMATE"), RRSpecies::GetUltimateName(Viewer.GetSpecies()), FVector2D(X + 14.f * S, TopForBaseline(Baseline, Size)), Size, RRUI::Gold);
 	}
 
+	// Meteor Rush: the ore I carry, right over the dice
+	float PanelTop = TopForBaseline(Baseline, CountSize);
+	if (ARRRandomGameState::IsMeteorRush(this))
+	{
+		PanelTop = DrawOrePanel(Viewer, Left, PanelTop - 8.f * S);
+	}
+
 	// Powers (the ultimate, flight, giant), then active buffs, stacked upward as tags
 	const float TagSize = 12.f * S;
-	float LineY = TopForBaseline(Baseline, CountSize) - TagLine * S;
+	float LineY = PanelTop - TagLine * S;
 	auto Line = [&](const FString& Label, const FString& Detail, const FLinearColor& Mark, float Alpha)
 	{
 		RRUI::DrawTag(Canvas, Label, Detail, FVector2D(Left, LineY), TagSize, Mark, Alpha);
@@ -672,6 +692,235 @@ void ARRRandomHUD::DrawDicePanel(const ARRRandomCharacter& Viewer)
 		Line(FString::Printf(TEXT("%s +%d%%"), *URRRandomDiceBuffComponent::GetStatName(Buff.Stat).ToString().ToUpper(), FMath::RoundToInt(Buff.Bonus * 100.f)),
 			FString::Printf(TEXT("%.0fs"), FMath::CeilToFloat(Buff.RemainingTime)),
 			RRUI::Pastel(URRRandomDiceBuffComponent::GetStatColor(Buff.Stat), 0.25f), Buff.RemainingTime < BuffBlinkTime ? Blink(GetWorld()) : 1.f);
+	}
+}
+
+namespace
+{
+	// The ore panel's team bar, and how long a gain takes to pop over my head and then fly into the panel
+	constexpr float OreBarWidth = 230.f;
+	constexpr float OreGainPop = 0.4f;
+	constexpr float OreGainFly = 0.45f;
+	constexpr float OreDroppedTime = 2.6f;
+	// Below this share of health, carrying ore, the panel warns that it could all be dropped
+	constexpr float OreRiskHealthShare = 0.35f;
+
+	/** A little cut gem (a diamond) with a white rim, for the ore panel. */
+	void DrawGem(UCanvas* Canvas, const FVector2D& Center, float Half, const FLinearColor& Color)
+	{
+		const float Rim = FMath::Max(1.f, Half * 0.28f);
+		const FVector2D Up(0.f, -Half * 1.15f), Down(0.f, Half * 1.15f), Side(Half, 0.f);
+		const FVector2D RimUp(0.f, -Rim * 1.2f), RimDown(0.f, Rim * 1.2f), RimSide(Rim, 0.f);
+		RRUI::DrawTriangle(Canvas, Center + Up + RimUp, Center + Side + RimSide, Center - Side - RimSide, RRUI::WithAlpha(RRUI::White, Color.A));
+		RRUI::DrawTriangle(Canvas, Center + Down + RimDown, Center + Side + RimSide, Center - Side - RimSide, RRUI::WithAlpha(RRUI::White, Color.A));
+		RRUI::DrawTriangle(Canvas, Center + Up, Center + Side, Center - Side, Color);
+		RRUI::DrawTriangle(Canvas, Center + Down, Center + Side, Center - Side, Color);
+		// A glint on the upper left face
+		RRUI::DrawTriangle(Canvas, Center + Up * 0.8f, Center - Side * 0.15f, Center - Side * 0.65f, RRUI::WithAlpha(RRUI::White, 0.55f * Color.A));
+	}
+
+	FLinearColor GainColor(int32 Amount)
+	{
+		return Amount >= 6 ? RRUI::Gold : Amount >= 3 ? RRUI::PinkDeep : RRUI::MintDeep;
+	}
+}
+
+float ARRRandomHUD::DrawOrePanel(const ARRRandomCharacter& Viewer, float Left, float Bottom)
+{
+	const URRRandomOreCarryComponent* Carry = Viewer.GetOreCarry();
+	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
+	if (!Carry || !State)
+	{
+		return Bottom;
+	}
+	const float S = UIScale;
+	const float Now = GetWorld()->GetRealTimeSeconds();
+	const int32 Points = Carry->GetPoints();
+	const int32 Goal = FMath::Max(1, State->GetScoreToWin());
+	const int32 Team = Viewer.GetTeam();
+	const int32 TeamPoints = State->GetTeamScore(Team);
+
+	// Bottom up: the team bar with TEAM n / goal after it, then the row with the count, ORE, and a gem and a count for each
+	// kind carried; the plate as wide as the longer of the two
+	const float BarW = OreBarWidth * S;
+	const FBox2D Bar(FVector2D(Left, Bottom - 7.f * S), FVector2D(Left + BarW, Bottom - 1.f * S));
+	const float Baseline = Bar.Min.Y - 10.f * S;
+	const float CountSize = 30.f * S;
+	const float Top = Baseline - CountSize * 0.95f;
+	const FString TeamText = FString::Printf(TEXT("TEAM %d / %d"), TeamPoints, Goal);
+	const float TeamSize = 9.f * S;
+	const FVector2D TeamBox = RRUI::MeasureText(TeamText, TeamSize, EWeight::ExtraBold, TeamSize * 0.15f);
+	const bool bAtRisk = Points > 0 && Viewer.IsAlive() && Viewer.GetHealth() < Viewer.GetMaxHealth() * OreRiskHealthShare;
+	const float RowWidth = 230.f * S + (bAtRisk ? 62.f * S : 0.f) + (Carry->HasGolden() ? 34.f * S : 0.f);
+	const FBox2D Panel(FVector2D(Left - 4.f * S, Top), FVector2D(Left + FMath::Max(RowWidth, BarW + 8.f * S + TeamBox.X) + 6.f * S, Bottom + 2.f * S));
+
+	// Hurt with ore on me: a pink glow round the panel, blinking
+	if (bAtRisk)
+	{
+		RRUI::DrawRounded(Canvas, Panel.ExpandBy(10.f * S), 22.f * S, WithAlpha(RRUI::PinkDeep, 0.45f * Blink(GetWorld())));
+	}
+	RRUI::DrawPlate(Canvas, Panel, 20.f * S);
+
+	// The count: bouncing big when it has just grown (a gain landing in it)
+	const float SinceBounce = Now - OreBounceAt;
+	const float Bounce = SinceBounce >= 0.f && SinceBounce < 0.35f ? FMath::Sin(SinceBounce / 0.35f * PI) * FMath::Exp(-SinceBounce * 4.f) : 0.f;
+	const float Size = CountSize * (1.f + 0.45f * Bounce);
+	const FString Count = FString::FromInt(Points);
+	const FLinearColor CountColor = bAtRisk ? RRUI::PinkDeep : Carry->HasGolden() ? RRUI::Gold : Carry->HasCrystal() ? RRUI::Gold : Points > 0 ? RRUI::Ink : RRUI::InkSoft;
+	float X = Left;
+	const FVector2D CountBox = RRUI::DrawText(Canvas, Count, FVector2D(X, TopForBaseline(Baseline, Size)), Size, EWeight::Black, CountColor);
+	OreCountAt = FVector2D(X + CountBox.X * 0.5f, Baseline - CountSize * 0.4f);
+	X += FMath::Max(CountBox.X, RRUI::MeasureText(Count, CountSize, EWeight::Black).X) + 4.f * S;
+	const float LabelSize = 10.f * S;
+	X += RRUI::DrawText(Canvas, TEXT("ORE"), FVector2D(X, TopForBaseline(Baseline, LabelSize)), LabelSize, EWeight::ExtraBold, RRUI::InkSoft, LabelSize * 0.2f).X;
+
+	// What I carry, kind by kind: a gem in its color and xN (dim when none)
+	X += 12.f * S;
+	struct FKind
+	{
+		int32 Count;
+		ERROreKind Kind;
+	};
+	const FKind Kinds[] = { { Carry->GetShards(), ERROreKind::Shard }, { Carry->GetOres(), ERROreKind::Ore }, { Carry->GetCrystals(), ERROreKind::Big }, { Carry->HasGolden() ? 1 : 0, ERROreKind::Golden } };
+	const float KindSize = 12.f * S;
+	for (const FKind& Kind : Kinds)
+	{
+		if (Kind.Kind == ERROreKind::Golden && Kind.Count == 0)
+		{
+			continue;
+		}
+		const float Alpha = Kind.Count > 0 ? 1.f : 0.3f;
+		const float Half = (Kind.Kind == ERROreKind::Shard ? 4.5f : Kind.Kind == ERROreKind::Ore ? 5.5f : 6.5f) * S;
+		DrawGem(Canvas, FVector2D(X + Half, Baseline - 7.f * S), Half, WithAlpha(RROre::GetColor(Kind.Kind), Alpha));
+		X += Half * 2.f + 3.f * S;
+		X += RRUI::DrawText(Canvas, FString::Printf(TEXT("x%d"), Kind.Count), FVector2D(X, TopForBaseline(Baseline, KindSize)), KindSize, EWeight::Black, WithAlpha(RRUI::Ink, Alpha)).X + 9.f * S;
+	}
+	if (bAtRisk)
+	{
+		const float RiskSize = 10.f * S;
+		RRUI::DrawText(Canvas, TEXT("AT RISK!"), FVector2D(X + 2.f * S, TopForBaseline(Baseline, RiskSize)), RiskSize, EWeight::Black, WithAlpha(RRUI::PinkDeep, Blink(GetWorld())), RiskSize * 0.15f);
+	}
+
+	// The team's ore toward the goal (its color, lighter), my share of it at the start (deeper), a tick at the goal; the
+	// numbers over its right end
+	RRUI::DrawPill(Canvas, Bar, WithAlpha(RRUI::Ink, 0.12f));
+	const float TeamShare = FMath::Clamp(float(TeamPoints) / Goal, 0.f, 1.f);
+	const float MyShare = FMath::Clamp(float(FMath::Min(Points, TeamPoints)) / Goal, 0.f, 1.f);
+	if (TeamShare > 0.f)
+	{
+		RRUI::DrawPill(Canvas, FBox2D(Bar.Min, FVector2D(Bar.Min.X + FMath::Max(Bar.GetSize().Y, BarW * TeamShare), Bar.Max.Y)), RRUI::TeamColor(Team));
+	}
+	if (MyShare > 0.f)
+	{
+		RRUI::DrawPill(Canvas, FBox2D(Bar.Min, FVector2D(Bar.Min.X + FMath::Max(Bar.GetSize().Y, BarW * MyShare), Bar.Max.Y)), RRUI::TeamColorDeep(Team));
+	}
+	RRUI::DrawText(Canvas, TeamText, FVector2D(Bar.Max.X + 8.f * S, Bar.GetCenter().Y - TeamBox.Y * 0.55f), TeamSize, EWeight::ExtraBold, RRUI::InkSoft, TeamSize * 0.15f);
+	return Panel.Min.Y;
+}
+
+void ARRRandomHUD::UpdateOreFeedback(const ARRRandomCharacter* Viewer)
+{
+	const URRRandomOreCarryComponent* Carry = Viewer ? Viewer->GetOreCarry() : nullptr;
+	if (!Carry || !ARRRandomGameState::IsMeteorRush(this))
+	{
+		OreGains.Reset();
+		LastOrePoints = 0;
+		OreViewer = nullptr;
+		return;
+	}
+	// A new brawler to watch (a respawned pawn is the same one): start from what it carries
+	if (OreViewer.Get() != Viewer)
+	{
+		OreViewer = Viewer;
+		LastOrePoints = Carry->GetPoints();
+		return;
+	}
+	const int32 Points = Carry->GetPoints();
+	const float Now = GetWorld()->GetRealTimeSeconds();
+	if (Points > LastOrePoints)
+	{
+		// Picked up: pops over my head
+		FOreGain& Gain = OreGains.AddDefaulted_GetRef();
+		Gain.Amount = Points - LastOrePoints;
+		Gain.Color = GainColor(Gain.Amount);
+		Gain.Start = Now;
+		const FVector Head = Project(Viewer->GetActorLocation() + FVector(0.f, 0.f, Viewer->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 60.f));
+		Gain.From = Head.Z > 0.f ? FVector2D(Head.X, Head.Y) : FVector2D(Canvas->ClipX * 0.5f, Canvas->ClipY * 0.45f);
+		// Two gains close together sit side by side
+		Gain.From.X += (OreGains.Num() - 1) % 3 * 34.f * UIScale;
+	}
+	else if (Points == 0 && LastOrePoints > 0)
+	{
+		// Knocked out (or fallen) with ore on me
+		DroppedOre = LastOrePoints;
+		DroppedAt = Now;
+		OreGains.Reset();
+	}
+	LastOrePoints = Points;
+}
+
+void ARRRandomHUD::DrawOreFeedback(const ARRRandomCharacter* Viewer)
+{
+	if (!ARRRandomGameState::IsMeteorRush(this))
+	{
+		return;
+	}
+	const float S = UIScale;
+	const float Now = GetWorld()->GetRealTimeSeconds();
+	// Gains: "+3" popping up over my head, then shooting down into the panel's count, which bounces as it lands
+	for (FOreGain& Gain : OreGains)
+	{
+		const float Age = Now - Gain.Start;
+		FVector2D At;
+		float Scale;
+		if (Age < OreGainPop)
+		{
+			const float T = Age / OreGainPop;
+			Scale = T < 0.3f ? FMath::Lerp(0.3f, 1.35f, T / 0.3f) : FMath::Lerp(1.35f, 1.f, FMath::Min(1.f, (T - 0.3f) / 0.4f));
+			At = Gain.From - FVector2D(0.f, 40.f * S * FMath::Sin(T * PI * 0.5f));
+		}
+		else
+		{
+			const float T = FMath::Clamp((Age - OreGainPop) / OreGainFly, 0.f, 1.f);
+			const FVector2D Lifted = Gain.From - FVector2D(0.f, 40.f * S);
+			// Easing in, along a slight arc
+			const float Ease = T * T;
+			At = FMath::Lerp(Lifted, OreCountAt, Ease) - FVector2D(0.f, 60.f * S * FMath::Sin(T * PI));
+			Scale = FMath::Lerp(1.f, 0.55f, Ease);
+			if (T >= 1.f && !Gain.bArrived)
+			{
+				Gain.bArrived = true;
+				OreBounceAt = Now;
+			}
+		}
+		if (Gain.bArrived)
+		{
+			continue;
+		}
+		const FString Text = FString::Printf(TEXT("+%d"), Gain.Amount);
+		const float Size = (Gain.Amount >= 6 ? 34.f : 28.f) * S * Scale;
+		const FVector2D Box = RRUI::MeasureText(Text, Size, EWeight::Black);
+		DrawGem(Canvas, At - FVector2D(Box.X * 0.5f + 9.f * S * Scale, 0.f), 7.f * S * Scale, Gain.Color);
+		DrawEdgedText(Canvas, Text, At - FVector2D(Box.X * 0.5f - 6.f * S * Scale, Box.Y * 0.5f), Size, Gain.Color, RRUI::White);
+	}
+	OreGains.RemoveAll([](const FOreGain& Gain) { return Gain.bArrived; });
+
+	// Dropped: under the knockout count, pink, shaking as it comes in
+	const float SinceDrop = Now - DroppedAt;
+	if (DroppedOre > 0 && SinceDrop >= 0.f && SinceDrop < OreDroppedTime)
+	{
+		const float Alpha = FMath::Clamp((OreDroppedTime - SinceDrop) / 0.4f, 0.f, 1.f);
+		const float Shake = SinceDrop < 0.4f ? FMath::Sin(SinceDrop * 60.f) * 6.f * S * (1.f - SinceDrop / 0.4f) : 0.f;
+		const float Zoom = SinceDrop < 0.15f ? FMath::Lerp(1.6f, 1.f, SinceDrop / 0.15f) : 1.f;
+		const FString Text = FString::Printf(TEXT("-%d ORE DROPPED"), DroppedOre);
+		const float Size = 24.f * S * Zoom;
+		const FVector2D Box = RRUI::MeasureText(Text, Size, EWeight::Black, Size * 0.06f);
+		const float Y = Canvas->ClipY * 0.28f + 96.f * S;
+		RRUI::DrawGlowText(Canvas, Text, FVector2D((Canvas->ClipX - Box.X) * 0.5f + Shake, Y), Size, EWeight::Black, WithAlpha(RRUI::PinkDeep, Alpha), Size * 0.06f);
+		const FString Hint = TEXT("GRAB IT BACK!");
+		const float HintSize = 11.f * S;
+		const FVector2D HintBox = RRUI::MeasureText(Hint, HintSize, EWeight::ExtraBold, HintSize * 0.2f);
+		RRUI::DrawGlowText(Canvas, Hint, FVector2D((Canvas->ClipX - HintBox.X) * 0.5f, Y + Box.Y + 4.f * S), HintSize, EWeight::ExtraBold, WithAlpha(RRUI::InkSoft, Alpha), HintSize * 0.2f);
 	}
 }
 
@@ -780,9 +1029,211 @@ void ARRRandomHUD::DrawScore()
 			RRUI::DrawPill(Canvas, FBox2D(FVector2D(Line.Max.X - FMath::Max(Line.GetSize().Y, Half * RedShare), Line.Min.Y), Line.Max), RRUI::Pink);
 		}
 
-		const FString Goal = FString::Printf(TEXT("FIRST TO %d"), State->GetScoreToWin());
+		// Meteor Rush: the points to hold and the clock (overtime: the golden crystal)
+		FString Goal = FString::Printf(TEXT("FIRST TO %d"), State->GetScoreToWin());
+		if (State->IsMeteorRush())
+		{
+			const int32 Seconds = FMath::Max(0, FMath::CeilToInt(State->HasPlayStarted() ? State->GetMatchTimeRemaining() : State->GetMatchTimeRemaining() - State->GetCountdownRemaining()));
+			Goal = State->IsOvertime() ? FString(TEXT("OVERTIME · GOLDEN CRYSTAL"))
+				: FString::Printf(TEXT("HOLD %d · %d:%02d"), State->GetScoreToWin(), Seconds / 60, Seconds % 60);
+		}
 		const float GoalWidth = RRUI::MeasureText(Goal, GoalSize, EWeight::ExtraBold, GoalSize * 0.22f).X;
-		RRUI::DrawText(Canvas, Goal, FVector2D(CenterX - GoalWidth * 0.5f, Line.Max.Y + 3.f * S), GoalSize, EWeight::ExtraBold, RRUI::InkSoft, GoalSize * 0.22f);
+		RRUI::DrawText(Canvas, Goal, FVector2D(CenterX - GoalWidth * 0.5f, Line.Max.Y + 3.f * S), GoalSize, EWeight::ExtraBold, State->IsOvertime() ? RRUI::Gold : RRUI::InkSoft, GoalSize * 0.22f);
+
+		// A meteor on its way: a pill under the score with the seconds to go, its edge blinking
+		if (State->IsMeteorRush())
+		{
+			for (TActorIterator<ARRRandomMeteor> It(GetWorld()); It; ++It)
+			{
+				const float Left = It->GetTimeToImpact();
+				if (Left > 0.f)
+				{
+					const FString Warning = FString::Printf(TEXT("%s INCOMING  %d"), It->IsGolden() ? TEXT("GOLDEN METEOR") : TEXT("METEOR"), FMath::CeilToInt(Left));
+					const float WarnSize = 15.f * S;
+					const FVector2D WarnBox = RRUI::MeasureText(Warning, WarnSize, EWeight::Black, WarnSize * 0.16f);
+					const FLinearColor Color = It->IsGolden() ? RRUI::Gold : RRUI::PinkDeep;
+					const FBox2D Pill(FVector2D(CenterX - WarnBox.X * 0.5f - 16.f * S, GroupBottom + 8.f * S), FVector2D(CenterX + WarnBox.X * 0.5f + 16.f * S, GroupBottom + 14.f * S + WarnBox.Y));
+					RRUI::DrawPill(Canvas, Pill.ExpandBy(2.5f * S), WithAlpha(Color, Blink(GetWorld())));
+					RRUI::DrawPill(Canvas, Pill, RRUI::White);
+					RRUI::DrawText(Canvas, Warning, FVector2D(CenterX - WarnBox.X * 0.5f, Pill.Min.Y + 3.f * S), WarnSize, EWeight::Black, Color, WarnSize * 0.16f);
+					break;
+				}
+			}
+		}
+	}
+}
+
+namespace
+{
+	// Comic words stay up this long (as the meteor keeps them)
+	constexpr float ComicWordLife = 0.9f;
+
+	/** A spiky comic burst: Points spikes, the dips InnerShare of the way in, turned by Tilt degrees. */
+	void DrawStarburst(UCanvas* Canvas, const FVector2D& Center, FVector2D Radius, int32 Points, float InnerShare, float Tilt, const FLinearColor& Color)
+	{
+		const int32 Corners = Points * 2;
+		auto Corner = [&](int32 Index)
+		{
+			const float Angle = FMath::DegreesToRadians(Tilt) + Index * PI / Points;
+			const float Reach = Index % 2 == 0 ? 1.f : InnerShare;
+			return Center + FVector2D(FMath::Cos(Angle) * Radius.X, FMath::Sin(Angle) * Radius.Y) * Reach;
+		};
+		for (int32 Index = 0; Index < Corners; ++Index)
+		{
+			RRUI::DrawTriangle(Canvas, Center, Corner(Index), Corner((Index + 1) % Corners), Color);
+		}
+	}
+
+	/** A cartoon star (five points), with an ink edge Edge wide. */
+	void DrawCartoonStar(UCanvas* Canvas, const FVector2D& Center, float Radius, float Turn, const FLinearColor& Color, float Edge)
+	{
+		DrawStarburst(Canvas, Center, FVector2D(Radius + Edge * 1.8f), 5, 0.46f, Turn - 90.f, RRUI::WithAlpha(RRUI::Ink, Color.A));
+		DrawStarburst(Canvas, Center, FVector2D(Radius), 5, 0.46f, Turn - 90.f, Color);
+	}
+}
+
+void ARRRandomHUD::DrawMeteorCartoons()
+{
+	if (!ARRRandomGameState::IsMeteorRush(this) || !PlayerOwner || !PlayerOwner->PlayerCameraManager)
+	{
+		return;
+	}
+	const float S = UIScale;
+	const float Now = GetWorld()->GetTimeSeconds();
+	const FVector CameraRight = PlayerOwner->PlayerCameraManager->GetCameraRotation().Quaternion().GetRightVector();
+	for (TActorIterator<ARRRandomMeteor> It(GetWorld()); It; ++It)
+	{
+		const ARRRandomMeteor* Meteor = *It;
+		// How big the meteor is on the screen (its half width in pixels), from its top
+		const FVector Top = Meteor->GetTopLocation();
+		const FVector TopOnScreen = Project(Top);
+		const FVector SideOnScreen = Project(Top + CameraRight * ARRRandomMeteor::GetHeight() * 0.5f);
+		const float Reach = TopOnScreen.Z > 0.f ? FVector2D::Distance(FVector2D(TopOnScreen), FVector2D(SideOnScreen)) : 0.f;
+
+		// Spinning: three speed lines whirling round its middle
+		if (Meteor->IsSpinning() && Reach > 4.f && Meteor->GetSpinSpeedShare() > 0.15f)
+		{
+			const FVector Middle = Project(FMath::Lerp(Meteor->GetActorLocation(), Top, 0.45f));
+			const float Alpha = FMath::Clamp(Meteor->GetSpinSpeedShare(), 0.f, 1.f);
+			// Each a tapering stroke of triangles along an ellipse round it: the ink edge first, then the white
+			for (int32 Pass = 0; Pass < 2; ++Pass)
+			{
+				for (int32 Line = 0; Line < 3; ++Line)
+				{
+					const float From = Now * 13.f * Alpha + Line * 2.f * PI / 3.f;
+					constexpr int32 Steps = 10;
+					auto At = [&](int32 Step, float Out)
+					{
+						const float Angle = From + Step * 0.11f;
+						const FVector2D Dir(FMath::Cos(Angle), FMath::Sin(Angle));
+						// Thick in the middle of the stroke, thin at its ends
+						const float Half = ((Pass == 0 ? 1.5f : 0.f) + 3.f * FMath::Sin(Step / float(Steps) * PI)) * S;
+						return FVector2D(Middle.X + Dir.X * (Reach * 1.35f + Out * Half), Middle.Y + Dir.Y * (Reach * 0.5f + Out * Half * 0.6f));
+					};
+					const FLinearColor LineColor = Pass == 0 ? RRUI::WithAlpha(RRUI::Ink, 0.6f * Alpha) : RRUI::WithAlpha(RRUI::White, Alpha);
+					for (int32 Step = 0; Step < Steps; ++Step)
+					{
+						RRUI::DrawTriangle(Canvas, At(Step, 1.f), At(Step, -1.f), At(Step + 1, 1.f), LineColor);
+						RRUI::DrawTriangle(Canvas, At(Step, -1.f), At(Step + 1, -1.f), At(Step + 1, 1.f), LineColor);
+					}
+				}
+			}
+		}
+
+		// Dizzy: little stars circling over its head
+		if (Meteor->GetDizzyAlpha() > 0.f && TopOnScreen.Z > 0.f)
+		{
+			const FVector Crown = Project(Top + FVector(0.f, 0.f, 45.f));
+			const float Alpha = Meteor->GetDizzyAlpha();
+			const FLinearColor StarColors[] = { RRUI::Butter, RRUI::Pink, RRUI::Mint };
+			for (int32 Star = 0; Star < 3; ++Star)
+			{
+				const float Angle = Now * 3.6f + Star * 2.f * PI / 3.f;
+				// Further back round the circle: smaller
+				const float Near = 0.75f + 0.25f * FMath::Sin(Angle);
+				const FVector2D At(Crown.X + FMath::Cos(Angle) * FMath::Max(Reach * 0.75f, 26.f * S), Crown.Y + FMath::Sin(Angle) * FMath::Max(Reach * 0.22f, 8.f * S));
+				DrawCartoonStar(Canvas, At, 15.f * S * Near, Now * 140.f + Star * 50.f, RRUI::WithAlpha(StarColors[Star], Alpha), 1.6f * S);
+			}
+		}
+
+		// Comic words: popping in big, settling, drifting up and fading, each in a white starburst with an ink edge
+		for (const FRRComicPop& Pop : Meteor->GetComicPops())
+		{
+			const float Age = Now - Pop.Start;
+			const FVector OnScreen = Project(Pop.Where);
+			if (Age < 0.f || Age > ComicWordLife || OnScreen.Z <= 0.f)
+			{
+				continue;
+			}
+			const float Scale = Age < 0.12f ? FMath::Lerp(0.25f, 1.25f, Age / 0.12f) : Age < 0.24f ? FMath::Lerp(1.25f, 1.f, (Age - 0.12f) / 0.12f) : 1.f;
+			const float Alpha = 1.f - FMath::Clamp((Age - (ComicWordLife - 0.25f)) / 0.25f, 0.f, 1.f);
+			const FVector2D Center(OnScreen.X, OnScreen.Y - Age * 45.f * S);
+			const float Size = 22.f * S * Pop.Size * Scale;
+			const FVector2D Box = RRUI::MeasureText(Pop.Text, Size, EWeight::Black);
+			const FVector2D Burst(Box.X * 0.78f + 14.f * S * Scale, Box.Y * 0.95f + 12.f * S * Scale);
+			DrawStarburst(Canvas, Center, Burst + FVector2D(3.f * S), 11, 0.74f, Pop.Tilt, RRUI::WithAlpha(RRUI::Ink, Alpha));
+			DrawStarburst(Canvas, Center, Burst, 11, 0.74f, Pop.Tilt, RRUI::WithAlpha(RRUI::White, Alpha));
+			DrawEdgedText(Canvas, Pop.Text, Center - Box * 0.5f, Size, RRUI::WithAlpha(Pop.Color, Alpha), RRUI::WithAlpha(RRUI::Ink, Alpha));
+		}
+	}
+}
+
+void ARRRandomHUD::DrawMeteorWarnings()
+{
+	if (!ARRRandomGameState::IsMeteorRush(this))
+	{
+		return;
+	}
+	const float S = UIScale;
+	// Markers stay this far inside the screen's edges (clear of the score and its warning at the top, the panels below)
+	const FVector2D InsetMin(70.f * S, 150.f * S);
+	const FVector2D InsetMax(70.f * S, 110.f * S);
+	for (TActorIterator<ARRRandomMeteor> It(GetWorld()); It; ++It)
+	{
+		const float Left = It->GetTimeToImpact();
+		const bool bIncoming = Left > 0.f;
+		if (!bIncoming && !It->IsBursting())
+		{
+			continue;
+		}
+		const FLinearColor Color = It->IsGolden() ? RRUI::Gold : RRUI::PinkDeep;
+		// Over the spot, up where the falling meteor will be seen
+		const FVector Projected = Project(It->GetActorLocation() + FVector(0.f, 0.f, 380.f));
+		FVector2D Point(Projected.X, Projected.Y);
+		const bool bBehind = Projected.Z <= 0.f;
+		const FBox2D Allowed(InsetMin, FVector2D(Canvas->ClipX, Canvas->ClipY) - InsetMax);
+		const bool bOnScreen = !bBehind && Allowed.IsInside(Point);
+		FVector2D Out(0.f, 1.f);
+		if (!bOnScreen)
+		{
+			// Off the screen (or under the score): slid along the way from the middle of the allowed area to its edge (turned
+			// round when behind the camera)
+			const FVector2D Middle = Allowed.GetCenter();
+			Out = (Point - Middle) * (bBehind ? -1.f : 1.f);
+			Out = Out.IsNearlyZero() ? FVector2D(0.f, 1.f) : Out.GetSafeNormal();
+			const FVector2D Half = Allowed.GetExtent();
+			const float Reach = FMath::Min(Out.X != 0.f ? Half.X / FMath::Abs(Out.X) : UE_BIG_NUMBER, Out.Y != 0.f ? Half.Y / FMath::Abs(Out.Y) : UE_BIG_NUMBER);
+			Point = Middle + Out * Reach;
+		}
+		const float Pulse = 0.5f + 0.5f * FMath::Sin(GetWorld()->GetTimeSeconds() * (bIncoming ? 6.f + 10.f * (1.f - Left / ARRRandomMeteor::WarnTime) : 12.f));
+		const float Radius = (20.f + 3.f * Pulse) * S;
+		// A pointer: down at the spot on the screen, out toward it at the edge
+		const FVector2D Tip = Point + Out * (Radius + 12.f * S);
+		const FVector2D Side(-Out.Y, Out.X);
+		RRUI::DrawTriangle(Canvas, Tip + Out * 2.f * S, Point + Out * Radius * 0.6f + Side * (Radius * 0.62f + 2.f * S), Point + Out * Radius * 0.6f - Side * (Radius * 0.62f + 2.f * S), RRUI::White);
+		RRUI::DrawTriangle(Canvas, Tip, Point + Out * Radius * 0.6f + Side * Radius * 0.55f, Point + Out * Radius * 0.6f - Side * Radius * 0.55f, Color);
+		RRUI::DrawRing(Canvas, Point, Radius + 6.f * S + 6.f * S * Pulse, 2.f * S, WithAlpha(Color, 0.6f * (1.f - Pulse)));
+		RRUI::DrawDisc(Canvas, Point, Radius + 2.5f * S, RRUI::White);
+		RRUI::DrawDisc(Canvas, Point, Radius, Color);
+		const FString Text = bIncoming ? FString::FromInt(FMath::CeilToInt(Left)) : FString(TEXT("ORE!"));
+		const float Size = (bIncoming ? 20.f : 11.f) * S;
+		const FVector2D Box = RRUI::MeasureText(Text, Size, EWeight::Black);
+		RRUI::DrawText(Canvas, Text, Point - Box * 0.5f, Size, EWeight::Black, RRUI::White);
+		// The label under (or beside, at the edge) the marker
+		const FString Label = bIncoming ? (It->IsGolden() ? TEXT("GOLDEN METEOR") : TEXT("METEOR")) : TEXT("GRAB THE ORE");
+		const float LabelSize = 10.f * S;
+		const FVector2D LabelBox = RRUI::MeasureText(Label, LabelSize, EWeight::Black, LabelSize * 0.16f);
+		RRUI::DrawGlowText(Canvas, Label, FVector2D(Point.X - LabelBox.X * 0.5f, Point.Y - Radius - 6.f * S - LabelBox.Y), LabelSize, EWeight::Black, Color, LabelSize * 0.16f);
 	}
 }
 
@@ -820,6 +1271,11 @@ namespace
 		return 1.f - FMath::Square(1.f - T);
 	}
 
+	int32 GetOreCollected(const ARRRandomCharacter* Brawler)
+	{
+		return Brawler->GetOreCarry() ? Brawler->GetOreCarry()->GetCollected() : 0;
+	}
+
 	/** A team's brawlers, numbered bots in a fixed order (by name), then sorted by knockouts. */
 	TArray<TPair<const ARRRandomCharacter*, FString>> GetTeamBoard(const UWorld* World, int32 Team, const ARRRandomCharacter* Viewer)
 	{
@@ -852,11 +1308,19 @@ namespace
 			}
 			Board.Emplace(Member, Label);
 		}
-		Board.StableSort([](const TPair<const ARRRandomCharacter*, FString>& A, const TPair<const ARRRandomCharacter*, FString>& B)
+		// (Meteor Rush: by the ore picked up)
+		const bool bRush = ARRRandomGameState::IsMeteorRush(World);
+		Board.StableSort([bRush](const TPair<const ARRRandomCharacter*, FString>& A, const TPair<const ARRRandomCharacter*, FString>& B)
 		{
-			return A.Key->GetKills() > B.Key->GetKills();
+			return bRush ? GetOreCollected(A.Key) > GetOreCollected(B.Key) : A.Key->GetKills() > B.Key->GetKills();
 		});
 		return Board;
+	}
+
+	/** What a brawler's row and the MVP pill show: knockouts, or in Meteor Rush the ore picked up. */
+	FString GetTally(const ARRRandomCharacter* Brawler)
+	{
+		return ARRRandomGameState::IsMeteorRush(Brawler) ? FString::Printf(TEXT("%d ORE"), GetOreCollected(Brawler)) : FString::Printf(TEXT("%d KO"), Brawler->GetKills());
 	}
 
 	/** Text centered on CenterX with its top at Y; returns its size. */
@@ -922,7 +1386,7 @@ float ARRRandomHUD::DrawTeamBoard(int32 Team, const ARRRandomCharacter* Viewer, 
 			RRUI::DrawText(Canvas, TEXT("MVP"), FVector2D(NameX + 8.f * Scale, Y + (Row - RRUI::MeasureText(TEXT("MVP"), TagSize, EWeight::Black).Y) * 0.5f),
 				TagSize, EWeight::Black, WithAlpha(RRUI::Gold, Alpha), TagSize * 0.14f);
 		}
-		const FString Kills = FString::Printf(TEXT("%d KO"), Entry.Key->GetKills());
+		const FString Kills = GetTally(Entry.Key);
 		const float KillsWidth = RRUI::MeasureText(Kills, NameSize, EWeight::ExtraBold).X;
 		RRUI::DrawText(Canvas, Kills, FVector2D(Right - 4.f * Scale - KillsWidth, Y + RowText), NameSize, EWeight::ExtraBold, WithAlpha(RRUI::InkSoft, Alpha));
 		Y += Row;
@@ -999,7 +1463,7 @@ void ARRRandomHUD::DrawResults(const ARRRandomGameState& State, const ARRRandomC
 		const float NameSize = 26.f * S;
 		const float TagSize = 10.f * S;
 		const float KOSize = 14.f * S;
-		const FString KO = FString::Printf(TEXT("%d KO"), MVP->GetKills());
+		const FString KO = GetTally(MVP);
 		const float NameWidth = RRUI::MeasureText(MVPName, NameSize, EWeight::Black).X;
 		const float KOWidth = RRUI::MeasureText(KO, KOSize, EWeight::ExtraBold).X;
 		const float Inner = Face + 14.f * S + NameWidth + 8.f * S + KOWidth;

@@ -13,6 +13,7 @@
 #include "RRRandomGameMode.h"
 #include "RRRandomGameState.h"
 #include "RRRandomMovementComponent.h"
+#include "RRRandomOre.h"
 #include "RRRandomOverheadDieComponent.h"
 #include "RRRandomProjectile.h"
 #include "RRRandomTigerSpirit.h"
@@ -243,6 +244,8 @@ ARRRandomCharacter::ARRRandomCharacter(const FObjectInitializer& ObjectInitializ
 	RandomEvents = CreateDefaultSubobject<URRRandomEventComponent>(TEXT("RandomEvents"));
 	RandomEvents->ColorParameterName = TEXT("DiffuseColor");
 	DiceBuffs = CreateDefaultSubobject<URRRandomDiceBuffComponent>(TEXT("DiceBuffs"));
+	OreCarry = CreateDefaultSubobject<URRRandomOreCarryComponent>(TEXT("OreCarry"));
+	OreCarry->SetupAttachment(RootComponent);
 	OverheadDie = CreateDefaultSubobject<URRRandomOverheadDieComponent>(TEXT("OverheadDie"));
 	OverheadDie->SetupAttachment(RootComponent);
 	Wings = CreateDefaultSubobject<URRRandomWingsComponent>(TEXT("Wings"));
@@ -725,7 +728,7 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 				GetCharacterMovement()->StopMovementImmediately();
 				return;
 			}
-			KnockOut(FVector::UpVector, nullptr);
+			KnockOut(FVector::UpVector, nullptr, true);
 			return;
 		}
 
@@ -1976,7 +1979,7 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 	return Damage;
 }
 
-void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharacter* Attacker)
+void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharacter* Attacker, bool bFell)
 {
 	bAlive = false;
 	Health = 0.f;
@@ -2004,7 +2007,7 @@ void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharact
 
 	if (ARRRandomGameMode* GameMode = GetWorld()->GetAuthGameMode<ARRRandomGameMode>())
 	{
-		GameMode->OnBrawlerKnockedOut(this, Attacker);
+		GameMode->OnBrawlerKnockedOut(this, Attacker, bFell);
 	}
 }
 

@@ -20,6 +20,10 @@ TArray<ERRTitleChoice> ARRRandomTitlePlayerController::GetChoices() const
 	{
 		return { ERRTitleChoice::Fox, ERRTitleChoice::Rabbit, ERRTitleChoice::Squirrel, ERRTitleChoice::Tiger, ERRTitleChoice::Dragon, ERRTitleChoice::Back };
 	}
+	if (bRulePage)
+	{
+		return { ERRTitleChoice::Knockout, ERRTitleChoice::MeteorRush, ERRTitleChoice::Back };
+	}
 	if (bMapPage)
 	{
 		return { ERRTitleChoice::DiceTown, ERRTitleChoice::DiceLand, ERRTitleChoice::Back };
@@ -65,6 +69,8 @@ FString ARRRandomTitlePlayerController::GetLabel(ERRTitleChoice Choice)
 	case ERRTitleChoice::Dragon: return RRSpecies::GetDisplayName(GetSpeciesOf(Choice));
 	case ERRTitleChoice::DiceTown: return TEXT("DICE TOWN");
 	case ERRTitleChoice::DiceLand: return TEXT("DICE LAND");
+	case ERRTitleChoice::Knockout: return TEXT("KNOCKOUT");
+	case ERRTitleChoice::MeteorRush: return TEXT("METEOR RUSH");
 	}
 	return FString();
 }
@@ -93,6 +99,8 @@ FString ARRRandomTitlePlayerController::GetDescription(ERRTitleChoice Choice)
 	case ERRTitleChoice::Dragon: return TEXT("Little red dragon. Its true form breathes fire.");
 	case ERRTitleChoice::DiceTown: return TEXT("Big block town: climb houses and towers, fight on rooftops, by canals and in the woods.");
 	case ERRTitleChoice::DiceLand: return TEXT("Small round island of candy dice. Quick fights in the open.");
+	case ERRTitleChoice::Knockout: return TEXT("The first team to 10 knockouts wins.");
+	case ERRTitleChoice::MeteorRush: return TEXT("Grab the dice ore meteors drop. Hold 30 points for 12 seconds to win.");
 	}
 	return FString();
 }
@@ -123,7 +131,7 @@ void ARRRandomTitlePlayerController::Choose(ERRTitleChoice Choice)
 		break;
 	case ERRTitleChoice::TopView:
 		Sessions->SetThirdPersonMode(false);
-		OpenSpeciesPage(bViewForHost ? EStart::Host : EStart::Solo);
+		OpenRulePage();
 		break;
 	case ERRTitleChoice::ThirdPerson:
 		// Which map first
@@ -134,6 +142,12 @@ void ARRRandomTitlePlayerController::Choose(ERRTitleChoice Choice)
 	case ERRTitleChoice::DiceLand:
 		Sessions->SetThirdPersonMap(Choice == ERRTitleChoice::DiceLand ? ERRThirdPersonMap::DiceLand : ERRThirdPersonMap::DiceTown);
 		bMapPage = false;
+		OpenRulePage();
+		break;
+	case ERRTitleChoice::Knockout:
+	case ERRTitleChoice::MeteorRush:
+		Sessions->SetMatchRule(Choice == ERRTitleChoice::MeteorRush ? ERRMatchRule::MeteorRush : ERRMatchRule::Knockout);
+		bRulePage = false;
 		OpenSpeciesPage(bViewForHost ? EStart::Host : EStart::Solo);
 		break;
 	case ERRTitleChoice::Join:
@@ -150,15 +164,27 @@ void ARRRandomTitlePlayerController::Choose(ERRTitleChoice Choice)
 	case ERRTitleChoice::Back:
 		if (bSpeciesPage)
 		{
-			// Back to the map (third person) or the way to play, or to the network page for a join
+			// Back to the rule, or to the network page for a join
 			bSpeciesPage = false;
 			bViewPage = Start != EStart::Join;
-			if (bViewPage && Sessions->IsThirdPersonMode())
+			if (bViewPage)
+			{
+				OpenRulePage();
+				break;
+			}
+			Selected = GetChoices().IndexOfByKey(ERRTitleChoice::Join);
+			break;
+		}
+		if (bRulePage)
+		{
+			// Back to the map (third person) or the way to play
+			bRulePage = false;
+			if (Sessions->IsThirdPersonMode())
 			{
 				OpenMapPage();
 				break;
 			}
-			Selected = bViewPage ? GetChoices().IndexOfByKey(ERRTitleChoice::TopView) : GetChoices().IndexOfByKey(ERRTitleChoice::Join);
+			Selected = GetChoices().IndexOfByKey(ERRTitleChoice::TopView);
 			break;
 		}
 		if (bMapPage)
@@ -189,6 +215,13 @@ void ARRRandomTitlePlayerController::OpenMapPage()
 	const URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>();
 	bMapPage = true;
 	Selected = GetChoices().IndexOfByKey(Sessions && Sessions->GetThirdPersonMap() == ERRThirdPersonMap::DiceLand ? ERRTitleChoice::DiceLand : ERRTitleChoice::DiceTown);
+}
+
+void ARRRandomTitlePlayerController::OpenRulePage()
+{
+	const URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>();
+	bRulePage = true;
+	Selected = GetChoices().IndexOfByKey(Sessions && Sessions->GetMatchRule() == ERRMatchRule::MeteorRush ? ERRTitleChoice::MeteorRush : ERRTitleChoice::Knockout);
 }
 
 void ARRRandomTitlePlayerController::OpenSpeciesPage(EStart InStart)
@@ -302,7 +335,7 @@ void ARRRandomTitlePlayerController::OnBack()
 	{
 		Sessions->CancelPending();
 	}
-	else if (bNetworkPage || bViewPage || bSpeciesPage || bMapPage)
+	else if (bNetworkPage || bViewPage || bSpeciesPage || bMapPage || bRulePage)
 	{
 		Choose(ERRTitleChoice::Back);
 	}

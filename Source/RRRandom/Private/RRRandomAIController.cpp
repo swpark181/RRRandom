@@ -4,6 +4,8 @@
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomDiceTown.h"
 #include "RRRandomGameState.h"
+#include "RRRandomMeteor.h"
+#include "RRRandomOre.h"
 #include "RRRandomVehicle.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
@@ -158,6 +160,21 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		Opponent = FindBestOpponent(Self);
 		RetargetTimer = RetargetInterval;
 	}
+	// Meteor Rush: an opponent carrying a crystal shows on every map; go after it first
+	const bool bRush = ARRRandomGameState::IsMeteorRush(this);
+	if (bRush)
+	{
+		if (ARRRandomCharacter* Carrier = FindCrystalCarrier(Self))
+		{
+			Opponent = Carrier;
+		}
+		UpdateRushGoal(Self, DeltaSeconds);
+	}
+	else
+	{
+		bHasRushGoal = false;
+		bGuardingOre = false;
+	}
 	if (Opponent.IsValid())
 	{
 		LastSeenLocation = Opponent->GetActorLocation();
@@ -240,8 +257,8 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	UpdateDice(Self, Distance, DeltaSeconds);
 	UpdateFlight(Self, Distance, DeltaSeconds);
 
-	// Hide while reloading or hurt; otherwise fight
-	const bool bWantsCover = Target && (bRetreating || Self->IsReloading() || (UnderFireTimer > 0.f && HealthShare < UnderFireCoverHealthShare));
+	// Hide while reloading or hurt (or keeping the team's winning ore safe); otherwise fight
+	const bool bWantsCover = Target && (bRetreating || bGuardingOre || Self->IsReloading() || (UnderFireTimer > 0.f && HealthShare < UnderFireCoverHealthShare));
 	FVector Wanted = FVector::ZeroVector;
 	if (bWantsCover)
 	{
@@ -268,12 +285,20 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		bHasCoverSpot = false;
 		Wanted = ChooseFightDirection(Self, Target, Distance, bCanSee);
 	}
+	// Meteor Rush: the ore (or home with it) unless an opponent is in sight and in range
+	const bool bRushing = bHasRushGoal && !bWantsCover && !(Target && bCanSee && Distance <= Self->GetAttackRange() * ShootRangeShare);
+	if (bRushing && !Map)
+	{
+		const FVector ToGoal = RushGoal - (SelfLocation - FVector(0.f, 0.f, Self->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
+		Wanted = ToGoal.Size2D() > CoverArriveRadius ? ToGoal.GetSafeNormal2D() : FVector::ZeroVector;
+	}
 	// On a map with routes, out of a close fight: along the route to the opponent, where it was last seen, or the roaming
 	// spot (feet heights)
 	bool bOnRoute = false;
-	if (Map && !bWantsCover && !(Target && bCanSee && Distance <= Self->GetAttackRange() * PreferredShare + DistanceSlack))
+	if (Map && !bWantsCover && (bRushing || !(Target && bCanSee && Distance <= Self->GetAttackRange() * PreferredShare + DistanceSlack)))
 	{
-		const FVector Goal = Target ? Target->GetActorLocation() - FVector(0.f, 0.f, Target->GetCapsuleComponent()->GetScaledCapsuleHalfHeight())
+		const FVector Goal = bRushing ? RushGoal
+			: Target ? Target->GetActorLocation() - FVector(0.f, 0.f, Target->GetCapsuleComponent()->GetScaledCapsuleHalfHeight())
 			: LastSeenTimer > 0.f ? LastSeenLocation - FVector(0.f, 0.f, Self->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight())
 			: PatrolGoal;
 		Wanted = FollowRoute(Self, Goal, DeltaSeconds);
@@ -301,8 +326,109 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	}
 }
 
+void ARRRandomAIController::UpdateRushGoal(const ARRRandomCharacter* Self, float DeltaSeconds)
+{
+	RushTimer -= DeltaSeconds;
+	if (RushTimer > 0.f)
+	{
+		return;
+	}
+	RushTimer = 0.3f;
+	bHasRushGoal = false;
+	bGuardingOre = false;
+	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
+	const URRRandomOreCarryComponent* Carry = Self->GetOreCarry();
+	if (!State || !Carry)
+	{
+		return;
+	}
+	const FVector Feet = Self->GetActorLocation() - FVector(0.f, 0.f, Self->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+
+	// The team is counting down to a win: carrying a share of it, keep it safe at home
+	if (State->GetHoldTeam() == Self->GetTeam() && (Carry->GetPoints() >= 3 || Carry->HasGolden()))
+	{
+		bGuardingOre = true;
+		bHasRushGoal = true;
+		RushGoal = Self->GetHomeLocation() - FVector(0.f, 0.f, Self->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight());
+		return;
+	}
+
+	// The best ore in reach: near, and worth more (a crystal is worth a detour; overtime's golden one, any)
+	const bool bBigMap = Town.IsValid();
+	const float Reach = bBigMap ? 6500.f : 3500.f;
+	float Best = UE_BIG_NUMBER;
+	for (TActorIterator<ARRRandomOre> It(GetWorld()); It; ++It)
+	{
+		const float Distance = FVector::Dist2D(Feet, It->GetActorLocation());
+		if (Distance > Reach && It->GetKind() != ERROreKind::Golden)
+		{
+			continue;
+		}
+		// Off a map with walking routes, bots don't climb: ore up on a block or a hill is left to the players
+		if (!bBigMap && It->IsResting() && It->GetKind() != ERROreKind::Golden && It->GetActorLocation().Z - Feet.Z > 90.f)
+		{
+			continue;
+		}
+		const float Score = Distance - (It->GetKind() == ERROreKind::Golden ? 10000.f : RROre::IsCrystal(It->GetKind()) ? 900.f : It->GetKind() == ERROreKind::Ore ? 250.f : 0.f);
+		if (Score < Best)
+		{
+			Best = Score;
+			RushGoal = It->GetActorLocation();
+			bHasRushGoal = true;
+		}
+	}
+	if (bHasRushGoal)
+	{
+		return;
+	}
+
+	// Else a meteor on its way or still throwing: wait just outside where it lands
+	for (TActorIterator<ARRRandomMeteor> It(GetWorld()); It; ++It)
+	{
+		if (!It->IsActive())
+		{
+			continue;
+		}
+		const FVector Spot = It->GetActorLocation();
+		const float Distance = FVector::Dist2D(Feet, Spot);
+		if (Distance > Reach * 1.5f || Distance >= Best)
+		{
+			continue;
+		}
+		Best = Distance;
+		const FVector Out = Distance > 1.f ? (Feet - Spot).GetSafeNormal2D() : FVector(1.f, 0.f, 0.f);
+		RushGoal = It->GetTimeToImpact() > 0.3f ? Spot + Out * (ARRRandomMeteor::ImpactRadius + 120.f) : Spot;
+		bHasRushGoal = true;
+	}
+}
+
+ARRRandomCharacter* ARRRandomAIController::FindCrystalCarrier(const ARRRandomCharacter* Self) const
+{
+	ARRRandomCharacter* Best = nullptr;
+	float BestDistance = Town.IsValid() ? 5000.f : 3500.f;
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		const URRRandomOreCarryComponent* Carry = It->GetOreCarry();
+		if (It->GetTeam() == Self->GetTeam() || !It->IsAlive() || It->IsDecoy() || !Carry || !Carry->HasCrystal())
+		{
+			continue;
+		}
+		const float Distance = FVector::Dist2D(Self->GetActorLocation(), It->GetActorLocation());
+		if (Distance < BestDistance)
+		{
+			BestDistance = Distance;
+			Best = *It;
+		}
+	}
+	return Best;
+}
+
 FVector ARRRandomAIController::GetTravelGoal(const ARRRandomCharacter* Self, const ARRRandomCharacter* Target) const
 {
+	if (bHasRushGoal && !Target)
+	{
+		return RushGoal;
+	}
 	if (Target)
 	{
 		return Target->GetActorLocation();

@@ -70,6 +70,15 @@ private:
 	float DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom);
 	void DrawDamagePopups(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer);
 	void DrawDicePanel(const ARRRandomCharacter& Viewer);
+	/**
+	 * Meteor Rush, bottom left over the dice: the ore I carry (big, bouncing when it grows, blinking pink when I'm hurt
+	 * enough to lose it), how many of each kind, and a bar of my team's ore toward the goal with my share in it. Its bottom
+	 * edge at Bottom; returns its top edge.
+	 */
+	float DrawOrePanel(const ARRRandomCharacter& Viewer, float Left, float Bottom);
+	/** Meteor Rush: "+3" popping over my head and flying into the ore panel as I pick ore up; "-9 ORE DROPPED" when I lose it. */
+	void UpdateOreFeedback(const ARRRandomCharacter* Viewer);
+	void DrawOreFeedback(const ARRRandomCharacter* Viewer);
 	void DrawAmmoPanel(const ARRRandomCharacter& Brawler);
 	/** "[F] RIDE MOTORBIKE" under the brawler next to a free vehicle, "[F] GET OFF" while riding. */
 	void DrawRidePrompt(const ARRRandomCharacter& Brawler);
@@ -79,6 +88,13 @@ private:
 	/** Draws the gun's name chip ending at Right; nothing for the starting pistol. */
 	void DrawWeaponChip(const struct FRRWeapon& Weapon, float Right, float CenterY);
 	void DrawScore();
+	/**
+	 * Meteor Rush: over each meteor's landing spot a marker counting down (an arrow at the screen's edge pointing to it when
+	 * it is off the screen), then ORE! while it throws its ore.
+	 */
+	void DrawMeteorWarnings();
+	/** Meteor Rush's cartoon touches over each meteor: comic words in starbursts, speed lines while it spins, dizzy stars. */
+	void DrawMeteorCartoons();
 	/** Online role (solo, hosting, joined), the host/join/leave keys and the latest online status. */
 	void DrawOnlinePanel();
 	void DrawRespawnCountdown(const ARRRandomCharacter& Viewer);
@@ -145,4 +161,24 @@ private:
 	bool bMapExpanded = false;
 	/** Where the corner map was last drawn (the square around its circle). */
 	FBox2D MinimapRect = FBox2D(ForceInit);
+
+	/** Meteor Rush feedback (UpdateOreFeedback): ore gains flying to the panel, the ore last seen, the panel's bounce and the drop notice. */
+	struct FOreGain
+	{
+		int32 Amount = 0;
+		FLinearColor Color = FLinearColor::White;
+		/** Real time it was picked up. */
+		float Start = 0.f;
+		/** Where it popped from on the screen (over my head). */
+		FVector2D From = FVector2D::ZeroVector;
+		bool bArrived = false;
+	};
+	TArray<FOreGain> OreGains;
+	int32 LastOrePoints = 0;
+	TWeakObjectPtr<const ARRRandomCharacter> OreViewer;
+	float OreBounceAt = -10.f;
+	int32 DroppedOre = 0;
+	float DroppedAt = -10.f;
+	/** Where the panel's big number was last drawn (the gains fly there). */
+	FVector2D OreCountAt = FVector2D::ZeroVector;
 };

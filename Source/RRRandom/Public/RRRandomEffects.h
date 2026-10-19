@@ -35,6 +35,17 @@ public:
 	void WingsBurst(const FVector& Back, const FLinearColor& Tint);
 	/** While flying or gliding, every frame: a trail of stars and soft glows from the back, more the faster it goes. */
 	void FlightTrail(const FVector& Back, const FVector& Velocity, const FLinearColor& Tint, float DeltaSeconds);
+	/**
+	 * Something falling like a shooting star, every frame: a long glowing tail laid along the way it came (From, where it
+	 * was last frame, to Head), Width across at the head and tapering to nothing about Length behind it, white hot in the
+	 * middle and Tint round it, with twinkling stars shed all along.
+	 */
+	void StarTail(const FVector& From, const FVector& Head, float Width, float Length, const FLinearColor& Tint, float DeltaSeconds);
+	/**
+	 * A shooting star hitting the ground: a flash, rings and rays of light rushing out along the floor, a glow left on it,
+	 * stars splashed up and on along the way it was going (Way), a little dust. Size 1 for a shard of ore.
+	 */
+	void StarImpact(const FVector& Where, const FVector& Way, float Size, const FLinearColor& Tint);
 	/** While the die over a head tumbles, every frame: rainbow glitter shed round it (Radius: the die's half size). */
 	void DiceSpinSparkle(const FVector& Where, float Radius, float DeltaSeconds);
 	/** The die landing on its face: a ring turned to the camera, a flash and a pop of stars. */
