@@ -3,9 +3,12 @@
 #include "RRRandomBodyAnimInstance.h"
 #include "RRRandomCover.h"
 #include "RRRandomDiceBuffComponent.h"
+#include "RRRandomDiceLand.h"
 #include "RRRandomDiceTown.h"
 #include "RRRandomEffects.h"
 #include "RRRandomGridPath.h"
+#include "RRRandomIsland.h"
+#include "RRRandomStudio.h"
 #include "Components/PoseableMeshComponent.h"
 #include "RRRandomEventComponent.h"
 #include "RRRandomFlightEffectsComponent.h"
@@ -135,6 +138,26 @@ namespace
 	constexpr float AfterimageOpacity = 0.55f;
 	// The rabbit's super hop: launched up at this share of a normal jump's speed (about 2.5 times as high)
 	constexpr float SuperHopJumpShare = 1.6f;
+	// The star robot's jump (its driver's), as a share of an animal friend's jump speed: about 340 high (a jump held to the
+	// top goes no higher), half its own height
+	constexpr float RobotJumpShare = 1.64f;
+	// An animal friend's jump (round 64: a little higher and further than the engine's 420, about 130 high instead of 90): this
+	// fast up, carrying on this much faster than the run it was taken on (at most that share of its walking speed)
+	constexpr float JumpSpeed = 500.f;
+	constexpr float JumpCarryShare = 1.25f;
+	// Coming down at least this fast it lands in a crouch (fully at this speed) that springs back up over this long, the body
+	// dropping this far (the bent legs' lost height, so the feet stay on the floor)
+	constexpr float JumpLandMinSpeed = 250.f;
+	constexpr float JumpLandFullSpeed = 700.f;
+	constexpr float JumpLandTime = 0.22f;
+	constexpr float JumpLandDrop = 11.f;
+	// Flying (round 65): a held lift goes on as long as it's held (this many seconds is "for ever"), this many lifts may be
+	// taken in the air, a flier over the flight area's side is pushed back in at least this fast, and with no map the feet go
+	// up to this far over where it started
+	constexpr float FlightHoldForever = 3600.f;
+	constexpr int32 FlightLifts = 1000;
+	constexpr float FlightEdgePush = 250.f;
+	constexpr float FlightFallbackCeiling = 960.f;
 	const FLinearColor AfterimageColor(1.f, 0.8f, 0.25f);
 	constexpr float HitFlashBrightness = 2.5f;
 	constexpr float HitFlashTime = 0.18f;
@@ -197,6 +220,7 @@ ARRRandomCharacter::ARRRandomCharacter(const FObjectInitializer& ObjectInitializ
 	Movement->bCanWalkOffLedges = false;
 	// Enough steering in the air to aim a jump at cover
 	Movement->AirControl = 0.35f;
+	Movement->JumpZVelocity = JumpSpeed;
 
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
@@ -774,25 +798,59 @@ void ARRRandomCharacter::StartFlight(float Seconds)
 
 void ARRRandomCharacter::UpdateFlight()
 {
-	// Flying: a held jump keeps rising at FlightRiseSpeed for up to FlightMaxHoldTime (the engine's variable-height jump)
+	// Flying: a held jump keeps rising at FlightRiseSpeed for as long as it's held (the engine's variable-height jump, without
+	// the old cap of 0.75 seconds), and a press in mid-air lifts again (it used to wait for a landing): up to any rooftop, as
+	// high as the map's flight area goes
 	UCharacterMovementComponent* Movement = GetCharacterMovement();
 	Movement->JumpZVelocity = bFlying ? FlightRiseSpeed : BaseJumpZVelocity;
-	JumpMaxHoldTime = bFlying ? FlightMaxHoldTime : BaseJumpMaxHoldTime;
+	JumpMaxHoldTime = bFlying ? FlightHoldForever : BaseJumpMaxHoldTime;
+	// Driving the star robot: its own jump, the same height however long it's held (and its kit's extra jumps don't count)
+	if (Robot)
+	{
+		Movement->JumpZVelocity = BaseJumpZVelocity * RobotJumpShare;
+		JumpMaxHoldTime = 0.f;
+		JumpMaxCount = 1;
+	}
+	else
+	{
+		const int32 Jumps = bFlying ? FlightLifts : RRKit::Get(Species).JumpCount;
+		if (JumpMaxCount != Jumps)
+		{
+			JumpMaxCount = Jumps;
+		}
+	}
 
 	// The glide lasts until landing even if the power runs out mid-air, but not once falling off the arena. The dragon's
 	// kit glides too while jump is held on the way down (not on the way up: the glide's braking would cut its jump short).
 	if (URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(Movement))
 	{
 		const bool bAboveArena = Movement->IsFalling() && GetActorLocation().Z > HomeLocation.Z - GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
-		bFlightGlide = bFlying || (bFlightGlide && bAboveArena);
-		const bool bHeldGlide = RRKit::Get(Species).bGlide && bAlive && bJumpHeld && bAboveArena && Movement->Velocity.Z <= 0.f;
+		bFlightGlide = !Robot && (bFlying || (bFlightGlide && bAboveArena));
+		const bool bHeldGlide = RRKit::Get(Species).bGlide && bAlive && bJumpHeld && bAboveArena && Movement->Velocity.Z <= 0.f && !Robot;
 		RandomMovement->bGliding = bFlightGlide || bHeldGlide;
 		Movement->AirControl = RandomMovement->bGliding ? FlightAirControl : BaseAirControl;
 
-		// Feet at most FlightMaxHeightInBodies normal body heights above the arena floor (where the brawler started)
+		// The map's flight area (round 65; it used to be a ceiling over the floor where the brawler started, which kept fliers
+		// off Dice Town's taller roofs): the feet up to its top, and back in over its sides
 		const UCapsuleComponent* Capsule = GetCapsuleComponent();
-		const float FloorZ = HomeLocation.Z - Capsule->GetUnscaledCapsuleHalfHeight();
-		RandomMovement->FlightCeilingZ = FloorZ + FlightMaxHeightInBodies * Capsule->GetUnscaledCapsuleHalfHeight() * 2.f + Capsule->GetScaledCapsuleHalfHeight();
+		FBox Area;
+		if (GetFlightArea(Area))
+		{
+			RandomMovement->FlightCeilingZ = Area.Max.Z + Capsule->GetScaledCapsuleHalfHeight();
+			if (Movement->IsFalling() && RandomMovement->bGliding)
+			{
+				const FVector Where = GetActorLocation();
+				FVector& Velocity = Movement->Velocity;
+				Velocity.X = Where.X < Area.Min.X ? FMath::Max<FVector::FReal>(Velocity.X, FlightEdgePush)
+					: Where.X > Area.Max.X ? FMath::Min<FVector::FReal>(Velocity.X, -FlightEdgePush) : Velocity.X;
+				Velocity.Y = Where.Y < Area.Min.Y ? FMath::Max<FVector::FReal>(Velocity.Y, FlightEdgePush)
+					: Where.Y > Area.Max.Y ? FMath::Min<FVector::FReal>(Velocity.Y, -FlightEdgePush) : Velocity.Y;
+			}
+		}
+		else
+		{
+			RandomMovement->FlightCeilingZ = HomeLocation.Z - Capsule->GetUnscaledCapsuleHalfHeight() + FlightFallbackCeiling + Capsule->GetScaledCapsuleHalfHeight();
+		}
 	}
 }
 
@@ -834,6 +892,7 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 
 	UpdateDamagePopups(DeltaSeconds);
 	UpdateHitFlash(DeltaSeconds);
+	UpdateJumpLanding(DeltaSeconds);
 	// Out of sight while its ultimate stands in for it (the tiger's giant, the rabbit's hops)
 	const bool bStandIn = Ultimate && Ultimate->HidesBrawler();
 	if (GetMesh()->IsVisible() == bStandIn)
@@ -957,8 +1016,18 @@ void ARRRandomCharacter::ServerSetJumpHeld_Implementation(bool bHeld)
 void ARRRandomCharacter::Jump()
 {
 	SetJumpHeld(true);
-	// No jumping (or climbing) on a vehicle, with the star robot, or while the tiger's spirit is out
-	if (!bAlive || bClimbing || Vehicle || Robot || IsUsingUltimate())
+	// The star robot jumps with its driver (the MOVE seat, the whole crew in, on the ground): one heavy jump, no climbing,
+	// hops or flying (UpdateFlight gives it its height)
+	if (Robot)
+	{
+		if (CanJumpRobot() && GetCharacterMovement()->IsMovingOnGround())
+		{
+			Super::Jump();
+		}
+		return;
+	}
+	// No jumping (or climbing) on a vehicle, or while the tiger's spirit is out
+	if (!bAlive || bClimbing || Vehicle || IsUsingUltimate())
 	{
 		return;
 	}
@@ -980,6 +1049,98 @@ void ARRRandomCharacter::Jump()
 			Super::Jump();
 		}
 	}
+}
+
+bool ARRRandomCharacter::GetFlightArea(FBox& OutArea) const
+{
+	UWorld* World = GetWorld();
+	if (!FlightMap.IsValid() && World)
+	{
+		// The map this game is on, once it has laid itself out
+		for (TActorIterator<ARRRandomDiceTown> It(World); It && !FlightMap.IsValid(); ++It)
+		{
+			FlightMap = It->IsBuilt() ? *It : nullptr;
+		}
+		for (TActorIterator<ARRRandomDiceLand> It(World); It && !FlightMap.IsValid(); ++It)
+		{
+			FlightMap = It->IsBuilt() ? *It : nullptr;
+		}
+		for (TActorIterator<ARRRandomIsland> It(World); It && !FlightMap.IsValid(); ++It)
+		{
+			FlightMap = It->IsBuilt() ? *It : nullptr;
+		}
+		for (TActorIterator<ARRRandomStudio> It(World); It && !FlightMap.IsValid(); ++It)
+		{
+			FlightMap = It->IsBuilt() ? *It : nullptr;
+		}
+	}
+	const AActor* Map = FlightMap.Get();
+	if (const ARRRandomDiceTown* Town = Cast<ARRRandomDiceTown>(Map))
+	{
+		OutArea = Town->GetFlightArea();
+	}
+	else if (const ARRRandomDiceLand* Land = Cast<ARRRandomDiceLand>(Map))
+	{
+		OutArea = Land->GetFlightArea();
+	}
+	else if (const ARRRandomIsland* Island = Cast<ARRRandomIsland>(Map))
+	{
+		OutArea = Island->GetFlightArea();
+	}
+	else if (const ARRRandomStudio* Studio = Cast<ARRRandomStudio>(Map))
+	{
+		OutArea = Studio->GetFlightArea();
+	}
+	else
+	{
+		return false;
+	}
+	return true;
+}
+
+bool ARRRandomCharacter::IsJumping() const
+{
+	const UCharacterMovementComponent* Movement = GetCharacterMovement();
+	return bAlive && !Vehicle && !Robot && !bClimbing && FlingTime <= 0.f && Movement && Movement->IsFalling() && !IsInFlight();
+}
+
+void ARRRandomCharacter::OnJumped_Implementation()
+{
+	Super::OnJumped_Implementation();
+	// On the run, the jump carries on a little faster than the run (the air keeps it: no braking in the air)
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (!Robot && !bFlying && Movement)
+	{
+		const FVector Run(Movement->Velocity.X, Movement->Velocity.Y, 0.f);
+		const float Carry = FMath::Min(Run.Size() * JumpCarryShare, Movement->MaxWalkSpeed * JumpCarryShare);
+		if (Run.Size() > 1.f && Carry > Run.Size())
+		{
+			const FVector Faster = Run.GetSafeNormal() * Carry;
+			Movement->Velocity.X = Faster.X;
+			Movement->Velocity.Y = Faster.Y;
+		}
+	}
+}
+
+void ARRRandomCharacter::UpdateJumpLanding(float DeltaSeconds)
+{
+	// Coming down onto its feet from a jump or a drop (falling at least this fast): a crouch that springs back up
+	const bool bJumping = IsJumping();
+	if (bJumping)
+	{
+		JumpFallSpeed = -GetVelocity().Z;
+	}
+	else if (bWasJumping && bAlive && GetCharacterMovement()->IsMovingOnGround() && JumpFallSpeed > JumpLandMinSpeed)
+	{
+		LandSquash = FMath::Clamp(JumpFallSpeed / JumpLandFullSpeed, 0.4f, 1.f);
+	}
+	bWasJumping = bJumping;
+	LandSquash = FMath::FInterpConstantTo(LandSquash, 0.f, DeltaSeconds, 1.f / JumpLandTime);
+}
+
+bool ARRRandomCharacter::CanJumpRobot() const
+{
+	return bAlive && Robot && RobotSeat == ERRRobotSeat::Move && Robot->IsAssembled() && Robot->IsCrewFull() && !ARRRandomGameState::IsPlayLocked(this);
 }
 
 bool ARRRandomCharacter::TryClimb()
@@ -1239,10 +1400,13 @@ void ARRRandomCharacter::UpdateClimb(float DeltaSeconds)
 void ARRRandomCharacter::UpdateLedgeWalking()
 {
 	// Standing on cover: walking off its edge drops to the floor. On the floor itself: the arena edge stops everyone. In
-	// Dice Town anywhere: off stairs, landings, roofs and window sills (a hidden wall round its rim stops the fall off it)
+	// Dice Town and Dice Land anywhere: off stairs, landings, roofs and window sills, the plaza's pedestal and the cover
+	// (a hidden wall round their rims stops the fall off the island; without this, a bot that hopped up onto Dice Land's
+	// pedestal stood at its edge for good)
 	const UCharacterMovementComponent* Movement = GetCharacterMovement();
 	const AActor* Floor = Movement->CurrentFloor.HitResult.GetActor();
-	GetCharacterMovement()->bCanWalkOffLedges = Movement->IsMovingOnGround() && Floor && (Floor->IsA<ARRRandomCover>() || Floor->IsA<ARRRandomDiceTown>());
+	GetCharacterMovement()->bCanWalkOffLedges = Movement->IsMovingOnGround() && Floor
+		&& (Floor->IsA<ARRRandomCover>() || Floor->IsA<ARRRandomDiceTown>() || Floor->IsA<ARRRandomDiceLand>());
 }
 
 void ARRRandomCharacter::UpdateAmmoAndHealth(float DeltaSeconds)
@@ -1335,7 +1499,9 @@ void ARRRandomCharacter::UpdateVehicleHandling()
 	if (bAlive && !bClimbing)
 	{
 		const float Seat = Vehicle ? Vehicle->GetHandling().SeatHeight : 0.f;
-		GetMesh()->SetRelativeLocation(MeshRelativeLocation + FVector(0.f, 0.f, Seat));
+		// (A landing's crouch: the body sinks with its bent legs)
+		const float Crouch = JumpLandDrop * FMath::Sin(LandSquash * HALF_PI);
+		GetMesh()->SetRelativeLocation(MeshRelativeLocation + FVector(0.f, 0.f, Seat - Crouch));
 	}
 }
 
@@ -1588,9 +1754,10 @@ void ARRRandomCharacter::UpdateLocomotionAnimation()
 	const float Speed = Vehicle ? 0.f : GetVelocity().Size2D();
 	// Shooting, the anim instance lays the aiming set over this; without it the standing fire animation stands in
 	const bool bShooting = FireAnimation && IsAiming() && !AimAnimations.IsComplete();
-	// In flight the legs don't walk: the idle under the flying pose (URRRandomBodyAnimInstance)
+	// In flight or a jump the legs don't walk: the idle under the flying or jumping pose (URRRandomBodyAnimInstance)
 	const bool bInFlight = IsInFlight();
-	UAnimSequence* Wanted = Speed > WalkAnimationThreshold && !bInFlight ? WalkAnimation : (bShooting ? FireAnimation : IdleAnimation);
+	const bool bInAir = bInFlight || IsJumping() || LandSquash > 0.f;
+	UAnimSequence* Wanted = Speed > WalkAnimationThreshold && !bInAir ? WalkAnimation : (bShooting ? FireAnimation : IdleAnimation);
 
 	if (IsCelebrating())
 	{

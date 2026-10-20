@@ -56,6 +56,12 @@ namespace
 	constexpr int32 Headroom = 2;
 	constexpr float MaxDrop = 650.f;
 	constexpr int32 MaxSearch = 80000;
+	// Flying: the feet up to this far over the tallest structure
+	constexpr float FlightHeadroom = 700.f;
+	// Straightening a route: a capsule this wide and half as tall, its bottom this far over the feet (over a step)
+	constexpr float RouteProbeRadius = 56.f;
+	constexpr float RouteProbeHalfHeight = 70.f;
+	constexpr float RouteProbeLift = 50.f;
 
 	constexpr int32 GroundSeed = 3601;
 	constexpr int32 LayoutSeed = 3602;
@@ -201,6 +207,14 @@ FBox2D ARRRandomDiceTown::GetMapBounds() const
 {
 	const FVector2D Center(GetActorLocation().X, GetActorLocation().Y);
 	return FBox2D(Center - FVector2D(MapHalf), Center + FVector2D(MapHalf));
+}
+
+FBox ARRRandomDiceTown::GetFlightArea() const
+{
+	// Over the whole island, the feet up to well over its tallest structure (the dice mountain, the keeps, the roofs), so a flyer
+	// can land on any of them and look about over them; the rim's tall hidden wall keeps flyers over the island
+	const FBox2D Map = GetMapBounds();
+	return FBox(FVector(Map.Min, FloorZ - 1000.f), FVector(Map.Max, FloorZ + TopLevel * BlockSize + FlightHeadroom));
 }
 
 bool ARRRandomDiceTown::IsInGrid(int32 X, int32 Y, int32 Level) const
@@ -1589,6 +1603,7 @@ void ARRRandomDiceTown::MakeCollision()
 					}
 				}
 				GridBoxes.Add({ FIntVector(X, Y, Level), FIntVector(X1, Y1, L1) });
+				TopLevel = FMath::Max(TopLevel, L1);
 				const FVector2D Middle = (CellCenter(FIntPoint(X, Y)) + CellCenter(FIntPoint(X1, Y1))) * 0.5f;
 				const float Bottom = (Level - 1) * BlockSize;
 				const float Top = L1 * BlockSize;
@@ -2659,12 +2674,24 @@ bool ARRRandomDiceTown::FindPath(const FVector& From, const FVector& To, TArray<
 		return End == Goal;
 	}
 
-	// Straightened: on level ground, the furthest spot ahead a brawler can walk straight to
+	// Straightened: on level ground, the furthest spot ahead a brawler fits straight to. The probe is its body from just
+	// over a step up to its head, wider than an animal friend (radius 42) by more than the 35 a walker may be off a corner it counts as reached, so a line past a lamp post or a wall's
+	// corner doesn't scrape it (a narrower one did: bots stuck on the road's lamp posts); and the first stretch starts where
+	// the walker really stands, or, if that way is blocked, from the middle of its cell
 	const UWorld* World = GetWorld();
-	const FCollisionShape Probe = FCollisionShape::MakeSphere(36.f);
+	const FCollisionShape Probe = FCollisionShape::MakeCapsule(RouteProbeRadius, RouteProbeHalfHeight);
 	const FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomTownRoute), false);
-	const FVector Raise(0.f, 0.f, 100.f);
+	const FVector Raise(0.f, 0.f, RouteProbeLift + RouteProbeHalfHeight);
 	FVector Anchor = Where(Start);
+	const FVector Walker(From.X, From.Y, Anchor.Z);
+	if (World->SweepTestByObjectType(Walker + Raise, Where(Route[0]) + Raise, FQuat::Identity, FCollisionObjectQueryParams(ECC_WorldStatic), Probe, Params))
+	{
+		OutPoints.Add(Anchor);
+	}
+	else
+	{
+		Anchor = Walker;
+	}
 	for (int32 I = 0; I < Route.Num(); )
 	{
 		int32 Reach = I;
@@ -2710,7 +2737,7 @@ void ARRRandomDiceTown::Tick(float DeltaSeconds)
 		return;
 	}
 	// This map's rules for brawlers (now and then, for brawlers who joined since): its stairs are 45 degree slopes, so
-	// they walk slopes a little steeper than usual; and they fly high enough to reach the roofs
+	// they walk slopes a little steeper than usual (how high they fly is the map's GetFlightArea)
 	RulesTimer -= DeltaSeconds;
 	if (RulesTimer <= 0.f)
 	{
@@ -2721,7 +2748,6 @@ void ARRRandomDiceTown::Tick(float DeltaSeconds)
 			{
 				Movement->SetWalkableFloorAngle(46.f);
 			}
-			It->SetFlightMaxHeightInBodies(9.f);
 		}
 	}
 	if (Floaters.Num() > 0)

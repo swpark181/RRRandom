@@ -42,6 +42,8 @@ namespace
 
 	// The rim's hidden wall: high enough that flying brawlers can't get over it
 	constexpr float RimWallHeight = 6000.f;
+	// Flying: the feet up to this far over the floor
+	constexpr float FlightCeiling = 1800.f;
 	constexpr int32 RimWallSegments = 160;
 
 	// Cover sizes: a wall of dice (two rows), a hedge of balls; both about chest high (the cover blocks were 160)
@@ -155,6 +157,14 @@ FBox2D ARRRandomDiceLand::GetMapBounds() const
 {
 	const FVector2D Center(GetActorLocation().X, GetActorLocation().Y);
 	return FBox2D(Center - FVector2D(MapHalf), Center + FVector2D(MapHalf));
+}
+
+FBox ARRRandomDiceLand::GetFlightArea() const
+{
+	// Over the land, the feet well over its tallest things (the dice trees, the rainbow, the spinning die over the plaza);
+	// the rim's tall hidden wall keeps flyers over the island
+	const FBox2D Map = GetMapBounds();
+	return FBox(FVector(Map.Min, FloorZ - 1000.f), FVector(Map.Max, FloorZ + FlightCeiling));
 }
 
 float ARRRandomDiceLand::RimRadius(float Theta) const

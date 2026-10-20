@@ -18,6 +18,8 @@ namespace
 	constexpr float BasicSize = 100.f;
 	// How far above and below the actor to look for the floor
 	constexpr float FloorSearchUp = 500.f;
+	// Flying: the feet up to this far over the highest cliff
+	constexpr float FlightHeadroom = 400.f;
 	constexpr float FloorSearchDown = 3000.f;
 	// Grass blocks overlap their neighbors this much so their grass tops meet (as on cover)
 	constexpr float GrassOverlap = 1.08f;
@@ -298,6 +300,14 @@ FBox2D ARRRandomIsland::GetMapBounds() const
 	return FBox2D(Center - Half, Center + Half);
 }
 
+FBox ARRRandomIsland::GetFlightArea() const
+{
+	// Over the island, the feet up to over its highest cliffs (levels of LevelHeight, a digit each) with room to spare; the
+	// view from above keeps flyers in sight
+	const FBox2D Map = GetMapBounds();
+	return FBox(FVector(Map.Min, FloorZ - 1000.f), FVector(Map.Max, FloorZ + 9.f * LevelHeight + FlightHeadroom));
+}
+
 bool ARRRandomIsland::IsRoadAt(const FVector2D& WorldLocation) const
 {
 	int32 Row;
@@ -379,6 +389,7 @@ void ARRRandomIsland::Build()
 		return;
 	}
 	const float Z = Hit.ImpactPoint.Z;
+	FloorZ = Z;
 	const FVector2D Center(GetActorLocation().X, GetActorLocation().Y);
 	auto CellCenter = [&](int32 Row, int32 Col)
 	{

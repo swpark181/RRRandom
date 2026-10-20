@@ -152,6 +152,8 @@ public:
 	ERRRobotSeat GetRobotSeat() const { return Robot ? RobotSeat : ERRRobotSeat::None; }
 	/** In one of the robot's seats: hidden inside it, its fire button working the robot. */
 	bool IsInRobot() const { return Robot && RobotSeat != ERRRobotSeat::Combiner && RobotSeat != ERRRobotSeat::None; }
+	/** Driving the star robot with the whole crew in, alive and in play: its jump is this one's (Jump). */
+	bool CanJumpRobot() const;
 	/** Server, by the robot: combining it, in a seat, or done with it (null). */
 	void SetRobotSeat(ARRRandomStarRobot* NewRobot, ERRRobotSeat NewSeat);
 	/** Server: off the vehicle ridden, if any (the driver getting off lets the one behind out too). */
@@ -231,8 +233,11 @@ public:
 	void ReviveNow();
 
 	bool IsGiant() const { return bGiant; }
-	/** The flight ceiling in normal body heights above the arena floor; a map with tall buildings raises it. */
-	void SetFlightMaxHeightInBodies(float Bodies) { FlightMaxHeightInBodies = Bodies; }
+	/**
+	 * Where flying is allowed on this map (round 65): the map's GetFlightArea (Dice Town, Dice Land, the island, the studio),
+	 * the feet up to its Max.Z; false with no map (then a ceiling over where this one started).
+	 */
+	bool GetFlightArea(FBox& OutArea) const;
 	/** Cheat (RRGod): takes no damage at all, foam finger pokes in the back included, and is put back home instead of falling out. Server only to set. */
 	bool IsInvincible() const { return bInvincible; }
 	void SetInvincible(bool bNewInvincible) { bInvincible = bNewInvincible; }
@@ -256,6 +261,13 @@ public:
 	 * the flight). The body takes its flying pose then (URRRandomBodyAnimInstance) instead of walking in mid-air.
 	 */
 	bool IsInFlight() const;
+	/**
+	 * In the air on its own legs (round 64): a jump, a drop, a push into the air, not flying, not flung, not riding. The
+	 * body takes its jumping pose then (URRRandomBodyAnimInstance) instead of walking in mid-air.
+	 */
+	bool IsJumping() const;
+	/** Just landed from a jump or a drop: how deep the landing's crouch is now (0 to 1, gone in JumpLandTime). */
+	float GetLandSquash() const { return LandSquash; }
 	/** Degrees the body leans forward in flight (eased). */
 	float GetFlightLean() const { return FlightLean; }
 	/** Seconds of flight left. */
@@ -269,6 +281,8 @@ public:
 	/** Every push goes through here; the species' kit scales it (the tiger is pushed half as far). */
 	virtual void LaunchCharacter(FVector LaunchVelocity, bool bXYOverride, bool bZOverride) override;
 	virtual void Landed(const FHitResult& Hit) override;
+	/** A jump taken on the run carries on a little faster (JumpCarryShare), so it goes further. */
+	virtual void OnJumped_Implementation() override;
 	const TArray<FRRDamagePopup>& GetDamagePopups() const { return DamagePopups; }
 
 	/** True for a moment after each shot (as long as the firing pose holds), on every machine. */
@@ -454,13 +468,6 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Flight", meta = (ClampMin = "0"))
 	float FlightRiseSpeed = 900.f;
 
-	/** Longest a held jump keeps rising with the flight power; with FlightRiseSpeed this sets how high one lift goes (about 700). */
-	UPROPERTY(EditAnywhere, Category = "Flight", meta = (ClampMin = "0"))
-	float FlightMaxHoldTime = 0.75f;
-
-	/** Hard ceiling for flying: the feet never go higher above the arena floor than this many body heights (normal size). */
-	UPROPERTY(EditAnywhere, Category = "Flight", meta = (ClampMin = "0"))
-	float FlightMaxHeightInBodies = 5.f;
 
 	/**
 	 * While flying, a second jump press within this many seconds starts a dash that lasts as long as that press is held.
@@ -787,6 +794,15 @@ private:
 	/** Which way the final shot threw the body, so every machine drops the ragdoll the same way. */
 	UPROPERTY(Replicated)
 	FVector_NetQuantizeNormal KnockdownDirection = FVector::ForwardVector;
+
+	/** Jumping (every machine, from the movement it sees): in the air last frame, the fall's speed then, the landing's crouch. */
+	void UpdateJumpLanding(float DeltaSeconds);
+	bool bWasJumping = false;
+	float JumpFallSpeed = 0.f;
+	float LandSquash = 0.f;
+
+	/** The map whose flight area this one keeps to (GetFlightArea), looked for until found. */
+	mutable TWeakObjectPtr<AActor> FlightMap;
 
 	/** Set on a knockout by a vehicle: the velocity the body was thrown with (zero for any other knockout). */
 	UPROPERTY(Replicated)
