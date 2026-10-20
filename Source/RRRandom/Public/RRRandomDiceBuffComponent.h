@@ -57,6 +57,10 @@ struct FRRDiceRoll
 	/** An ultimate die (the tiger's): its face is how many times the ultimate strikes; Stat is unused then. */
 	UPROPERTY(BlueprintReadOnly, Category = "RRRandom")
 	bool bUltimate = false;
+
+	/** The owner's species' own die (FRRKit: the fox's invisibility, the rabbit's super hops, the squirrel's shield); Stat is unused then. */
+	UPROPERTY(BlueprintReadOnly, Category = "RRRandom")
+	bool bOwn = false;
 };
 
 /** Fired when a weapon die lands, with its face. */
@@ -69,13 +73,16 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FRRGiantDieSignature, int32 /*Face*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FRRFlightDieSignature, int32 /*Face*/);
 /** Fired when an ultimate die lands, with its face. */
 DECLARE_MULTICAST_DELEGATE_OneParam(FRRUltimateDieSignature, int32 /*Face*/);
+/** Fired when the owner's own die lands, with its face. */
+DECLARE_MULTICAST_DELEGATE_OneParam(FRROwnDieSignature, int32 /*Face*/);
 
 /**
  * A gauge fills over time; each full gauge stores one die. Rolling spends one stored die, which tumbles
  * for RollSpinTime over its owner's head and takes effect when it lands: a timed bonus to attack power,
  * attack speed or move speed sized by its face, or now and then a weapon die that hands its owner a new random gun,
- * a giant die that makes its owner bigger, harder hitting and harder to hurt for a while,
- * or a flight die that lets its owner rise while holding jump and glide down for a while.
+ * a giant die that makes its owner bigger, harder hitting and harder to hurt for a while (the tiger's),
+ * a flight die that lets its owner rise while holding jump and glide down for a while (the dragon's),
+ * or the owner's own die (the other species': see FRRKit). The owner sets each chance by its species.
  * An owner with an ultimate (UltimateDieChance above 0: the tiger) sometimes stores a golden ultimate die instead of a plain
  * one; it is rolled before the plain ones, and its face is how many times the ultimate strikes (OnUltimateDie).
  */
@@ -146,6 +153,8 @@ public:
 	FRRFlightDieSignature OnFlightDie;
 	/** The owner listens to this to use its ultimate. */
 	FRRUltimateDieSignature OnUltimateDie;
+	/** The owner listens to this for its own die's power. */
+	FRROwnDieSignature OnOwnDie;
 
 	/** Chance for each die the gauge fills to be an ultimate die; 0 for owners without an ultimate. One at a time. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom", meta = (ClampMin = "0", ClampMax = "1"))
@@ -167,6 +176,10 @@ public:
 	/** Chance for each die to be a flight die (on top of the weapon and giant die chances). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom", meta = (ClampMin = "0", ClampMax = "1"))
 	float FlightDieChance = 0.1f;
+
+	/** Chance for each die to be the owner's own die (on top of the weapon, giant and flight die chances); set by species. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom", meta = (ClampMin = "0", ClampMax = "1"))
+	float OwnDieChance = 0.f;
 
 	static FLinearColor GetGiantColor() { return FLinearColor(0.3f, 0.95f, 1.f); }
 	static FLinearColor GetFlightColor() { return FLinearColor(1.f, 0.5f, 0.85f); }

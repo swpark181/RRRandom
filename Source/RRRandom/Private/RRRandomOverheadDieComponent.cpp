@@ -2,6 +2,7 @@
 #include "RRRandomEffects.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomDiceBuffComponent.h"
+#include "RRRandomKit.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/CollisionProfile.h"
@@ -136,7 +137,8 @@ void URRRandomOverheadDieComponent::TickComponent(float DeltaTime, ELevelTick Ti
 	const APlayerCameraManager* Camera = UGameplayStatics::GetPlayerCameraManager(this, 0);
 	const float Age = Dice ? Dice->GetTimeSinceLastRoll() : UE_BIG_NUMBER;
 	const float SpinTime = Dice ? Dice->GetSpinTime() : 0.f;
-	if (!Dice || !Camera || !Brawler->IsAlive() || Age >= SpinTime + HoldTime + ExitTime)
+	// (an invisible opponent rolls unseen)
+	if (!Dice || !Camera || !Brawler->IsAlive() || Age >= SpinTime + HoldTime + ExitTime || Brawler->GetKit()->IsCloakedOnThisScreen())
 	{
 		if (IsVisible())
 		{

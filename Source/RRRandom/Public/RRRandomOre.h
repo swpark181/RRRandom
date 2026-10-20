@@ -64,6 +64,8 @@ public:
 
 	ERROreKind GetKind() const { return Kind; }
 	bool IsResting() const { return bResting; }
+	/** Server: a resting piece hops up and homes in on Puller's feet in an arc (the squirrel's ore magnet), picked up on arrival. */
+	void PullToward(const ARRRandomCharacter* Puller);
 
 protected:
 	virtual void BeginPlay() override;
@@ -127,6 +129,10 @@ private:
 
 	FVector Velocity = FVector::ZeroVector;
 	float Age = 0.f;
+	/** Server: pulled by a squirrel's ore magnet, from where, and for how long so far. */
+	TWeakObjectPtr<const ARRRandomCharacter> Puller;
+	FVector PullFrom = FVector::ZeroVector;
+	float PullAge = 0.f;
 	/** Below this height it has fallen off the map. */
 	float LostZ = -UE_BIG_NUMBER;
 	/** Random phase so a pile doesn't bob in step. */

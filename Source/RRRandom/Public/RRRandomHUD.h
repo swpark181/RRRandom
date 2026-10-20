@@ -178,6 +178,8 @@ private:
 	TWeakObjectPtr<const ARRRandomCharacter> OreViewer;
 	float OreBounceAt = -10.f;
 	int32 DroppedOre = 0;
+	/** What the squirrel's cheek pouch kept of it. */
+	int32 KeptOre = 0;
 	float DroppedAt = -10.f;
 	/** Where the panel's big number was last drawn (the gains fly there). */
 	FVector2D OreCountAt = FVector2D::ZeroVector;

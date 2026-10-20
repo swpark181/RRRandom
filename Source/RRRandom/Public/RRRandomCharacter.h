@@ -21,6 +21,7 @@ class URRRandomOverheadDieComponent;
 class URRRandomWingsComponent;
 class URRRandomFlightEffectsComponent;
 class URRRandomGunComponent;
+class URRRandomKitComponent;
 class URRRandomOreCarryComponent;
 
 /** A damage number floating over a brawler's head, drawn by the HUD. */
@@ -36,6 +37,8 @@ struct FRRDamagePopup
 	FVector2D Nudge = FVector2D::ZeroVector;
 	/** Seconds it stays up (a skull lingers). */
 	float Lifetime = 0.8f;
+	/** A fox's hit from behind or out of invisibility (FRRKit::bBackstab): a bigger gold number. */
+	bool bBackstab = false;
 };
 
 /**
@@ -45,6 +48,8 @@ struct FRRDamagePopup
  * turns giant for a while when a giant die comes up (bigger, more damage dealt, less taken),
  * flies for a while when a flight die comes up (hold jump to rise, let go to glide down), jumps and climbs onto cover,
  * and is knocked out at 0 health, getting back up at its starting spot after a delay.
+ * Each species plays a little differently through its kit (URRRandomKitComponent, FRRKit): an always-on passive and a die
+ * of its own; the giant die is the tiger's and the flight die the dragon's.
  * Looks like the Mixamo-rigged fox in /Game/Characters/Fox (idle, walk, fire, death); without those assets it falls back
  * to the engine's mannequin with idle and walk only.
  *
@@ -67,6 +72,10 @@ public:
 	URRRandomDiceBuffComponent* GetDiceBuffs() const { return DiceBuffs; }
 	/** The dice ore carried in Meteor Rush. */
 	URRRandomOreCarryComponent* GetOreCarry() const { return OreCarry; }
+	/** Its species' passive and own die (URRRandomKitComponent). */
+	URRRandomKitComponent* GetKit() const { return Kit; }
+	/** The gun in its hands. */
+	URRRandomGunComponent* GetGun() const { return Gun; }
 	/** Where this brawler starts and gets back up. */
 	const FVector& GetHomeLocation() const { return HomeLocation; }
 
@@ -187,6 +196,8 @@ public:
 	 * In a third-person game (no fog of war) the radius is ThirdPersonSightRange instead: what is in plain sight, not just close by.
 	 */
 	static bool IsSeenByTeam(const UWorld* World, int32 InTeam, const FVector& Location);
+	/** IsSeenByTeam at this brawler, unless it is invisible to that team (the fox's own die: URRRandomKitComponent::IsHiddenFrom). */
+	bool IsNoticedByTeam(int32 InTeam) const;
 	/** Where this brawler looks from for the fog of war: half its height (the capsule's middle). */
 	FVector GetEyeLocation() const;
 	/**
@@ -218,6 +229,8 @@ public:
 	void StartGiant(float Seconds);
 	/** Server only: can fly for at least this many seconds (what a flight die does). */
 	void StartFlight(float Seconds);
+	/** Server only, a cheat (RROwnDie): what this species' own die does on this face (the tiger's giant, the dragon's flight, the rest URRRandomKitComponent). */
+	void CheatOwnDie(int32 Face);
 	/** Damage dealt while giant, as a factor. */
 	float GetGiantDamageMultiplier() const { return GiantDamageMultiplier; }
 	/** Damage taken while giant, as a factor. */
@@ -233,6 +246,8 @@ public:
 
 	/** Ends a held dash when jump is let go. */
 	virtual void StopJumping() override;
+	/** Every push goes through here; the species' kit scales it (the tiger is pushed half as far). */
+	virtual void LaunchCharacter(FVector LaunchVelocity, bool bXYOverride, bool bZOverride) override;
 	virtual void Landed(const FHitResult& Hit) override;
 	const TArray<FRRDamagePopup>& GetDamagePopups() const { return DamagePopups; }
 
@@ -285,6 +300,10 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "Random")
 	TObjectPtr<URRRandomOreCarryComponent> OreCarry;
+
+	/** The species' passive and own die. */
+	UPROPERTY(VisibleAnywhere, Category = "Random")
+	TObjectPtr<URRRandomKitComponent> Kit;
 
 	/** The 3D die that tumbles over the head on each roll. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Random")
@@ -534,7 +553,7 @@ private:
 	void UpdateWalkSpeed();
 	void UpdateAmmoAndHealth(float DeltaSeconds);
 	void UpdateDamagePopups(float DeltaSeconds);
-	void AddDamagePopup(float Amount, ERRHitEffect Effect);
+	void AddDamagePopup(float Amount, ERRHitEffect Effect, bool bBackstab);
 	/** Seconds between shots with the current gun and attack speed buffs. */
 	float GetFireInterval() const;
 	/** Server side of FireAt. Slack lets a client's shot arrive a little before the server's cooldown ends. */
@@ -573,6 +592,21 @@ private:
 	/** Scales the whole brawler, keeping its feet where they are. */
 	void SetBodyScale(float NewScale);
 	void OnFlightDie(int32 Face);
+	void OnOwnDie(int32 Face);
+	/** The species' passive numbers (health, jumps) and dice chances on this brawler; every machine. */
+	void ApplyKit();
+	/** The rabbit's super hop in mid-air: on the controlling machine (predicted) and the server. */
+	bool TrySuperHop();
+	void DoSuperHop();
+
+	UFUNCTION(Server, Reliable)
+	void ServerSuperHop();
+
+	/** The dragon's glide: whether jump is held, told to the server by a remote player (the engine's own flag lets go early). */
+	UFUNCTION(Server, Reliable)
+	void ServerSetJumpHeld(bool bHeld);
+	void SetJumpHeld(bool bHeld);
+	bool bJumpHeld = false;
 
 	UPROPERTY(Replicated)
 	bool bDecoy = false;
@@ -640,7 +674,7 @@ private:
 	void UpdateVehicleHandling();
 
 	UFUNCTION(NetMulticast, Unreliable)
-	void MulticastDamagePopup(float Amount, ERRHitEffect Effect);
+	void MulticastDamagePopup(float Amount, ERRHitEffect Effect, bool bBackstab);
 
 	UFUNCTION()
 	void OnRep_Team();
@@ -790,6 +824,10 @@ private:
 	float BaseJumpZVelocity = 0.f;
 	float BaseJumpMaxHoldTime = 0.f;
 	float BaseAirControl = 0.f;
+	/** MaxHealth before the species' kit scales it. */
+	float BaseMaxHealth = 0.f;
+	/** Still gliding down from a flight that ran out (until landing), apart from the dragon's held glide. */
+	bool bFlightGlide = false;
 
 	float LastCombatTime = -UE_BIG_NUMBER;
 	float NextFireTime = 0.f;

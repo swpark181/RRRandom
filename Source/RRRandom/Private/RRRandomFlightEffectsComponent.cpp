@@ -1,5 +1,6 @@
 #include "RRRandomFlightEffectsComponent.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomKit.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/DecalComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -120,7 +121,8 @@ void URRRandomFlightEffectsComponent::TickComponent(float DeltaTime, ELevelTick 
 
 	const UCharacterMovementComponent* Movement = Brawler->GetCharacterMovement();
 	const bool bInAir = Movement && Movement->IsFalling();
-	const bool bShow = bHasGround && Brawler->IsAlive() && !Brawler->GetVehicle();
+	// (none under an invisible opponent: it would give it away)
+	const bool bShow = bHasGround && Brawler->IsAlive() && !Brawler->GetVehicle() && !Brawler->GetKit()->IsCloakedOnThisScreen();
 	UpdateShadow(Feet, bShow, Size);
 	UpdateDust(Feet, bInAir && Brawler->IsAlive(), DeltaTime, Size);
 
