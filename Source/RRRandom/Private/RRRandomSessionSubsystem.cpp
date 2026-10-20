@@ -147,7 +147,10 @@ void URRRandomSessionSubsystem::RunStartupCommand()
 	FString MapName;
 	if (FParse::Value(FCommandLine::Get(), TEXT("RRMap="), MapName))
 	{
-		ThirdPersonMap = MapName.Equals(TEXT("DiceLand"), ESearchCase::IgnoreCase) ? ERRThirdPersonMap::DiceLand : ERRThirdPersonMap::DiceTown;
+		ThirdPersonMap = MapName.Equals(TEXT("DiceLand"), ESearchCase::IgnoreCase) ? ERRThirdPersonMap::DiceLand
+			: MapName.Equals(TEXT("Studio"), ESearchCase::IgnoreCase) ? ERRThirdPersonMap::Studio : ERRThirdPersonMap::DiceTown;
+		// The studio is a third person map only
+		bThirdPersonMode |= ThirdPersonMap == ERRThirdPersonMap::Studio;
 	}
 	FString RuleName;
 	if (FParse::Value(FCommandLine::Get(), TEXT("RRRule="), RuleName))

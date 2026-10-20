@@ -1,6 +1,6 @@
 # 작업 이어하기 메모 — 팀전 프로토타입 (FPS식 사격 + 엄폐물)
 
-최종 업데이트: 2026-10-20 (54차)
+최종 업데이트: 2026-10-20 (61차)
 
 Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMemory/` 에 복사해 둠 — 다른 PC 세션은 먼저 읽기.
 
@@ -60,6 +60,77 @@ Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMem
 - (53차) 하늘에서 운석·조각 등 모든 아이템이 떨어질 때 별꼬리처럼 길게 그리며 떨어지고, 떨어지면 이펙트.
 - (53차 추가) Meteor Rush 제한 시간 15분, 목표 77점. 운석 간격 1분.
 - (54차) 캐릭터 아이덴티티: 시안 비교(A 성격 키트 / B 액션 스킬 / C 전용 주사위) 끝에 "패시브 + 전용 주사위" 를 적용. 여우는 상대로 변장 대신 투명화(집중해서 보면 보이는 실루엣).
+- (55차) 용은 추가 날개 이펙트 대신 자기 날개로: 활공 땐 독수리처럼 고정, 평소엔 펄럭.
+- (56차) 날아다닐 때 기본 포즈와 애니메이션(걷기 재활용 대신).
+- (57차) 용 활강 애니메이션(동물친구 활공 + 궁극기 큰 용 둘 다): 더 역동적으로, 날개 고정 + 가끔 한 번 펄럭.
+- (58차) 캐릭터를 "브롤러" 대신 "동물친구" 로 부름(타이틀 `PICK YOUR ANIMAL FRIEND`, 문서·페이지). 코드 이름(`ARRRandomCharacter`, 변수 `Brawler`)은 그대로.
+- (59차) 맵 자동차 5종 확장 → Tripo 시안(16대, 합체 로봇 15대) → 별 팀(13·14·15) 4각도·3D → 합체 로봇 3D → 얼굴 v2~v5(v5: 눈동자 없는 눈 + 각진 로봇 주둥이로 확정). 가슴 차를 로봇에 맞춰 다시. 게임 안에서: 세 차를 일정 반경에 모으면 합체 인디케이터, F 를 먼저 누른 쪽이 합체 진행(약 10초, 만화 같은 합체 모션, 게이지), 진행자는 완성까지 기다려야 하고 죽으면 취소. 완성되면 3명이 타야 움직이고 한 명은 이동, 한 명은 공격, 한 명은 방어.
+- (60차) 로봇이나 호랑이 궁극기, 드래곤 궁극기는 구조물을 파괴할 수 있게. 파괴된 건물은 일정 시간 뒤 그 자리에 유저가 없을 때 복구.
+- (61차) 로봇 걷는 모션을 더 자연스럽게, 공격 이펙트와 로켓도 새로. → (작업 중 추가) 아무 장애물 없는 테스트 레벨을 만들어 이런 애니메이션 작업 때 쓰기.
+
+## 61차 — 로봇 걷기·로켓 주먹 + 애니메이션 테스트 맵 "스튜디오" (사용자: 로봇 걷기 자연스럽게, 공격 이펙트·로켓 새로 → 장애물 없는 테스트 레벨을 만들어 애니메이션 작업에 쓰자)
+
+- 로봇 부품을 관절로: 새 `C:\work\char-pipeline\scripts\blender_robot_joints.py <out> <parts dir> 160 390 30 262`(`Tools/char-pipeline/scripts` 에도) — 59차 조각(`output\vehicles\robot\SM_StarRobotLegs/ArmL/ArmR.fbx`)을 면 중심 기준으로 무릎 160·팔꿈치 390 에서 자름, 다리 가운데 |y|<30·z>262 는 골반 → `output\vehicles\robot_joints\SM_StarRobotPelvis/ThighL/R/ShinL/R/UpperArmL/R/ForearmL/R.fbx`(모두 로봇 원점 피벗) → `ue_import_props.py "/Game/Vehicles|SM_StarRobotPelvis=…=@M_StarRobot|…"`. 자를 높이는 스크래치 `robot_slices.py`(10 단위 높이별 폭)로 찾음 — 팔은 390 근처에서 바깥 폭이 좁아짐(팔꿈치), 다리는 140~170 이 좁음.
+- `ARRRandomStarRobot`: 관절 컴포넌트 `HipL/R`(35, ∓86, 300), `KneeL/R`(36, ∓100, 160), `ElbowL/R`(−5, ∓178, 392)와 부품 9개. 합체 연출은 예전 통짜 `Legs/ArmL/ArmR`, 완성되면 `ShowJointed(true)` 로 관절 부품(메시가 없으면 예전대로). `PoseAssembled` 다시 씀: 위상 2π = 두 걸음, 엉덩이 각 `StepSwing` 24°·sin, 앞으로 나가는 다리 무릎 `KneeLift` 42°·max(0,cos)², 그만큼 허벅지도 0.3 더 듦, `StrideLength` = 2·300·sin24°(발 안 미끄러짐), 엉덩이 높이 −300(1−cos 엉덩이 각)(디딘 다리 곧게 바닥), 발이 닿는 순간(위상 π/2, 3π/2 통과) `StepJolt` → 12 내려앉음 + 고개 끄덕 + `Footstep` 먼지(정강이 기준 발바닥 위치), 엉덩이 롤 3.5°(디딘 발 쪽)·요 6°, 가슴 요 반대 1.8배·앞 숙임 4°(엉덩이 높이 300 기준 회전), 팔 ±20° 다리와 반대, 팔꿈치 6° + 앞으로 올 때 14°, 조준 땐 팔 85° 들고 팔꿈치 −28°(팔뚝 수평).
+- 로켓 주먹: `ARRRandomProjectile::MakeRocketFist(bLeft, Radius)` + 복제 `RocketArm` — 구 대신 팔뚝 메시(`ARRRandomStarRobot::LoadForearm`, `GetForearmFlightPose`: 팔꿈치→주먹 끝(67, ±232, 212) 방향을 +X 로 돌리고 가운데를 원점에), 600°/s 회전, Tick 마다 `RocketExhaust`, 착탄 `RocketBlast`(1.5), 사거리 끝이면 공중 폭발(타이머). 로봇: 크기 3.5배 대신 반지름 55, 속도 1.3 → 0.55, 출발점 = 어깨 + (위팔 128 + 팔뚝 절반) 앞. `OnRep_Shot`: 그 팔뚝을 숨기고 `RocketLaunch`(예전 `SonicBoom` 대신, 안에서 함께), 0.45초 뒤 팔꿈치째 BackOut 으로 자라며 `DiceLandBurst`.
+- 새 이펙트(`ARRRandomEffects`, 기존 공 파티클 조합): `RocketLaunch`(섬광, 팔꿈치 뒤로 불꽃 26·연기 14, 연기 고리, 앞쪽 소닉붐, 불티), `RocketExhaust`(심 60/s, 불꽃 90/s, 연기 28/s, 가끔 불티), `RocketBlast`(섬광, 불덩이 16, 연기 12, 고리 2, `StarImpact`, 별·주사위 튐), `Footstep`(먼지 12 + 고리).
+- 스튜디오: 새 `ARRRandomStudio`(복제, 모든 머신이 같게): 레벨 바닥을 숨기고 40000 회색 판(BlockAll, `BasicShapeMaterial` Color) + ±6000 격자선(100 마다 3, 500 마다 8, 가운데 축 14 — 분홍 X·민트 Y, 충돌 없음). `ERRThirdPersonMap::Studio`, `-RRMap=Studio`(3인칭 강제). 게임 모드 `bStudio`/`IsStudio()`: 팀 간격 3000, 탈것은 별 팀 3대만, AI 컨트롤러는 스튜디오면 상대 팀 봇 정지. 처음 바닥색(0.56)은 밝은 하늘 노출에서 거의 흰색이라 0.24 로.
+- 치트: `RRStudioCam [각도] [거리] [높이]`/`RRStudioCamOff`(로컬 `ACameraActor`, 대상의 방향을 초당 3 으로 따라감, 궁극기 시점 중엔 안 함), `RRSlomo [배속]`(서버 `SetGlobalTimeDilation`), `RRRobotFire [거리]`(공격석 승무원 이름으로 `CrewFire`). 스크래치 `game_seq.py` 에 `bring=이름`(내 옆 300 으로), `place=이름,dx,dy`, `watchfrom=…`(봇 시점 — 봇은 탑뷰 카메라라 쓸모없었음).
+- 확인(빌드 경고 없음, 스튜디오): 호랑이 걷기 옆·앞·뒤; 로봇 3명 탑승 후 옆에서 걷기 연속 캡처(다리 번갈아 무릎 굽힘, 팔 반대로, 발 디딜 때 먼지); `RRSlomo 0.3` + `RRRobotFire` — 팔 들고 팔뚝이 주먹부터 날아감(연기 꼬리·뒤 불꽃), 그 팔뚝 빈자리 → 다시 자람, 바닥에 맞아 불덩이·고리·연기. 처음 테스트에서 세 번째 봇이 로봇까지 안 와서(주사위 랜드) `bring` 으로 데려옴 — 실제 게임에서 봇이 늦게 오는 원인은 안 봄.
+- 확인 못 한 것: 온라인 참가자 화면(로켓은 복제된 `RocketArm` 으로 같은 모습, 팔뚝 숨김은 `OnRep_Shot`), 사람이 공격석에서 쏘는 것, 회전하며 걷기·정지 직후 자세, 잘린 면(무릎·팔꿈치 단면)이 가까이서 보이는지.
+
+## 60차 — 구조물 파괴와 복구 (사용자: 로봇·호랑이 궁극기·드래곤 궁극기가 구조물을 부수고, 일정 시간 뒤 그 자리에 유저가 없으면 복구)
+
+- 새 `RRRandomWreckage.h/.cpp`: `ARRRandomWreckage`(복제, 항상 관련, 첫 파괴 때 서버가 스폰). `static Wreck(Context, From, To, Radius, bColumn)` → 복제 배열 `Wrecks`(`FRRWreck` Id·선분·반지름·기둥 여부; 기둥 = 평면 거리만, 바닥 위 모든 높이). 서버·클라 모두 `Apply`(OnRep) 에서 현재 목록 전체로 맵 상태를 다시 맞춤 → 늦게 들어온 참가자도 같은 구멍. 서버 Tick 0.25초마다: `rr.Wreck.RestoreSeconds`(기본 15) 지난 것 중 `IsOccupied` 가 아니면 삭제. 막는 것: 동물친구(쓰러진 상태 포함, 거리 여유 120 + 캡슐 반지름 — 공 모양은 반높이), 사람이 탄 탈것(320), 승무원 있거나 합체 중인 로봇(480). 처음엔 빈 탈것도 막았더니 주사위 랜드에서 세워 둔 별 팀 다리 차 때문에 영영 복구 안 됨 → 탄 것만.
+- 주사위 마을(`ARRRandomDiceTown::ApplyWrecks`): 칸 단위. 레벨 1 이상, 255(거대 주사위)·모델 밑 숨은 칸 제외, 칸 중심이 파괴 안이면 깨짐. 모델(지붕·Tripo 나무·마시멜로 덤불·가로등 기둥)은 바운드가 닿으면 통째로 숨기고 그 바운드 안 숨은 칸도 깨짐, 2차로 깨진 숨은 칸 위에 있는 다른 모델도 숨김. 차양(`Decor`), 계단은 한 단이라도 닿으면 그 계단 전체(`FStair` 에 `StepFirst/StepCount/SolidFirst/SolidCount` 기록), 가로등 별(`Floater.bWrecked`, 바닥 위 1200 아래 + 공전 안 하는 것만). 보이기: `MakeBlocks` 가 칸 → 인스턴스(`CellBlocks`)를 기록, 바뀐 칸과 이웃 6칸을 다시 판정(깨짐/묻힘 = 크기 0, 드러난 속 블록은 새 인스턴스). 충돌: `MakeCollision` 이 병합 상자(`GridBoxes`)·칸별 상자(`BoxOfCell`) 기록, 깨진 칸이 든 상자는 섬 아래로 치우고 남은 칸을 같은 방식으로 다시 병합해 `WreckSolid`(숨김, BlockAll)로 — 바뀔 때마다 통째로 다시 채움. 봇 길 그래프·미니맵은 그대로(원래 모양).
+- 주사위 랜드: `GetWreckSolid`/`GetWreckLooks`(새). 처음 파괴 때 숨은 상자마다(가운데 400 안 받침대 제외) 그 위 모습(주사위·빈 주사위·공·줄기 — 상자 안 ±40, 가는 상자면 위 450·옆 180 까지 잎)을 묶음(로그 `87 pieces with 384 looks`). 닿으면 상자째. 섬·다른 맵: `ARRRandomCover` 를 숨기고 충돌 끔(봇 엄폐 찾기는 숨은 것 건너뜀).
+- 연출(화면 있는 머신만): 파편 = `SM_BTBlock` 풀 420(커스텀 데이터 = 깨진 칸 색, 주사위 랜드는 모습의 첫 세 float 색, 섬은 흙 + 잔디), 한 번에 최대 110개, 밖·위로 튀어 중력 1900, 바닥에서 튕기고 끝에 줄어듦. 복구 = 0.4초 BackOut 으로 자람 + `DiceLandBurst` 최대 8곳(처음 반지름 70 은 흰 덩어리처럼 커서 28).
+- 연결: 호랑이 `Impact`(서버) → 기둥, 반지름 `AreaRadius × WreckShare`(0.8). 드래곤 → 서버에서 브레스 앞머리(`Front`)가 `WreckStep`(450) 갈 때마다 그 토막을 기둥으로(반지름 `BreathRadius × WreckShare` 0.85, 선 끝에서 남은 토막), `WreckedTo` 는 패스 시작에 0. 로봇 주먹 → `ARRRandomProjectile::WreckRadius`(새, 0 이면 안 함; 로봇이 250) — `OnHit` 에서 폰이 아닌 곳에 맞으면 공 모양.
+- 치트 `RRWreck [반지름] [1]`(콘솔): 화면 가운데에서 8000 까지 월드 스태틱 추적한 지점(처음엔 캐릭터 600 앞이었는데 겨누기 어려워 바꿈).
+- 확인(스크래치 `run_seq.ps1`/`game_seq.py`, 빌드 경고 없음): 주사위 마을 3인칭 — 치트로 가로등·파란 엄폐 블록·건물 바깥 계단벽에 구멍, 파편, 10초 뒤 자라며 복구; 호랑이 궁극기 3번(광장 받침대 일부가 깨지고 거대 주사위는 남음, 각 12초 뒤 복구); 드래곤 궁극기 LV6 대각선 7000 — 기지 벽·탑과 집들이 브레스 길을 따라 잘려 나감(로그 최대 354칸, 모델 118개), 토막마다 복구, 시작점(내 캐릭터가 서 있는 곳) 두 토막은 계속 남음; 로봇 합체 후 공격 봇의 주먹 5발이 구조물을 깸 → 15초 뒤 모두 복구. 주사위 랜드 — 기둥 700 으로 엄폐 주사위 10개 통째로, 6초가 지나도 내가 안에 있는 동안 기다리다 걸어 나간 지 1초 만에 복구. 탑뷰 섬 — 엄폐 블록 2개.
+- 확인 못 한 것: 온라인 참가자 화면(같은 목록을 OnRep 으로 적용 — 설계상 같음), 깨진 2층 위에 서 있던 캐릭터가 떨어지는 장면(충돌은 로그상 잘려 있음), 부서진 칸 위 봇 길(봇이 없는 바닥으로 가다 떨어지고 1.5초마다 새 길), 거대한 드래곤 길에서의 프레임(Apply 가 토막마다 전체 다시 계산 — 로그상 문제 없지만 실측 안 함), 세워 둔 빈 차가 복구된 벽 안에 끼는 경우.
+- 주의: 빌드 직후 Smart App Control 이 DLL 을 막아(4551) 로그 문구를 바꿔 다시 빌드함(메모 그대로).
+
+## 59차 — 별 팀 합체 로봇 (사용자: 차 5종 → 합체 구조 15대 → 별 팀 → 로봇 얼굴 v5 확정 → "가슴 차를 로봇에 맞춰서 다시, 게임 안에서 차를 일정 반경에 3가지 다 모으면 합체 인디케이터가 뜨고 F 를 먼저 누른 사람이 합체 진행, 10초 정도 만화 같은 합체 모션, 진행자는 완성될 때까지 기다리고 죽으면 취소, 게이지, 완성되면 3명이 타야 움직이고 이동·공격·방어")
+
+- 에셋(Tripo 웹, 크레딧 22,620 → 22,560: 로봇 v5 30 + 새 가슴 차 30). 새 가슴 차: 원래 가슴 차 + 로봇 v5 앞모습을 참고로 Nano Banana 시안 4장(앞면 = 로봇 가슴 금테 그릴 + 초승달, 은색 각진 범퍼, 보닛 = 접힌 호랑이 헬멧, 어깨 블록 펜더) → 3번 → 앞·옆·뒤 → 멀티뷰 3D. 사용자 허락받고 FBX 4개 다운로드(`star_chest_v5`, `star_robot_v5`, `star_arms`, `star_legs` → `C:\work\char-pipeline\input\vehicles_v2\star_team\models\<이름>\`).
+- `blender_vehicles.py ... SM_StarChest=…=300 SM_StarArms=…=300=90 SM_StarLegs=…=420` → `output\vehicles\star\` (300×281×180, 300×309×181, 420×176×133; 팔 차만 앞이 −Y 라 90° 더). 앞 방향은 새 `blender_textured_views.py <png> <fbx>=<텍스처> …`(텍스처 입혀 앞·옆·위 렌더; 기존 프리뷰는 텍스처가 안 나와 방향을 못 봄)로 확인.
+- 새 `blender_robot_parts.py <out> <fbx> 640 90 315 465 100 205`: 로봇을 높이 640·앞 +X·바닥 가운데 피벗으로 → `SM_StarRobot` + 면 중심 기준으로 자른 다섯 조각 `SM_StarRobotLegs`(엉덩이 315 아래, 단 발 근처는 옆 205·허벅지 높이는 135 안쪽만 — 그 바깥은 늘어진 팔), `Torso`, `Head`(목 465 위), `ArmL`(+Y 블렌더 = 로봇 왼쪽), `ArmR`(옆 100 밖). 조각들은 로봇 원점 피벗 그대로라 같은 자리에 두면 원래 모양.
+- `ue_import_props.py` 에 png 자리 `@M_Other`(이미 만든 머티리얼 공유) 추가 → `/Game/Vehicles/SM_StarChest|Arms|Legs`, `SM_StarRobot`, 조각 5개(모두 `M_StarRobot`). 스크립트 3개 `Tools/char-pipeline/scripts` 에도 복사.
+- 차(`ARRRandomVehicle`): 종류 `StarChest/StarArms/StarLegs`, 핸들링 표에 `DriverSeatY`/`RearSeatY`(나란히 좌석 ±42)·`bRams`(자동차처럼 들이받기) 추가. `bCombined`(복제, 숨김·좌석 없음)·`SetCombined`(나올 땐 바닥 찾아 놓음)·`GetStarPart`·`GetKindMesh`·`GetHeight`. 게임 모드: 가슴 차 (0, −Near×0.96), 팔 차 (0, +Near×0.96), 다리 차 (−Near×0.6, 1250) — Dice Town 에서 팔 차 원래 자리(Near×0.6, 1250)는 집 안이었음(위로 쏜 Visibility 추적이 지붕을 못 맞혀 "열린 하늘" 검사는 실패 → 자리를 길 위로). 바닥이 아레나보다 40 넘게 높으면(울타리·상자 위) 길 따라 ±200~600 옮김.
+- `ARRRandomStarRobot`(새): 위 README 참고. 합체 연출 시간표(초): 통통 0~1, 하늘로 1~3, 빙글 링(반경 280, 높이 560) ~4.2, 변신 4.2, 다리 착지 5.6, 몸통 6.8, 팔 6.8~7.6(BackOut 스냅), 머리 8~8.5, 포즈 8.9~10. 비트 이펙트: TeleportPoof / SonicBoom+WingsBurst / StarImpact / TigerStrike / StarImpact / HitBurst / MoonFlash+WingsBurst / UltimateDieBurst+GiantBurst. 걸을 때 엉덩이 들썩·롤, 팔 흔들기, 숨쉬기. 방어막 = 엔진 구 + `M_FXCloak`(Color 하늘색, Opacity·Fill). 부서지면 차를 1050 밖(같은 높이 ±150 바닥, 아니면 340)으로 → 바로 다시 합체 안 되게.
+- 캐릭터: `Robot`/`RobotSeat`(복제) + `ApplyRobotSeat`(숨김, 폰 채널 무시, 공격·방어는 이동 끄고 충돌 끄고 로봇에 붙음). F 우선순위: 로봇에서 내리기 → (플레이어만) 합체 시작 → 로봇 타기 → 탈것. 사격 `ShootAt`/`FireAt` → `CrewFire`(클라는 0.1초마다 서버 요청). 걷기 속도는 이동 담당 + 3명일 때만, 합체 진행자는 0. 점프·주사위 막음. `TakeDamage` 는 로봇으로. `KnockOut`/`EndPlay` 에서 로봇 나가기(진행자면 취소). 카메라 `RobotCameraPull`. 투사체: 쏜 쪽 팀 로봇 무시. HUD `DrawStarRobot`(RRRandomHUD.cpp 끝, 기존 `DrawStarburst`/`DrawEdgedText` 재사용), 숨겨진 캐릭터는 머리 위 표시 안 함, 로봇 관련일 땐 `[F] RIDE` 안내 숨김.
+- 봇: `UpdateStarRobot`(탈것보다 먼저). 처음엔 봇이 별 차를 타려고 F → 그게 합체로 이어져 플레이어가 누를 틈이 없었음 → 봇은 별 차를 안 타고(`IsStillWorthRiding`), 캐릭터 F 의 합체는 플레이어만, 봇은 `StartCombine` 직접(같은 팀 플레이어가 합체 가능 거리에 있으면 양보). 로봇에 빈자리면 12000 안에서 걸어감(Dice Town 은 경로 따라, 740 안은 직진 — 경로 끝이 탑승 거리 밖에서 멈춰 한 봇이 못 타던 것).
+- 처음 확인에서 고친 것: 진행자가 탑승 거리(460) 밖이면 첫 자리를 봇이 가져감 → 진행자는 거리 무관하게 첫 자리. 주먹이 어깨 높이(520)에서 피치 −25° 까지라 가까운 적 머리 위로 지나감 → −65°. 로봇 위 판이 로봇을 가림 → 머리 위 240 로. 3인칭에서 로봇이 화면 가운데를 가림 → 팔 길이 ×3.4, 높이 +640. 로봇 방향: 처음엔 진행자에게 등을 돌리게 했다가, 추가 요청(로봇이 시전자를 바라보고 합체)으로 진행자를 바라보게 스폰(가슴·얼굴이 진행자 카메라 쪽). 이어서 추가 요청으로 완성 0.4초 뒤 자동으로 돌아섬: `FinishCombine` 이 `bIntroTurn`·`IntroTurnYaw`(+180°, 복제)를 세우고, 이동 담당의 조종하는 머신이 `UpdateRobotIntroTurn` 으로 캡슐을 150°/s 로 돌림(그 전에 조종하면 그만, 완성 뒤 3.4초 안에만 — 나중에 다시 탄 사람은 안 돎). 제자리 회전도 걸음으로 침(`TurnStepShare` 2.5). 3인칭으로 앞 → 옆 → 등 확인. 부서질 때 화면이 하얘짐 → 연기·불 크기 줄임. 3인칭 팔 차에서 카메라가 로켓 통 안 → 별 차는 높이 −100 만큼 카메라 올림.
+- 테스트: Ctrl + 0 `RRStarCars`(추가 요청으로 단축키 — 처음 F4, 다시 요청으로 Ctrl + 0: 0 키에 묶고 `OnCheatStarCarsKey` 가 Ctrl 을 확인; 탄 사람은 `LeaveVehicle` 로 내리고, 로봇이 있으면 `CheatBreak` — 합체 중이면 취소, 완성이면 부서짐 — 후 내 앞에 모음. 탄 채로·합체 중·완성 후 세 경우 다 확인), 콘솔 `RRRide`·`RRShoot`, 인자 `-RRIdleEnemies`(상대 봇 정지, Shipping 제외). 스크래치 `game_seq.py` 에 `walk=x,y,초`, `nearmesh=StarArms`(그 차 옆으로 순간이동), `dump` 에 탈것 위치.
+- 확인한 것(솔로, 탑뷰·3인칭 Dice Town): 합체 표시 → F → 10초 연출(컷마다 효과음 글자·집중선·게이지) → 배너, 진행자 이동 자리, 봇 둘이 와서 공격·방어(3/3), 3명 다 타야 걸음, 공격 담당 봇이 상체 돌려 팔 들고 주먹 발사, 방어막, `RRHurt 2000`(내가 맞음 → 로봇이 대신 맞아 부서짐) → 세 차로 흩어지고 내림, 세 별 차 타기(탑뷰·3인칭). 빌드 경고 없음.
+- 카메라 보정(추가 요청: 합체할 때 시전자도 변신을 볼 수 있게, 변신해서 움직일 때 시점이 너무 위): 캐릭터 `UpdateCamera` 에서 스프링암 `TargetOffset`(월드 기준 팔 시작점)을 씀. 합체 중 진행자(`CombineCameraBlend`, 2.5/s): 3인칭은 팔 시작점을 로봇 높이 330 으로 옮기고 1500 뒤에서, 컨트롤 회전을 로봇 쪽·피치 −12° 로 돌림(3/s); 탑뷰는 화면을 로봇 쪽으로 75% 옮기고 0.55 만큼 뒤로. 타고 있을 때(`RobotCameraPull`, 이제 탑승 중에만): 3인칭은 팔 시작점 높이 420(로봇 어깨), 팔 1050, 오른쪽 300·위 90 — 로봇이 화면 왼쪽, 조준점은 앞이 보이게(예전엔 팔 ×3.4 + 소켓 높이 640 이라 위에서 내려다봄); 탑뷰는 0.4 뒤로 + 가슴 높이 260 을 가운데로. HUD 로봇 판은 머리 위 120 + 화면 45px 위(탑뷰에서 어깨를 덮던 것). 확인: 3인칭·탑뷰 둘 다 합체 장면이 진행자 화면 가운데, 탑승 후 시점.
+- 확인 못 한 것: 온라인(클라이언트 쪽 복제·예측 — 진행자·탑승·주먹·방어막 다 서버 처리라 동작은 하겠지만 직접 안 봄), 사람이 공격·방어 자리에서 마우스로 쏘는 것(봇·치트로만), 로봇 걷기 모션(스틸 컷으로는 들썩임만 봄), 로봇이 쓰러뜨린 킬 점수(주먹의 Instigator 가 공격 담당이라 그쪽 점수로 갈 것), 합체 중 진행자가 실제로 맞아 쓰러져 취소되는 장면(첫 테스트에서 봇 진행자가 쓰러져 두 번 다시 시작된 것으로 간접 확인).
+
+## 57차 — 용 활강 (사용자: 용 활강 애니메이션 수정 → 질문에 "둘 다", "더 역동적으로 + 날개 고정, 가끔 한 번 펄럭")
+
+- 동물친구 용(`URRRandomBodyAnimInstance`): 활공 중(`GlideWeight` > 0.9) `GlideStrokeEvery` 1.6~3초마다 한 번 큰 날갯짓(`GlideStrokeTime` 0.5초, 뿌리 ±42°, 끝 0.6배 0.9rad 늦게), 활공에 들어간 뒤 0.6초 안에 첫 번째. 날갯짓 동안 다리를 살짝 접음(허벅지 +12°, 무릎 −22°). 캐릭터: 비행 중 진행 방향이 도는 만큼 몸을 옆으로 기울임(`FlightBankPerTurn` 0.3°/(°/s), 최대 40°, 5/s 로 섞음; 메시 회전 = 뱅크 · 숙임 · 방향).
+- 궁극기 큰 용(`ARRRandomDragonFlight`): 출발 0.5초와 떠나기(`Leave`)만 펄럭(`Flapping`), 한 바퀴·불 뿜기 동안은 날개를 젖힌 기본 자세로 고정 + 떨림 ±1.5°, `StrokeEvery` 1.1~1.9초마다 `StrokeSeconds` 0.55초·`StrokeDegrees` 46° 큰 날갯짓(그때 기수 +7° 솟음, 꼬리 끝이 따라 튐). 뱅크 `BankPerTurn` 0.5(예전 0.35), 최대 55°(예전 35°), 기수 각 0.8배(예전 0.6), 목은 도는 쪽으로 뱅크의 0.35, 꼬리는 바깥으로 0.12.
+- 치트 `RRRoll`(새, 콘솔: E 처럼 주사위 하나 굴림) — `RRUltimate` 다음에 써서 스크립트로 궁극기를 띄움(플레이어는 6초 기다리면 앞으로 자동 출발).
+- 확인: 빌드 경고 없음. 탑뷰 캡처 — 한 바퀴 돌 때 날개 펴고 깊게 기울어 도는 큰 용, 불 뿜는 중 날개를 크게 쳐올린 프레임. 3인칭 봇 용 비행.
+- 확인 못 한 것: 동물친구 용의 활공 날갯짓을 가까이서 프레임으로(봇은 활공보다 떠오르기가 많음), 뱅크가 3인칭 내 카메라에서 어지러운지.
+
+## 56차 — 나는 자세 (사용자: 날아다닐 때 기본 포즈와 애니메이션, 지금은 걷기를 재활용)
+
+- 원인: `UpdateLocomotionAnimation` 이 공중에서도 수평 속도가 있으면 `WalkAnimation`, 쏘면 조준 레이어가 뛰는 다리(`AimRun*`). 용(과 다른 종)에 비행 애니메이션이 없음(Mixamo 는 용 오토리그가 실패했던 곳이라 새로 받지 않음) → 코드로 자세.
+- `ARRRandomCharacter::IsInFlight()`(새: 탈것 없음, 살아 있음, 낙하 중, `bFlying` 또는 이동 컴포넌트 `bGliding`), `GetFlightLean()`. 비행 중이면 기본 애니메이션은 `IdleAnimation`. 기울기: 내려갈 때(Vz < −20) `FlightGlideLean` 12 + 26 × 속도 비, 떠오를 때(Vz > 100) 평소의 0.4.
+- `URRRandomBodyAnimInstance::UpdateFlightPose` → `FlightBends`(LeftUpLeg, LeftLeg, LeftFoot, RightUpLeg, RightLeg, RightFoot, Neck, Head; 모두 메시 옆축 +X, 음수 = 다리 뒤로/발끝 아래, 양수 = 고개 듦) → `Evaluate` 에서 날개와 같이 `TurnBones`(새, 날개 루프를 이걸로 바꿈). 떠 있기 ↔ 활공(내려갈 때, 4/s 로 섞음): 허벅지 −18 ↔ −38, 무릎 −42 ↔ −16, 발끝 −28 ↔ −45, 다리 교대 차기 ±8°(활공 땐 40%) 1.6회/초, 목·머리 각각 기울기 × 0.3. 0.25초에 걸쳐 들어가고 나옴. 조준 중 `Aim.MoveWeight` 는 비행 중 0(서서 쏘는 조준).
+- 확인: 빌드 경고 없음. 봇을 모두 용으로(`-RRBotSpecies=Dragon`, `RROwnDie 6 1`) 3인칭 캡처 — 옆에서 무릎 굽혀 발이 뒤로, 총은 앞으로, 날개 펄럭; 뒤에서 날개 펴고 다리는 꼬리 뒤. 스크래치 `game_seq.py` 에 `sidecam` 을 넣어 봤지만 게임 안 파이썬은 액터를 못 만들어 실패(코드는 남아 있음, 안 씀).
+- 확인 못 한 것: 다른 종의 나는 자세(치트 F8 — 같은 Mixamo 뼈라 될 것), 일반 점프는 그대로 걷기(요청 밖), 온라인 참가자 화면의 활공 판정(다른 기계는 `bGliding` 을 몰라 패시브 활공 중엔 나는 자세가 아님 — 비행 중엔 됨).
+
+## 55차 — 용은 자기 날개로 (사용자: 추가 날개 이펙트 대신 본인 날개로, 활공 땐 독수리처럼 날개 고정, 평소엔 펄럭)
+
+- 동물친구 용 리그(30차, 뼈 49)의 `WingL1/L2/R1/R2` 를 이제 움직임(예전엔 꼬리만). 기준 자세(메시 공간, 크기 1): 앞 +Y, 왼쪽 +X, `WingL1` (0, 6, 47) → `WingL2` (13.6, 0, 53) — 밖·뒤·위로 22° 들리고 23° 뒤로 젖힌 반쯤 편 날개. (스크래치 `dragon_bones.py`: `unreal.AnimPoseExtensions.get_reference_pose` 로 뼈 위치·축 출력, Quat 축은 `get_axis_x/y/z`.)
+- `URRRandomBodyAnimInstance::UpdateWings`(게임 스레드) → 뼈마다 메시 공간 회전 `WingBends` → 프록시 `Evaluate` 에서 꼬리와 같은 식(`부모⁻¹ · 회전 · 부모 · 로컬`)으로. 왼날개 기준 "아래" = +Y 축, "앞" = +Z 축, 오른날개는 같은 각도로 −Y·−Z(거울). 끝마디는 뿌리 회전 틀 안에서(`Root·Tip·Root⁻¹`).
+  - 상태: 공중이면 펄럭(`AirFlap` 3회/초 ±36°, 비행으로 떠오를 땐 `RisingFlap` 4.2회/초 ±42°), 땅에선 `GroundFlap` 0.7회/초 ±4° ~ 걸을 때 `WalkFlap` 1.4회/초 ±9°. 끝마디는 0.9rad 늦게 절반. 활공(이동 컴포넌트 `bGliding` + 내려가는 중, 또는 대쉬) = 뿌리 16° 내리고 20° 앞으로, 끝 6°·15° 더 → 수평으로 쭉 편 날개, 미세한 떨림 ±1.2°, 0.2초에 걸쳐 들어가고 나옴. 다른 기계(활공 플래그를 모름)는 비행 중 0.35초 넘게 공중에서 천천히(−280~0) 내려가면 활공으로 봄. 쓰러지면 기준 자세로.
+- 빛나는 날개(`URRRandomWingsComponent`)·날개 펼침 섬광·별 꼬리는 `FRRKit::bOwnWings`(용)이면 안 나옴. 바람 줄·흙먼지(`FlightEffects`)는 그대로.
+- 확인: 빌드 경고 없음. TPS 뒤에서 캡처 — 땅(기준 자세), 떠오를 때 아래로 내려친 날개 두 프레임, 비행 뒤 활공에 활짝 편 날개, 빛나는 날개 없음.
+- 확인 못 한 것: 옆·앞에서 본 날개 모양(뒤에서만 봄 — 활짝 폈을 때 막이 찢어지거나 몸을 뚫는지), 탑뷰에서 잘 보이는지, 온라인 참가자 화면의 활공 판정.
 
 ## 54차 — 캐릭터 키트: 패시브 + 전용 주사위 (사용자: 각 캐릭터 아이덴티티 → 시안 5개 → 3개(A/B/C) → "패시브랑 전용 주사위 적용" + 여우는 투명화, 실루엣이 집중하면 보일 만큼)
 
@@ -192,7 +263,7 @@ Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMem
   - 떠다니는 것(`FFloater`: 흔들림·자전·구르기·공전)은 `Tick` → `AnimateFloaters`(전용 서버 제외, 인스턴스 변환 갱신 후 렌더 상태 한 번).
   - 새 컴포넌트: `Decor`(블록, 충돌 없음), `Stars`/`Moons`(빛나는 MID: `M_BTBlock` Glow 0.9/0.45), `FloatDice`.
 - 확인: 빌드 경고 없음. 로그 `dice town 56829 blocks, 2880 dice, 604 steps, ... 2801 solid boxes, 74 stairs, 33917 walk nodes (27541 roamable)`, `dream pass: 272 decor, 82 stars, 2 moons, 58 floating dice, 140 floaters`. 화면 없이 봇전 ~90초(`-RRTownDream`): 에러 없음, 넉아웃·드래곤 비행·탈것 정상. 같은 시점 11곳 전후 캡처(스크래치 `town_views.py`/`townshots.sh` — 플레이어 시작점을 카메라로, `showhud` 끔): `C:\work\char-pipeline\output\screens\dicetown_dream\before|after\`, 비교 페이지 https://claude.ai/artifact/23Z95m1iY47DXo7MaDGGZY (전후 슬라이더).
-- 적용 뒤 확인: 임시 `-RRTEMPDreamWalk`(플레이어 브롤러를 땅에서 `FindPath` 길 따라 걷게 — 지움): 주사위 산 꼭대기(1200), 주사위 집 옥상 두 채(1200) 모두 걸어서 도착(8~12초). 스위치 없이 시작해 꿈나라 마을로 뜨는 것 캡처 `output\screens\dicetown_dream\applied\`.
+- 적용 뒤 확인: 임시 `-RRTEMPDreamWalk`(플레이어 동물친구를 땅에서 `FindPath` 길 따라 걷게 — 지움): 주사위 산 꼭대기(1200), 주사위 집 옥상 두 채(1200) 모두 걸어서 도착(8~12초). 스위치 없이 시작해 꿈나라 마을로 뜨는 것 캡처 `output\screens\dicetown_dream\applied\`.
 - 확인 못 한 것: 프레임(떠다니는 것 140개를 매 프레임 갱신), LAN 참가자 화면(같은 코드·시드라 같아야 함), 실제 마우스·키로 오르는 손맛.
 
 ## 46차 — 불씨 더 잘 보이게 + 지나간 자리를 그을린 바닥으로 (사용자: 불씨가 더 잘 보이게, 궁극기가 지나간 자리에 생기는 텍스처 어울리게)
@@ -215,7 +286,7 @@ Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMem
 - 확인(PC 잠김 → `-RenderOffscreen` + `-ExecCmds="py …"`, 스크래치 `game_ult.py`: `RRGod`·`RRUltimate` 후 `Input.+key E`/`Input.-key E` 로 굴림, 적 하나를 선 위에 계속 옮겨 둠): 적이 브레스 지난 뒤 **2.9초까지** 도트를 받고 쓰러짐(봇 용 궁극기도 3.0초). 화면 `C:\work\char-pipeline\output\screens\dragon_embers\`(지난 띠가 주황 바닥 빛 + 작은 불씨 점).
 - 참고: 처음 불씨(지름 8~16, 초당 14)는 궁극기 시점(멀리서 옆으로)에선 거의 안 보여서 키움.
 
-## 44차 — 드래곤 브롤러를 Tripo 부터 새로: 처음부터 셔츠 없는 모델 (사용자: 기존 걸 고치지 말고 트라이포 단계부터 티셔츠 없는 모델링 새로 뽑아서 적용)
+## 44차 — 드래곤 동물친구를 Tripo 부터 새로: 처음부터 셔츠 없는 모델 (사용자: 기존 걸 고치지 말고 트라이포 단계부터 티셔츠 없는 모델링 새로 뽑아서 적용)
 
 - 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지; 코드 변경 없음, 에셋만). 43차의 텍스처 덧칠 방식은 대체됨.
 - 그림: Tripo Image(Nano Banana Pro, 1:1, `input\dragon\concept\dragon_front.png` 참고)로 셔츠 없는 정면 → `input\dragon_v2\concept\dragon_front_noshirt_capture.png`. 프롬프트에 "no shirt / no clothes" 를 쓰면 가이드라인 오류가 나서 안 씀.
@@ -242,7 +313,7 @@ Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMem
 - 결과 `output\animals\dragon_back\v5.png` → `output\animals\T_Dragon_BaseColor_shirt.png` 덮어씀 → `T_Dragon_BaseColor` 다시 들여옴. 미리보기 `output\animals\dragon_back\v5_*.png`(`v5_sheet.png`).
 - 확인: 게임 TPS 용 뒷모습 — 날개 전체 원래 색, 셔츠는 날개 뿌리에서 끝남(`C:\work\char-pipeline\output\screens\dragon_shirt2`).
 
-## 41차 — 드래곤 브롤러 등 티셔츠를 컨셉 뒷모습대로 (사용자: 인간폼 뒷모습 티셔츠가 애매, 컨셉 뒷모습 참고해서 보정)
+## 41차 — 드래곤 동물친구 등 티셔츠를 컨셉 뒷모습대로 (사용자: 인간폼 뒷모습 티셔츠가 애매, 컨셉 뒷모습 참고해서 보정)
 
 - 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지; 코드 변경 없음, 텍스처만).
 - 문제: Tripo 가 정면 그림만으로 만들어 등은 허리 위 가는 흰 띠뿐, 그 위 등·어깨는 빨간 비늘, 띠 위에 빨간 얼룩. 컨셉(`input\dragon\concept\dragon_back.png`)은 목 아래부터 벨트 바로 위까지 흰 반팔 티, 날개가 셔츠에서 나오고 등 가시가 셔츠를 뚫고 나옴.
@@ -322,26 +393,26 @@ Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMem
 - 브레스 불덩이는 앞머리가 움직이는 만큼 앞을 겨눔(`DragonBreath` 의 `Carry`), 따라가는 시점은 더 빨리 붙음(보간 6 → 9, 처음 돌아가는 시간 1.2 → 0.8초).
 - 확인: 빌드 경고 없음. 창 + 실제 키·클릭 한 번(첫 시도는 E 키가 안 들어가 다시): 미리보기 띠가 자기 자리→맵 끝, 옆 시점으로 다이빙 후 자기 자리부터 불, 맵 끝 너머로 날아감(`output\screens\dragon_dash`, LV1). 화면 없이 임시 `-RRTEMPDragonTest`(지움): 모든 선이 각 용의 자리에서 시작해 맵 끝(±3240)까지, 봇 선이 적 쪽, 맞힘·피해 정상.
 - 확인 못 한 것: 높은 레벨에서의 화면(폭은 32차 그대로라 수치만), LAN 에서 새 흐름(32차와 같은 멀티캐스트 하나라 로그 확인은 생략), TPS 에서의 고르기.
-- 그 뒤 "실행이 안 된다": Windows 스마트 앱 컨트롤(코드 무결성 이벤트 3077/3033, 정책 {0283ac0f-…})이 새로 빌드한 `UnrealEditor-RRRandom.dll` 로드를 막음(로그 `GetLastError=4551` → "The game module 'RRRandom' could not be loaded"). 파일 시간만 바꿔 다시 링크하면 같은 바이너리라 계속 막힘 → 로그 문구 하나를 바꿔(드래곤 변신 로그 "breath %.0f wide each side") 다시 빌드하니 통과. 확인: 화면 없이 솔로 시작, 브롤러 6명 생성.
+- 그 뒤 "실행이 안 된다": Windows 스마트 앱 컨트롤(코드 무결성 이벤트 3077/3033, 정책 {0283ac0f-…})이 새로 빌드한 `UnrealEditor-RRRandom.dll` 로드를 막음(로그 `GetLastError=4551` → "The game module 'RRRandom' could not be loaded"). 파일 시간만 바꿔 다시 링크하면 같은 바이너리라 계속 막힘 → 로그 문구 하나를 바꿔(드래곤 변신 로그 "breath %.0f wide each side") 다시 빌드하니 통과. 확인: 화면 없이 솔로 시작, 동물친구 6명 생성.
 
-## 32차 — 드래곤 브롤러 + 궁극기 "드래곤 비행" (사용자: 드래곤 캐릭터 추가, 궁극기를 쓰면 두 번째 용이 하늘을 날며 지정한 경로에 브레스를 뿜으면서 맵을 가로질러 날아가게, 브레스 굵기와 용 크기는 주사위 숫자)
+## 32차 — 드래곤 동물친구 + 궁극기 "드래곤 비행" (사용자: 드래곤 캐릭터 추가, 궁극기를 쓰면 두 번째 용이 하늘을 날며 지정한 경로에 브레스를 뿜으면서 맵을 가로질러 날아가게, 브레스 굵기와 용 크기는 주사위 숫자)
 
 - 30~48차 커밋에 포함(브랜치 `claude/project-thread-ykg56g` → PR 로 main 에 머지).
-- 브롤러(30차 리그): `ue_import_animal.py Dragon|input/dragon/mixamo|<베이스컬러>|input/dragon/dragon_rig.fbx` → `/Game/Characters/Dragon`(뼈 41 → 49: Tail1~4, WingL/R1~2, 다른 뼈 변화 0), `ue_import_flyback.py dragon_flyback.fbx|20.4|Dragon=20.4`(자기 리그라 그대로), 얼굴 `blender_portrait.py mixamo/dragon_SK.fbx` → `/Game/UI/T_DragonPortrait`. 코드: `RRSpecies::Dragon = 4`, `Count = 5`, 튜닝 `{Dragon, 2.15, 20.4}`(여우 엉덩이 맞춤 2.43과 머리 맞춤 1.8 사이, 뿔이 높아 엉덩이 쪽으로), 꼬리 흔들기는 Tail1~4 그대로(날개 뼈는 브롤러에선 안 움직임). 타이틀 `ERRTitleChoice::Dragon`("Little red dragon. Its true form breathes fire."), 봇 랜덤 5종.
+- 동물친구(30차 리그): `ue_import_animal.py Dragon|input/dragon/mixamo|<베이스컬러>|input/dragon/dragon_rig.fbx` → `/Game/Characters/Dragon`(뼈 41 → 49: Tail1~4, WingL/R1~2, 다른 뼈 변화 0), `ue_import_flyback.py dragon_flyback.fbx|20.4|Dragon=20.4`(자기 리그라 그대로), 얼굴 `blender_portrait.py mixamo/dragon_SK.fbx` → `/Game/UI/T_DragonPortrait`. 코드: `RRSpecies::Dragon = 4`, `Count = 5`, 튜닝 `{Dragon, 2.15, 20.4}`(여우 엉덩이 맞춤 2.43과 머리 맞춤 1.8 사이, 뿔이 높아 엉덩이 쪽으로), 꼬리 흔들기는 Tail1~4 그대로(날개 뼈는 동물친구에선 안 움직임). 타이틀 `ERRTitleChoice::Dragon`("Little red dragon. Its true form breathes fire."), 봇 랜덤 5종.
 - 고전 용(31차 모델) 리그 — Mixamo 는 네 발이 안 되므로 블렌더에서: `scripts\blender_creature_base.py <tripo fbx> <out> <grid>`(새: 메시 합치고 발 바닥 0·가운데, 뼈 하나 Hips 에 전부, 옆/뒤/위 10cm 격자 렌더) → `input\dragon_classic\rig_chains.sh`(`blender_animal_tail.py` 8번: Neck1~3(머리 포함), Tail1~4, LegFL/FR/BL/BR 1~2, WingL/R 1~2(몸 비율 1.0, 연결 모드 — 마지막에)) → `dragon_classic_rig.fbx`(20뼈). 블렌더 자세 시험(날개 위/중간/아래, 다리 접기, 목 앞으로): 목을 45° 숙이면 머리가 늘어나서 게임에선 15°만. → `scripts\ue_import_creature.py`(새) → `/Game/Characters/DragonClassic/SK_DragonClassic`, `M_DragonClassic`(평평, "Glow" 발광 파라미터). (처음엔 머티리얼 슬롯이 비어 회색으로 나옴 — 읽어 온 항목을 고쳐 넣는 방식이 이 메시에선 안 먹어서 `unreal.SkeletalMaterial` 새로 만들어 넣게 고침.)
 - `ARRRandomDragonFlight`(새, `RRRandomDragonFlight.h/.cpp`, 궁극기 기반 위):
   - 흐름: 작은 용 자리에서 불꽃 펑(`FireBurst`) → 고전 용이 커지며 떠오름(TakeOffTime 1.1) → 머리 위에서 날갯짓하며 맴돎(Hover) → 클릭 두 번(`Left` = 2: 불 시작점, 끝점; 상태 줄 `[CLICK WHERE THE FIRE STARTS/ENDS]`) → 선으로 부드럽게 활강(Hermite, `Approach`) → 선을 따라 `FlySpeed` 1500 으로 날며 브레스(`Pass`, 불이 닿는 곳은 용보다 `Lead` = 주둥이 + 높이×0.55 앞) → 계속 날아 올라가며 작아져 불꽃으로 사라짐(`Leave` 1.8 s) → 땅의 불이 꺼지면 끝, 작은 용이 그 자리에 다시 펑.
   - 주사위 눈(1~6): 크기 `Scale` = 4 + 1×눈(5~10, 모델 1m → 날개폭 5~10m), 브레스 반지름 140 + 55×눈(195~470), 높이 400 + 70×Scale.
   - 선: 두 번째 클릭은 첫 클릭에서 700~3800 사이로 맞춤. 첫 클릭 뒤엔 시작점 원(경고 홀로그램)과, 이 기기 플레이어에게 시작점→커서 띠(`PathHolo`, 엔진 큐브 + `M_FXHolo`, 높이 70); 날기 시작하면 모든 기기에 경고 띠(`WarnHolo`, 아주 옅게 — 처음엔 밝아서 용과 불을 가렸음). `ShowCursorSpot` 을 기반 클래스에서 virtual 로.
-  - 피해(서버): 브레스 앞머리가 닿은 적 25 + 선 바깥으로 450/320 튕김(한 번), 지나간 자리는 BurnSeconds 2.5 동안 불타며 그 안의 적 0.25초마다 4. 자기 궁극기에 붙잡힌(숨은) 브롤러는 제외(처음엔 변신 중인 드래곤도 '맞음'으로 셌음). 너무 높이 나는 적 제외.
+  - 피해(서버): 브레스 앞머리가 닿은 적 25 + 선 바깥으로 450/320 튕김(한 번), 지나간 자리는 BurnSeconds 2.5 동안 불타며 그 안의 적 0.25초마다 4. 자기 궁극기에 붙잡힌(숨은) 동물친구는 제외(처음엔 변신 중인 드래곤도 '맞음'으로 셌음). 너무 높이 나는 적 제외.
   - 봇: 적이 가장 많은 곳(기반 `PickTarget`)을 지나는 선, 용→무리 방향, 길이 ≥ 1400 + 2×반지름. 플레이어가 6초 안에 안 고르면 앞쪽(첫 점) / 첫 점에서 용이 보는 쪽 1600(끝점).
   - 몸: `UPoseableMeshComponent`, 매 프레임 코드로 — 날개 위아래(1.6 회/s, 바깥쪽이 늦게), 다리 뒤로 접기, 목 15° 앞, 브레스 때 머리 32° 숙임, 꼬리 살랑. 각 뼈의 회전은 참조 자세 축 기준(부모 회전에 실려 감, FBX 가 Y 를 뒤집어서 X·Z 축 회전은 블렌더와 부호 반대). 참조 자세는 컴포넌트가 아니라 에셋의 RefSkeleton 에서. 몸 기울기: 진행 방향, 선회 땐 뱅크(최대 35°), 오르내림 피치.
   - 시점: 고르는 동안은 기반 클래스의 높은 시점, 활강부터는 선 오른쪽에서 비스듬히(피치 -28, 거리 2600 + 220×Scale) 용을 따라가며 왼쪽→오른쪽으로 날아가게, 떠날 땐 선 끝, 그 뒤 불타는 선 가운데.
   - 모든 기기: `MulticastStart`(첫 점), `MulticastFly`(선) 뒤 각자 시계로 같은 비행·불.
 - 이펙트(`ARRRandomEffects`): `DragonBreath`(입 → 착지점 불덩이 줄기, 착지 튀김, 불티), `GroundFire`(불길, 세기 따라 줄어듦), `FireBurst`(변신 펑). 공 풀 500 → 1400. 불은 Glow 1.6~2.4, 주황·빨강 위주(밝으면 하얗게 날아감).
 - 덤: `RRRandomMoonHop` 의 애니메이션 찾기가 `FObjectFinderOptional(*FString::Printf(...))` — 임시 문자열이 사라진 뒤 경로를 읽어 "Failed to find <깨진 글자>" 오류(토끼 달토끼 애니메이션이 못 잡힐 수 있었음) → 문자열을 지역 변수로.
-- 확인: 빌드 경고 없음. 임시 `-RRTEMPDragonTest`(봇 전부 드래곤 + 모두 궁극기 주사위 자동) — 지움. 화면 없이: 6마리 모두 비행, 브레스·불 피해, 넉아웃, 봇이 무리를 지나는 선. 창: 고르기 원/띠, 이륙, 옆 시점 비행과 브레스, 불타는 선(`output\screens\ult_dragon3`), **실제 마우스 클릭 두 번**으로 LV6 비행 성공(`dragon_click`), 타이틀 DRAGON 버튼과 드래곤으로 시작(`dragon_title`). LAN 호스트+참가자: 참가자 로그에 같은 선·같은 레벨 비행, 참가자 브롤러 여우 → 드래곤 전환, 에러 없음. 일반 솔로 1분 에러 없음.
-- 확인 못 한 것: 3인칭(TPS) 시점에서의 고르기·비행 시점, 참가자 화면에서 본 모습(로그만), 여러 마리가 동시에 불을 뿜을 때 파티클 풀(1400) 부족 여부, 비행 중 다른 탈것/거인 등과 겹칠 때, 고전 용 날갯짓을 가까이서 본 모습(멀리서만 봄), 작은 드래곤 브롤러의 날개(지금 고정).
+- 확인: 빌드 경고 없음. 임시 `-RRTEMPDragonTest`(봇 전부 드래곤 + 모두 궁극기 주사위 자동) — 지움. 화면 없이: 6마리 모두 비행, 브레스·불 피해, 넉아웃, 봇이 무리를 지나는 선. 창: 고르기 원/띠, 이륙, 옆 시점 비행과 브레스, 불타는 선(`output\screens\ult_dragon3`), **실제 마우스 클릭 두 번**으로 LV6 비행 성공(`dragon_click`), 타이틀 DRAGON 버튼과 드래곤으로 시작(`dragon_title`). LAN 호스트+참가자: 참가자 로그에 같은 선·같은 레벨 비행, 참가자 동물친구 여우 → 드래곤 전환, 에러 없음. 일반 솔로 1분 에러 없음.
+- 확인 못 한 것: 3인칭(TPS) 시점에서의 고르기·비행 시점, 참가자 화면에서 본 모습(로그만), 여러 마리가 동시에 불을 뿜을 때 파티클 풀(1400) 부족 여부, 비행 중 다른 탈것/거인 등과 겹칠 때, 고전 용 날갯짓을 가까이서 본 모습(멀리서만 봄), 작은 드래곤 동물친구의 날개(지금 고정).
 
 ## 31차 — 궁극기용 고전 드래곤(네 발) 컨셉아트 + 3D 모델 (사용자: 사람 폼이 아니라 고전적인 드래곤 모습으로, 궁극기에 쓸, 아트 느낌은 유지하면서 멋진)
 
@@ -379,7 +450,7 @@ Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMem
 ## 29차 — 여우 둔갑술, 토끼 달토끼 낙하, 다람쥐 도토리 비 (사용자: 추천 조합으로 모두 만들어 줘)
 
 - 29차 커밋에 포함(브랜치 `claude/project-thread-ykg56g`).
-- 구조: 호랑이 기운의 공통 부분을 `ARRRandomUltimate`(`RRRandomUltimate.h/.cpp`, 추상)로 분리 — 브롤러·남은 수(`Left`)·주사위 눈(`Face`) 복제, 끝내기(`Finish` → 복제 `bEnding` → `OnEnding` → `Done` → `ARRRandomCharacter::EndUltimate`), 지점 고르기(`WantsSpots`, `IsBusy`, `IsReady`, `RequestSpot` + 예약, 플레이어 6초 → `GetDefaultSpot`, 봇 0.8초 → `PickTarget` 적 많은 곳), 높은 시점 `Overview`, 커서/경고 홀로그램(`ShowCursorSpot`, `ShowTargetHolo(지점, 반경, 세기)`, `ReleaseTargetHolo`), `FindGround`, `FindEnemiesNear`(원기둥), `HoldsBrawler`(못 움직이고 무적), `HidesBrawler`, `KeepsOverview`(고르는 동안 + 브롤러를 붙잡는 궁극기는 끝날 때까지 — 마지막 한 방을 보게), `GetTitle`/`GetStatusLine`(HUD). `ARRRandomTigerSpirit` 는 이 위로 옮김(동작 같음, `StrikeRadius` → `AreaRadius`).
+- 구조: 호랑이 기운의 공통 부분을 `ARRRandomUltimate`(`RRRandomUltimate.h/.cpp`, 추상)로 분리 — 동물친구·남은 수(`Left`)·주사위 눈(`Face`) 복제, 끝내기(`Finish` → 복제 `bEnding` → `OnEnding` → `Done` → `ARRRandomCharacter::EndUltimate`), 지점 고르기(`WantsSpots`, `IsBusy`, `IsReady`, `RequestSpot` + 예약, 플레이어 6초 → `GetDefaultSpot`, 봇 0.8초 → `PickTarget` 적 많은 곳), 높은 시점 `Overview`, 커서/경고 홀로그램(`ShowCursorSpot`, `ShowTargetHolo(지점, 반경, 세기)`, `ReleaseTargetHolo`), `FindGround`, `FindEnemiesNear`(원기둥), `HoldsBrawler`(못 움직이고 무적), `HidesBrawler`, `KeepsOverview`(고르는 동안 + 동물친구를 붙잡는 궁극기는 끝날 때까지 — 마지막 한 방을 보게), `GetTitle`/`GetStatusLine`(HUD). `ARRRandomTigerSpirit` 는 이 위로 옮김(동작 같음, `StrikeRadius` → `AreaRadius`).
 - 캐릭터: `Spirit` → 복제 `Ultimate`, `IsUsingUltimate()` = 붙잡는 궁극기일 때만. 궁극기 주사위 확률 `UltimateDieChance` 0.15 를 **모든 종**에(분신 제외). `OnUltimateDie` 가 종별 클래스 스폰. 치트 U/F11 = 지금 캐릭터에 궁극기 주사위(호랑이로 바꾸지 않음). HUD: 굴린 결과·배너·아래 줄이 종별 이름(`RRSpecies::GetUltimateName/GetUltimateBanner`: FOX CLONES xN / MOON HOP xN / ACORN RAIN Ns / TIGER SPIRIT xN), 치트 줄 `[U] ULTIMATE DIE`. `ARRRandomGameMode::GetArenaCenter` public 으로.
 - 여우 둔갑술(`ARRRandomFoxClones`): 지점 없음, 붙잡지 않음. 연기·나뭇잎 펑(`ARRRandomEffects::FoxPoof`) 속에서 여우 둘레 반지름 170 고리에 분신 N개 + 여우 자신이 무작위 자리로(`TeleportTo`), 모두 바깥으로 700 튕겨 흩어짐. 분신 = 같은 클래스 `ARRRandomCharacter` 에 복제 `bDecoy`(`MakeDecoyOf`: 팀·종·총·체력 복사) + 봇 AI. 분신 규칙: 총알 피해 0(맞는 쪽 `TakeDamage` 가 공격자가 분신이면 0, 숫자도 안 뜸), 진짜 피해를 받으면 펑 사라짐(`VanishDecoy` → `MulticastDecoyPoof`, 0.2초 뒤 파괴, 넉아웃·점수 없음), 주사위 안 굴림, 탈것 안 탐, 궁극기 주사위 없음, 체력은 여우 것으로 시작. MVP·승리 대열·결과표·팀원 카드·봇 이름 번호에서 제외(미니맵엔 보임 — 적에게는 속임수). 12초 뒤, 또는 여우가 쓰러지거나 경기가 끝나면 남은 분신 모두 펑.
 - 토끼 달토끼 낙하(`ARRRandomMoonHop`): 반지름 380, 파란 커서/보라 경고 홀로그램. 토끼 메시(×1.4)가 클릭한 곳으로 높이 1500 포물선 1.35초 — 앞구르기(공중제비) → 꼭대기에서 큰 달빛(`MoonFlash`: 크림색 원판 + 은빛 고리 + 별) → 낙하 자세 → 엉덩방아 착지(`TigerStrike` 이펙트 은빛): 가운데 45 → 가장자리 25 피해, 700/500 튕김. 날아가는 동안 은빛 궤적. 진짜 토끼는 숨고 무적, 끝나면 마지막 착지 자리로 순간이동. Mixamo(지금 Mixamo 에 남은 새 토끼 리그 그대로): Jumping Up, Big Front Flip, Mid-Air Falling Idle, Mid-Air Falling To A Hard Landing → `input\rabbit\mixamo_extra\` → `ue_import_extra_anims.py` → `A_Rabbit_JumpUp|FrontFlip|FallIdle|HardLanding`.
@@ -451,7 +522,7 @@ Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMem
   - `FRRSpeciesLook::FlyBack` → `ARRRandomCharacter::FlyBackAnimation`.
   - `ARRRandomVehicle::UpdateRam` 이 데미지 직전에 `Victim->SetRamImpact(속도)`. `KnockOut` 이 같은 순간(월드 시간 double 로 비교 — float 로 했다가 항상 달라서 안 됐음)의 충격이면 복제 `FlingVelocity` = 차 방향 × clamp(차 속도 × `FlingSpeedShare` 0.8, `FlingSpeedRange` 600~1300) + 위 `FlingLift` 480(중력 980 에서 약 1초, 모션 착지와 맞음).
   - `ApplyKnockedOutBody`(서버·OnRep 모두): 날림이면 캡슐 충돌은 켠 채 Pawn 만 무시(다른 캐릭터·운전자 통과, 지형엔 막힘), 차 반대쪽을 보게 돌리고(움직임 방향/컨트롤러 회전 끔), `MOVE_Falling` + 속도, `FlyBackAnimation` 한 번. `UpdateFling`(쓰러진 동안 Tick): 0.2초 뒤 땅(또는 서버가 이미 멈춤)이면 `EndFling` — 이동 끄고 캡슐 충돌 끔, Pawn 응답 되돌림, 서버 로그 `run over, lands <거리> away after <초>`. 맵 밖으로 날아가면 부활 때까지 떨어짐. 부활(`ApplyStandingBody`)이 날던 중이면 정리.
-- 확인(임시 `-RRTEMPRam`: 시작 뒤 가까운 브롤러를 속도 1400 으로 옆/카메라 쪽으로 친 것처럼 — 확인 후 지움): 화면 없이 4번 모두 0.98~1.00초 뒤 착지, 약 11m(장애물에 걸리면 6.8m). TPS 창 캡처(`output\screens\fling2`)에서 호랑이가 팔다리를 뻗고 뒤로 날아 플레이어 뒤를 지나 등으로 떨어져 누움. LAN 호스트+참가자: 참가자 화면에서도 같은 몸이 0.99초 뒤 착지(732 vs 호스트 768). 일반 봇전 끝까지 에러 없음.
+- 확인(임시 `-RRTEMPRam`: 시작 뒤 가까운 동물친구를 속도 1400 으로 옆/카메라 쪽으로 친 것처럼 — 확인 후 지움): 화면 없이 4번 모두 0.98~1.00초 뒤 착지, 약 11m(장애물에 걸리면 6.8m). TPS 창 캡처(`output\screens\fling2`)에서 호랑이가 팔다리를 뻗고 뒤로 날아 플레이어 뒤를 지나 등으로 떨어져 누움. LAN 호스트+참가자: 참가자 화면에서도 같은 몸이 0.99초 뒤 착지(732 vs 호스트 768). 일반 봇전 끝까지 에러 없음.
 - 확인 못 한 것: 실제 차가 사람을 치는 장면(봇이 차로 치는 경우가 드묾 — 경로는 같은 `SetRamImpact` → 데미지), 거인이 치였을 때, 탑뷰에서의 모습.
 
 ## 23차 — 토끼·다람쥐·호랑이 (사용자: 여우와 비슷한 느낌으로 추가하고 시작할 때 고르게, 봇은 랜덤, Tripo·Mixamo 로)
@@ -470,13 +541,13 @@ Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMem
   - `RRRandomSpecies.h/.cpp`: `RRSpecies`(Fox, Rabbit, Squirrel, Tiger; 이름 ↔ 번호), `FRRSpeciesLook`(메시, 머티리얼, 대기/걷기/사격/쓰러짐, 춤들, 좌절들, 조준 세트, 메시 크기, 메시 오프셋, 걷기 속도, 얼굴) — `GetAll()` 이 생성자에서 경로 규칙으로 찾음. 크기 = 여우 엉덩이 높이 맞춤과 머리 끝 맞춤의 중간(토끼 2.14, 다람쥐 2.05, 호랑이 1.75; 엉덩이만 맞추면 다람쥐 머리가 여우보다 훨씬 큼). 걷기/조준 달리기 속도 = 여우 값 × 엉덩이 높이 비 × 크기(토끼 걷기 실측 65 ≈ 계산 63.5). (처음엔 기본 자세 엉덩이 XY 로 메시 오프셋을 줬다가 24차에서 뺌: Mixamo 애니메이션은 기본 자세와 상관없이 엉덩이를 원점 근처(0.3, 0.8)에 두고 재생해서, 호랑이가 오히려 30cm 어긋났음.)
   - `ARRRandomCharacter`: `SpeciesLooks`(모두 로드 유지), 복제 `Species`(OnRep), `SetSpecies`(서버), `UseLook`, `ApplySpecies`(시작 전이면 BeginPlay 가 적용; 시작 뒤면 메시·머티리얼 교체 + `URRRandomEventComponent::RefreshMesh` + 팀 색 + 잔상 지움 + 자세), `GetPortrait`. 클라이언트에서 시작할 때 `arrives as the <종>` 로그.
   - 게임 모드: `SpawnBrawler(…, Species)` 지연 스폰에서 설정 + `is a <종> on team` 로그. 봇 = `FMath::RandRange` 4종, 플레이어 = 컨트롤러가 알려 준 값 또는 이 기기 플레이어면 세션 서브시스템 값.
-  - `URRRandomSessionSubsystem::Get/SetSpecies`(레벨 넘어 유지, `-RRSpecies=<이름>`). `ARRRandomPlayerController`: 참가자가 BeginPlay 에서 `ServerChooseSpecies` → 서버가 기억(`GetChosenSpecies`, 새 게임 때 스폰에 씀)하고 지금 브롤러를 바꿈.
-  - 타이틀: 시점(TOP VIEW / THIRD PERSON) 고른 뒤, 참가(JOIN)는 바로 `PICK YOUR BRAWLER` 페이지 — FOX / RABBIT / SQUIRREL / TIGER(버튼 왼쪽에 얼굴, 설명 한 줄) / BACK. 마지막 고른 것이 선택돼 있음, Esc/BACK 은 이전 페이지로.
-  - HUD 팀원 카드 얼굴 = 그 브롤러의 종(`GetPortrait`, 없으면 여우).
+  - `URRRandomSessionSubsystem::Get/SetSpecies`(레벨 넘어 유지, `-RRSpecies=<이름>`). `ARRRandomPlayerController`: 참가자가 BeginPlay 에서 `ServerChooseSpecies` → 서버가 기억(`GetChosenSpecies`, 새 게임 때 스폰에 씀)하고 지금 동물친구를 바꿈.
+  - 타이틀: 시점(TOP VIEW / THIRD PERSON) 고른 뒤, 참가(JOIN)는 바로 `PICK YOUR ANIMAL FRIEND`(당시 이름 `PICK YOUR BRAWLER`) 페이지 — FOX / RABBIT / SQUIRREL / TIGER(버튼 왼쪽에 얼굴, 설명 한 줄) / BACK. 마지막 고른 것이 선택돼 있음, Esc/BACK 은 이전 페이지로.
+  - HUD 팀원 카드 얼굴 = 그 동물친구의 종(`GetPortrait`, 없으면 여우).
 - 확인:
   - 빌드 경고 없음. `-nullrhi` 봇전(`-RRSpecies=Rabbit -RRScoreToWin=3`): 플레이어 토끼, 봇 여우·다람쥐×2·호랑이 등 랜덤, 경기 끝까지 에러 없음.
   - 창 캡처: 탑뷰 호랑이(`output\screens\species1`), TPS 다람쥐(`species2`), 타이틀 키 입력(싱글 → THIRD PERSON → 캐릭터 페이지 → 다람쥐 → 시작, `species_title`; 캡처 스크립트에 키/마우스 입력 추가), 결과 화면에서 다람쥐·호랑이 춤(`species3`), TPS 에서 네 종 모두 마우스 왼쪽 누른 채 사격 — 총이 손에, 같은 조준 자세(`species_fire\compare.png`).
-  - LAN 두 프로세스(`-RRHost -RRLan -RRSpecies=Tiger` / `-RRJoin -RRLan -RRSpecies=Squirrel`): 호스트에서 참가자 브롤러가 여우로 생겼다가 `is now the Squirrel`, 참가자 화면에서도 자기 것이 다람쥐로 바뀌고 봇들은 호스트와 같은 구성(호랑이 3, 토끼 1, 다람쥐 2)으로 도착.
+  - LAN 두 프로세스(`-RRHost -RRLan -RRSpecies=Tiger` / `-RRJoin -RRLan -RRSpecies=Squirrel`): 호스트에서 참가자 동물친구가 여우로 생겼다가 `is now the Squirrel`, 참가자 화면에서도 자기 것이 다람쥐로 바뀌고 봇들은 호스트와 같은 구성(호랑이 3, 토끼 1, 다람쥐 2)으로 도착.
 - 확인 못 한 것: 실제 마우스로 해 본 타이틀 클릭, 참가자가 새 게임(`?Restart`) 뒤에도 고른 종 유지(서버가 컨트롤러에 기억하지만 재접속 때 컨트롤러가 새로 생기면 다시 RPC 로 보냄 — 로그로는 안 봄), 꼬리 흔들림의 실제 모습(다람쥐 꼬리는 크고 위로 솟아 여우용 흔들기 축이 덜 맞을 수 있음), 각 종의 쓰러짐·거인·비행 모습, 연습 더미(`ARRRandomDummy`)는 여전히 여우, 타이틀 그림도 여우.
 
 ## 22차 — TPS 카메라, 거대화·날개·피격 이펙트

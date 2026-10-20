@@ -47,6 +47,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Tiger Spirit")
 	FVector2D StrikeKnock = FVector2D(900.f, 550.f);
 
+	/** Each strike smashes the structures under the paw (ARRRandomWreckage), this share of the area across. */
+	UPROPERTY(EditAnywhere, Category = "Tiger Spirit")
+	float WreckShare = 0.8f;
+
 	/** Seconds growing (with the roar) and shrinking back. */
 	UPROPERTY(EditAnywhere, Category = "Tiger Spirit")
 	float GrowTime = 2.f;

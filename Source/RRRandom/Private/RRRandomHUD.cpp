@@ -8,6 +8,7 @@
 #include "RRRandomOverheadDieComponent.h"
 #include "RRRandomPlayerController.h"
 #include "RRRandomSessionSubsystem.h"
+#include "RRRandomStarRobot.h"
 #include "RRRandomUIStyle.h"
 #include "RRRandomUltimate.h"
 #include "RRRandomVehicle.h"
@@ -135,6 +136,7 @@ void ARRRandomHUD::DrawHUD()
 
 	DrawMeteorCartoons();
 	DrawMeteorWarnings();
+	DrawStarRobot(Viewer);
 	DrawScore();
 	DrawOnlinePanel();
 	if (Viewer)
@@ -182,8 +184,8 @@ void ARRRandomHUD::DrawFriendOrFoeMarker(float CenterX, float Top, const FLinear
 
 void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer)
 {
-	// Hidden in the fog of war on this screen (ARRRandomFogOfWar): nothing over it either
-	if (Brawler.GetMesh()->bHiddenInGame)
+	// Hidden in the fog of war on this screen (ARRRandomFogOfWar), or inside the star robot: nothing over it either
+	if (Brawler.GetMesh()->bHiddenInGame || Brawler.IsHidden())
 	{
 		return;
 	}
@@ -381,7 +383,12 @@ void ARRRandomHUD::DrawAmmoBar(const ARRRandomCharacter& Brawler, float Left, fl
 
 void ARRRandomHUD::DrawRidePrompt(const ARRRandomCharacter& Brawler)
 {
-	// Under the brawler's feet: what F does right now
+	// Under the brawler's feet: what F does right now (the star robot's own sign says it when F is for the robot)
+	const ARRRandomStarRobot* Robot = ARRRandomStarRobot::Get(this);
+	if (Brawler.GetRobot() || ARRRandomStarRobot::CanStartCombine(&Brawler) || (Robot && !Brawler.GetVehicle() && Robot->CanBoard(&Brawler)))
+	{
+		return;
+	}
 	const ARRRandomVehicle* Ridden = Brawler.GetVehicle();
 	// Giants and flyers can't get on, so no offer
 	const ARRRandomVehicle* Near = Ridden || Brawler.IsGiant() || Brawler.CanFly() ? nullptr : Brawler.FindVehicleInReach();
@@ -1007,7 +1014,7 @@ void ARRRandomHUD::DrawOnlinePanel()
 	RRUI::DrawGlowText(Canvas, TEXT("F1 HOST · F2 JOIN · F3 LEAVE · ESC MENU · M MAP"), FVector2D(Left, Y), Size, EWeight::ExtraBold, RRUI::InkSoft, Tracking);
 	Y += Step;
 #if !UE_BUILD_SHIPPING
-	RRUI::DrawGlowText(Canvas, TEXT("CHEATS · F6 WIN · F7 GIANT · F8 FLY · F9 3RD PERSON · F10 GOD · U ULTIMATE DIE"), FVector2D(Left, Y), Size, EWeight::ExtraBold, RRUI::InkSoft, Tracking);
+	RRUI::DrawGlowText(Canvas, TEXT("CHEATS · CTRL+0 STAR CARS · F6 WIN · F7 GIANT · F8 FLY · F9 3RD PERSON · F10 GOD · U ULTIMATE DIE"), FVector2D(Left, Y), Size, EWeight::ExtraBold, RRUI::InkSoft, Tracking);
 	Y += Step;
 	RRUI::DrawGlowText(Canvas, TEXT("1-7 GUNS · PISTOL MINIGUN SMG RIFLE BLASTER CANNON FINGER"), FVector2D(Left, Y), Size, EWeight::ExtraBold, RRUI::InkSoft, Tracking);
 	Y += Step;
@@ -1642,4 +1649,251 @@ void ARRRandomHUD::DrawCrosshair(const ARRRandomCharacter& Brawler)
 	RRUI::DrawDashedRing(Canvas, Middle, Radius, Thickness, 8, 0.5f, RRUI::White);
 	RRUI::DrawDisc(Canvas, Middle, 3.2f * S, WithAlpha(RRUI::Ink, 0.8f));
 	RRUI::DrawDisc(Canvas, Middle, 2.f * S, RRUI::White);
+}
+
+namespace
+{
+	// The star robot's comic words while it combines: when (seconds in), what, how big, which way tilted, where on it
+	// (a share of its height)
+	struct FRobotWord
+	{
+		float Time;
+		const TCHAR* Text;
+		float Size;
+		float Tilt;
+		float Height;
+	};
+	const FRobotWord RobotWords[] =
+	{
+		{ 1.05f, TEXT("WHOOSH!"), 1.f, -8.f, 0.9f },
+		{ 4.2f, TEXT("SHING!"), 1.1f, 6.f, 1.f },
+		{ 5.6f, TEXT("THOOM!"), 1.2f, -5.f, 0.15f },
+		{ 6.8f, TEXT("KA-CHUNK!"), 1.f, 7.f, 0.55f },
+		{ 7.6f, TEXT("CLANK!"), 1.f, -9.f, 0.8f },
+		{ 8.5f, TEXT("POP!"), 0.9f, 10.f, 1.05f },
+	};
+	constexpr float RobotWordLife = 1.1f;
+	const TCHAR* const RobotSeatNames[] = { TEXT("MOVE"), TEXT("ATTACK"), TEXT("DEFEND") };
+	const TCHAR* const RobotSeatHelp[] = { TEXT("WALK IT AROUND"), TEXT("FIRE: ROCKET FISTS"), TEXT("HOLD FIRE: SHIELD") };
+
+	/** [F] then the words, centered on CenterX with its top at Top. */
+	void DrawKeyPrompt(UCanvas* Canvas, const FString& Text, float CenterX, float Top, float S, const FLinearColor& Color)
+	{
+		const float Size = 13.f * S;
+		const float KeyHeight = 19.f * S;
+		const float Gap = 6.f * S;
+		const FVector2D Label = RRUI::MeasureText(Text, Size, EWeight::Black, Size * 0.06f);
+		const float KeyWidth = FMath::Max(KeyHeight, RRUI::MeasureText(TEXT("F"), KeyHeight * 0.62f, EWeight::Black).X + KeyHeight * 0.5f);
+		const float X = CenterX - (KeyWidth + Gap + Label.X) * 0.5f;
+		RRUI::DrawKey(Canvas, TEXT("F"), FVector2D(X, Top), KeyHeight);
+		RRUI::DrawGlowText(Canvas, Text, FVector2D(X + KeyWidth + Gap, Top + (KeyHeight - Label.Y) * 0.5f), Size, EWeight::Black, Color, Size * 0.06f);
+	}
+}
+
+void ARRRandomHUD::DrawStarRobot(const ARRRandomCharacter* Viewer)
+{
+	const UWorld* World = GetWorld();
+	if (!World || !Canvas)
+	{
+		return;
+	}
+	const float S = UIScale;
+	const float Now = World->GetTimeSeconds();
+	const ARRRandomStarRobot* Robot = ARRRandomStarRobot::Get(this);
+
+	// No robot yet: over the gathered cars, a pulsing sign
+	if (!Robot)
+	{
+		ARRRandomVehicle* Cars[3];
+		FVector Center;
+		if (!ARRRandomStarRobot::FindGathered(this, Cars, Center))
+		{
+			return;
+		}
+		// A little star over each car
+		for (const ARRRandomVehicle* Car : Cars)
+		{
+			const FVector Over = Project(Car->GetActorLocation() + FVector(0.f, 0.f, 230.f));
+			if (Over.Z > 0.f)
+			{
+				DrawCartoonStar(Canvas, FVector2D(Over.X, Over.Y + FMath::Sin(Now * 5.f + Over.X) * 4.f * S), 11.f * S, Now * 90.f, RRUI::Butter, 1.5f * S);
+			}
+		}
+		const FVector Sign = Project(Center + FVector(0.f, 0.f, 330.f));
+		if (Sign.Z <= 0.f)
+		{
+			return;
+		}
+		const float Pulse = 1.f + 0.07f * FMath::Sin(Now * 6.f);
+		const FVector2D Middle(Sign.X, Sign.Y);
+		DrawStarburst(Canvas, Middle, FVector2D(118.f, 46.f) * S * Pulse + FVector2D(3.f * S), 14, 0.78f, Now * 20.f, RRUI::WithAlpha(RRUI::Ink, 0.9f));
+		DrawStarburst(Canvas, Middle, FVector2D(118.f, 46.f) * S * Pulse, 14, 0.78f, Now * 20.f, RRUI::Butter);
+		const float TitleSize = 21.f * S * Pulse;
+		const FString Title = TEXT("STAR ROBOT");
+		const FVector2D TitleBox = RRUI::MeasureText(Title, TitleSize, EWeight::Black);
+		DrawEdgedText(Canvas, Title, Middle - FVector2D(TitleBox.X * 0.5f, TitleBox.Y * 0.62f), TitleSize, RRUI::SkyDeep, RRUI::White);
+		const float SubSize = 10.f * S;
+		const FString Sub = TEXT("READY TO COMBINE");
+		const FVector2D SubBox = RRUI::MeasureText(Sub, SubSize, EWeight::ExtraBold, SubSize * 0.15f);
+		RRUI::DrawText(Canvas, Sub, FVector2D(Middle.X - SubBox.X * 0.5f, Middle.Y + TitleBox.Y * 0.3f), SubSize, EWeight::ExtraBold, RRUI::Ink, SubSize * 0.15f);
+		if (Viewer && ARRRandomStarRobot::CanStartCombine(Viewer))
+		{
+			DrawKeyPrompt(Canvas, TEXT("COMBINE!"), Middle.X, Middle.Y + 56.f * S, S, RRUI::Ink);
+		}
+		return;
+	}
+
+	// Over its head, and a little higher on the screen so the plate clears its shoulders seen from above
+	const FVector TopOnScreen = Project(Robot->GetTopLocation() + FVector(0.f, 0.f, 120.f)) - FVector(0.f, 45.f * S, 0.f);
+	const FVector Feet = Robot->GetActorLocation();
+	if (!Robot->IsAssembled())
+	{
+		const float Progress = Robot->GetCombineProgress();
+		const float Time = Progress * ARRRandomStarRobot::CombineSeconds;
+		// Manga speed lines rushing in at it from all round, flickering, while the parts fly together
+		const FVector MiddleOnScreen = Project(Feet + FVector(0.f, 0.f, 320.f));
+		if (MiddleOnScreen.Z > 0.f && Time > 1.f)
+		{
+			const FVector2D Middle(MiddleOnScreen.X, MiddleOnScreen.Y);
+			const float Outer = FVector2D(Canvas->ClipX, Canvas->ClipY).Size();
+			const float Inner = 230.f * S;
+			const float Strength = FMath::Clamp((Time - 1.f) / 1.f, 0.f, 1.f) * FMath::Clamp((ARRRandomStarRobot::CombineSeconds - Time) / 0.6f, 0.f, 1.f);
+			const uint32 Seed = static_cast<uint32>(FMath::FloorToInt(Now * 20.f));
+			for (uint32 Line = 0; Line < 40; ++Line)
+			{
+				const uint32 Hash = (Line * 2654435761u) ^ (Seed * 40503u);
+				const float Angle = (Line + (Hash % 100) / 100.f) * 2.f * PI / 40.f;
+				const float Reach = Inner * (1.f + (Hash % 37) / 37.f * 0.8f);
+				const float Half = (1.5f + (Hash % 5)) * S;
+				const FVector2D Dir(FMath::Cos(Angle), FMath::Sin(Angle));
+				const FVector2D Side(-Dir.Y, Dir.X);
+				RRUI::DrawTriangle(Canvas, Middle + Dir * Outer + Side * Half * 3.f, Middle + Dir * Outer - Side * Half * 3.f, Middle + Dir * Reach,
+					RRUI::WithAlpha(RRUI::Ink, 0.22f * Strength));
+			}
+		}
+		// The comic words
+		for (const FRobotWord& Word : RobotWords)
+		{
+			const float Age = Time - Word.Time;
+			const FVector OnScreen = Project(Feet + FVector(0.f, 0.f, 640.f * Word.Height));
+			if (Age < 0.f || Age > RobotWordLife || OnScreen.Z <= 0.f)
+			{
+				continue;
+			}
+			const float Scale = Age < 0.12f ? FMath::Lerp(0.25f, 1.3f, Age / 0.12f) : Age < 0.24f ? FMath::Lerp(1.3f, 1.f, (Age - 0.12f) / 0.12f) : 1.f;
+			const float Alpha = 1.f - FMath::Clamp((Age - (RobotWordLife - 0.25f)) / 0.25f, 0.f, 1.f);
+			const FVector2D Center(OnScreen.X + (Word.Tilt > 0.f ? 1.f : -1.f) * 150.f * S, OnScreen.Y - Age * 35.f * S);
+			const float Size = 26.f * S * Word.Size * Scale;
+			const FVector2D Box = RRUI::MeasureText(Word.Text, Size, EWeight::Black);
+			const FVector2D Burst(Box.X * 0.78f + 16.f * S * Scale, Box.Y * 0.95f + 14.f * S * Scale);
+			DrawStarburst(Canvas, Center, Burst + FVector2D(3.f * S), 12, 0.74f, Word.Tilt * 3.f, RRUI::WithAlpha(RRUI::Ink, Alpha));
+			DrawStarburst(Canvas, Center, Burst, 12, 0.74f, Word.Tilt * 3.f, RRUI::WithAlpha(RRUI::Butter, Alpha));
+			DrawEdgedText(Canvas, Word.Text, Center - Box * 0.5f, Size, RRUI::WithAlpha(RRUI::PinkDeep, Alpha), RRUI::WithAlpha(RRUI::White, Alpha));
+		}
+		// The gauge over it
+		if (TopOnScreen.Z > 0.f)
+		{
+			const float Width = 190.f * S;
+			const float Height = 12.f * S;
+			const FVector2D Top(TopOnScreen.X - Width * 0.5f, TopOnScreen.Y);
+			const FString Label = FString::Printf(TEXT("COMBINING  %d%%"), FMath::FloorToInt(Progress * 100.f));
+			const float Size = 12.f * S;
+			const FVector2D LabelBox = RRUI::MeasureText(Label, Size, EWeight::Black, Size * 0.1f);
+			RRUI::DrawPlate(Canvas, FBox2D(Top - FVector2D(10.f * S, LabelBox.Y + 10.f * S), Top + FVector2D(Width + 10.f * S, Height + 8.f * S)), 18.f * S);
+			RRUI::DrawText(Canvas, Label, FVector2D(TopOnScreen.X - LabelBox.X * 0.5f, Top.Y - LabelBox.Y - 4.f * S), Size, EWeight::Black, RRUI::Ink, Size * 0.1f);
+			RRUI::DrawBar(Canvas, FBox2D(Top, Top + FVector2D(Width, Height)), Progress, WithAlpha(RRUI::Ink, 0.12f), FMath::Fmod(Now * 4.f, 1.f) < 0.5f ? RRUI::Gold : RRUI::Butter);
+		}
+		// The one combining it: a reminder to hang on
+		if (Viewer && Viewer == Robot->GetCombiner())
+		{
+			const FString Text = TEXT("COMBINING... DON'T GET KNOCKED OUT!");
+			const float Size = 15.f * S;
+			const FVector2D Box = RRUI::MeasureText(Text, Size, EWeight::Black, Size * 0.06f);
+			const FVector2D Pos(Canvas->ClipX * 0.5f - Box.X * 0.5f, Canvas->ClipY * 0.72f);
+			RRUI::DrawPlate(Canvas, FBox2D(Pos - FVector2D(14.f, 8.f) * S, Pos + Box + FVector2D(14.f, 8.f) * S), 22.f * S);
+			RRUI::DrawText(Canvas, Text, Pos, Size, EWeight::Black, Blink(World) > 0.5f ? RRUI::PinkDeep : RRUI::Ink, Size * 0.06f);
+		}
+		return;
+	}
+
+	// Done: a banner for a moment
+	const float Since = Robot->GetSecondsSinceAssembled();
+	if (Since < 2.8f)
+	{
+		const float Scale = Since < 0.15f ? FMath::Lerp(0.3f, 1.25f, Since / 0.15f) : Since < 0.3f ? FMath::Lerp(1.25f, 1.f, (Since - 0.15f) / 0.15f) : 1.f;
+		const float Alpha = 1.f - FMath::Clamp((Since - 2.4f) / 0.4f, 0.f, 1.f);
+		const FVector2D Center(Canvas->ClipX * 0.5f, Canvas->ClipY * 0.2f);
+		const float Size = 44.f * S * Scale;
+		const FString Text = TEXT("STAR ROBOT, COMBINE!");
+		const FVector2D Box = RRUI::MeasureText(Text, Size, EWeight::Black);
+		DrawStarburst(Canvas, Center, FVector2D(Box.X * 0.66f, Box.Y * 1.15f) + FVector2D(4.f * S), 18, 0.8f, Since * 30.f, RRUI::WithAlpha(RRUI::Ink, Alpha));
+		DrawStarburst(Canvas, Center, FVector2D(Box.X * 0.66f, Box.Y * 1.15f), 18, 0.8f, Since * 30.f, RRUI::WithAlpha(RRUI::Butter, Alpha));
+		const FLinearColor Stops[] = { RRUI::SkyDeep, RRUI::LavenderDeep, RRUI::PinkDeep };
+		RRUI::DrawGradientText(Canvas, Text, Center - Box * 0.5f, Size, EWeight::Black, Stops, Alpha);
+	}
+
+	// Over it: health, shield, the three seats
+	if (TopOnScreen.Z > 0.f)
+	{
+		const float Width = 170.f * S;
+		const FVector2D Top(TopOnScreen.X - Width * 0.5f, TopOnScreen.Y);
+		const FLinearColor TeamColor = RRUI::TeamColor(Robot->GetTeam());
+		const float ChipHeight = 17.f * S;
+		const float ChipGap = 4.f * S;
+		const float ChipWidth = (Width - ChipGap * 2.f) / 3.f;
+		RRUI::DrawPlate(Canvas, FBox2D(Top - FVector2D(8.f * S, 8.f * S), Top + FVector2D(Width + 8.f * S, 16.f * S + ChipHeight + 8.f * S)), 18.f * S);
+		RRUI::DrawBar(Canvas, FBox2D(Top, Top + FVector2D(Width, 10.f * S)), Robot->GetHealth() / FMath::Max(1.f, Robot->GetMaxHealth()), WithAlpha(RRUI::Ink, 0.12f), TeamColor);
+		if (Robot->GetCrew(ERRRobotSeat::Defend))
+		{
+			RRUI::DrawBar(Canvas, FBox2D(Top + FVector2D(0.f, 11.5f * S), Top + FVector2D(Width, 14.5f * S)), Robot->GetShieldEnergy(), WithAlpha(RRUI::Ink, 0.08f),
+				Robot->IsShieldUp() ? RRUI::Sky : RRUI::SkyDeep);
+		}
+		for (int32 Index = 0; Index < 3; ++Index)
+		{
+			const ERRRobotSeat Seat = Index == 0 ? ERRRobotSeat::Move : Index == 1 ? ERRRobotSeat::Attack : ERRRobotSeat::Defend;
+			const bool bTaken = Robot->GetCrew(Seat) != nullptr;
+			const FBox2D Chip(Top + FVector2D(Index * (ChipWidth + ChipGap), 16.f * S), Top + FVector2D(Index * (ChipWidth + ChipGap) + ChipWidth, 16.f * S + ChipHeight));
+			RRUI::DrawPill(Canvas, Chip, bTaken ? TeamColor : WithAlpha(RRUI::Ink, 0.1f));
+			const float Size = 8.5f * S;
+			const FVector2D Box = RRUI::MeasureText(RobotSeatNames[Index], Size, EWeight::Black, Size * 0.1f);
+			RRUI::DrawText(Canvas, RobotSeatNames[Index], Chip.GetCenter() - Box * 0.5f, Size, EWeight::Black, bTaken ? RRUI::White : RRUI::InkSoft, Size * 0.1f);
+		}
+	}
+	if (!Viewer || !Viewer->IsAlive())
+	{
+		return;
+	}
+
+	// The crew: which seat, what it does, who is missing
+	if (Viewer->GetRobot() == Robot && Viewer->IsInRobot())
+	{
+		const int32 Index = Viewer->GetRobotSeat() == ERRRobotSeat::Move ? 0 : Viewer->GetRobotSeat() == ERRRobotSeat::Attack ? 1 : 2;
+		const int32 Missing = 3 - Robot->CountCrew();
+		const FString Title = FString::Printf(TEXT("YOU: %s"), RobotSeatNames[Index]);
+		const FString Help = Missing > 0 && Index == 0 ? FString::Printf(TEXT("NEED %d MORE CREW TO WALK"), Missing) : FString(RobotSeatHelp[Index]);
+		const float TitleSize = 18.f * S;
+		const float HelpSize = 11.f * S;
+		const FVector2D TitleBox = RRUI::MeasureText(Title, TitleSize, EWeight::Black, TitleSize * 0.06f);
+		const FVector2D HelpBox = RRUI::MeasureText(Help, HelpSize, EWeight::ExtraBold, HelpSize * 0.1f);
+		const float Width = FMath::Max(TitleBox.X, HelpBox.X) + 36.f * S;
+		const FVector2D Center(Canvas->ClipX * 0.5f, Canvas->ClipY * 0.8f);
+		const FBox2D Plate(Center - FVector2D(Width * 0.5f, 26.f * S), Center + FVector2D(Width * 0.5f, 30.f * S));
+		RRUI::DrawPlate(Canvas, Plate, 22.f * S);
+		RRUI::DrawText(Canvas, Title, FVector2D(Center.X - TitleBox.X * 0.5f, Plate.Min.Y + 6.f * S), TitleSize, EWeight::Black, RRUI::Readable(RRUI::TeamColor(Robot->GetTeam())), TitleSize * 0.06f);
+		RRUI::DrawText(Canvas, Help, FVector2D(Center.X - HelpBox.X * 0.5f, Plate.Min.Y + 8.f * S + TitleBox.Y), HelpSize, EWeight::ExtraBold,
+			Missing > 0 && Index == 0 ? RRUI::PinkDeep : RRUI::InkSoft, HelpSize * 0.1f);
+		DrawKeyPrompt(Canvas, TEXT("GET OUT"), Center.X, Plate.Max.Y + 8.f * S, S, RRUI::InkSoft);
+		return;
+	}
+	// Next to it with a seat free: get in
+	if (!Viewer->GetVehicle() && Robot->CanBoard(Viewer))
+	{
+		const ERRRobotSeat Seat = Robot->GetFreeSeat();
+		const int32 Index = Seat == ERRRobotSeat::Move ? 0 : Seat == ERRRobotSeat::Attack ? 1 : 2;
+		const FVector Under = Project(Viewer->GetActorLocation() - FVector(0.f, 0.f, Viewer->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
+		if (Under.Z > 0.f)
+		{
+			DrawKeyPrompt(Canvas, FString::Printf(TEXT("GET IN: %s"), RobotSeatNames[Index]), Under.X, Under.Y + 8.f * S, S, RRUI::Ink);
+		}
+	}
 }

@@ -103,6 +103,15 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
 	float BurnTick = 0.25f;
 
+	/**
+	 * The breath smashes the structures it sweeps (ARRRandomWreckage) as its front goes by, in stretches this long, this share
+	 * of BreathRadius to each side.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
+	float WreckStep = 450.f;
+	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
+	float WreckShare = 0.85f;
+
 	/** Seconds flying away at the end. */
 	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
 	float LeaveTime = 1.2f;
@@ -113,9 +122,26 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
 	float FollowPerScale = 220.f;
 
-	/** Wing beats a second (hovering; dashing, quicker and shallower). */
+	/** Wing beats a second while it flaps (setting off and climbing away). */
 	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
 	float FlapRate = 2.2f;
+
+	/**
+	 * Gliding (the lap and the fire run): wings held spread and still, and every so many seconds (min, max) one big beat
+	 * lasting StrokeSeconds, StrokeDegrees down and back up at the root; the body surges nose up a little with it.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
+	FVector2D StrokeEvery = FVector2D(1.1f, 1.9f);
+	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
+	float StrokeSeconds = 0.55f;
+	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
+	float StrokeDegrees = 46.f;
+
+	/** Banking into turns: degrees per degree a second it turns, and at most. */
+	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
+	float BankPerTurn = 0.5f;
+	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
+	float MaxBank = 55.f;
 
 protected:
 	virtual void BeginPlay() override;
@@ -212,6 +238,8 @@ private:
 	float LineLength = 0.f;
 	/** Seconds since the pass began (the breath's front is FlySpeed times that along the line). */
 	float PassTime = -1.f;
+	/** Server: how far along the line the breath has smashed so far. */
+	float WreckedTo = 0.f;
 	/**
 	 * The lap: where it begins and ends (on the line, Lead behind its start, at height), its middle (beside the start),
 	 * radius, seconds, and the angle (radians) of its end round the middle.
@@ -234,6 +262,11 @@ private:
 	float Dash = 0.f;
 	/** The wing beat's phase (radians), run on at the beat's rate of the moment. */
 	float FlapPhase = 0.f;
+	/** 0 .. 1 how much the wings flap (setting off, climbing away) rather than glide; the glide's next big beat in so many
+	 * seconds, and how far through the one going on (0 .. 1; above 1 none). */
+	float Flapping = 1.f;
+	float StrokeWait = 0.8f;
+	float StrokeAlpha = 2.f;
 
 	/** Server: enemies the breath's front has already hit, and the burn's clock. */
 	TSet<TWeakObjectPtr<AActor>> FrontHit;

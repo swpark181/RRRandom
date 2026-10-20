@@ -120,6 +120,57 @@ public:
 	UFUNCTION(Exec)
 	void RROwnDie(int32 Face = 6, int32 bEveryone = 0);
 
+	/** Rolls one stored die, as E does (console only, for scripted tests). */
+	UFUNCTION(Exec)
+	void RRRoll();
+
+	/** Presses F: rides, gets off, combines the star robot, gets in or out of it (console only, for scripted tests). */
+	UFUNCTION(Exec)
+	void RRRide();
+
+	/** Fires once at the nearest opponent, or straight ahead with none about (console only, for scripted tests). */
+	UFUNCTION(Exec)
+	void RRShoot();
+
+	/**
+	 * Cheat: the star team's three cars park in a ring in front of my animal friend, ready to combine (Ctrl + 0; anyone
+	 * riding them is put off, and a robot already about comes apart first). Not in shipping builds.
+	 */
+	UFUNCTION(Exec)
+	void RRStarCars();
+
+	/**
+	 * Cheat: smashes the structures round the spot the middle of my view points at (ARRRandomWreckage; console only): a ball
+	 * this big, or with 1 after it a column through every height. Not in shipping builds.
+	 */
+	UFUNCTION(Exec)
+	void RRWreck(float Radius = 300.f, int32 bColumn = 0);
+
+	/**
+	 * For animation work (the studio, -RRMap=Studio, though it works anywhere; console only): this screen watches my
+	 * animal friend (the star robot while I'm aboard it) from a fixed side, following it: Yaw round from its front (0
+	 * its face, 90 its right side, 180 its back, -90 its left), this far away and this high over its middle (0: a distance
+	 * and height to suit it). The controls stay as they were. RRStudioCamOff goes back to the usual view.
+	 */
+	UFUNCTION(Exec)
+	void RRStudioCam(float Yaw = 90.f, float Distance = 0.f, float Height = 0.f);
+	UFUNCTION(Exec)
+	void RRStudioCamOff();
+
+	/** Cheat: the whole game runs at this speed (0.25 a quarter, 1 back to normal; console only). Not in shipping builds. */
+	UFUNCTION(Exec)
+	void RRSlomo(float Rate = 0.25f);
+
+	/**
+	 * Cheat: the star robot I'm aboard fires a rocket fist this far straight ahead of its upper body, as its ATTACK seat
+	 * would (it needs someone in that seat; console only, for animation work). Not in shipping builds.
+	 */
+	UFUNCTION(Exec)
+	void RRRobotFire(float Distance = 1500.f);
+
+	/** The 0 key: with Ctrl held, RRStarCars. */
+	void OnCheatStarCarsKey();
+
 	/** While my tiger's spirit is out: the floor under the cursor, where a strike would land (false off the arena). */
 	bool GetUltimateSpot(FVector& OutSpot) const;
 
@@ -230,6 +281,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> CheatWinAction;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> CheatStarCarsAction;
+
 	/** One per gun, in RRGun's numbering (keys 1 to 6). */
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TArray<TObjectPtr<UInputAction>> CheatGunActions;
@@ -261,6 +315,24 @@ private:
 	void ServerCheatHurt(float Amount);
 	UFUNCTION(Server, Reliable)
 	void ServerCheatOwnDie(int32 Face, bool bEveryone);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatStarCars();
+	UFUNCTION(Server, Reliable)
+	void ServerCheatWreck(FVector_NetQuantize Spot, float Radius, bool bColumn);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatSlomo(float Rate);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatRobotFire(float Distance);
+
+	/** RRStudioCam: the camera (this screen's own), whether it's on, its angle, distance and height, and the yaw it follows. */
+	void UpdateStudioCam(float DeltaTime);
+	UPROPERTY(Transient)
+	TObjectPtr<class ACameraActor> StudioCam;
+	bool bStudioCam = false;
+	float StudioYaw = 90.f;
+	float StudioDistance = 0.f;
+	float StudioHeight = 0.f;
+	float StudioFacing = 0.f;
 
 	/** My tiger's spirit strikes at this spot (if it's ready for one). */
 	UFUNCTION(Server, Reliable)

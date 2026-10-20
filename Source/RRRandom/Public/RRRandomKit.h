@@ -27,6 +27,9 @@ struct FRRKit
 	int32 JumpCount = 1;
 	/** Holding jump while falling glides down (the dragon). */
 	bool bGlide = false;
+	/** Flies and glides on its own wings (the dragon: its wing bones flap and spread, URRRandomBodyAnimInstance) instead of
+	 * the glowing ones (URRRandomWingsComponent) and their sparkles. */
+	bool bOwnWings = false;
 	/** Shots from behind, and the first shot out of invisibility, hit harder (the fox). */
 	bool bBackstab = false;
 	/** Keeps part of its ore and its gun when knocked out (the squirrel). */

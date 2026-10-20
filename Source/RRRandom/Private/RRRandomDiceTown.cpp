@@ -1,5 +1,6 @@
 #include "RRRandomDiceTown.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomWreckage.h"
 #include "EngineUtils.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
@@ -394,6 +395,10 @@ void ARRRandomDiceTown::AddStairs(const FFrame& Frame, int32 U, int32 V, int32 D
 	Stair.Width = Width;
 	Stair.Base = Base;
 	Stair.Rise = Rise;
+	Stair.StepFirst = Steps->GetInstanceCount();
+	Stair.StepCount = Rise * 2;
+	Stair.SolidFirst = Solid->GetInstanceCount();
+	Stair.SolidCount = Rise + 2;
 	Stairs.Add(Stair);
 	for (int32 K = 0; K < Rise; ++K)
 	{
@@ -1481,14 +1486,10 @@ void ARRRandomDiceTown::MakeBlocks()
 						bShows = Local.Size() > RimRadius(FMath::Atan2(Local.Y, Local.X)) * UnderShare - 200.f;
 					}
 				}
-				if (!bShows)
+				if (bShows)
 				{
-					continue;
+					AddCellBlock(X, Y, Level);
 				}
-				const FLook& Look = Looks[Value - 1];
-				const float Jitter = 0.95f + 0.1f * float(CellHash(X, Y, Level) % 1000) / 1000.f;
-				const FTransform Where(FRotator::ZeroRotator, At(CellCenter(FIntPoint(X, Y)), (Level - 0.5f) * BlockSize));
-				AddColored(Look.bDie ? DieBlocks.Get() : Blocks.Get(), Where, Shade(Look.Body, Jitter), Shade(Look.Accent, Jitter));
 			}
 		}
 	}
@@ -1528,6 +1529,10 @@ void ARRRandomDiceTown::MakeCollision()
 {
 	// Greedy boxes: from each solid block not yet covered, as far as it goes along X, then Y, then up
 	TBitArray<> Covered(false, Grid.Num());
+	// (Remembered by box and by cell, for cutting round wrecks)
+	FirstGridBox = Solid->GetInstanceCount();
+	GridBoxes.Reset();
+	BoxOfCell.Init(INDEX_NONE, Grid.Num());
 	auto IsOpen = [&](int32 X, int32 Y, int32 Level)
 	{
 		return IsInGrid(X, Y, Level) && Grid[GridIndex(X, Y, Level)] != 0 && !Covered[GridIndex(X, Y, Level)];
@@ -1579,9 +1584,11 @@ void ARRRandomDiceTown::MakeCollision()
 						for (int32 I = X; I <= X1; ++I)
 						{
 							Covered[GridIndex(I, J, L)] = true;
+							BoxOfCell[GridIndex(I, J, L)] = GridBoxes.Num();
 						}
 					}
 				}
+				GridBoxes.Add({ FIntVector(X, Y, Level), FIntVector(X1, Y1, L1) });
 				const FVector2D Middle = (CellCenter(FIntPoint(X, Y)) + CellCenter(FIntPoint(X1, Y1))) * 0.5f;
 				const float Bottom = (Level - 1) * BlockSize;
 				const float Top = L1 * BlockSize;
@@ -2212,7 +2219,7 @@ void ARRRandomDiceTown::AnimateFloaters(float Time)
 		Where.Z += Floater.Bob * FMath::Sin(Time * 1.1f + Floater.Phase * 2.3f);
 		const FQuat Spin(FRotator(0.f, Time * Floater.Spin, 0.f));
 		const FQuat Tumble(FRotator(Time * Floater.Tumble * 0.7f, 0.f, Time * Floater.Tumble));
-		Floater.Instances->UpdateInstanceTransform(Floater.Index, FTransform(Spin * FQuat(Floater.Turn) * Tumble, Where, FVector(Floater.Scale)), true, false, true);
+		Floater.Instances->UpdateInstanceTransform(Floater.Index, FTransform(Spin * FQuat(Floater.Turn) * Tumble, Where, FVector(Floater.bWrecked ? 0.f : Floater.Scale)), true, false, true);
 	}
 	for (UInstancedStaticMeshComponent* Instances : { Stars.Get(), FloatDice.Get() })
 	{
@@ -2749,4 +2756,516 @@ FColor ARRRandomDiceTown::GetMapColor(const FVector2D& WorldLocation, int32& Out
 	const int32 Index = (Y + HalfCells) * GridCells + (X + HalfCells);
 	OutLevels = MapLevels[Index];
 	return MapColors[Index];
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Wrecks (round 60)
+
+namespace
+{
+	/** Looks gone with a wreck: drawn at no size where they stood. */
+	FTransform Shrunk(const FTransform& Was)
+	{
+		return FTransform(Was.GetRotation(), Was.GetLocation(), FVector::ZeroVector);
+	}
+
+	/** What stopped things there: put far under the island. */
+	FTransform Stowed(const FTransform& Was)
+	{
+		return FTransform(Was.GetRotation(), Was.GetLocation() - FVector(0.f, 0.f, 200000.f), Was.GetScale3D());
+	}
+
+	/** Floaters this high over the floor at most go with a wreck (the star lamps' stars, not the dice drifting in the sky). */
+	constexpr float WreckFloaterHeight = 1200.f;
+}
+
+FTransform ARRRandomDiceTown::GetCellTransform(int32 X, int32 Y, int32 Level) const
+{
+	return FTransform(FRotator::ZeroRotator, At(CellCenter(FIntPoint(X, Y)), (Level - 0.5f) * BlockSize));
+}
+
+void ARRRandomDiceTown::AddCellBlock(int32 X, int32 Y, int32 Level)
+{
+	const FLook& Look = Looks[Grid[GridIndex(X, Y, Level)] - 1];
+	const float Jitter = 0.95f + 0.1f * float(CellHash(X, Y, Level) % 1000) / 1000.f;
+	UInstancedStaticMeshComponent* Instances = Look.bDie ? DieBlocks.Get() : Blocks.Get();
+	AddColored(Instances, GetCellTransform(X, Y, Level), Shade(Look.Body, Jitter), Shade(Look.Accent, Jitter));
+	CellBlocks.Add(GridIndex(X, Y, Level), { Look.bDie, Instances->GetInstanceCount() - 1, true });
+}
+
+bool ARRRandomDiceTown::IsFilled(int32 X, int32 Y, int32 Level) const
+{
+	if (!IsInGrid(X, Y, Level))
+	{
+		return false;
+	}
+	const int32 Index = GridIndex(X, Y, Level);
+	return Grid[Index] != 0 && !(Broken.IsValidIndex(Index) && Broken[Index]);
+}
+
+bool ARRRandomDiceTown::Touches(const FRRWreck& Wreck, const FBox& Box) const
+{
+	if (Wreck.bColumn && (Box.Max.Z < FloorZ + 5.f || Box.Min.Z > FloorZ + LevelMax * BlockSize))
+	{
+		return false;
+	}
+	// The box's point nearest the line's point nearest the box's middle
+	const FVector Middle = Box.GetCenter();
+	const FVector Line = Wreck.To - Wreck.From;
+	const float Alpha = Line.SizeSquared() > 1.f ? FMath::Clamp(FVector::DotProduct(Middle - Wreck.From, Line) / Line.SizeSquared(), 0.f, 1.f) : 0.f;
+	FVector Near = Wreck.From + Line * Alpha;
+	if (Wreck.bColumn)
+	{
+		Near.Z = Middle.Z;
+	}
+	return Wreck.Contains(Box.GetClosestPointTo(Near));
+}
+
+void ARRRandomDiceTown::RefreshCellBlock(int32 X, int32 Y, int32 Level, bool bGrow, TArray<FRRRegrow>& OutRegrow)
+{
+	// (The island's underside keeps its own rule in MakeBlocks; wrecks never come near it)
+	if (!IsInGrid(X, Y, Level) || Level < -1)
+	{
+		return;
+	}
+	const int32 Index = GridIndex(X, Y, Level);
+	const uint8 Value = Grid[Index];
+	if (Value == 0 || Value == HiddenSolid || Looks[Value - 1].bUnderMesh)
+	{
+		return;
+	}
+	const bool bWant = !Broken[Index] && (!IsFilled(X + 1, Y, Level) || !IsFilled(X - 1, Y, Level) || !IsFilled(X, Y + 1, Level) || !IsFilled(X, Y - 1, Level)
+		|| !IsFilled(X, Y, Level + 1) || !IsFilled(X, Y, Level - 1));
+	FCellBlock* Block = CellBlocks.Find(Index);
+	if (!Block)
+	{
+		// Inside a wall until now: drawn from now on, shown or hidden as it goes
+		if (bWant)
+		{
+			AddCellBlock(X, Y, Level);
+		}
+		return;
+	}
+	if (Block->bShown == bWant)
+	{
+		return;
+	}
+	Block->bShown = bWant;
+	UInstancedStaticMeshComponent* Instances = Block->bDie ? DieBlocks.Get() : Blocks.Get();
+	const FTransform Where = GetCellTransform(X, Y, Level);
+	Instances->UpdateInstanceTransform(Block->Index, bWant ? Where : Shrunk(Where), true, false, false);
+	if (bWant && bGrow)
+	{
+		OutRegrow.Add({ Instances, Block->Index, Where });
+	}
+}
+
+void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<FRRBrokenBit>& OutBroken, TArray<FRRRegrow>& OutRegrow)
+{
+	if (!bBuilt)
+	{
+		return;
+	}
+	if (Broken.Num() != Grid.Num())
+	{
+		Broken.Init(false, Grid.Num());
+	}
+	const FVector Middle = GetActorLocation();
+	const float Top = FloorZ + LevelMax * BlockSize;
+	auto CellAt = [&](const FVector& World)
+	{
+		return FIntVector(FMath::FloorToInt((World.X - Middle.X) / BlockSize), FMath::FloorToInt((World.Y - Middle.Y) / BlockSize),
+			FMath::FloorToInt((World.Z - FloorZ) / BlockSize) + 1);
+	};
+	auto CellOf = [](int32 Index)
+	{
+		return FIntVector(Index % GridCells - HalfCells, Index / GridCells % GridCells - HalfCells, Index / (GridCells * GridCells) + LevelMin);
+	};
+	auto IsUnderMesh = [this](int32 Index)
+	{
+		const uint8 Value = Grid[Index];
+		return Value != 0 && Value != HiddenSolid && Looks[Value - 1].bUnderMesh;
+	};
+
+	TBitArray<> Now(false, Grid.Num());
+	TArray<int32> NowCells;
+	auto Break = [&](int32 Index)
+	{
+		if (!Now[Index])
+		{
+			Now[Index] = true;
+			NowCells.Add(Index);
+		}
+	};
+	// The cells (over the floor) inside a box in the world, a little in from its sides
+	auto ForCellsIn = [&](const FBox& Box, TFunctionRef<void(int32)> Visit)
+	{
+		const FIntVector Low = CellAt(Box.Min + FVector(10.f));
+		const FIntVector High = CellAt(Box.Max - FVector(10.f));
+		for (int32 Level = FMath::Max(1, Low.Z); Level <= FMath::Min(LevelMax, High.Z); ++Level)
+		{
+			for (int32 Y = FMath::Max(-HalfCells, Low.Y); Y <= FMath::Min(HalfCells - 1, High.Y); ++Y)
+			{
+				for (int32 X = FMath::Max(-HalfCells, Low.X); X <= FMath::Min(HalfCells - 1, High.X); ++X)
+				{
+					Visit(GridIndex(X, Y, Level));
+				}
+			}
+		}
+	};
+	// Where a model stands (as it stood, if it's gone), and the box round it
+	auto Standing = [this](UInstancedStaticMeshComponent* Instances, int32 Index)
+	{
+		if (const TMap<int32, FTransform>* Mine = Gone.Find(Instances))
+		{
+			if (const FTransform* Was = Mine->Find(Index))
+			{
+				return *Was;
+			}
+		}
+		FTransform Transform;
+		Instances->GetInstanceTransform(Index, Transform, true);
+		return Transform;
+	};
+	auto BoundsOf = [&](UInstancedStaticMeshComponent* Instances, int32 Index)
+	{
+		return Instances->GetStaticMesh()->GetBoundingBox().TransformBy(Standing(Instances, Index));
+	};
+	auto IsHit = [&](const FBox& Box)
+	{
+		for (const FRRWreck& Wreck : InWrecks)
+		{
+			if (Touches(Wreck, Box))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
+	// Models drawn over hidden solid cells (roofs, Tripo trees, hedges, lamp posts): one a wreck reaches goes whole, its
+	// cells with it; then any other drawn over a cell that went goes too (a hedge's smaller puffs, a post's other bands)
+	TMap<UInstancedStaticMeshComponent*, TSet<int32>> WantGone;
+	TArray<UInstancedStaticMeshComponent*> Owners = { Roofs.Get(), Marshmallows.Get(), Poles.Get() };
+	for (UInstancedStaticMeshComponent* Trees : PropTrees)
+	{
+		Owners.Add(Trees);
+	}
+	Owners.RemoveAll([](const UInstancedStaticMeshComponent* Instances) { return !Instances || !Instances->GetStaticMesh(); });
+	for (UInstancedStaticMeshComponent* Instances : Owners)
+	{
+		for (int32 Index = 0; Index < Instances->GetInstanceCount(); ++Index)
+		{
+			const FBox Box = BoundsOf(Instances, Index);
+			if (IsHit(Box))
+			{
+				WantGone.FindOrAdd(Instances).Add(Index);
+				ForCellsIn(Box, [&](int32 Cell) { if (IsUnderMesh(Cell)) { Break(Cell); } });
+			}
+		}
+	}
+
+	// The blocks: every cell over the floor whose middle is in a wreck (not the giant dice, nor what models draw)
+	for (const FRRWreck& Wreck : InWrecks)
+	{
+		const FBox Box = Wreck.GetBounds(FloorZ, Top);
+		const FIntVector Low = CellAt(Box.Min);
+		const FIntVector High = CellAt(Box.Max);
+		for (int32 Level = FMath::Max(1, Low.Z); Level <= FMath::Min(LevelMax, High.Z); ++Level)
+		{
+			for (int32 Y = FMath::Max(-HalfCells, Low.Y); Y <= FMath::Min(HalfCells - 1, High.Y); ++Y)
+			{
+				for (int32 X = FMath::Max(-HalfCells, Low.X); X <= FMath::Min(HalfCells - 1, High.X); ++X)
+				{
+					const int32 Index = GridIndex(X, Y, Level);
+					const uint8 Value = Grid[Index];
+					if (Value != 0 && Value != HiddenSolid && !Looks[Value - 1].bUnderMesh && Wreck.Contains(GetCellTransform(X, Y, Level).GetLocation()))
+					{
+						Break(Index);
+					}
+				}
+			}
+		}
+	}
+	for (UInstancedStaticMeshComponent* Instances : Owners)
+	{
+		const TSet<int32>* Already = WantGone.Find(Instances);
+		TArray<int32> More;
+		for (int32 Index = 0; Index < Instances->GetInstanceCount(); ++Index)
+		{
+			if (Already && Already->Contains(Index))
+			{
+				continue;
+			}
+			bool bOver = false;
+			ForCellsIn(BoundsOf(Instances, Index), [&](int32 Cell) { bOver |= Now[Cell] && IsUnderMesh(Cell); });
+			if (bOver)
+			{
+				More.Add(Index);
+			}
+		}
+		if (More.Num() > 0)
+		{
+			WantGone.FindOrAdd(Instances).Append(More);
+		}
+	}
+
+	// Looks that stop nothing (awnings), and whole flights of stairs (looks and slabs) a wreck reaches a step of
+	if (Decor)
+	{
+		for (int32 Index = 0; Index < Decor->GetInstanceCount(); ++Index)
+		{
+			if (IsHit(BoundsOf(Decor, Index)))
+			{
+				WantGone.FindOrAdd(Decor).Add(Index);
+			}
+		}
+	}
+	for (const FStair& Stair : Stairs)
+	{
+		bool bHit = false;
+		for (int32 Step = Stair.StepFirst; Step < Stair.StepFirst + Stair.StepCount && !bHit; ++Step)
+		{
+			bHit = IsHit(BoundsOf(Steps, Step));
+		}
+		if (bHit)
+		{
+			for (int32 Step = Stair.StepFirst; Step < Stair.StepFirst + Stair.StepCount; ++Step)
+			{
+				WantGone.FindOrAdd(Steps).Add(Step);
+			}
+			for (int32 Slab = Stair.SolidFirst; Slab < Stair.SolidFirst + Stair.SolidCount; ++Slab)
+			{
+				WantGone.FindOrAdd(Solid).Add(Slab);
+			}
+		}
+	}
+	// The lamps' stars (floaters low over the town)
+	for (FFloater& Floater : Floaters)
+	{
+		Floater.bWrecked = Floater.Orbit <= 0.f && Floater.Base.Z < FloorZ + WreckFloaterHeight && IsHit(FBox(Floater.Base - FVector(40.f), Floater.Base + FVector(40.f)));
+	}
+
+	// What changed: cells broken just now (rubble), cells mended
+	TArray<int32> Changed;
+	TSet<int32> Mended;
+	for (const int32 Index : BrokenCells)
+	{
+		if (!Now[Index])
+		{
+			Changed.Add(Index);
+			Mended.Add(Index);
+		}
+	}
+	for (const int32 Index : NowCells)
+	{
+		if (!Broken[Index])
+		{
+			Changed.Add(Index);
+			const FIntVector Cell = CellOf(Index);
+			const FLook& Look = Looks[Grid[Index] - 1];
+			OutBroken.Add({ GetCellTransform(Cell.X, Cell.Y, Cell.Z).GetLocation(), FLinearColor(Look.Body), FLinearColor(Look.Accent), 1.f });
+		}
+	}
+	Broken = MoveTemp(Now);
+	BrokenCells = MoveTemp(NowCells);
+
+	// The blocks drawn: each changed cell and its neighbors (bared or buried again)
+	TSet<int32> Refresh;
+	for (const int32 Index : Changed)
+	{
+		const FIntVector Cell = CellOf(Index);
+		for (const FIntVector& Step : { FIntVector(0, 0, 0), FIntVector(1, 0, 0), FIntVector(-1, 0, 0), FIntVector(0, 1, 0), FIntVector(0, -1, 0), FIntVector(0, 0, 1), FIntVector(0, 0, -1) })
+		{
+			const FIntVector Next = Cell + Step;
+			if (IsInGrid(Next.X, Next.Y, Next.Z))
+			{
+				Refresh.Add(GridIndex(Next.X, Next.Y, Next.Z));
+			}
+		}
+	}
+	for (const int32 Index : Refresh)
+	{
+		const FIntVector Cell = CellOf(Index);
+		RefreshCellBlock(Cell.X, Cell.Y, Cell.Z, Mended.Contains(Index), OutRegrow);
+	}
+	if (Refresh.Num() > 0)
+	{
+		Blocks->MarkRenderStateDirty();
+		DieBlocks->MarkRenderStateDirty();
+	}
+
+	// What stops: each merged box with a broken cell in it goes under the island, and boxes merged again from what's left
+	// of it stand in for it (the way MakeCollision merges); once none of its cells is broken it comes back
+	auto BoxTransform = [this](const FIntVector& Min, const FIntVector& Max)
+	{
+		const FVector2D BoxMiddle = (CellCenter(FIntPoint(Min.X, Min.Y)) + CellCenter(FIntPoint(Max.X, Max.Y))) * 0.5f;
+		const float Bottom = (Min.Z - 1) * BlockSize;
+		const float BoxTop = Max.Z * BlockSize;
+		return FTransform(FRotator::ZeroRotator, At(BoxMiddle, (Bottom + BoxTop) * 0.5f), FVector(Max.X - Min.X + 1, Max.Y - Min.Y + 1, Max.Z - Min.Z + 1));
+	};
+	TSet<int32> DirtyBoxes;
+	for (const int32 Index : Changed)
+	{
+		if (BoxOfCell.IsValidIndex(Index) && BoxOfCell[Index] != INDEX_NONE)
+		{
+			DirtyBoxes.Add(BoxOfCell[Index]);
+		}
+	}
+	for (const int32 Box : DirtyBoxes)
+	{
+		const FGridBox& Cells = GridBoxes[Box];
+		const FIntVector Size = Cells.Max - Cells.Min + FIntVector(1);
+		TBitArray<> Covered(false, Size.X * Size.Y * Size.Z);
+		auto Local = [&](int32 X, int32 Y, int32 Level) { return ((Level - Cells.Min.Z) * Size.Y + (Y - Cells.Min.Y)) * Size.X + (X - Cells.Min.X); };
+		auto IsOpen = [&](int32 X, int32 Y, int32 Level)
+		{
+			return X >= Cells.Min.X && X <= Cells.Max.X && Y >= Cells.Min.Y && Y <= Cells.Max.Y && Level >= Cells.Min.Z && Level <= Cells.Max.Z
+				&& !Broken[GridIndex(X, Y, Level)] && !Covered[Local(X, Y, Level)];
+		};
+		int32 BrokenCount = 0;
+		for (int32 Level = Cells.Min.Z; Level <= Cells.Max.Z; ++Level)
+		{
+			for (int32 Y = Cells.Min.Y; Y <= Cells.Max.Y; ++Y)
+			{
+				for (int32 X = Cells.Min.X; X <= Cells.Max.X; ++X)
+				{
+					BrokenCount += Broken[GridIndex(X, Y, Level)] ? 1 : 0;
+				}
+			}
+		}
+		const int32 Instance = FirstGridBox + Box;
+		if (BrokenCount == 0)
+		{
+			if (CutBoxes.Remove(Box) > 0)
+			{
+				Solid->UpdateInstanceTransform(Instance, BoxTransform(Cells.Min, Cells.Max), true, false, true);
+			}
+			continue;
+		}
+		TArray<FTransform> Left;
+		for (int32 Level = Cells.Min.Z; Level <= Cells.Max.Z; ++Level)
+		{
+			for (int32 Y = Cells.Min.Y; Y <= Cells.Max.Y; ++Y)
+			{
+				for (int32 X = Cells.Min.X; X <= Cells.Max.X; ++X)
+				{
+					if (!IsOpen(X, Y, Level))
+					{
+						continue;
+					}
+					int32 X1 = X;
+					while (IsOpen(X1 + 1, Y, Level))
+					{
+						++X1;
+					}
+					auto RowOpen = [&](int32 AtY, int32 AtLevel)
+					{
+						for (int32 I = X; I <= X1; ++I)
+						{
+							if (!IsOpen(I, AtY, AtLevel))
+							{
+								return false;
+							}
+						}
+						return true;
+					};
+					int32 Y1 = Y;
+					while (RowOpen(Y1 + 1, Level))
+					{
+						++Y1;
+					}
+					int32 L1 = Level;
+					for (bool bGrow = true; bGrow; )
+					{
+						for (int32 J = Y; J <= Y1 && bGrow; ++J)
+						{
+							bGrow = RowOpen(J, L1 + 1);
+						}
+						L1 += bGrow ? 1 : 0;
+					}
+					for (int32 L = Level; L <= L1; ++L)
+					{
+						for (int32 J = Y; J <= Y1; ++J)
+						{
+							for (int32 I = X; I <= X1; ++I)
+							{
+								Covered[Local(I, J, L)] = true;
+							}
+						}
+					}
+					Left.Add(BoxTransform(FIntVector(X, Y, Level), FIntVector(X1, Y1, L1)));
+				}
+			}
+		}
+		if (!CutBoxes.Contains(Box))
+		{
+			Solid->UpdateInstanceTransform(Instance, Stowed(BoxTransform(Cells.Min, Cells.Max)), true, false, true);
+		}
+		CutBoxes.Add(Box, MoveTemp(Left));
+	}
+
+	// Models gone now, and back once no wreck reaches them
+	TSet<UInstancedStaticMeshComponent*> Touched;
+	for (TPair<UInstancedStaticMeshComponent*, TMap<int32, FTransform>>& Pair : Gone)
+	{
+		UInstancedStaticMeshComponent* Instances = Pair.Key;
+		const TSet<int32>* Want = WantGone.Find(Instances);
+		for (auto It = Pair.Value.CreateIterator(); It; ++It)
+		{
+			if (!Want || !Want->Contains(It.Key()))
+			{
+				Instances->UpdateInstanceTransform(It.Key(), It.Value(), true, false, true);
+				if (Instances != Solid)
+				{
+					OutRegrow.Add({ Instances, It.Key(), It.Value() });
+				}
+				Touched.Add(Instances);
+				It.RemoveCurrent();
+			}
+		}
+	}
+	for (const TPair<UInstancedStaticMeshComponent*, TSet<int32>>& Pair : WantGone)
+	{
+		TMap<int32, FTransform>& Mine = Gone.FindOrAdd(Pair.Key);
+		for (const int32 Index : Pair.Value)
+		{
+			if (!Mine.Contains(Index))
+			{
+				FTransform Was;
+				Pair.Key->GetInstanceTransform(Index, Was, true);
+				Mine.Add(Index, Was);
+				Pair.Key->UpdateInstanceTransform(Index, Pair.Key == Solid ? Stowed(Was) : Shrunk(Was), true, false, true);
+				Touched.Add(Pair.Key);
+			}
+		}
+	}
+
+	if (DirtyBoxes.Num() > 0)
+	{
+		if (!WreckSolid)
+		{
+			WreckSolid = MakeInstances(Cube, nullptr, true, 0);
+			WreckSolid->SetVisibility(false);
+			WreckSolid->SetHiddenInGame(true);
+		}
+		TArray<FTransform> All;
+		for (const TPair<int32, TArray<FTransform>>& Pair : CutBoxes)
+		{
+			All.Append(Pair.Value);
+		}
+		WreckSolid->ClearInstances();
+		WreckSolid->AddInstances(All, false, true, false);
+	}
+	for (UInstancedStaticMeshComponent* Instances : Touched)
+	{
+		Instances->MarkRenderStateDirty();
+	}
+	int32 GoneCount = 0;
+	for (const TPair<UInstancedStaticMeshComponent*, TMap<int32, FTransform>>& Pair : Gone)
+	{
+		GoneCount += Pair.Value.Num();
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town wrecks: %d in force, %d blocks broken (%d just now, %d mended), %d boxes cut into %d, %d models gone."),
+		InWrecks.Num(), BrokenCells.Num(), OutBroken.Num(), Mended.Num(), CutBoxes.Num(), WreckSolid ? WreckSolid->GetInstanceCount() : 0, GoneCount);
 }

@@ -61,10 +61,44 @@ namespace
 	// In flight the body leans forward up to FlightLeanMax degrees at FlightLeanSpeed (ground speed), easing at
 	// FlightLeanRate; the player's camera pulls back by up to FlightCameraPullShare of its length, easing at FlightCameraPullRate
 	constexpr float FlightLeanMax = 18.f;
+	// Gliding down: this lean, plus this much more at FlightLeanSpeed; rising: this share of the usual lean
+	constexpr float FlightGlideLean = 12.f;
+	constexpr float FlightGlideLeanAtSpeed = 26.f;
+	constexpr float FlightRiseLeanShare = 0.4f;
+	// Banking in flight: degrees per degree a second the way it flies turns, at most FlightBankMax, easing at FlightBankRate
+	constexpr float FlightBankPerTurn = 0.3f;
+	constexpr float FlightBankMax = 40.f;
+	constexpr float FlightBankRate = 5.f;
 	constexpr float FlightLeanSpeed = 600.f;
 	constexpr float FlightLeanRate = 6.f;
 	constexpr float FlightCameraPullShare = 0.12f;
 	constexpr float FlightCameraPullRate = 2.f;
+	// Crew of the star robot ask it to fire (its fists or its shield) this often at most
+	constexpr float RobotFireRequestInterval = 0.1f;
+	// In the star robot the player's camera eases over at this rate. Top-down: it pulls back by this share of its length
+	// and looks at this height on the robot (its chest, not its feet). Third person: behind the robot's right shoulder,
+	// looking past its head (the arm's pivot this high, the camera this far back, out to the right and up), so the robot
+	// stands at the left of the screen and the crosshair has the way ahead
+	constexpr float RobotCameraPullRate = 2.f;
+	constexpr float RobotCameraPullShare = 0.4f;
+	constexpr float RobotTopDownLookHeight = 260.f;
+	constexpr float RobotShoulderPivot = 420.f;
+	constexpr float RobotShoulderArmLength = 1050.f;
+	const FVector RobotShoulderOffset(0.f, 300.f, 90.f);
+	// Combining the robot, the one who started it watches it come together: top-down, the view slides this share of the
+	// way over to it and pulls back by this share; third person, the camera turns to it (this fast) and looks at this
+	// height on it from this far, this much down
+	constexpr float CombineCameraRate = 2.6f;
+	constexpr float CombineTopDownShare = 0.75f;
+	constexpr float CombineTopDownPull = 0.55f;
+	constexpr float CombineLookHeight = 330.f;
+	constexpr float CombineArmLength = 1500.f;
+	constexpr float CombinePitch = -12.f;
+	constexpr float CombineTurnRate = 3.f;
+	// The just-combined robot turns round only this soon after it is done (not again for someone getting in later)
+	constexpr float IntroTurnWindow = 3.f;
+	// Third person on one of the star team's cars (taller than the others), the camera rises by its height above this
+	constexpr float VehicleCameraClearHeight = 100.f;
 	// Third person (a cheat): the over-the-shoulder camera's distance, its offset from the brawler (forward, right, up), and its
 	// field of view; the same into the sights, and how fast the camera goes into and out of them
 	constexpr float ShoulderArmLength = 340.f;
@@ -428,8 +462,13 @@ void ARRRandomCharacter::BeginPlay()
 
 void ARRRandomCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	// A brawler leaving the game (a bot making room for a player) parks its vehicle for others
+	// A brawler leaving the game (a bot making room for a player) parks its vehicle for others, and leaves the robot (or
+	// calls its combining off)
 	GetOffVehicle();
+	if (Robot && HasAuthority())
+	{
+		Robot->Leave(this);
+	}
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -457,6 +496,8 @@ void ARRRandomCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ARRRandomCharacter, bFlying);
 	DOREPLIFETIME(ARRRandomCharacter, FlightRemaining);
 	DOREPLIFETIME(ARRRandomCharacter, Vehicle);
+	DOREPLIFETIME(ARRRandomCharacter, Robot);
+	DOREPLIFETIME(ARRRandomCharacter, RobotSeat);
 	DOREPLIFETIME(ARRRandomCharacter, bInvincible);
 	DOREPLIFETIME(ARRRandomCharacter, bPassenger);
 	DOREPLIFETIME(ARRRandomCharacter, ShotCount);
@@ -888,6 +929,7 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 		GetOffVehicle();
 	}
 	UpdateVehicleHandling();
+	UpdateRobotIntroTurn(DeltaSeconds);
 	UpdateWalkSpeed();
 	UpdateLocomotionAnimation();
 	UpdateCamera(DeltaSeconds);
@@ -915,8 +957,8 @@ void ARRRandomCharacter::ServerSetJumpHeld_Implementation(bool bHeld)
 void ARRRandomCharacter::Jump()
 {
 	SetJumpHeld(true);
-	// No jumping (or climbing) on a vehicle, or while the tiger's spirit is out
-	if (!bAlive || bClimbing || Vehicle || IsUsingUltimate())
+	// No jumping (or climbing) on a vehicle, with the star robot, or while the tiger's spirit is out
+	if (!bAlive || bClimbing || Vehicle || Robot || IsUsingUltimate())
 	{
 		return;
 	}
@@ -1233,6 +1275,13 @@ void ARRRandomCharacter::UpdateDamagePopups(float DeltaSeconds)
 
 void ARRRandomCharacter::UpdateWalkSpeed()
 {
+	// Combining the star robot: standing still till it is done; driving it: only with the whole crew in
+	if (Robot)
+	{
+		GetCharacterMovement()->MaxWalkSpeed = RobotSeat == ERRRobotSeat::Move && Robot->IsCrewFull() && !ARRRandomGameState::IsPlayLocked(this)
+			? BaseWalkSpeed * ARRRandomStarRobot::WalkSpeedShare * DiceBuffs->GetMultiplier(ERRDiceBuffStat::MoveSpeed) : 0.f;
+		return;
+	}
 	const float VehicleSpeed = Vehicle ? Vehicle->GetHandling().SpeedMultiplier : 1.f;
 	// On foot the species' kit counts too (the rabbit quicker, the tiger slower); a vehicle goes at its own speed
 	const float KitSpeed = Vehicle ? 1.f : RRKit::Get(Species).MoveSpeedScale;
@@ -1247,7 +1296,16 @@ void ARRRandomCharacter::UpdateWalkSpeed()
 void ARRRandomCharacter::UpdateVehicleHandling()
 {
 	UCharacterMovementComponent* Movement = GetCharacterMovement();
-	if (Vehicle)
+	const bool bDrivingRobot = Robot && RobotSeat == ERRRobotSeat::Move;
+	if (bDrivingRobot)
+	{
+		// Heavy: slow to get going and to turn
+		Movement->MaxAcceleration = ARRRandomStarRobot::WalkAcceleration;
+		Movement->GroundFriction = BaseGroundFriction;
+		Movement->BrakingDecelerationWalking = ARRRandomStarRobot::WalkBraking;
+		Movement->RotationRate.Yaw = ARRRandomStarRobot::WalkTurnRate;
+	}
+	else if (Vehicle)
 	{
 		const FRRVehicleHandling& Handling = Vehicle->GetHandling();
 		Movement->MaxAcceleration = Handling.Acceleration;
@@ -1271,7 +1329,7 @@ void ARRRandomCharacter::UpdateVehicleHandling()
 	}
 	// Shooting on foot, the brawler keeps facing where it shoots and strafes (the aiming runs go every way);
 	// otherwise it turns to where it goes
-	Movement->bOrientRotationToMovement = Vehicle || IsDashingToFormation() || (!bThirdPerson && !WantsAimPose());
+	Movement->bOrientRotationToMovement = Vehicle || bDrivingRobot || IsDashingToFormation() || (!bThirdPerson && !WantsAimPose());
 	ApplyThirdPersonRotation();
 	// Up on the deck or in the seat (the body's own offset otherwise; knocked out it is a ragdoll and left alone)
 	if (bAlive && !bClimbing)
@@ -1307,6 +1365,27 @@ void ARRRandomCharacter::ToggleRide()
 	if (!HasAuthority())
 	{
 		ServerToggleRide();
+		return;
+	}
+	// The star robot first: out of it (not while combining it: that waits till it is done), combining the gathered cars
+	// (even from the seat of one of them), into it
+	if (Robot)
+	{
+		if (IsInRobot())
+		{
+			Robot->Leave(this);
+		}
+		return;
+	}
+	// (bots combine on their own terms: ARRRandomAIController::UpdateStarRobot; their F is for vehicles and seats)
+	if (IsPlayerControlled() && ARRRandomStarRobot::CanStartCombine(this))
+	{
+		ARRRandomStarRobot::StartCombine(this);
+		return;
+	}
+	if (ARRRandomStarRobot* Near = ARRRandomStarRobot::Get(this); Near && !Vehicle && !bClimbing && Near->CanBoard(this))
+	{
+		Near->Board(this);
 		return;
 	}
 	if (Vehicle)
@@ -1375,6 +1454,85 @@ void ARRRandomCharacter::ServerToggleRide_Implementation()
 	ToggleRide();
 }
 
+void ARRRandomCharacter::UpdateRobotIntroTurn(float DeltaSeconds)
+{
+	float Yaw = 0.f;
+	if (bRobotIntroTurned || !IsLocallyControlled() || !Robot || RobotSeat != ERRRobotSeat::Move || !Robot->GetIntroTurn(Yaw)
+		|| Robot->GetSecondsSinceAssembled() < ARRRandomStarRobot::IntroTurnDelay || Robot->GetSecondsSinceAssembled() > ARRRandomStarRobot::IntroTurnDelay + IntroTurnWindow)
+	{
+		return;
+	}
+	// Steered off before it got round: the driver has it from here
+	if (!GetCharacterMovement()->GetCurrentAcceleration().IsNearlyZero())
+	{
+		bRobotIntroTurned = true;
+		return;
+	}
+	// Round at its own heavy pace (it steps as it turns: ARRRandomStarRobot)
+	const float Now = GetActorRotation().Yaw;
+	const float Next = FMath::FixedTurn(Now, Yaw, ARRRandomStarRobot::WalkTurnRate * DeltaSeconds);
+	SetActorRotation(FRotator(0.f, Next, 0.f));
+	bRobotIntroTurned = FMath::Abs(FRotator::NormalizeAxis(Next - Yaw)) < 1.f;
+}
+
+void ARRRandomCharacter::SetRobotSeat(ARRRandomStarRobot* NewRobot, ERRRobotSeat NewSeat)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	Robot = NewRobot;
+	RobotSeat = NewRobot ? NewSeat : ERRRobotSeat::None;
+	ApplyRobotSeat();
+	ForceNetUpdate();
+}
+
+void ARRRandomCharacter::OnRep_Robot()
+{
+	ApplyRobotSeat();
+}
+
+void ARRRandomCharacter::ApplyRobotSeat()
+{
+	// Inside: hidden, other animal friends walking through; carried (ATTACK and DEFEND): no movement of its own,
+	// attached to the robot. The driver keeps its capsule and movement: the robot rides on it.
+	const bool bInside = IsInRobot();
+	const bool bCarried = bInside && RobotSeat != ERRRobotSeat::Move;
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	UCapsuleComponent* Capsule = GetCapsuleComponent();
+	if (bCarriedByRobot && !bCarried)
+	{
+		DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+		SetActorRotation(FRotator(0.f, GetActorRotation().Yaw, 0.f));
+		Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		if (bAlive)
+		{
+			Movement->SetMovementMode(MOVE_Walking);
+		}
+	}
+	if (bInsideRobot != bInside)
+	{
+		SetActorHiddenInGame(bInside);
+		Capsule->SetCollisionResponseToChannel(ECC_Pawn, bInside ? ECR_Ignore : CapsulePawnResponse);
+	}
+	if (bCarried && !bCarriedByRobot && Robot)
+	{
+		Movement->StopMovementImmediately();
+		Movement->DisableMovement();
+		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		AttachToComponent(Robot->GetRootComponent(), FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		SetActorRelativeLocation(FVector(0.f, 0.f, Capsule->GetUnscaledCapsuleHalfHeight()));
+		SetActorRelativeRotation(FRotator::ZeroRotator);
+	}
+	bInsideRobot = bInside;
+	bCarriedByRobot = bCarried;
+	if (RobotSeat != ERRRobotSeat::Move)
+	{
+		bRobotIntroTurned = false;
+	}
+	ApplyThirdPersonRotation();
+}
+
 void ARRRandomCharacter::GetOffVehicle()
 {
 	if (!HasAuthority() || !Vehicle)
@@ -1413,13 +1571,26 @@ void ARRRandomCharacter::GetOffVehicle()
 	}
 }
 
+bool ARRRandomCharacter::IsInFlight() const
+{
+	const UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (Vehicle || !bAlive || !Movement || !Movement->IsFalling())
+	{
+		return false;
+	}
+	const URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(Movement);
+	return bFlying || (RandomMovement && RandomMovement->bGliding);
+}
+
 void ARRRandomCharacter::UpdateLocomotionAnimation()
 {
 	// On a vehicle the legs stand still; it does the moving
 	const float Speed = Vehicle ? 0.f : GetVelocity().Size2D();
 	// Shooting, the anim instance lays the aiming set over this; without it the standing fire animation stands in
 	const bool bShooting = FireAnimation && IsAiming() && !AimAnimations.IsComplete();
-	UAnimSequence* Wanted = Speed > WalkAnimationThreshold ? WalkAnimation : (bShooting ? FireAnimation : IdleAnimation);
+	// In flight the legs don't walk: the idle under the flying pose (URRRandomBodyAnimInstance)
+	const bool bInFlight = IsInFlight();
+	UAnimSequence* Wanted = Speed > WalkAnimationThreshold && !bInFlight ? WalkAnimation : (bShooting ? FireAnimation : IdleAnimation);
 
 	if (IsCelebrating())
 	{
@@ -1448,19 +1619,29 @@ void ARRRandomCharacter::UpdateLocomotionAnimation()
 	const bool bAfterMatch = CurrentAnimation && (VictoryAnimations.Contains(CurrentAnimation) || DefeatAnimations.Contains(CurrentAnimation));
 	const float Turn = bAfterMatch && CelebrationViewPoint.IsSet()
 		? FRotator::NormalizeAxis((CelebrationViewPoint.GetValue() - GetActorLocation()).Rotation().Yaw - GetActorRotation().Yaw) : 0.f;
-	// Flying (or gliding down after it): the body leans forward into the way it goes, more the faster
+	// Flying: the body leans forward into the way it goes, more the faster; gliding down it lies out flatter, like a bird;
+	// rising it stays nearly upright
 	const float DeltaSeconds = GetWorld()->GetDeltaSeconds();
-	const URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(GetCharacterMovement());
-	const bool bInFlight = !Vehicle && GetCharacterMovement()->IsFalling() && (bFlying || (RandomMovement && RandomMovement->bGliding));
-	const float Lean = bInFlight ? FlightLeanMax * FMath::Clamp(Speed / FlightLeanSpeed, 0.f, 1.f) : 0.f;
-	if (FireStanceAlpha != Stance || CelebrationTurn != Turn || FlightLean != Lean)
+	const float Pace = FMath::Clamp(Speed / FlightLeanSpeed, 0.f, 1.f);
+	const float Climb = GetVelocity().Z;
+	const float Lean = !bInFlight ? 0.f : Climb < -20.f ? FlightGlideLean + FlightGlideLeanAtSpeed * Pace
+		: FlightLeanMax * Pace * (Climb > 100.f ? FlightRiseLeanShare : 1.f);
+	// And it banks into turns like a bird, the harder the faster the way it flies turns
+	const float WayYaw = GetVelocity().Rotation().Yaw;
+	const float TurnRate = bInFlight && Speed > 80.f && DeltaSeconds > 0.f ? FMath::FindDeltaAngleDegrees(LastFlightYaw, WayYaw) / DeltaSeconds : 0.f;
+	LastFlightYaw = WayYaw;
+	const float Bank = FMath::Clamp(TurnRate * FlightBankPerTurn, -FlightBankMax, FlightBankMax);
+	if (FireStanceAlpha != Stance || CelebrationTurn != Turn || FlightLean != Lean || FlightBank != Bank)
 	{
 		FireStanceAlpha = FMath::FInterpConstantTo(FireStanceAlpha, Stance, DeltaSeconds, FireStanceSpeed);
 		CelebrationTurn = FMath::FInterpConstantTo(CelebrationTurn, Turn, DeltaSeconds, CelebrationTurnRate);
 		FlightLean = FMath::Abs(FlightLean - Lean) < 0.05f ? Lean : FMath::FInterpTo(FlightLean, Lean, DeltaSeconds, FlightLeanRate);
+		FlightBank = FMath::Abs(FlightBank - Bank) < 0.05f ? Bank : FMath::FInterpTo(FlightBank, Bank, DeltaSeconds, FlightBankRate);
 		const FQuat Facing = (MeshRelativeRotation + FRotator(0.f, FireStanceYaw * FireStanceAlpha + CelebrationTurn, 0.f)).Quaternion();
-		// About the brawler's right (+Y), which tips its front (+X) down and its head forward
-		GetMesh()->SetRelativeRotation(FQuat(FVector::RightVector, FMath::DegreesToRadians(FlightLean)) * Facing);
+		// About the brawler's right (+Y), which tips its front (+X) down and its head forward; the bank about its front
+		// (+X), the side it turns to going down
+		GetMesh()->SetRelativeRotation(FQuat(FVector::ForwardVector, FMath::DegreesToRadians(FlightBank))
+			* FQuat(FVector::RightVector, FMath::DegreesToRadians(FlightLean)) * Facing);
 	}
 }
 
@@ -1476,6 +1657,16 @@ void ARRRandomCharacter::UpdateCamera(float DeltaSeconds)
 	const URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(GetCharacterMovement());
 	const bool bInFlight = !Vehicle && GetCharacterMovement()->IsFalling() && (bFlying || (RandomMovement && RandomMovement->bGliding));
 	FlightCameraPull = FMath::FInterpTo(FlightCameraPull, bInFlight ? 1.f : 0.f, DeltaSeconds, FlightCameraPullRate);
+	// In the star robot: framed round something that big. Combining it: watching it come together (where it stands is
+	// kept, so the view can ease back once it is done)
+	RobotCameraPull = FMath::FInterpTo(RobotCameraPull, IsInRobot() ? 1.f : 0.f, DeltaSeconds, RobotCameraPullRate);
+	const bool bWatchingCombine = Robot && RobotSeat == ERRRobotSeat::Combiner;
+	if (bWatchingCombine)
+	{
+		CombineFocus = Robot->GetActorLocation();
+	}
+	CombineCameraBlend = FMath::FInterpTo(CombineCameraBlend, bWatchingCombine ? 1.f : 0.f, DeltaSeconds, CombineCameraRate);
+	const FVector ToCombine = CombineCameraBlend > 0.f ? CombineFocus - GetActorLocation() : FVector::ZeroVector;
 	if (bThirdPerson)
 	{
 		// Over the right shoulder, turned by the mouse (the controller's rotation), kept out of walls; into the sights:
@@ -1484,18 +1675,39 @@ void ARRRandomCharacter::UpdateCamera(float DeltaSeconds)
 		const float Body = GetActorScale3D().Z;
 		CameraBoom->bUsePawnControlRotation = true;
 		CameraBoom->bDoCollisionTest = true;
-		CameraBoom->TargetArmLength = FMath::Lerp(ShoulderArmLength, SightsArmLength, SightsBlend) * Body * (1.f + ShoulderFlightPull * FlightCameraPull);
-		CameraBoom->SocketOffset = FMath::Lerp(ShoulderOffset, SightsOffset, SightsBlend) * Body + FVector(0.f, 0.f, ShoulderFlightRise * FlightCameraPull);
+		float ArmLength = FMath::Lerp(ShoulderArmLength, SightsArmLength, SightsBlend) * Body * (1.f + ShoulderFlightPull * FlightCameraPull);
+		// Over a tall vehicle's sides (the star cars' pods and fenders), not inside them
+		const float VehicleRise = Vehicle && Vehicle->GetStarPart() >= 0 ? FMath::Max(0.f, Vehicle->GetHeight() - VehicleCameraClearHeight) : 0.f;
+		FVector Socket = FMath::Lerp(ShoulderOffset, SightsOffset, SightsBlend) * Body + FVector(0.f, 0.f, ShoulderFlightRise * FlightCameraPull + VehicleRise);
+		// In the robot: behind its right shoulder, looking on past its head
+		ArmLength = FMath::Lerp(ArmLength, RobotShoulderArmLength, RobotCameraPull);
+		Socket = FMath::Lerp(Socket, RobotShoulderOffset, RobotCameraPull);
+		FVector Pivot(0.f, 0.f, (RobotShoulderPivot - GetCapsuleComponent()->GetScaledCapsuleHalfHeight()) * RobotCameraPull);
+		// Combining: straight at the robot from well back, turned to face it
+		ArmLength = FMath::Lerp(ArmLength, CombineArmLength, CombineCameraBlend);
+		Socket = FMath::Lerp(Socket, FVector::ZeroVector, CombineCameraBlend);
+		Pivot = FMath::Lerp(Pivot, ToCombine + FVector(0.f, 0.f, CombineLookHeight - GetCapsuleComponent()->GetScaledCapsuleHalfHeight()), CombineCameraBlend);
+		if (bWatchingCombine && Controller && !ToCombine.IsNearlyZero())
+		{
+			const FRotator Wanted(CombinePitch, ToCombine.Rotation().Yaw, 0.f);
+			Controller->SetControlRotation(FMath::RInterpTo(Controller->GetControlRotation(), Wanted, DeltaSeconds, CombineTurnRate));
+		}
+		CameraBoom->TargetArmLength = ArmLength;
+		CameraBoom->SocketOffset = Socket;
+		CameraBoom->TargetOffset = Pivot;
 		TopDownCamera->SetFieldOfView(FMath::Lerp(ShoulderFieldOfView, SightsFieldOfView, SightsBlend) + ShoulderFlightFieldOfView * FlightCameraPull);
 		return;
 	}
 
-	// Top-down: straight on from above
+	// Top-down: straight on from above (in the robot: pulled back, centered on its chest; combining: slid most of the
+	// way over to it)
 	CameraBoom->bUsePawnControlRotation = false;
 	CameraBoom->bDoCollisionTest = false;
 	CameraBoom->SetWorldRotation(FRotator(CameraPitch, 0.f, 0.f));
 	CameraBoom->SocketOffset = FVector::ZeroVector;
-	CameraBoom->TargetArmLength = BaseCameraArmLength * (1.f + FlightCameraPullShare * FlightCameraPull);
+	CameraBoom->TargetOffset = FVector(0.f, 0.f, RobotTopDownLookHeight * RobotCameraPull)
+		+ (ToCombine * FVector(1.f, 1.f, 0.f) * CombineTopDownShare + FVector(0.f, 0.f, RobotTopDownLookHeight)) * CombineCameraBlend;
+	CameraBoom->TargetArmLength = BaseCameraArmLength * (1.f + FlightCameraPullShare * FlightCameraPull + RobotCameraPullShare * RobotCameraPull + CombineTopDownPull * CombineCameraBlend);
 	TopDownCamera->SetFieldOfView(CameraFieldOfView);
 }
 
@@ -1519,7 +1731,7 @@ void ARRRandomCharacter::ServerSetThirdPerson_Implementation(bool bOn)
 void ARRRandomCharacter::ApplyThirdPersonRotation()
 {
 	// In third person the brawler faces where the camera looks (strafing); on a vehicle it still turns the way it drives
-	bUseControllerRotationYaw = bThirdPerson && !Vehicle && !IsDashingToFormation();
+	bUseControllerRotationYaw = bThirdPerson && !Vehicle && !Robot && !IsDashingToFormation();
 }
 
 bool ARRRandomCharacter::IsDespairing() const
@@ -1640,6 +1852,19 @@ bool ARRRandomCharacter::FireAt(const FVector& TargetLocation)
 	{
 		return ShootAt(TargetLocation, 0.f);
 	}
+	// In the star robot the button works the robot (its fists or its shield; the server keeps their pace): send it on
+	// a few times a second
+	if (Robot)
+	{
+		const float Now = GetWorld()->GetTimeSeconds();
+		if (!IsInRobot() || Now < NextFireTime)
+		{
+			return false;
+		}
+		NextFireTime = Now + RobotFireRequestInterval;
+		ServerFireAt(TargetLocation);
+		return true;
+	}
 
 	// Client: run the cooldown here so holding the button sends one request per shot, and let the server shoot.
 	// Ammo comes back replicated; the server reloads an empty magazine by itself.
@@ -1664,6 +1889,16 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 {
 	UWorld* World = GetWorld();
 	const float Now = World->GetTimeSeconds();
+	// Combining the robot: hands busy. In it: the robot's fists or shield instead of the gun.
+	if (Robot)
+	{
+		if (IsInRobot() && bAlive)
+		{
+			Robot->CrewFire(this, TargetLocation);
+			return true;
+		}
+		return false;
+	}
 	if (!bAlive || !ProjectileClass || bReloading || bClimbing || IsUsingUltimate() || Now + CooldownSlack < NextFireTime || ARRRandomGameState::IsPlayLocked(this))
 	{
 		return false;
@@ -1759,7 +1994,7 @@ void ARRRandomCharacter::ServerStartReload_Implementation()
 
 void ARRRandomCharacter::RollDice()
 {
-	if (!bAlive || bDecoy || IsUsingUltimate() || ARRRandomGameState::IsPlayLocked(this))
+	if (!bAlive || bDecoy || Robot || IsUsingUltimate() || ARRRandomGameState::IsPlayLocked(this))
 	{
 		return;
 	}
@@ -1832,18 +2067,20 @@ void ARRRandomCharacter::UpdatePowerEffects(float DeltaSeconds)
 	{
 		Effects->GiantAura(Feet, Body, HalfHeight * 2.f, Tint, DeltaSeconds);
 	}
-	// Wings: a burst of light as they open, a trail of stars while flying or gliding
+	// Wings: a burst of light as they open, a trail of stars while flying or gliding (not for a brawler on its own wings:
+	// the dragon's flap and spread instead)
+	const bool bOwnWings = RRKit::Get(Species).bOwnWings;
 	const FVector Back = Wings ? Wings->GetComponentLocation() : GetActorLocation() + FVector(0.f, 0.f, HalfHeight * 0.4f);
 	if (bFlying != bWasFlying)
 	{
 		bWasFlying = bFlying;
-		if (bFlying)
+		if (bFlying && !bOwnWings)
 		{
 			Effects->WingsBurst(Back, Tint);
 		}
 	}
 	const URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(GetCharacterMovement());
-	if (!Vehicle && GetCharacterMovement()->IsFalling() && (bFlying || (RandomMovement && RandomMovement->bGliding)))
+	if (!bOwnWings && !Vehicle && GetCharacterMovement()->IsFalling() && (bFlying || (RandomMovement && RandomMovement->bGliding)))
 	{
 		Effects->FlightTrail(Back, GetVelocity(), Tint, DeltaSeconds);
 	}
@@ -2072,6 +2309,12 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 		return 0.f;
 	}
 
+	// The star robot's crew: hidden inside, the robot takes the hit instead (once for all three)
+	if (IsInRobot())
+	{
+		return Robot->IsDamageProxy(this) ? Robot->TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser) : 0.f;
+	}
+
 	// A fox's clone's shots are only for show; the clone itself goes up in smoke at the first real hit
 	if (Attacker && Attacker->IsDecoy())
 	{
@@ -2161,8 +2404,17 @@ void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharact
 		FlingVelocity = RamImpact.GetSafeNormal2D() * Speed + FVector(0.f, 0.f, FlingLift);
 	}
 	SetTrustClientMovement(false);
-	// Thrown off: the vehicle stays where the rider fell
+	// Out of the star robot (or its combining is off)
+	if (Robot)
+	{
+		Robot->Leave(this);
+	}
+	// Thrown off: the vehicle stays where the rider fell; out of the star robot (or its combining is off)
 	GetOffVehicle();
+	if (Robot)
+	{
+		Robot->Leave(this);
+	}
 	ApplyKnockedOutBody();
 
 	if (ARRRandomGameMode* GameMode = GetWorld()->GetAuthGameMode<ARRRandomGameMode>())

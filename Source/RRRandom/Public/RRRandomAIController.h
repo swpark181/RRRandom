@@ -138,6 +138,13 @@ private:
 	void UpdateRushGoal(const ARRRandomCharacter* Self, float DeltaSeconds);
 	/** Meteor Rush: the nearest opponent carrying a crystal (seen on every map), if near enough to chase. */
 	ARRRandomCharacter* FindCrystalCarrier(const ARRRandomCharacter* Self) const;
+	/**
+	 * The star robot (ARRRandomStarRobot): combines the gathered cars when next to them out of a fight, walks over to its
+	 * team's robot with a seat free and gets in. In it, the usual fighting works it (the driver's steering walks it,
+	 * the fire button its fists or shield). Returns true when the robot has this bot's attention (no vehicles then);
+	 * sets Wanted while walking over (along the map's routes, if it has them: then bOnRoute).
+	 */
+	bool UpdateStarRobot(ARRRandomCharacter* Self, bool bInFight, FVector& Wanted, bool& bOnRoute, float DeltaSeconds);
 	/** Gets on and off vehicles (see RideTripDistance). Returns true and sets Wanted while walking over to one. */
 	bool UpdateVehicles(ARRRandomCharacter* Self, const ARRRandomCharacter* Target, bool bInFight, FVector& Wanted, float DeltaSeconds);
 	/** The vehicle worth walking to now, if any: a teammate's stopped car with room behind, or a free one for a long trip. */

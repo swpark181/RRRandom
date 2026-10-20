@@ -1290,3 +1290,256 @@ void ARRRandomEffects::Tick(float DeltaSeconds)
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The star robot's rocket fists and steps (round 61)
+
+namespace
+{
+	const FLinearColor Smoke(1.f, 0.95f, 0.88f);
+	const FLinearColor SmokeDark(0.78f, 0.74f, 0.82f);
+	const FLinearColor Dust(0.95f, 0.86f, 0.72f);
+
+	FLinearColor FireColor(float Heat)
+	{
+		return Heat < 0.3f ? FireYellow : (Heat < 0.75f ? FireOrange : FireRed);
+	}
+}
+
+void ARRRandomEffects::RocketLaunch(const FVector& Where, const FVector& Direction, const FLinearColor& Tint)
+{
+	const FVector Way = Direction.IsNearlyZero() ? FVector::ForwardVector : Direction.GetSafeNormal();
+	const FRotator Across = FRotationMatrix::MakeFromZ(Way).Rotator();
+	// A hot flash where the forearm lets go
+	FParticle Flash;
+	Flash.Shape = EShape::Ball;
+	Flash.Location = Where;
+	Flash.Life = 0.18f;
+	Flash.StartSize = FVector(1.2f);
+	Flash.EndSize = FVector(2.6f);
+	Flash.Color = FMath::Lerp(FireYellow, FLinearColor::White, 0.5f);
+	Flash.Glow = 7.f;
+	Flash.Opacity = 0.75f;
+	Flash.FadeIn = 0.01f;
+	Spawn(Flash);
+	// The jet out of the elbow, behind: hot core first, flames, then a cloud of smoke rolling back
+	for (int32 Index = 0; Index < 26; ++Index)
+	{
+		FParticle Fire;
+		Fire.Shape = EShape::Ball;
+		Fire.Location = Where - Way * FMath::FRandRange(20.f, 80.f);
+		Fire.Velocity = FMath::VRandCone(-Way, FMath::DegreesToRadians(28.f)) * FMath::FRandRange(500.f, 1300.f);
+		Fire.Drag = 4.f;
+		Fire.Gravity = -80.f;
+		Fire.Life = FMath::FRandRange(0.25f, 0.5f);
+		Fire.StartSize = FVector(FMath::FRandRange(0.6f, 1.1f));
+		Fire.EndSize = FVector(0.1f);
+		Fire.Color = FireColor(FMath::FRand());
+		Fire.Glow = 4.5f;
+		Fire.Opacity = 0.9f;
+		Fire.FadeIn = 0.01f;
+		Spawn(Fire);
+	}
+	for (int32 Index = 0; Index < 14; ++Index)
+	{
+		FParticle Puff;
+		Puff.Shape = EShape::Ball;
+		Puff.Location = Where - Way * FMath::FRandRange(40.f, 140.f) + FMath::VRand() * 30.f;
+		Puff.Velocity = FMath::VRandCone(-Way, FMath::DegreesToRadians(55.f)) * FMath::FRandRange(150.f, 450.f) + FVector(0.f, 0.f, 60.f);
+		Puff.Drag = 2.5f;
+		Puff.Gravity = -60.f;
+		Puff.Life = FMath::FRandRange(0.7f, 1.2f);
+		Puff.StartSize = FVector(FMath::FRandRange(0.7f, 1.1f));
+		Puff.EndSize = FVector(FMath::FRandRange(1.8f, 2.6f));
+		Puff.Color = FMath::FRand() < 0.6f ? Smoke : SmokeDark;
+		Puff.Glow = 0.75f;
+		Puff.Opacity = 0.5f;
+		Puff.FadeIn = 0.06f;
+		Spawn(Puff);
+	}
+	// A ring of smoke round the arm, and a gold shock ring running ahead with the fist
+	FParticle SmokeRing;
+	SmokeRing.Shape = EShape::Ring;
+	SmokeRing.Location = Where - Way * 40.f;
+	SmokeRing.Life = 0.6f;
+	SmokeRing.StartSize = FVector(1.f, 1.f, 3.f);
+	SmokeRing.EndSize = FVector(4.f, 4.f, 2.f);
+	SmokeRing.Turn = Across;
+	SmokeRing.Color = Smoke;
+	SmokeRing.Glow = 1.2f;
+	SmokeRing.Opacity = 0.7f;
+	Spawn(SmokeRing);
+	SonicBoom(Where + Way * 60.f, Way, Tint);
+	Spray(EShape::Star, Where, 16, -Way, 60.f, FVector2D(400.f, 900.f), FVector2D(3.f, 6.f), FVector2D(0.3f, 0.6f), FireYellow, 8.f, 400.f);
+}
+
+void ARRRandomEffects::RocketExhaust(const FVector& Nozzle, const FVector& Back, float Size, float DeltaSeconds)
+{
+	const FVector Way = Back.IsNearlyZero() ? -FVector::ForwardVector : Back.GetSafeNormal();
+	// The hot core right at the nozzle
+	for (int32 Index = CountThisFrame(60.f, DeltaSeconds); Index > 0; --Index)
+	{
+		FParticle Core;
+		Core.Shape = EShape::Ball;
+		Core.Location = Nozzle + FMath::VRand() * 6.f * Size;
+		Core.Velocity = Way * 600.f * Size;
+		Core.Drag = 6.f;
+		Core.Life = FMath::FRandRange(0.06f, 0.12f);
+		Core.StartSize = FVector(0.75f * Size);
+		Core.EndSize = FVector(0.3f * Size);
+		Core.Color = FMath::Lerp(FireYellow, FLinearColor::White, 0.55f);
+		Core.Glow = 7.f;
+		Core.Opacity = 0.9f;
+		Core.FadeIn = 0.f;
+		Spawn(Core);
+	}
+	// Flames streaming back, cooling from yellow to red
+	for (int32 Index = CountThisFrame(90.f, DeltaSeconds); Index > 0; --Index)
+	{
+		FParticle Fire;
+		Fire.Shape = EShape::Ball;
+		Fire.Location = Nozzle + FMath::VRand() * 12.f * Size;
+		Fire.Velocity = FMath::VRandCone(Way, FMath::DegreesToRadians(12.f)) * FMath::FRandRange(350.f, 700.f) * Size;
+		Fire.Drag = 3.f;
+		Fire.Gravity = -100.f;
+		Fire.Life = FMath::FRandRange(0.14f, 0.3f);
+		Fire.StartSize = FVector(FMath::FRandRange(0.5f, 0.8f) * Size);
+		Fire.EndSize = FVector(0.12f * Size);
+		Fire.Color = FireColor(FMath::FRand());
+		Fire.Glow = 4.f;
+		Fire.Opacity = 0.85f;
+		Fire.FadeIn = 0.01f;
+		Spawn(Fire);
+	}
+	// A trail of soft smoke puffs left hanging in the air, swelling as they fade
+	for (int32 Index = CountThisFrame(28.f, DeltaSeconds); Index > 0; --Index)
+	{
+		FParticle Puff;
+		Puff.Shape = EShape::Ball;
+		Puff.Location = Nozzle + Way * 30.f * Size + FMath::VRand() * 15.f * Size;
+		Puff.Velocity = Way * 80.f + FMath::VRand() * 40.f + FVector(0.f, 0.f, 40.f);
+		Puff.Drag = 1.5f;
+		Puff.Life = FMath::FRandRange(0.6f, 1.f);
+		Puff.StartSize = FVector(0.55f * Size);
+		Puff.EndSize = FVector(FMath::FRandRange(1.4f, 2.f) * Size);
+		Puff.Color = FMath::FRand() < 0.7f ? Smoke : SmokeDark;
+		Puff.Glow = 0.75f;
+		Puff.Opacity = 0.42f;
+		Puff.FadeIn = 0.08f;
+		Spawn(Puff);
+	}
+	if (FMath::FRand() < 14.f * DeltaSeconds)
+	{
+		Spray(EShape::Star, Nozzle, 1, Way, 35.f, FVector2D(200.f, 500.f), FVector2D(2.5f, 4.5f), FVector2D(0.25f, 0.45f), FireYellow, 8.f, 200.f);
+	}
+}
+
+void ARRRandomEffects::RocketBlast(const FVector& Where, const FVector& Normal, float Size)
+{
+	const FVector Up = Normal.IsNearlyZero() ? FVector::UpVector : Normal.GetSafeNormal();
+	const FRotator Across = FRotationMatrix::MakeFromZ(Up).Rotator();
+	// A white flash and a cartoon fireball: balls of flame swelling out from the hit
+	FParticle Flash;
+	Flash.Shape = EShape::Ball;
+	Flash.Location = Where + Up * 30.f * Size;
+	Flash.Life = 0.16f;
+	Flash.StartSize = FVector(1.5f * Size);
+	Flash.EndSize = FVector(3.4f * Size);
+	Flash.Color = FLinearColor::White;
+	Flash.Glow = 7.f;
+	Flash.Opacity = 0.6f;
+	Flash.FadeIn = 0.01f;
+	Spawn(Flash);
+	for (int32 Index = FMath::RoundToInt(16.f * Size); Index > 0; --Index)
+	{
+		FParticle Ball;
+		Ball.Shape = EShape::Ball;
+		const FVector Out = FMath::VRandCone(Up, FMath::DegreesToRadians(75.f));
+		Ball.Location = Where + Out * FMath::FRandRange(20.f, 70.f) * Size;
+		Ball.Velocity = Out * FMath::FRandRange(250.f, 520.f) * Size;
+		Ball.Drag = 4.5f;
+		Ball.Gravity = -120.f;
+		Ball.Life = FMath::FRandRange(0.45f, 0.75f);
+		Ball.StartSize = FVector(FMath::FRandRange(0.9f, 1.5f) * Size);
+		Ball.EndSize = FVector(FMath::FRandRange(1.6f, 2.4f) * Size);
+		Ball.Color = FireColor(FMath::FRand() * 0.9f);
+		Ball.Glow = 4.f;
+		Ball.Opacity = 0.9f;
+		Ball.FadeIn = 0.02f;
+		Spawn(Ball);
+	}
+	// Smoke rolling up after the fire
+	for (int32 Index = FMath::RoundToInt(12.f * Size); Index > 0; --Index)
+	{
+		FParticle Puff;
+		Puff.Shape = EShape::Ball;
+		const FVector Out = FMath::VRandCone(Up, FMath::DegreesToRadians(70.f));
+		Puff.Location = Where + Out * 60.f * Size;
+		Puff.Velocity = Out * FMath::FRandRange(150.f, 350.f) * Size + FVector(0.f, 0.f, 120.f);
+		Puff.Drag = 2.f;
+		Puff.Gravity = -90.f;
+		Puff.Life = FMath::FRandRange(1.f, 1.6f);
+		Puff.StartSize = FVector(1.f * Size);
+		Puff.EndSize = FVector(FMath::FRandRange(2.4f, 3.4f) * Size);
+		Puff.Color = FMath::FRand() < 0.5f ? Smoke : SmokeDark;
+		Puff.Glow = 0.7f;
+		Puff.Opacity = 0.5f;
+		Puff.FadeIn = 0.25f;
+		Spawn(Puff);
+	}
+	// Shock rings along the surface: hot, then smoke
+	for (int32 Index = 0; Index < 2; ++Index)
+	{
+		FParticle Ring;
+		Ring.Shape = EShape::Ring;
+		Ring.Location = Where + Up * (8.f + Index * 6.f);
+		Ring.Life = 0.45f + Index * 0.25f;
+		Ring.StartSize = FVector(1.f * Size, 1.f * Size, 3.f);
+		Ring.EndSize = FVector((7.f - Index * 2.f) * Size, (7.f - Index * 2.f) * Size, 1.5f);
+		Ring.Turn = Across;
+		Ring.Color = Index == 0 ? FireYellow : Smoke;
+		Ring.Glow = Index == 0 ? 6.f : 1.2f;
+		Ring.Opacity = Index == 0 ? 1.f : 0.6f;
+		Ring.FadeIn = 0.01f;
+		Spawn(Ring);
+	}
+	StarImpact(Where, Up, 1.6f * Size, FireOrange);
+	Spray(EShape::Star, Where + Up * 20.f, FMath::RoundToInt(26.f * Size), Up, 70.f, FVector2D(500.f, 1100.f) * Size, FVector2D(4.f, 8.f),
+		FVector2D(0.5f, 0.9f), FireYellow, 8.f, 900.f);
+	Spray(EShape::Die, Where + Up * 20.f, FMath::RoundToInt(5.f * Size), Up, 60.f, FVector2D(400.f, 800.f), FVector2D(0.12f, 0.2f),
+		FVector2D(0.7f, 1.1f), Candy[FMath::RandRange(0, UE_ARRAY_COUNT(Candy) - 1)], 1.5f, 1300.f);
+}
+
+void ARRRandomEffects::Footstep(const FVector& Where, float Size)
+{
+	// Dust puffing out low along the ground, round the foot
+	for (int32 Index = 0; Index < 12; ++Index)
+	{
+		const float Angle = UE_TWO_PI * (Index + FMath::FRand() * 0.6f) / 12.f;
+		const FVector Out(FMath::Cos(Angle), FMath::Sin(Angle), 0.f);
+		FParticle Puff;
+		Puff.Shape = EShape::Ball;
+		Puff.Location = Where + Out * 50.f * Size + FVector(0.f, 0.f, 15.f * Size);
+		Puff.Velocity = (Out * FMath::FRandRange(220.f, 420.f) + FVector(0.f, 0.f, FMath::FRandRange(30.f, 110.f))) * Size;
+		Puff.Drag = 3.5f;
+		Puff.Life = FMath::FRandRange(0.5f, 0.85f);
+		Puff.StartSize = FVector(0.45f * Size);
+		Puff.EndSize = FVector(FMath::FRandRange(1.f, 1.4f) * Size);
+		Puff.Color = Dust;
+		Puff.Glow = 0.7f;
+		Puff.Opacity = 0.45f;
+		Puff.FadeIn = 0.05f;
+		Spawn(Puff);
+	}
+	FParticle Ring;
+	Ring.Shape = EShape::Ring;
+	Ring.Location = Where + FVector(0.f, 0.f, 6.f);
+	Ring.Life = 0.4f;
+	Ring.StartSize = FVector(0.8f * Size, 0.8f * Size, 2.f);
+	Ring.EndSize = FVector(3.2f * Size, 3.2f * Size, 1.f);
+	Ring.Color = Dust;
+	Ring.Glow = 1.2f;
+	Ring.Opacity = 0.55f;
+	Ring.FadeIn = 0.01f;
+	Spawn(Ring);
+}

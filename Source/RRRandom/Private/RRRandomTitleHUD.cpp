@@ -400,7 +400,7 @@ void ARRRandomTitleHUD::DrawHUD()
 	const float LabelY = ScreenH * 0.36f;
 	if (Menu->IsOnSpeciesPage())
 	{
-		DrawCenteredText(TEXT("PICK YOUR BRAWLER"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
+		DrawCenteredText(TEXT("PICK YOUR ANIMAL FRIEND"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
 	}
 	else if (Menu->IsOnRulePage())
 	{

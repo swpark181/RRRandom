@@ -3,6 +3,7 @@
 Usage: UnrealEditor-Cmd <project> -run=pythonscript -dpcvars=Interchange.FeatureFlags.Import.FBX=0
            "-script=ue_import_props.py <dest>|<name>=<fbx>=<tripo base color png>[=gloss]|..."
   e.g. /Game/Environment/Props|SM_PineTree=C:/.../SM_PineTree.fbx=C:/.../pine_basecolor.PNG
+In place of the png, "@M_Other" gives the prop a material already made (earlier in the list): pieces of one model.
 "gloss" makes it shiny like a balloon instead (Dice Land's candy props): "Tint" 1, roughness 0.4, specular 0.5;
 "nanite" turns Nanite on (Dice Town's trees keep their full 20,000 triangles).
 
@@ -46,11 +47,10 @@ def node(mat, cls, x, y, **props):
     return n
 
 
-for name, fbx, png, *flags in entries:
-    gloss = "gloss" in flags
+def make_material(name, png, gloss):
     tex_name = name.replace("SM_", "T_") + "_BaseColor"
     mat_name = name.replace("SM_", "M_")
-    for asset in (f"{dest}/{name}", f"{dest}/Textures/{tex_name}", f"{dest}/{mat_name}"):
+    for asset in (f"{dest}/Textures/{tex_name}", f"{dest}/{mat_name}"):
         if eal.does_asset_exist(asset):
             eal.delete_asset(asset)
 
@@ -75,6 +75,16 @@ for name, fbx, png, *flags in entries:
         mel.connect_material_property(node(mat, unreal.MaterialExpressionConstant, -300, 200, r=value), "", prop)
     mel.recompile_material(mat)
     eal.save_asset(mat.get_path_name())
+    return mat
+
+
+for name, fbx, png, *flags in entries:
+    gloss = "gloss" in flags
+    if eal.does_asset_exist(f"{dest}/{name}"):
+        eal.delete_asset(f"{dest}/{name}")
+    # "@M_Other": share a material made earlier in this run or before (pieces of one model, one texture)
+    mat = unreal.load_asset(f"{dest}/{png[1:]}") if png.startswith("@") else make_material(name, png, gloss)
+    mat_name = mat.get_name()
 
     ui = unreal.FbxImportUI()
     ui.automated_import_should_detect_type = False

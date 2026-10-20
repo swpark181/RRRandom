@@ -17,6 +17,8 @@ enum class ERRThirdPersonMap : uint8
 	DiceLand,
 	/** The big block town (ARRRandomDiceTown). */
 	DiceTown,
+	/** A bare floor for animation work (ARRRandomStudio): -RRMap=Studio only, not on the title. */
+	Studio,
 };
 
 /** How a match is won. */

@@ -82,6 +82,12 @@ private:
 	void DrawAmmoPanel(const ARRRandomCharacter& Brawler);
 	/** "[F] RIDE MOTORBIKE" under the brawler next to a free vehicle, "[F] GET OFF" while riding. */
 	void DrawRidePrompt(const ARRRandomCharacter& Brawler);
+	/**
+	 * The star robot (ARRRandomStarRobot): over its gathered cars a pulsing combine sign ("[F]
+	 * COMBINE!" when close enough), over the robot coming together its gauge, over the finished one its health, shield and
+	 * three seats ("[F] GET IN" next to it), a banner when it is done, and for its crew which seat they have.
+	 */
+	void DrawStarRobot(const ARRRandomCharacter* Viewer);
 	/** Third person (ARRRandomPlayerController::RRThirdPerson): a crosshair in the middle of the screen, tighter in the sights,
 	 * spreading for a moment after each shot. */
 	void DrawCrosshair(const ARRRandomCharacter& Brawler);

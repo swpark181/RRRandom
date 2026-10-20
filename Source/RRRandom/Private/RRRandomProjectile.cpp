@@ -1,5 +1,8 @@
 #include "RRRandomProjectile.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomEffects.h"
+#include "RRRandomStarRobot.h"
+#include "RRRandomWreckage.h"
 #include "Components/PointLightComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -148,6 +151,7 @@ void ARRRandomProjectile::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 
 	DOREPLIFETIME(ARRRandomProjectile, Tier);
 	DOREPLIFETIME(ARRRandomProjectile, bPoke);
+	DOREPLIFETIME(ARRRandomProjectile, RocketArm);
 	DOREPLIFETIME(ARRRandomProjectile, bImpacted);
 	DOREPLIFETIME(ARRRandomProjectile, ImpactLocation);
 	DOREPLIFETIME(ARRRandomProjectile, ImpactNormal);
@@ -188,11 +192,25 @@ void ARRRandomProjectile::BeginPlay()
 		Glow->SetAttenuationRadius(Look.GlowRadius);
 		Glow->SetVisibility(true);
 	}
-	if (!bPoke)
+	// A rocket fist: the robot's forearm flies, its own exhaust behind it (the robot plays the launch)
+	const bool bRocket = RocketArm != 0;
+	if (bRocket)
+	{
+		if (UStaticMesh* Forearm = ARRRandomStarRobot::LoadForearm(RocketArm == 1))
+		{
+			Visual->SetStaticMesh(Forearm);
+			Visual->EmptyOverrideMaterials();
+			RocketPose = ARRRandomStarRobot::GetForearmFlightPose(RocketArm == 1);
+			Visual->SetRelativeTransform(RocketPose);
+		}
+		Glow->SetLightColor(FLinearColor(1.f, 0.55f, 0.15f));
+		SetActorTickEnabled(true);
+	}
+	if (!bPoke && !bRocket)
 	{
 		SpawnOneShot(this, Look.Muzzle == EImpact::Spark ? SparkEffect : (Look.Muzzle == EImpact::Burst ? BurstEffect : nullptr), GetActorLocation(), GetActorRotation(), Look.MuzzleScale);
 	}
-	if (Look.bTrail && TrailEffect && !bPoke)
+	if (Look.bTrail && TrailEffect && !bPoke && !bRocket)
 	{
 		Trail = UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, TrailEffect, GetActorLocation(), GetActorRotation(), FVector(Look.TrailScale));
 		SetActorTickEnabled(Trail != nullptr);
@@ -213,6 +231,14 @@ void ARRRandomProjectile::BeginPlay()
 						Collision->IgnoreActorWhenMoving(*It, true);
 					}
 				}
+				// The team's star robot too (its own fists start next to it)
+				for (TActorIterator<ARRRandomStarRobot> It(GetWorld()); It; ++It)
+				{
+					if (It->GetTeam() == Brawler->GetTeam())
+					{
+						Collision->IgnoreActorWhenMoving(*It, true);
+					}
+				}
 			}
 		}
 
@@ -226,7 +252,26 @@ void ARRRandomProjectile::BeginPlay()
 			}
 		}
 
-		if (MaxRange > 0.f && GetSpeed() > 0.f)
+		if (MaxRange > 0.f && GetSpeed() > 0.f && bRocket)
+		{
+			// A rocket fist that reaches its range without hitting anything blows up in the air
+			SetLifeSpan(0.f);
+			FTimerHandle Handle;
+			GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this]()
+			{
+				if (!bImpacted)
+				{
+					bImpacted = true;
+					ImpactLocation = GetActorLocation();
+					ImpactNormal = -GetActorForwardVector();
+					ForceNetUpdate();
+					SpawnImpactEffects(ImpactLocation, ImpactNormal);
+					HideAfterImpact();
+					SetLifeSpan(ImpactLingerTime);
+				}
+			}), MaxRange / GetSpeed(), false);
+		}
+		else if (MaxRange > 0.f && GetSpeed() > 0.f)
 		{
 			SetLifeSpan(MaxRange / GetSpeed());
 		}
@@ -237,10 +282,20 @@ void ARRRandomProjectile::BeginPlay()
 		Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 
+	if (bRocket)
+	{
+		return;
+	}
 	if (UMaterialInstanceDynamic* Material = Visual->CreateAndSetMaterialInstanceDynamic(0))
 	{
 		Material->SetVectorParameterValue(ColorParameter, ShotColor);
 	}
+}
+
+void ARRRandomProjectile::MakeRocketFist(bool bLeft, float Radius)
+{
+	RocketArm = bLeft ? 1 : 2;
+	Collision->SetSphereRadius(Radius);
 }
 
 void ARRRandomProjectile::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -262,6 +317,17 @@ void ARRRandomProjectile::Tick(float DeltaSeconds)
 	{
 		Trail->SetWorldLocation(GetActorLocation());
 	}
+	// A rocket fist spins round the way it flies, its exhaust streaming out of the elbow end
+	if (RocketArm != 0 && !bImpacted)
+	{
+		RocketSpin = FMath::Fmod(RocketSpin + RocketSpinRate * DeltaSeconds, 360.f);
+		Visual->SetRelativeTransform(RocketPose * FTransform(FQuat(FVector::ForwardVector, FMath::DegreesToRadians(RocketSpin))));
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			const FVector Forward = GetActorForwardVector();
+			Effects->RocketExhaust(GetActorLocation() - Forward * ARRRandomStarRobot::GetForearmLength() * 0.5f, -Forward, 1.f, DeltaSeconds);
+		}
+	}
 }
 
 float ARRRandomProjectile::GetSpeed() const
@@ -278,6 +344,14 @@ void ARRRandomProjectile::SetSpeedMultiplier(float Multiplier)
 
 void ARRRandomProjectile::SpawnImpactEffects(const FVector& Location, const FVector& Normal)
 {
+	if (RocketArm != 0)
+	{
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			Effects->RocketBlast(Location, Normal, 1.5f);
+		}
+		return;
+	}
 	const FTierLook& Look = TierLooks[static_cast<int32>(Tier)];
 	const FRotator AwayFromSurface = Normal.Rotation();
 	switch (Look.Impact)
@@ -349,6 +423,11 @@ void ARRRandomProjectile::OnHit(UPrimitiveComponent* HitComponent, AActor* Other
 		{
 			OtherComp->AddImpulseAtLocation(ShotDirection * ImpactImpulse, Hit.ImpactPoint, Hit.BoneName);
 		}
+	}
+
+	if (WreckRadius > 0.f && !Cast<APawn>(OtherActor))
+	{
+		ARRRandomWreckage::Wreck(this, Hit.ImpactPoint, Hit.ImpactPoint, WreckRadius, false);
 	}
 
 	// Tell the clients where it landed, then go once they've had time to hear it

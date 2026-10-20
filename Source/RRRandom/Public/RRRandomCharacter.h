@@ -6,6 +6,7 @@
 #include "RRRandomWeapon.h"
 #include "RRRandomAimAnimations.h"
 #include "RRRandomSpecies.h"
+#include "RRRandomStarRobot.h"
 #include "RRRandomCharacter.generated.h"
 
 class ARRRandomProjectile;
@@ -143,6 +144,18 @@ public:
 	void ToggleRide();
 	/** The vehicle being ridden, if any (replicated). */
 	ARRRandomVehicle* GetVehicle() const { return Vehicle; }
+	/**
+	 * The star robot this animal friend is combining (standing still till it is done) or sitting in, and how
+	 * (replicated). F does the robot's things first: starts combining the gathered cars, gets in, gets out.
+	 */
+	ARRRandomStarRobot* GetRobot() const { return Robot; }
+	ERRRobotSeat GetRobotSeat() const { return Robot ? RobotSeat : ERRRobotSeat::None; }
+	/** In one of the robot's seats: hidden inside it, its fire button working the robot. */
+	bool IsInRobot() const { return Robot && RobotSeat != ERRRobotSeat::Combiner && RobotSeat != ERRRobotSeat::None; }
+	/** Server, by the robot: combining it, in a seat, or done with it (null). */
+	void SetRobotSeat(ARRRandomStarRobot* NewRobot, ERRRobotSeat NewSeat);
+	/** Server: off the vehicle ridden, if any (the driver getting off lets the one behind out too). */
+	void LeaveVehicle() { GetOffVehicle(); }
 	/** The nearest free vehicle this brawler could get on now, if any. */
 	ARRRandomVehicle* FindVehicleInReach() const;
 	/** While dancing, the body turns to face this point: this screen's results camera (set on each machine by its ARRRandomResultsDirector). */
@@ -238,6 +251,13 @@ public:
 
 	/** True while the flight power lasts: holding jump rises, letting go glides down. */
 	bool CanFly() const { return bFlying; }
+	/**
+	 * In the air on wings: flying, or gliding down (after a flight, or the dragon's held glide; other machines only know
+	 * the flight). The body takes its flying pose then (URRRandomBodyAnimInstance) instead of walking in mid-air.
+	 */
+	bool IsInFlight() const;
+	/** Degrees the body leans forward in flight (eased). */
+	float GetFlightLean() const { return FlightLean; }
 	/** Seconds of flight left. */
 	float GetFlightRemaining() const { return FlightRemaining; }
 	bool IsDashing() const { return bDashing; }
@@ -663,8 +683,14 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerToggleRide();
 
-	/** Server only: puts down the vehicle being ridden (or leaves its rear seat), if any. */
+	/** Server only: puts down the vehicle being ridden (or leaves its rear seat), if any. The robot does it too. */
 	void GetOffVehicle();
+	friend class ARRRandomStarRobot;
+	/** Hidden inside the robot, carried by it (not the driver, whose capsule carries the robot) or back out; every machine. */
+	void ApplyRobotSeat();
+
+	UFUNCTION()
+	void OnRep_Robot();
 	/** Seats the brawler in its vehicle's rear seat (no movement of its own, attached) or takes it out; every machine. */
 	void ApplyRide();
 
@@ -810,6 +836,25 @@ private:
 	/** Whether this machine has seated the brawler as a passenger (ApplyRide). */
 	bool bSeatedAsPassenger = false;
 
+	UPROPERTY(ReplicatedUsing = OnRep_Robot)
+	TObjectPtr<ARRRandomStarRobot> Robot;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Robot)
+	ERRRobotSeat RobotSeat = ERRRobotSeat::None;
+
+	/** What this machine has done for the robot seat (ApplyRobotSeat): hidden inside it, carried by it. */
+	bool bInsideRobot = false;
+	bool bCarriedByRobot = false;
+	/** The camera pulled back for the robot's size, 0 to 1. */
+	float RobotCameraPull = 0.f;
+	/** Driving the robot just combined: whether it has turned round yet (ARRRandomStarRobot::GetIntroTurn). */
+	bool bRobotIntroTurned = false;
+	/** Where it is controlled: turns the just-combined robot round, unless driven off first. */
+	void UpdateRobotIntroTurn(float DeltaSeconds);
+	/** The camera on the robot being combined, 0 to 1, and where that robot stands. */
+	float CombineCameraBlend = 0.f;
+	FVector CombineFocus = FVector::ZeroVector;
+
 	/** Walking's movement settings, put back on getting off. */
 	float BaseMaxAcceleration = 0.f;
 	float BaseGroundFriction = 0.f;
@@ -839,6 +884,9 @@ private:
 	FRotator MeshRelativeRotation = FRotator::ZeroRotator;
 	/** Degrees the body leans forward in flight (eased), and how far the camera has pulled back for it (0 .. 1). */
 	float FlightLean = 0.f;
+	/** Degrees the body banks into turns in flight (eased), and the way it flew last frame. */
+	float FlightBank = 0.f;
+	float LastFlightYaw = 0.f;
 	/** Third person: on (replicated, so the server turns the brawler with the camera too), the sights, and the camera's eased blends. */
 	UPROPERTY(Replicated)
 	bool bThirdPerson = false;

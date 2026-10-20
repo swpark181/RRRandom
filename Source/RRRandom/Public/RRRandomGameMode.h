@@ -28,6 +28,9 @@ public:
 	 */
 	FVector GetArenaCenter() const;
 
+	/** This game is on the studio, the bare test floor (-RRMap=Studio): the other team's bots stand still there. */
+	bool IsStudio() const { return bStudio; }
+
 	ARRRandomGameMode();
 
 	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
@@ -165,8 +168,11 @@ private:
 	void SpawnIslandIfNoneExists();
 	void SpawnDiceLandIfNoneExists();
 	void SpawnDiceTownIfNoneExists();
+	void SpawnStudioIfNoneExists();
 	/** This game is on Dice Town (decided in InitGame, from this machine's title picks). */
 	bool bDiceTown = false;
+	/** This game is on the studio (-RRMap=Studio). */
+	bool bStudio = false;
 	/** This game is played by Meteor Rush's rule (ERRMatchRule, picked on this machine's title). */
 	bool bMeteorRush = false;
 	FVector GetPlayerStartLocation() const;

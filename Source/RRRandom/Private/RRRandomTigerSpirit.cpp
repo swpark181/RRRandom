@@ -1,6 +1,7 @@
 #include "RRRandomTigerSpirit.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomEffects.h"
+#include "RRRandomWreckage.h"
 #include "Animation/AnimSequence.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
@@ -298,6 +299,7 @@ void ARRRandomTigerSpirit::Impact()
 	{
 		return;
 	}
+	ARRRandomWreckage::Wreck(this, StrikeSpot, StrikeSpot, AreaRadius * WreckShare, true);
 	const TArray<ARRRandomCharacter*> Victims = FindEnemiesNear(StrikeSpot, AreaRadius, GiantHeight);
 	for (ARRRandomCharacter* Victim : Victims)
 	{
