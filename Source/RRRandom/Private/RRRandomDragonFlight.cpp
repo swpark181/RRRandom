@@ -4,6 +4,7 @@
 #include "RRRandomDiceLand.h"
 #include "RRRandomDiceTown.h"
 #include "RRRandomIsland.h"
+#include "RRRandomWreckage.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/PoseableMeshComponent.h"
@@ -373,16 +374,24 @@ void ARRRandomDragonFlight::PoseBody(float Time, bool bBreathing)
 		return;
 	}
 	// The model's axes: +Y ahead, +X its left, +Z up. (Rotations about X and Z are mirrored from Blender's: the FBX flips Y
-	// on the way in.) Streamlined: the wings beat quick and shallow about their swept-back rest, the outer half trailing,
-	// the neck and tail ripple a little, the head dips at the fire
+	// on the way in.) Setting off and climbing away the wings beat about their swept-back rest, the outer half trailing;
+	// gliding they are held there, still but for a shiver, with one big beat now and then. The neck looks into a turn and
+	// the tail swings out of it (about +Z: the head toward its right, the tail toward its left, for a right turn), both
+	// ripple a little, and the head dips at the fire.
 	const FVector Ahead(0.f, 1.f, 0.f);
 	const FVector Side(1.f, 0.f, 0.f);
 	const FVector Up(0.f, 0.f, 1.f);
 	const float Beat = FlapPhase;
+	const float Glide = 1.f - Flapping;
+	const float Stroke = StrokeAlpha < 1.f ? StrokeDegrees * FMath::Sin(2.f * PI * StrokeAlpha) : 0.f;
+	const float StrokeTip = StrokeAlpha < 1.f ? 0.6f * StrokeDegrees * FMath::Sin(2.f * PI * StrokeAlpha - 0.8f) : 0.f;
+	const float Shiver = 1.5f * FMath::Sin(Time * 13.f);
 	TMap<FName, FQuat> Want;
-	const float Flap = 8.f + 24.f * FMath::Sin(Beat);
-	const float Tip = 4.f + 12.f * FMath::Sin(Beat - 0.7f);
-	Want.Add(TEXT("Neck1"), Turn(Side, 2.f * FMath::Sin(Beat + 1.f)));
+	const float Flap = 8.f + 24.f * FMath::Sin(Beat) * Flapping + (Stroke + Shiver) * Glide;
+	const float Tip = 4.f + 12.f * FMath::Sin(Beat - 0.7f) * Flapping + (StrokeTip + Shiver * 0.6f) * Glide;
+	const float Look = FMath::Clamp(Bank, -MaxBank, MaxBank) * 0.35f;
+	Want.Add(TEXT("Neck1"), Turn(Up, Look * 0.5f) * Turn(Side, 2.f * FMath::Sin(Beat + 1.f) * Flapping));
+	Want.Add(TEXT("Neck2"), Turn(Up, Look * 0.5f));
 	Want.Add(TEXT("Neck3"), Turn(Side, bBreathing ? -24.f : -3.f));
 	Want.Add(TEXT("WingL1"), Turn(Ahead, Flap));
 	Want.Add(TEXT("WingR1"), Turn(Ahead, -Flap));
@@ -391,7 +400,10 @@ void ARRRandomDragonFlight::PoseBody(float Time, bool bBreathing)
 	for (int32 Index = 1; Index <= 4; ++Index)
 	{
 		const float Wave = Time * 3.f - Index * 0.8f;
-		Want.Add(FName(*FString::Printf(TEXT("Tail%d"), Index)), Turn(Up, 4.f * FMath::Sin(Wave)) * Turn(Side, 3.f * FMath::Sin(Wave + 1.3f)));
+		const float Swing = Bank * 0.12f + 4.f * FMath::Sin(Wave);
+		// A beat flicks the tail down and up a little after it
+		const float Flick = StrokeAlpha < 1.f ? 6.f * FMath::Sin(2.f * PI * StrokeAlpha - Index * 0.5f) * Glide : 0.f;
+		Want.Add(FName(*FString::Printf(TEXT("Tail%d"), Index)), Turn(Up, Swing) * Turn(Side, 3.f * FMath::Sin(Wave + 1.3f) + Flick));
 	}
 	ApplyPose(FlightRig, Want);
 }
@@ -403,11 +415,12 @@ void ARRRandomDragonFlight::PlaceBody(const FVector& Where, const FVector& Veloc
 	if (Flat.Size() > 50.f)
 	{
 		const float NewYaw = Flat.Rotation().Yaw;
-		// Banking into the turn, the harder the faster it turns
+		// Banking into the turn, the harder the faster it turns; nose up with a beat of the wings (a surge)
 		const float TurnRate = DeltaSeconds > 0.f ? FMath::FindDeltaAngleDegrees(Yaw, NewYaw) / DeltaSeconds : 0.f;
-		Bank = FMath::FInterpTo(Bank, FMath::Clamp(TurnRate * 0.35f, -35.f, 35.f), DeltaSeconds, 4.f);
+		Bank = FMath::FInterpTo(Bank, FMath::Clamp(TurnRate * BankPerTurn, -MaxBank, MaxBank), DeltaSeconds, 4.f);
 		Yaw = NewYaw;
-		Pitch = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan2(Velocity.Z, Flat.Size())) * 0.6f, -20.f, 30.f);
+		const float Surge = StrokeAlpha < 1.f ? 7.f * FMath::Sin(PI * StrokeAlpha) * (1.f - Flapping) : 0.f;
+		Pitch = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan2(Velocity.Z, Flat.Size())) * 0.8f + Surge, -25.f, 35.f);
 	}
 	else
 	{
@@ -429,6 +442,19 @@ void ARRRandomDragonFlight::TickUltimate(float DeltaSeconds)
 	Dash = FMath::FInterpTo(Dash, Phase == EPhase::Circle || Phase == EPhase::Pass || Phase == EPhase::Leave ? 1.f : 0.f,
 		DeltaSeconds, 3.f);
 	FlapPhase += DeltaSeconds * FlapRate * (1.f + 0.6f * Dash) * 2.f * PI;
+	// Flapping as it sets off and as it climbs away; gliding the rest, with a big beat every so often
+	const bool bFlaps = (Phase == EPhase::Circle && PhaseTime < 0.5f) || Phase == EPhase::Leave;
+	Flapping = FMath::FInterpTo(Flapping, bFlaps ? 1.f : 0.f, DeltaSeconds, 4.f);
+	if (Flapping < 0.5f)
+	{
+		StrokeWait -= DeltaSeconds;
+		if (StrokeWait <= 0.f)
+		{
+			StrokeWait = FMath::FRandRange(StrokeEvery.X, StrokeEvery.Y);
+			StrokeAlpha = 0.f;
+		}
+	}
+	StrokeAlpha += DeltaSeconds / FMath::Max(StrokeSeconds, 0.05f);
 	ARRRandomEffects* Effects = ARRRandomEffects::Get(this);
 	bool bBreathing = false;
 	float Size = Scale;
@@ -465,6 +491,7 @@ void ARRRandomDragonFlight::TickUltimate(float DeltaSeconds)
 			Phase = EPhase::Pass;
 			PhaseTime = 0.f;
 			PassTime = 0.f;
+			WreckedTo = 0.f;
 		}
 		break;
 	}
@@ -569,6 +596,13 @@ void ARRRandomDragonFlight::TickUltimate(float DeltaSeconds)
 		if (HasAuthority())
 		{
 			BurnEnemies(DeltaSeconds);
+			// What the breath sweeps is smashed, a stretch at a time as its front goes by
+			while (WreckedTo < Front - 1.f && (Front - WreckedTo >= WreckStep || Front >= LineLength))
+			{
+				const float To = FMath::Min(WreckedTo + WreckStep, Front);
+				ARRRandomWreckage::Wreck(this, OnLine(WreckedTo), OnLine(To), BreathRadius * WreckShare, true);
+				WreckedTo = To;
+			}
 		}
 		if (Phase == EPhase::Pass)
 		{

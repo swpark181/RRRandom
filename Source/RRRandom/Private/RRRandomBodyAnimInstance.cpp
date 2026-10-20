@@ -1,9 +1,11 @@
 #include "RRRandomBodyAnimInstance.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomMovementComponent.h"
 #include "Animation/AnimNodeBase.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AttributesRuntime.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 namespace
 {
@@ -68,6 +70,140 @@ namespace
 URRRandomBodyAnimInstance::URRRandomBodyAnimInstance()
 {
 	TailBoneNames = { TEXT("Tail1"), TEXT("Tail2"), TEXT("Tail3"), TEXT("Tail4") };
+	WingBoneNames = { TEXT("WingL1"), TEXT("WingL2"), TEXT("WingR1"), TEXT("WingR2") };
+	FlightBoneNames = { TEXT("LeftUpLeg"), TEXT("LeftLeg"), TEXT("LeftFoot"), TEXT("RightUpLeg"), TEXT("RightLeg"), TEXT("RightFoot"), TEXT("Neck"), TEXT("Head") };
+}
+
+void URRRandomBodyAnimInstance::UpdateFlightPose(float DeltaSeconds)
+{
+	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetOwningActor());
+	if (!Brawler)
+	{
+		FlightBends.Reset();
+		return;
+	}
+	const bool bInFlight = Brawler->IsInFlight();
+	const float Climb = Brawler->GetVelocity().Z;
+	FlightWeight = FMath::FInterpConstantTo(FlightWeight, bInFlight ? 1.f : 0.f, DeltaSeconds, 1.f / FMath::Max(FlightBlendTime, 0.01f));
+	// Gliding down lays the legs out behind; hovering or rising they hang and tread
+	FlightGlide = FMath::FInterpTo(FlightGlide, bInFlight && Climb < -20.f ? 1.f : 0.f, DeltaSeconds, 4.f);
+	KickPhase = FMath::Fmod(KickPhase + 2.f * PI * FlightKick.X * DeltaSeconds, 2.f * PI);
+	if (FlightWeight <= 0.f)
+	{
+		FlightBends.Reset();
+		return;
+	}
+
+	const float W = FlightWeight;
+	const float G = FlightGlide;
+	const float Kick = FlightKick.Y * FMath::Sin(KickPhase) * (1.f - 0.6f * G);
+	// A beat of the wings in the glide (UpdateWings) tucks the legs in for a moment
+	const float Tuck = StrokeAlpha < 1.f ? FMath::Sin(PI * StrokeAlpha) * G : 0.f;
+	const float Thigh = FMath::Lerp(FlightThigh.X, FlightThigh.Y, G) + 12.f * Tuck;
+	const float Knee = FMath::Lerp(FlightKnee.X, FlightKnee.Y, G) - 22.f * Tuck;
+	const float Toes = FMath::Lerp(FlightToes.X, FlightToes.Y, G);
+	// Against the body's lean, split between neck and head
+	const float HeadLift = Brawler->GetFlightLean() * FlightHeadLift * 0.5f;
+	// About the mesh's side axis (+X, the brawler's left): positive tips the front (+Y) up, negative swings a leg back
+	const float Angles[] = { Thigh + Kick, Knee - 0.5f * Kick, Toes, Thigh - Kick, Knee + 0.5f * Kick, Toes, HeadLift, HeadLift };
+	FlightBends.SetNum(UE_ARRAY_COUNT(Angles));
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Angles); ++Index)
+	{
+		FlightBends[Index] = FQuat(FVector::ForwardVector, FMath::DegreesToRadians(Angles[Index] * W));
+	}
+}
+
+void FRRRandomBodyAnimInstanceProxy::TurnBones(FPoseContext& Output, const TArray<FName>& Names, const TArray<FQuat>& Bends)
+{
+	const FBoneContainer& Bones = Output.Pose.GetBoneContainer();
+	for (int32 Bone = 0; Bone < Names.Num() && Bone < Bends.Num(); ++Bone)
+	{
+		const FCompactPoseBoneIndex Index = FindBone(Bones, Names[Bone]);
+		if (!Index.IsValid())
+		{
+			continue;
+		}
+		FQuat ParentRotation = FQuat::Identity;
+		for (FCompactPoseBoneIndex Parent = Output.Pose.GetParentBoneIndex(Index); Parent.IsValid(); Parent = Output.Pose.GetParentBoneIndex(Parent))
+		{
+			ParentRotation = Output.Pose[Parent].GetRotation() * ParentRotation;
+		}
+		FTransform& Local = Output.Pose[Index];
+		Local.SetRotation((ParentRotation.Inverse() * Bends[Bone] * ParentRotation * Local.GetRotation()).GetNormalized());
+	}
+}
+
+void URRRandomBodyAnimInstance::UpdateWings(float DeltaSeconds)
+{
+	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetOwningActor());
+	const USkeletalMeshComponent* Mesh = GetSkelMeshComponent();
+	if (!Brawler || !Mesh || WingBoneNames.Num() < 4 || Mesh->GetBoneIndex(WingBoneNames[0]) == INDEX_NONE)
+	{
+		WingBends.Reset();
+		return;
+	}
+
+	// What the wings are doing: gliding (spread and still), flapping in the air (harder rising on the flight power), or
+	// stirring on the ground. Other machines don't know the glide flag, so a slow fall after a while in the air counts.
+	const UCharacterMovementComponent* Movement = Brawler->GetCharacterMovement();
+	const URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(Movement);
+	const FVector Velocity = Brawler->GetVelocity();
+	const bool bInAir = Movement && Movement->IsFalling() && Brawler->IsAlive();
+	AirTime = bInAir ? AirTime + DeltaSeconds : 0.f;
+	const bool bSlowFall = Velocity.Z <= 0.f && Velocity.Z > -280.f && AirTime > 0.35f;
+	const bool bGlide = bInAir && ((RandomMovement && RandomMovement->bGliding && Velocity.Z <= 0.f) || Brawler->IsDashing()
+		|| (!Brawler->IsLocallyControlled() && !Brawler->HasAuthority() && Brawler->CanFly() && bSlowFall));
+	const float Run = FMath::Clamp(Velocity.Size2D() / FMath::Max(WagRunSpeed, 1.f), 0.f, 1.f);
+	const FVector2D Flap = !bInAir ? FMath::Lerp(GroundFlap, WalkFlap, Run) : Brawler->CanFly() && Velocity.Z > 0.f ? RisingFlap : AirFlap;
+
+	GlideWeight = FMath::FInterpConstantTo(GlideWeight, bGlide ? 1.f : 0.f, DeltaSeconds, 1.f / FMath::Max(GlideBlendTime, 0.01f));
+	FlapRate = FMath::FInterpTo(FlapRate, Flap.X, DeltaSeconds, 6.f);
+	FlapSize = FMath::FInterpTo(FlapSize, Flap.Y, DeltaSeconds, 6.f);
+	FlapPhase = FMath::Fmod(FlapPhase + 2.f * PI * FlapRate * DeltaSeconds, 2.f * PI);
+
+	// Gliding: held spread, and every so often one big beat (down, then back up past the spread)
+	if (GlideWeight > 0.9f)
+	{
+		StrokeWait -= DeltaSeconds;
+		if (StrokeWait <= 0.f)
+		{
+			StrokeWait = FMath::FRandRange(GlideStrokeEvery.X, GlideStrokeEvery.Y);
+			StrokeAlpha = 0.f;
+		}
+	}
+	else
+	{
+		// A beat soon after settling into the glide
+		StrokeWait = FMath::Min(StrokeWait, 0.6f);
+	}
+	StrokeAlpha += DeltaSeconds / FMath::Max(GlideStrokeTime, 0.05f);
+	const float Stroke = StrokeAlpha < 1.f ? GlideStrokeSize * FMath::Sin(2.f * PI * StrokeAlpha) : 0.f;
+	const float StrokeTip = StrokeAlpha < 1.f ? 0.6f * GlideStrokeSize * FMath::Sin(2.f * PI * StrokeAlpha - 0.9f) : 0.f;
+
+	// The left wing's turns (degrees down, about the mesh's front axis, and forward, about its up axis); a knocked-out
+	// brawler's wings settle back to rest
+	const float Glide = GlideWeight;
+	const float Still = 1.f - Glide;
+	const float Shiver = 1.2f * FMath::Sin(GetWorld()->GetTimeSeconds() * 11.f);
+	const float RootDown = (GlideRootDownForward.X + Shiver + Stroke) * Glide + FlapSize * FMath::Sin(FlapPhase) * Still;
+	const float RootForward = GlideRootDownForward.Y * Glide;
+	const float TipDown = (GlideTipDownForward.X + Shiver * 0.5f + StrokeTip) * Glide + 0.5f * FlapSize * FMath::Sin(FlapPhase - 0.9f) * Still;
+	const float TipForward = GlideTipDownForward.Y * Glide;
+	const float Alive = Brawler->IsAlive() ? 1.f : 0.f;
+
+	// Down turns the left wing (+X) toward -Z: about +Y. Forward turns it toward +Y: about +Z. The right wing is the mirror
+	// image: the same angles about -Y and -Z. The tip's turn is taken in the root's turned frame, so it rides on it.
+	WingBends.SetNum(4);
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		const float Mirror = Side == 0 ? 1.f : -1.f;
+		const FVector Front(0.f, Mirror, 0.f);
+		const FVector Up(0.f, 0.f, Mirror);
+		const FQuat Root = FQuat(Up, FMath::DegreesToRadians(RootForward * Alive)) * FQuat(Front, FMath::DegreesToRadians(RootDown * Alive));
+		const FQuat Tip = FQuat(Up, FMath::DegreesToRadians(TipForward * Alive)) * FQuat(Front, FMath::DegreesToRadians(TipDown * Alive));
+		WingBends[Side * 2] = Root;
+		WingBends[Side * 2 + 1] = Root * Tip * Root.Inverse();
+	}
 }
 
 FAnimInstanceProxy* URRRandomBodyAnimInstance::CreateAnimInstanceProxy()
@@ -79,6 +215,11 @@ void URRRandomBodyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
 	Super::NativeUpdateAnimation(DeltaSeconds);
 	UpdateAim(DeltaSeconds);
+	if (DeltaSeconds > 0.f)
+	{
+		UpdateFlightPose(DeltaSeconds);
+		UpdateWings(DeltaSeconds);
+	}
 
 	const USkeletalMeshComponent* Mesh = GetSkelMeshComponent();
 	const AActor* Owner = GetOwningActor();
@@ -176,7 +317,8 @@ void URRRandomBodyAnimInstance::UpdateAim(float DeltaSeconds)
 	const float Speed = Velocity.Size2D();
 	const float Ahead = FVector::DotProduct(Velocity, Brawler->GetActorForwardVector());
 	const float Side = FVector::DotProduct(Velocity, Brawler->GetActorRightVector());
-	Aim.MoveWeight = FMath::FInterpTo(Aim.MoveWeight, FMath::Clamp(Speed / FMath::Max(AimRunSpeed, 1.f), 0.f, 1.f), DeltaSeconds, MoveBlendSpeed);
+	// (in flight no running legs: the standing aim over the flying pose)
+	Aim.MoveWeight = FMath::FInterpTo(Aim.MoveWeight, Brawler->IsInFlight() ? 0.f : FMath::Clamp(Speed / FMath::Max(AimRunSpeed, 1.f), 0.f, 1.f), DeltaSeconds, MoveBlendSpeed);
 	if (Speed > MinStrafeSpeed)
 	{
 		// 0 ahead, 90 right, -90 left, 180 behind; between two runs, a share of each
@@ -238,6 +380,10 @@ void FRRRandomBodyAnimInstanceProxy::PreUpdate(UAnimInstance* InAnimInstance, fl
 	TailBones = Instance->GetTailBones();
 	TailSwing = Instance->GetTailSwing();
 	TailLift = Instance->GetTailLift();
+	FlightBones = Instance->GetFlightBones();
+	FlightBends = Instance->GetFlightBends();
+	WingBones = Instance->GetWingBones();
+	WingBends = Instance->GetWingBends();
 	Aim = Instance->GetAimFrame();
 }
 
@@ -374,5 +520,9 @@ bool FRRRandomBodyAnimInstanceProxy::Evaluate(FPoseContext& Output)
 		FTransform& Local = Output.Pose[Index];
 		Local.SetRotation((ParentRotation.Inverse() * Bend * ParentRotation * Local.GetRotation()).GetNormalized());
 	}
+
+	// The flying pose, then the wings (roots before tips, so a tip's parent is already turned)
+	TurnBones(Output, FlightBones, FlightBends);
+	TurnBones(Output, WingBones, WingBends);
 	return true;
 }

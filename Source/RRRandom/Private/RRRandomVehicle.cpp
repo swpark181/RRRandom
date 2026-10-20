@@ -25,13 +25,22 @@ namespace
 		{ 2.7f, 2400.f, 1.6f, 560.f, 1100.f, true, 22.f, 0.7f, 28.f, TEXT("MOTORBIKE"), 0.f, false, 0.f, 16.f, 0.65f, 0.f },
 		// Car: fastest, slides the most, rolls a little; a tandem two-seater, the rear seat right behind the driver's;
 		// two rear wheels' marks
-		{ 3.5f, 2200.f, 1.1f, 460.f, 1000.f, true, 18.f, 0.15f, 6.f, TEXT("CAR"), -7.f, true, -93.f, 22.f, 0.55f, 0.72f },
+		{ 3.5f, 2200.f, 1.1f, 460.f, 1000.f, true, 18.f, 0.15f, 6.f, TEXT("CAR"), -7.f, true, -93.f, 22.f, 0.55f, 0.72f, 0.f, 0.f, true },
+		// The star team (Tripo models, measured from char-pipeline/output/vehicles/star/vehicles_top.png): two seats side
+		// by side in the chest car and the arms car, one behind the other in the long legs car. The chest car is the
+		// sturdy one, the arms car the nimble one, the legs car (a rocket) the fastest that turns the slowest; all ram.
+		{ 3.f, 2000.f, 1.4f, 440.f, 1100.f, true, 45.f, 0.12f, 5.f, TEXT("STAR CHEST"), -90.f, true, -90.f, 24.f, 0.55f, 0.75f, -42.f, 42.f, true },
+		{ 3.2f, 2200.f, 1.2f, 500.f, 1000.f, true, 45.f, 0.15f, 6.f, TEXT("STAR ARMS"), -45.f, true, -45.f, 22.f, 0.55f, 0.7f, -42.f, 42.f, true },
+		{ 3.8f, 2400.f, 1.f, 380.f, 900.f, true, 30.f, 0.1f, 4.f, TEXT("STAR LEGS"), 120.f, true, -57.f, 18.f, 0.7f, 0.5f, 0.f, 0.f, true },
 	};
 	const TCHAR* MeshPaths[] =
 	{
 		TEXT("/Game/Vehicles/SM_Kickboard.SM_Kickboard"),
 		TEXT("/Game/Vehicles/SM_Motorbike.SM_Motorbike"),
 		TEXT("/Game/Vehicles/SM_Car.SM_Car"),
+		TEXT("/Game/Vehicles/SM_StarChest.SM_StarChest"),
+		TEXT("/Game/Vehicles/SM_StarArms.SM_StarArms"),
+		TEXT("/Game/Vehicles/SM_StarLegs.SM_StarLegs"),
 	};
 	// Drifting counts from this many degrees between where the vehicle faces and where it goes, at this speed or more
 	constexpr float DriftAngleStart = 8.f;
@@ -90,6 +99,7 @@ void ARRRandomVehicle::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME(ARRRandomVehicle, Kind);
 	DOREPLIFETIME(ARRRandomVehicle, Rider);
 	DOREPLIFETIME(ARRRandomVehicle, Passenger);
+	DOREPLIFETIME(ARRRandomVehicle, bCombined);
 }
 
 void ARRRandomVehicle::OnConstruction(const FTransform& Transform)
@@ -113,6 +123,46 @@ void ARRRandomVehicle::ApplyKind()
 {
 	const int32 Index = static_cast<int32>(Kind);
 	Body->SetStaticMesh(KindMeshes.IsValidIndex(Index) ? KindMeshes[Index] : nullptr);
+}
+
+UStaticMesh* ARRRandomVehicle::GetKindMesh(ERRVehicleKind InKind) const
+{
+	const int32 Index = static_cast<int32>(InKind);
+	return KindMeshes.IsValidIndex(Index) ? KindMeshes[Index] : nullptr;
+}
+
+void ARRRandomVehicle::SetCombined(bool bNewCombined, const FVector& Where, float Yaw)
+{
+	if (!HasAuthority() || bCombined == bNewCombined || Rider || Passenger)
+	{
+		return;
+	}
+	bCombined = bNewCombined;
+	if (!bCombined)
+	{
+		// Back on the floor below the spot (its pivot is the middle of its bottom)
+		FVector Spot = Where;
+		FHitResult Hit;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(RRVehicleFloor), false, this);
+		if (GetWorld()->LineTraceSingleByChannel(Hit, Where + FVector(0.f, 0.f, 400.f), Where - FVector(0.f, 0.f, 2000.f), ECC_Visibility, Params))
+		{
+			Spot = Hit.ImpactPoint;
+		}
+		SetActorLocationAndRotation(Spot, FRotator(0.f, Yaw, 0.f));
+	}
+	OnRep_Combined();
+}
+
+void ARRRandomVehicle::OnRep_Combined()
+{
+	SetActorHiddenInGame(bCombined);
+	SkidSpots.Reset();
+}
+
+float ARRRandomVehicle::GetHeight() const
+{
+	const UStaticMesh* Mesh = Body->GetStaticMesh();
+	return Mesh ? Mesh->GetBoundingBox().Max.Z : 100.f;
 }
 
 float ARRRandomVehicle::GetHalfWidth() const
@@ -139,7 +189,7 @@ int32 ARRRandomVehicle::Mount(ARRRandomCharacter* NewRider)
 	// Under the rider's feet with the driver's seat there, turned with it (the vehicle's pivot is the middle of its bottom)
 	UCapsuleComponent* Capsule = NewRider->GetCapsuleComponent();
 	AttachToComponent(Capsule, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-	SetActorRelativeLocation(FVector(-GetHandling().DriverSeatX, 0.f, -Capsule->GetUnscaledCapsuleHalfHeight()));
+	SetActorRelativeLocation(FVector(-GetHandling().DriverSeatX, -GetHandling().DriverSeatY, -Capsule->GetUnscaledCapsuleHalfHeight()));
 	SetActorRelativeRotation(FRotator::ZeroRotator);
 	SetActorRelativeScale3D(FVector::OneVector);
 	return 0;
@@ -170,6 +220,10 @@ void ARRRandomVehicle::RemovePassenger(ARRRandomCharacter* Who)
 void ARRRandomVehicle::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (bCombined)
+	{
+		return;
+	}
 
 	// Leaning into a drift: the angle between where it faces and where it is going, while going fast enough
 	const FRRVehicleHandling& Handling = GetHandling();
@@ -194,7 +248,7 @@ void ARRRandomVehicle::Tick(float DeltaSeconds)
 	Lean = FMath::FInterpConstantTo(Lean, Wanted, DeltaSeconds, LeanRate);
 	Body->SetRelativeRotation(FRotator(0.f, 0.f, Lean));
 	UpdateSkidMarks(bDrifting, Speed);
-	if (HasAuthority() && Kind == ERRVehicleKind::Car)
+	if (HasAuthority() && Handling.bRams)
 	{
 		UpdateRam();
 	}

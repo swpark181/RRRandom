@@ -14,6 +14,10 @@ enum class ERRVehicleKind : uint8
 	Kickboard,
 	Motorbike,
 	Car,
+	/** The star team: three cars that combine into one robot (ARRRandomStarRobot): its chest and head, its arms, its legs. */
+	StarChest,
+	StarArms,
+	StarLegs,
 };
 
 /** How a kind of vehicle rides: the brawler's movement while on it, and where it stands or sits. */
@@ -51,6 +55,11 @@ struct FRRVehicleHandling
 	float SkidWidth = 0.f;
 	float RearAxleShare = 0.6f;
 	float TrackShare = 0.f;
+	/** How far right of the middle the driver's and the other seat are: side by side seats are left and right of it. */
+	float DriverSeatY = 0.f;
+	float RearSeatY = 0.f;
+	/** Whether it runs enemies over like a car (UpdateRam). */
+	bool bRams = false;
 };
 
 /**
@@ -63,7 +72,9 @@ struct FRRVehicleHandling
  * F again, a knockout or the flight power puts it back down (the driver getting off lets the passenger out too).
  * The car is a weapon too: an enemy it drives into faster than walking is knocked out (the driver gets the point),
  * slower it hurts them by its speed and throws them aside.
- * Replicated: who drives it, who sits behind, and its kind.
+ * The star team's three cars (chest, arms, legs) ride like cars, two seats each, and combine into a robot
+ * (ARRRandomStarRobot) once gathered: they are hidden inside it meanwhile (SetCombined).
+ * Replicated: who drives it, who sits behind, its kind and whether it is in the robot.
  */
 UCLASS(NotPlaceable)
 class RRRANDOM_API ARRRandomVehicle : public AActor
@@ -87,8 +98,21 @@ public:
 	ARRRandomCharacter* GetPassenger() const { return Passenger; }
 	/** Half the vehicle's width, for stepping off beside it. */
 	float GetHalfWidth() const;
-	/** A seat free: the driver's, or the rear one with a driver in front. */
-	bool HasRoom() const { return !Rider || (GetHandling().bRearSeat && !Passenger); }
+	/** How tall it is (the star team's cars stand tall round their seats: the camera rises over them). */
+	float GetHeight() const;
+	/** A seat free: the driver's, or the rear one with a driver in front. None while it is part of the robot. */
+	bool HasRoom() const { return !bCombined && (!Rider || (GetHandling().bRearSeat && !Passenger)); }
+
+	/** One of the star team's three cars, and which (0 chest, 1 arms, 2 legs), or -1. */
+	int32 GetStarPart() const { return Kind >= ERRVehicleKind::StarChest ? static_cast<int32>(Kind) - static_cast<int32>(ERRVehicleKind::StarChest) : -1; }
+	/**
+	 * Server: taken into the robot (hidden, no seats, out of the way) or back out of it, parked at Where facing Yaw on
+	 * the floor below it. Its riders must be off first.
+	 */
+	void SetCombined(bool bNewCombined, const FVector& Where = FVector::ZeroVector, float Yaw = 0.f);
+	bool IsCombined() const { return bCombined; }
+	/** The mesh of a kind of vehicle (the robot flies these round while combining). */
+	UStaticMesh* GetKindMesh(ERRVehicleKind InKind) const;
 	/** Whether the next one to get on would ride in the rear seat. */
 	bool IsNextSeatRear() const { return Rider != nullptr; }
 
@@ -103,7 +127,7 @@ public:
 	/** Server only: empties the rear seat. */
 	void RemovePassenger(ARRRandomCharacter* Who);
 	/** Where a passenger's capsule middle sits, relative to the vehicle's pivot (the middle of its bottom). */
-	FVector GetRearSeatLocation(float CapsuleHalfHeight) const { return FVector(GetHandling().RearSeatX, 0.f, CapsuleHalfHeight); }
+	FVector GetRearSeatLocation(float CapsuleHalfHeight) const { return FVector(GetHandling().RearSeatX, GetHandling().RearSeatY, CapsuleHalfHeight); }
 
 	/** Brawlers this close (flat) to a parked vehicle can get on. */
 	static constexpr float MountRange = 170.f;
@@ -116,6 +140,13 @@ private:
 
 	UFUNCTION()
 	void OnRep_Kind();
+
+	UFUNCTION()
+	void OnRep_Combined();
+
+	/** Part of the robot: hidden, no seats (replicated). */
+	UPROPERTY(ReplicatedUsing = OnRep_Combined)
+	bool bCombined = false;
 
 	UPROPERTY(VisibleAnywhere, Category = "Vehicle")
 	TObjectPtr<UStaticMeshComponent> Body;

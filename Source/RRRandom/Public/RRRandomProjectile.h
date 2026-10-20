@@ -37,6 +37,14 @@ public:
 	/** Scales the flying speed; call before the shot finishes spawning. */
 	void SetSpeedMultiplier(float Multiplier);
 
+	/**
+	 * Makes it the star robot's rocket fist (call before it finishes spawning): its left or right forearm flies instead of
+	 * a ball (the rocket gauntlet and its fist, ARRRandomStarRobot::LoadForearm), fist first and spinning, a jet of flame
+	 * and smoke streaming out behind it (ARRRandomEffects::RocketExhaust), and it lands in a cartoon fireball
+	 * (RocketBlast); Radius wide for hits.
+	 */
+	void MakeRocketFist(bool bLeft, float Radius);
+
 	/** Damage is rolled between these on every hit. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat")
 	int32 MinDamage = 8;
@@ -55,6 +63,10 @@ public:
 	/** Push given to physics bodies it hits, such as a knocked-down dummy. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat")
 	float ImpactImpulse = 300.f;
+
+	/** Above 0: where it lands on anything but an animal friend, the structures this close are smashed (the star robot's fists). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	float WreckRadius = 0.f;
 
 	/** Color of the viewer's own shots, so they stand out; everyone else's take their team color. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
@@ -79,6 +91,14 @@ public:
 	/** How flashy the shot looks; the shooter sets it from its gun before the shot begins play. */
 	UPROPERTY(Replicated)
 	ERRWeaponTier Tier = ERRWeaponTier::Common;
+
+	/** A rocket fist (MakeRocketFist): 0 not, 1 the left forearm, 2 the right. */
+	UPROPERTY(Replicated)
+	uint8 RocketArm = 0;
+
+	/** How fast a rocket fist spins round the way it flies (degrees a second). */
+	UPROPERTY(EditAnywhere, Category = "Projectile")
+	float RocketSpinRate = 600.f;
 
 	/** How long a shot that hit something stays around, hidden, so clients hear about the hit before it goes. */
 	UPROPERTY(EditAnywhere, Category = "Projectile")
@@ -146,4 +166,8 @@ private:
 
 	UPROPERTY(Replicated)
 	FVector_NetQuantizeNormal ImpactNormal;
+
+	/** A rocket fist: the forearm's place relative to the shot (fist first), and how far round it has spun. */
+	FTransform RocketPose;
+	float RocketSpin = 0.f;
 };

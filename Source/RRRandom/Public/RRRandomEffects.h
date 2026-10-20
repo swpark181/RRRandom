@@ -83,6 +83,17 @@ public:
 	void FireBurst(const FVector& Where, float Size);
 	/** A hit: sparks and stars thrown back toward where the shot came from, a quick ring and a flash; Strength 1 is a pistol shot. */
 	void HitBurst(const FVector& Where, const FVector& FromDirection, float Strength, const FLinearColor& Tint);
+	/**
+	 * The star robot's rocket fist leaving its arm (Direction: the way it flies): a flash, a jet of flame and smoke out
+	 * of the elbow behind it, a ring of smoke round the arm, a shock ring ahead, sparks.
+	 */
+	void RocketLaunch(const FVector& Where, const FVector& Direction, const FLinearColor& Tint);
+	/** One frame of a rocket fist's exhaust out of its back (Back: the way the exhaust goes): a hot core, flames, smoke, sparks. */
+	void RocketExhaust(const FVector& Nozzle, const FVector& Back, float Size, float DeltaSeconds);
+	/** A rocket fist landing: a cartoon fireball, shock rings along the surface, star rays, smoke rising, sparks. */
+	void RocketBlast(const FVector& Where, const FVector& Normal, float Size);
+	/** A big foot coming down (the star robot's steps): dust puffing out along the ground and a faint ring. */
+	void Footstep(const FVector& Where, float Size);
 
 private:
 	enum class EShape : uint8 { Ball, Ring, Star, Die, Count };

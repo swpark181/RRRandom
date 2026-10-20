@@ -46,6 +46,10 @@ public:
 	/** True once the land has laid itself out (BeginPlay). */
 	bool IsBuilt() const { return bBuilt; }
 
+	/** For wrecks (round 60, ARRRandomWreckage): the hidden boxes that stop things, and the looks that may stand over them. */
+	UInstancedStaticMeshComponent* GetWreckSolid() const { return Solid; }
+	void GetWreckLooks(TArray<UInstancedStaticMeshComponent*>& OutLooks) const { OutLooks = { Dice.Get(), BlankDice.Get(), Balls.Get(), Trunks.Get() }; }
+
 protected:
 	virtual void BeginPlay() override;
 

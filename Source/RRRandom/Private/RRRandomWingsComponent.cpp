@@ -1,5 +1,6 @@
 #include "RRRandomWingsComponent.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomKit.h"
 #include "RRRandomMovementComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -120,7 +121,8 @@ void URRRandomWingsComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	const URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(Movement);
 	const bool bInAir = Movement->IsFalling();
 	const bool bGliding = RandomMovement && RandomMovement->bGliding && bInAir;
-	const bool bWanted = Brawler->IsAlive() && (Brawler->CanFly() || bGliding);
+	// (not on a brawler that flies on its own wings: the dragon)
+	const bool bWanted = Brawler->IsAlive() && (Brawler->CanFly() || bGliding) && !RRKit::Get(Brawler->GetSpecies()).bOwnWings;
 
 	// A knockout drops them at once; otherwise they unfold and fold away
 	Shown = Brawler->IsAlive() ? FMath::FInterpConstantTo(Shown, bWanted ? 1.f : 0.f, DeltaTime, ShowTime > 0.f ? 1.f / ShowTime : UE_BIG_NUMBER) : 0.f;

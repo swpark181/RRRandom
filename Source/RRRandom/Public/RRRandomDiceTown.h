@@ -9,6 +9,9 @@ class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UStaticMesh;
 struct FRandomStream;
+struct FRRWreck;
+struct FRRBrokenBit;
+struct FRRRegrow;
 
 /**
  * "Dice Town", the third person mode's big map (about ten times Dice Land's ground): a floating island town built of
@@ -62,6 +65,15 @@ public:
 	/** A spot on the ground anyone can walk to, at foot height, at most Radius from the middle (in 2D). */
 	FVector GetRandomWalkSpot(FRandomStream& Stream, float Radius) const;
 
+	/**
+	 * Smashes and mends this machine's town to match the wrecks in force (round 60, ARRRandomWreckage): the blocks over the
+	 * floor inside them go (giant dice stay), and with them what stands there drawn as a model (roofs, Tripo trees, hedges,
+	 * lamps, awnings, whole flights of stairs); the hidden boxes that stop things are cut round the holes, and blocks inside
+	 * walls that a hole lays bare are drawn. OutBroken gets the blocks that went just now (for the rubble), OutRegrow what is
+	 * shown again (to grow back into place). The bots' routes stay as built.
+	 */
+	void ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<FRRBrokenBit>& OutBroken, TArray<FRRRegrow>& OutRegrow);
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -100,6 +112,11 @@ private:
 		int32 Width;
 		int32 Base;
 		int32 Rise;
+		/** Its looks (Steps) and what stops (Solid), as instance ranges: a wreck takes the whole flight. */
+		int32 StepFirst = 0;
+		int32 StepCount = 0;
+		int32 SolidFirst = 0;
+		int32 SolidCount = 0;
 	};
 
 	/** A spot the bots can stand: a cell and the height of its floor (above the island's floor), maybe on stairs. */
@@ -169,6 +186,17 @@ private:
 	void MakeUnderside();
 	void MakeSky();
 	void AddColored(UInstancedStaticMeshComponent* Instances, const FTransform& Transform, const FColor& Body, const FColor& Accent);
+	/** Draws the block of a cell (one with a face showing), remembered in CellBlocks. */
+	void AddCellBlock(int32 X, int32 Y, int32 Level);
+	FTransform GetCellTransform(int32 X, int32 Y, int32 Level) const;
+
+	// Wrecks (round 60)
+	/** Solid and not broken. */
+	bool IsFilled(int32 X, int32 Y, int32 Level) const;
+	/** A wreck reaches into a box in the world (a column only between the floor and the grid's top). */
+	bool Touches(const FRRWreck& Wreck, const FBox& Box) const;
+	/** A cell's block drawn or not, as it should be now: broken or buried, hidden; laid bare, drawn (added if never drawn). */
+	void RefreshCellBlock(int32 X, int32 Y, int32 Level, bool bGrow, TArray<FRRRegrow>& OutRegrow);
 
 	// The dreamier pass (round 47; -RRTownClassic leaves it out)
 	/** Something that drifts in the air (a die, a star): bobbing, turning, maybe circling a point. */
@@ -187,6 +215,8 @@ private:
 		/** Circling Base this far out, this many radians a second (0: in place). */
 		float Orbit;
 		float OrbitRate;
+		/** Gone with a wreck (drawn at no size). */
+		bool bWrecked = false;
 	};
 	/** A spot in a frame (fractional cells), this high above the floor, and the yaw its +U faces. */
 	FVector FrameSpot(const FFrame& Frame, float U, float V, float Height) const;
@@ -275,6 +305,34 @@ private:
 	TArray<int32> NodeStart;
 	/** Nodes on the ground anyone can reach from the plaza (for the bots' roaming). */
 	TArray<int32> Roamable;
+
+	/** Each drawn block by cell (grid index): a die block or a plain one, its instance, and whether it shows now. */
+	struct FCellBlock
+	{
+		bool bDie;
+		int32 Index;
+		bool bShown;
+	};
+	TMap<int32, FCellBlock> CellBlocks;
+
+	/** The hidden boxes merged from the grid (MakeCollision), Solid's instances from FirstGridBox on, in cells and levels. */
+	struct FGridBox
+	{
+		FIntVector Min;
+		FIntVector Max;
+	};
+	TArray<FGridBox> GridBoxes;
+	int32 FirstGridBox = 0;
+	/** The box covering each cell (by grid index; INDEX_NONE for none). */
+	TArray<int32> BoxOfCell;
+
+	/** Wrecks: the broken cells, and the boxes cut round them (by box, the boxes over what's left of it, in WreckSolid). */
+	TBitArray<> Broken;
+	TArray<int32> BrokenCells;
+	TMap<int32, TArray<FTransform>> CutBoxes;
+	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> WreckSolid;
+	/** Model instances gone with a wreck (by their instances, then index), and where they stood. */
+	TMap<UInstancedStaticMeshComponent*, TMap<int32, FTransform>> Gone;
 
 	/** The floor's height under the middle; level 0's top. */
 	float FloorZ = 0.f;

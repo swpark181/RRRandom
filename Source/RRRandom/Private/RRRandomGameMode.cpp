@@ -13,6 +13,7 @@
 #include "RRRandomOre.h"
 #include "RRRandomHUD.h"
 #include "RRRandomPlayerController.h"
+#include "RRRandomStudio.h"
 #include "RRRandomVehicle.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
@@ -70,6 +71,11 @@ void ARRRandomGameMode::InitGame(const FString& MapName, const FString& Options,
 	{
 		TeamSpawnDistance = ARRRandomDiceTown::TeamSpawnDistance;
 	}
+	bStudio = bSpawnDiceLand && Sessions && Sessions->IsThirdPersonMode() && Sessions->GetThirdPersonMap() == ERRThirdPersonMap::Studio;
+	if (bStudio)
+	{
+		TeamSpawnDistance = ARRRandomStudio::TeamSpawnDistance;
+	}
 }
 
 void ARRRandomGameMode::StartPlay()
@@ -118,7 +124,11 @@ void ARRRandomGameMode::StartPlay()
 	if (bSpawnDiceLand && ARRRandomGameState::IsThirdPersonMode(this))
 	{
 		// The third person map brings its own ground and cover; it goes up before the bots, whose floor traces land on it
-		if (!bDiceTown)
+		if (bStudio)
+		{
+			SpawnStudioIfNoneExists();
+		}
+		else if (!bDiceTown)
 		{
 			SpawnDiceLandIfNoneExists();
 		}
@@ -729,15 +739,40 @@ void ARRRandomGameMode::SpawnVehiclesIfNoneExist()
 		{ ERRVehicleKind::Motorbike, FVector2D(Near, -900.f), 180.f },
 		{ ERRVehicleKind::Car, FVector2D(90.f, -1890.f), 0.f },
 		{ ERRVehicleKind::Car, FVector2D(-90.f, 1710.f), 180.f },
+		// The star team, spread out so it takes driving to gather them (ARRRandomStarRobot): the chest and the arms cars
+		// on the cross road at either flank, the legs car on the way to one team (all on open road in Dice Town too)
+		{ ERRVehicleKind::StarChest, FVector2D(0.f, -Near * 0.96f), 90.f },
+		{ ERRVehicleKind::StarArms, FVector2D(0.f, Near * 0.96f), -90.f },
+		{ ERRVehicleKind::StarLegs, FVector2D(-Near * 0.6f, 1250.f), 0.f },
 	};
 	const FVector Origin = GetArenaCenter();
+	// Floor more than this above the arena's isn't the ground
+	constexpr float StarCarGroundStep = 40.f;
 	for (const FParking& Spot : Spots)
 	{
+		// The studio keeps its floor bare: only the star team's cars, for RRStarCars to bring
+		if (bStudio && Spot.Kind < ERRVehicleKind::StarChest)
+		{
+			continue;
+		}
 		// Its pivot is the middle of its bottom, so it goes straight onto the floor; no floor, no vehicle
 		FVector Location;
 		if (!FindFloorSpot(Origin + FVector(Spot.Offset, 0.f), 0.f, Location))
 		{
 			continue;
+		}
+		// The star team's big cars on the ground, not up on a hedge or a crate: the nearest spot that is, along the road
+		if (Spot.Kind >= ERRVehicleKind::StarChest)
+		{
+			for (const float Shift : { 200.f, -200.f, 400.f, -400.f, 600.f, -600.f })
+			{
+				FVector Shifted;
+				if (Location.Z - Origin.Z <= StarCarGroundStep || !FindFloorSpot(Origin + FVector(Spot.Offset + FVector2D(Shift, 0.f), 0.f), 0.f, Shifted))
+				{
+					continue;
+				}
+				Location = Shifted.Z - Origin.Z <= StarCarGroundStep ? Shifted : Location;
+			}
 		}
 		const FTransform SpawnTransform(FRotator(0.f, Spot.Yaw, 0.f), Location);
 		if (ARRRandomVehicle* Vehicle = World->SpawnActorDeferred<ARRRandomVehicle>(ARRRandomVehicle::StaticClass(), SpawnTransform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
@@ -824,4 +859,14 @@ void ARRRandomGameMode::SpawnDiceTownIfNoneExists()
 	}
 	// Around the arena's center, halfway between the teams; each team starts at its base on the main road
 	World->SpawnActor<ARRRandomDiceTown>(ARRRandomDiceTown::StaticClass(), FTransform(GetArenaCenter()));
+}
+
+void ARRRandomGameMode::SpawnStudioIfNoneExists()
+{
+	UWorld* World = GetWorld();
+	if (TActorIterator<ARRRandomStudio>(World))
+	{
+		return;
+	}
+	World->SpawnActor<ARRRandomStudio>(ARRRandomStudio::StaticClass(), FTransform(GetArenaCenter()));
 }

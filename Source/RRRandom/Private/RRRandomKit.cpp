@@ -67,6 +67,7 @@ namespace
 			break;
 		case RRSpecies::Dragon:
 			Kit.bGlide = true;
+			Kit.bOwnWings = true;
 			Kit.FlightDieChance = 0.2f;
 			Kit.PassiveName = TEXT("GLIDE");
 			Kit.PassiveLine = TEXT("hold jump while falling to glide down");

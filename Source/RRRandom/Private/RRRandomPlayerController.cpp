@@ -9,9 +9,13 @@
 #include "RRRandomOre.h"
 #include "RRRandomResultsDirector.h"
 #include "RRRandomSessionSubsystem.h"
+#include "RRRandomStarRobot.h"
 #include "RRRandomUltimate.h"
 #include "RRRandomVehicle.h"
+#include "RRRandomWreckage.h"
+#include "Camera/CameraActor.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Kismet/GameplayStatics.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/DamageEvents.h"
 #include "EnhancedInputComponent.h"
@@ -114,6 +118,11 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 		CheatWinAction = NewObject<UInputAction>(this, TEXT("IA_CheatWin"));
 		CheatWinAction->ValueType = EInputActionValueType::Boolean;
 	}
+	if (!CheatStarCarsAction)
+	{
+		CheatStarCarsAction = NewObject<UInputAction>(this, TEXT("IA_CheatStarCars"));
+		CheatStarCarsAction->ValueType = EInputActionValueType::Boolean;
+	}
 	if (!CheatGiantAction)
 	{
 		CheatGiantAction = NewObject<UInputAction>(this, TEXT("IA_CheatGiant"));
@@ -200,6 +209,8 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 	MappingContext->MapKey(CheatThirdPersonAction, EKeys::F9);
 	MappingContext->MapKey(CheatFlyAction, EKeys::F8);
 	MappingContext->MapKey(CheatWinAction, EKeys::F6);
+	// Ctrl + 0 (the 0 alone does nothing: OnCheatStarCarsKey checks for Ctrl)
+	MappingContext->MapKey(CheatStarCarsAction, EKeys::Zero);
 	const FKey GunKeys[] = { EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine };
 	for (int32 Type = 0; Type < FMath::Min(CheatGunActions.Num(), static_cast<int32>(UE_ARRAY_COUNT(GunKeys))); ++Type)
 	{
@@ -293,6 +304,7 @@ void ARRRandomPlayerController::SetupInputComponent()
 	EnhancedInput->BindAction(LeaveAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRLeave);
 	EnhancedInput->BindAction(TitleAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnEscape);
 	EnhancedInput->BindAction(CheatWinAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRWin);
+	EnhancedInput->BindAction(CheatStarCarsAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnCheatStarCarsKey);
 	EnhancedInput->BindAction(CheatGiantAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRGiant);
 	EnhancedInput->BindAction(CheatGodAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRGod);
 	EnhancedInput->BindAction(CheatUltimateAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRUltimate);
@@ -402,6 +414,12 @@ void ARRRandomPlayerController::PlayerTick(float DeltaTime)
 			ResultsDirector->Setup(State->GetMVP(), PlayerCameraManager ? PlayerCameraManager->GetCameraCacheView() : FMinimalViewInfo(), ResultsBlendTime);
 			SetViewTarget(ResultsDirector);
 		}
+	}
+
+	// RRStudioCam (not while my ultimate has the view over the arena)
+	if (!bViewingSpirit)
+	{
+		UpdateStudioCam(DeltaTime);
 	}
 }
 
@@ -641,6 +659,125 @@ void ARRRandomPlayerController::ServerCheatMeteor_Implementation()
 #endif
 }
 
+void ARRRandomPlayerController::RRWreck(float Radius, int32 bColumn)
+{
+	// Where the middle of the view first meets something solid (my own animal friend aside), at most 8000 away
+	FVector ViewFrom;
+	FRotator ViewTurn;
+	GetPlayerViewPoint(ViewFrom, ViewTurn);
+	const FVector ViewTo = ViewFrom + ViewTurn.Vector() * 8000.f;
+	FHitResult Hit;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomCheatWreck), false, GetPawn());
+	const bool bHit = GetWorld()->LineTraceSingleByObjectType(Hit, ViewFrom, ViewTo, FCollisionObjectQueryParams(ECC_WorldStatic), Params);
+	ServerCheatWreck(bHit ? FVector(Hit.ImpactPoint) : ViewTo, Radius, bColumn != 0);
+}
+
+void ARRRandomPlayerController::ServerCheatWreck_Implementation(FVector_NetQuantize Spot, float Radius, bool bColumn)
+{
+#if !UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, wrecking round %s."), *Spot.ToCompactString());
+	ARRRandomWreckage::Wreck(this, Spot, Spot, FMath::Clamp(Radius, 50.f, 3000.f), bColumn);
+#endif
+}
+
+void ARRRandomPlayerController::RRStudioCam(float Yaw, float Distance, float Height)
+{
+	if (!StudioCam)
+	{
+		FActorSpawnParameters Params;
+		Params.Owner = this;
+		Params.ObjectFlags |= RF_Transient;
+		StudioCam = GetWorld()->SpawnActor<ACameraActor>(ACameraActor::StaticClass(), FTransform::Identity, Params);
+	}
+	const bool bWasOn = bStudioCam;
+	bStudioCam = StudioCam != nullptr;
+	StudioYaw = Yaw;
+	StudioDistance = Distance;
+	StudioHeight = Height;
+	if (!bWasOn && GetPawn())
+	{
+		StudioFacing = GetPawn()->GetActorRotation().Yaw;
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: studio camera at %.0f degrees round from the front."), Yaw);
+}
+
+void ARRRandomPlayerController::RRStudioCamOff()
+{
+	bStudioCam = false;
+	if (GetPawn())
+	{
+		SetViewTarget(GetPawn());
+	}
+}
+
+void ARRRandomPlayerController::UpdateStudioCam(float DeltaTime)
+{
+	if (!bStudioCam || !StudioCam || !IsLocalController() || ResultsDirector)
+	{
+		return;
+	}
+	// Who it watches: my animal friend, or the robot I'm aboard
+	AActor* Subject = GetPawn();
+	const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(Subject);
+	ARRRandomStarRobot* Robot = Mine ? Mine->GetRobot() : nullptr;
+	const bool bRobot = Robot && Robot->IsAssembled();
+	if (bRobot)
+	{
+		Subject = Robot;
+	}
+	if (!Subject)
+	{
+		return;
+	}
+	// Round from its front, turning with it smoothly (a quick turn isn't a jolt of the view)
+	const float Real = DeltaTime / FMath::Max(UGameplayStatics::GetGlobalTimeDilation(this), 0.01f);
+	StudioFacing = FRotator::NormalizeAxis(StudioFacing + FRotator::NormalizeAxis(Subject->GetActorRotation().Yaw - StudioFacing) * FMath::Min(1.f, Real * 3.f));
+	const FVector Middle = Subject->GetActorLocation() + FVector(0.f, 0.f, bRobot ? 320.f : 0.f);
+	const float Distance = StudioDistance > 0.f ? StudioDistance : (bRobot ? 2100.f : 620.f);
+	const float Height = StudioHeight != 0.f ? StudioHeight : (bRobot ? 120.f : 40.f);
+	const FVector Where = Middle + FRotator(0.f, StudioFacing + StudioYaw, 0.f).Vector() * Distance + FVector(0.f, 0.f, Height);
+	StudioCam->SetActorLocationAndRotation(Where, (Middle - Where).Rotation());
+	if (GetViewTarget() != StudioCam)
+	{
+		SetViewTarget(StudioCam);
+	}
+}
+
+void ARRRandomPlayerController::RRSlomo(float Rate)
+{
+	ServerCheatSlomo(Rate);
+}
+
+void ARRRandomPlayerController::ServerCheatSlomo_Implementation(float Rate)
+{
+#if !UE_BUILD_SHIPPING
+	UGameplayStatics::SetGlobalTimeDilation(this, FMath::Clamp(Rate, 0.05f, 4.f));
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, the game runs at %.2f speed."), Rate);
+#endif
+}
+
+void ARRRandomPlayerController::RRRobotFire(float Distance)
+{
+	ServerCheatRobotFire(Distance);
+}
+
+void ARRRandomPlayerController::ServerCheatRobotFire_Implementation(float Distance)
+{
+#if !UE_BUILD_SHIPPING
+	const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	ARRRandomStarRobot* Robot = Mine ? Mine->GetRobot() : nullptr;
+	ARRRandomCharacter* Gunner = Robot ? Robot->GetCrew(ERRRobotSeat::Attack) : nullptr;
+	if (!Gunner)
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, no robot with someone in its ATTACK seat to fire."));
+		return;
+	}
+	// Ahead at chest height of an animal friend, so it flies level
+	const FVector Ahead = Robot->GetActorLocation() + Robot->GetActorForwardVector().GetSafeNormal2D() * FMath::Max(Distance, 300.f) + FVector(0.f, 0.f, 300.f);
+	Robot->CrewFire(Gunner, Ahead);
+#endif
+}
+
 void ARRRandomPlayerController::RRStar()
 {
 	ServerCheatStar();
@@ -649,6 +786,102 @@ void ARRRandomPlayerController::RRStar()
 void ARRRandomPlayerController::RRHurt(float Amount)
 {
 	ServerCheatHurt(Amount);
+}
+
+void ARRRandomPlayerController::RRRoll()
+{
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		RandomCharacter->RollDice();
+	}
+}
+
+void ARRRandomPlayerController::RRRide()
+{
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		RandomCharacter->ToggleRide();
+	}
+}
+
+void ARRRandomPlayerController::RRShoot()
+{
+	ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	if (!RandomCharacter)
+	{
+		return;
+	}
+	FVector Target = RandomCharacter->GetActorLocation() + RandomCharacter->GetActorForwardVector() * 1500.f;
+	float Nearest = UE_BIG_NUMBER;
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		const float Distance = FVector::Dist(It->GetActorLocation(), RandomCharacter->GetActorLocation());
+		if (It->GetTeam() != RandomCharacter->GetTeam() && It->IsAlive() && Distance < Nearest)
+		{
+			Nearest = Distance;
+			Target = It->GetActorLocation();
+		}
+	}
+	RandomCharacter->FireAt(Target);
+}
+
+void ARRRandomPlayerController::OnCheatStarCarsKey()
+{
+	if (IsInputKeyDown(EKeys::LeftControl) || IsInputKeyDown(EKeys::RightControl))
+	{
+		RRStarCars();
+	}
+}
+
+void ARRRandomPlayerController::RRStarCars()
+{
+	ServerCheatStarCars();
+}
+
+void ARRRandomPlayerController::ServerCheatStarCars_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+	const ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	if (!RandomCharacter || !RandomCharacter->IsAlive())
+	{
+		return;
+	}
+	// A robot already about (combining or done) comes apart first, everyone out
+	if (ARRRandomStarRobot* Robot = ARRRandomStarRobot::Get(this))
+	{
+		Robot->CheatBreak();
+	}
+	// Ahead of me, left, middle and right, facing me
+	const FVector Feet = RandomCharacter->GetActorLocation() - FVector(0.f, 0.f, RandomCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	const FRotator Facing(0.f, RandomCharacter->GetActorRotation().Yaw, 0.f);
+	for (TActorIterator<ARRRandomVehicle> It(GetWorld()); It; ++It)
+	{
+		const int32 Part = It->GetStarPart();
+		if (Part < 0 || It->IsCombined())
+		{
+			continue;
+		}
+		// Whoever rides it gets put off where they are (the one behind first)
+		for (ARRRandomCharacter* Rider : { It->GetPassenger(), It->GetRider() })
+		{
+			if (Rider)
+			{
+				Rider->LeaveVehicle();
+			}
+		}
+		const float Side = Part == 0 ? 0.f : Part == 1 ? -1.f : 1.f;
+		FVector Spot = Feet + Facing.RotateVector(FVector(Part == 0 ? 650.f : 480.f, Side * 420.f, 0.f));
+		FHitResult Hit;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(RRCheatStarCars), false, *It);
+		Params.AddIgnoredActor(RandomCharacter);
+		if (GetWorld()->LineTraceSingleByChannel(Hit, Spot + FVector(0.f, 0.f, 400.f), Spot - FVector(0.f, 0.f, 1000.f), ECC_Visibility, Params))
+		{
+			Spot = Hit.ImpactPoint;
+		}
+		It->SetActorLocationAndRotation(Spot, FRotator(0.f, Facing.Yaw + 180.f - Side * 30.f, 0.f));
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, the star cars park in front of %s."), *RandomCharacter->GetName());
+#endif
 }
 
 void ARRRandomPlayerController::RROwnDie(int32 Face, int32 bEveryone)

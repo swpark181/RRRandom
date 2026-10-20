@@ -50,6 +50,13 @@ private:
 	TArray<FName> TailBones;
 	TArray<float> TailSwing;
 	TArray<float> TailLift;
+	/** Copied from the instance each frame: the flying pose's and the wings' bones and each one's turn in mesh space. */
+	TArray<FName> FlightBones;
+	TArray<FQuat> FlightBends;
+	TArray<FName> WingBones;
+	TArray<FQuat> WingBends;
+	/** Turns each named bone in mesh space about its own root, in order (parents first). */
+	static void TurnBones(FPoseContext& Output, const TArray<FName>& Names, const TArray<FQuat>& Bends);
 	FRRAimFrame Aim;
 };
 
@@ -116,6 +123,65 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Tail")
 	float WagRunSpeed = 600.f;
 
+	/**
+	 * Wing bones (the dragon's own wings): left root, left tip, right root, right tip. A mesh without them skips this.
+	 * In the air they flap; gliding (and dashing) they spread out flat and hold still like an eagle's; on the ground they
+	 * stir a little, more on the move. Built for the dragon rig: the mesh's +X is the left, +Y the front.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Wings")
+	TArray<FName> WingBoneNames;
+
+	/** Flaps per second and degrees up and down at the root (the tip follows, later and by half): in the air, rising on
+	 * the flight power, and on the ground standing and at WagRunSpeed. */
+	UPROPERTY(EditAnywhere, Category = "Wings")
+	FVector2D AirFlap = FVector2D(3.f, 36.f);
+	UPROPERTY(EditAnywhere, Category = "Wings")
+	FVector2D RisingFlap = FVector2D(4.2f, 42.f);
+	UPROPERTY(EditAnywhere, Category = "Wings")
+	FVector2D GroundFlap = FVector2D(0.7f, 4.f);
+	UPROPERTY(EditAnywhere, Category = "Wings")
+	FVector2D WalkFlap = FVector2D(1.4f, 9.f);
+
+	/** The glide's spread from the wings' rest pose: the root turned down and forward, the tip further out in line with it. */
+	UPROPERTY(EditAnywhere, Category = "Wings")
+	FVector2D GlideRootDownForward = FVector2D(16.f, 20.f);
+	UPROPERTY(EditAnywhere, Category = "Wings")
+	FVector2D GlideTipDownForward = FVector2D(6.f, 15.f);
+
+	/** Seconds to spread into the glide and to fold out of it. */
+	UPROPERTY(EditAnywhere, Category = "Wings")
+	float GlideBlendTime = 0.2f;
+
+	/** Gliding, now and then one big beat of the spread wings: every so many seconds (min, max), lasting so long, so many
+	 * degrees down and back up at the root (the tip lags), the legs tucking in a little with it. */
+	UPROPERTY(EditAnywhere, Category = "Wings")
+	FVector2D GlideStrokeEvery = FVector2D(1.6f, 3.f);
+	UPROPERTY(EditAnywhere, Category = "Wings")
+	float GlideStrokeTime = 0.5f;
+	UPROPERTY(EditAnywhere, Category = "Wings")
+	float GlideStrokeSize = 42.f;
+
+	/**
+	 * The flying pose over the idle while ARRRandomCharacter::IsInFlight (any brawler: the Mixamo leg and neck bones):
+	 * thighs swung back, knees bent, toes pointed, the head lifted against the body's lean, and a slow kick like
+	 * treading air. Degrees, about the mesh's side axis (negative swings back), hovering or rising (X) and gliding down (Y).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Flight")
+	FVector2D FlightThigh = FVector2D(-18.f, -38.f);
+	UPROPERTY(EditAnywhere, Category = "Flight")
+	FVector2D FlightKnee = FVector2D(-42.f, -16.f);
+	UPROPERTY(EditAnywhere, Category = "Flight")
+	FVector2D FlightToes = FVector2D(-28.f, -45.f);
+	/** Share of the body's lean the neck and head lift back up, so it looks where it flies. */
+	UPROPERTY(EditAnywhere, Category = "Flight")
+	float FlightHeadLift = 0.6f;
+	/** The kick: per second, and degrees each way at the thigh (less gliding). */
+	UPROPERTY(EditAnywhere, Category = "Flight")
+	FVector2D FlightKick = FVector2D(1.6f, 8.f);
+	/** Seconds to go into the flying pose and back out of it. */
+	UPROPERTY(EditAnywhere, Category = "Flight")
+	float FlightBlendTime = 0.25f;
+
 	/** Seconds to go into the aiming pose and to come back out of it. */
 	UPROPERTY(EditAnywhere, Category = "Aim")
 	float AimInTime = 0.1f;
@@ -145,6 +211,10 @@ public:
 	float KickTime = 0.16f;
 
 	const TArray<FName>& GetTailBones() const { return TailBoneNames; }
+	const TArray<FName>& GetFlightBones() const { return FlightBoneNames; }
+	const TArray<FQuat>& GetFlightBends() const { return FlightBends; }
+	const TArray<FName>& GetWingBones() const { return WingBoneNames; }
+	const TArray<FQuat>& GetWingBends() const { return WingBends; }
 	const TArray<float>& GetTailSwing() const { return BoneSwing; }
 	const TArray<float>& GetTailLift() const { return BoneLift; }
 	const FRRAimFrame& GetAimFrame() const { return Aim; }
@@ -173,4 +243,26 @@ private:
 	float TargetMoveWeights[4] = { 1.f, 0.f, 0.f, 0.f };
 
 	void UpdateAim(float DeltaSeconds);
+	/** The wing bones' turns for this frame (WingBends), from how the brawler is moving. */
+	void UpdateWings(float DeltaSeconds);
+	/** The flying pose's turns for this frame (FlightBends). */
+	void UpdateFlightPose(float DeltaSeconds);
+
+	/** The legs (thigh, knee, foot; left then right) and the neck and head, in that order. */
+	TArray<FName> FlightBoneNames;
+	TArray<FQuat> FlightBends;
+	float FlightWeight = 0.f;
+	float FlightGlide = 0.f;
+	float KickPhase = 0.f;
+
+	TArray<FQuat> WingBends;
+	float FlapPhase = 0.f;
+	/** Eased: the flap's rate and size, and 0 .. 1 into the glide. */
+	float FlapRate = 0.f;
+	float FlapSize = 0.f;
+	float GlideWeight = 0.f;
+	float AirTime = 0.f;
+	/** The glide's beat: seconds to the next one, and how far through the one going on (0 .. 1; above 1 none). */
+	float StrokeWait = 1.f;
+	float StrokeAlpha = 2.f;
 };

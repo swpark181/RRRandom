@@ -3,9 +3,11 @@
 #include "RRRandomCover.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomDiceTown.h"
+#include "RRRandomGameMode.h"
 #include "RRRandomGameState.h"
 #include "RRRandomMeteor.h"
 #include "RRRandomOre.h"
+#include "RRRandomStarRobot.h"
 #include "RRRandomVehicle.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
@@ -65,6 +67,8 @@ namespace
 	constexpr float VehicleSearchInterval = 0.5f;
 	constexpr float StuckSpeed = 60.f;
 	constexpr float StuckTime = 1.5f;
+	// A bot heads for its team's star robot with a seat free from this far away at most
+	constexpr float RobotCrewSearchRadius = 12000.f;
 
 	// Shots fly this far above the capsule center, this far to the shooter's right (the rifle's muzzle in the fox's fire
 	// stance) and are this wide (see the character's MuzzleOffset and the projectile)
@@ -128,6 +132,20 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 	ARRRandomCharacter* Self = Cast<ARRRandomCharacter>(GetPawn());
+#if !UE_BUILD_SHIPPING
+	// Scripted tests (-RRIdleEnemies): the other team's bots just stand there
+	static const bool bIdleEnemies = FParse::Param(FCommandLine::Get(), TEXT("RRIdleEnemies"));
+	if (bIdleEnemies && Self && Self->GetTeam() != 0)
+	{
+		return;
+	}
+#endif
+	// The studio (a test floor for animation work): the other team's bots stand still there too
+	const ARRRandomGameMode* Mode = GetWorld()->GetAuthGameMode<ARRRandomGameMode>();
+	if (Mode && Mode->IsStudio() && Self && Self->GetTeam() != 0)
+	{
+		return;
+	}
 	// Counting down to the start, or the match is over: stand still
 	if (Self && ARRRandomGameState::IsPlayLocked(this))
 	{
@@ -311,7 +329,10 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 
 	// Vehicles: only out of a fight (an opponent in sight near its range, or being hit)
 	const bool bInFight = bWantsCover || UnderFireTimer > 0.f || (Target && Distance <= Self->GetAttackRange() * EngageRangeShare);
-	UpdateVehicles(Self, Target, bInFight, Wanted, DeltaSeconds);
+	if (!UpdateStarRobot(Self, bInFight, Wanted, bOnRoute, DeltaSeconds))
+	{
+		UpdateVehicles(Self, Target, bInFight, Wanted, DeltaSeconds);
+	}
 
 	// (a route already goes round walls, and its stairs would look like walls to the steering's probe)
 	const FVector Move = (bOnRoute ? Wanted : SteerAroundObstacles(Self, Wanted)) + GetSeparation(Self);
@@ -481,7 +502,8 @@ FVector ARRRandomAIController::FollowRoute(ARRRandomCharacter* Self, const FVect
 
 bool ARRRandomAIController::IsStillWorthRiding(const ARRRandomCharacter* Self, const ARRRandomVehicle* Ride) const
 {
-	if (!Ride || !Ride->HasRoom())
+	// Not the star team's cars: gathering those for the robot is for players (a bot would only drive them apart)
+	if (!Ride || !Ride->HasRoom() || Ride->GetStarPart() >= 0)
 	{
 		return false;
 	}
@@ -539,6 +561,58 @@ ARRRandomVehicle* ARRRandomAIController::FindVehicleToRide(const ARRRandomCharac
 		}
 	}
 	return Best;
+}
+
+bool ARRRandomAIController::UpdateStarRobot(ARRRandomCharacter* Self, bool bInFight, FVector& Wanted, bool& bOnRoute, float DeltaSeconds)
+{
+	// Combining it (standing still) or in it: the robot is all there is
+	if (Self->GetRobot())
+	{
+		return true;
+	}
+	// Next to the gathered cars out of a fight: combine them, unless a player on the team is there too (most likely the
+	// one who drove them together: theirs to press)
+	if (!bInFight && ARRRandomStarRobot::CanStartCombine(Self))
+	{
+		bool bPlayerThere = false;
+		for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It && !bPlayerThere; ++It)
+		{
+			bPlayerThere = It->IsPlayerControlled() && It->GetTeam() == Self->GetTeam() && ARRRandomStarRobot::CanStartCombine(*It);
+		}
+		if (!bPlayerThere)
+		{
+			ARRRandomStarRobot::StartCombine(Self);
+			return true;
+		}
+	}
+	// The team's robot with a seat free, not too far: over to it and in
+	const ARRRandomStarRobot* Robot = ARRRandomStarRobot::Get(this);
+	if (!Robot || !Robot->IsAssembled() || Robot->GetTeam() != Self->GetTeam() || Robot->GetFreeSeat() == ERRRobotSeat::None || Self->IsGiant() || Self->CanFly())
+	{
+		return false;
+	}
+	const FVector ToRobot = Robot->GetActorLocation() - Self->GetActorLocation();
+	const float Distance = ToRobot.Size2D();
+	if (Distance > RobotCrewSearchRadius)
+	{
+		return false;
+	}
+	if (Distance <= ARRRandomStarRobot::BoardReach * 0.8f)
+	{
+		// Off any vehicle first (F does that), then in
+		Self->ToggleRide();
+		return true;
+	}
+	// A map with walking routes: along them, round the walls (to its feet), the last stretch straight at it
+	if (Town.IsValid() && Distance > ARRRandomStarRobot::BoardReach * 1.6f)
+	{
+		Wanted = FollowRoute(Self, Robot->GetActorLocation(), DeltaSeconds);
+		bOnRoute = true;
+		return true;
+	}
+	Wanted = ToRobot.GetSafeNormal2D();
+	bOnRoute = false;
+	return true;
 }
 
 bool ARRRandomAIController::UpdateVehicles(ARRRandomCharacter* Self, const ARRRandomCharacter* Target, bool bInFight, FVector& Wanted, float DeltaSeconds)
@@ -684,6 +758,11 @@ bool ARRRandomAIController::FindCoverSpot(const ARRRandomCharacter* Self, const 
 	float BestScore = UE_BIG_NUMBER;
 	for (TActorIterator<ARRRandomCover> It(World); It; ++It)
 	{
+		// (Not one smashed for now: ARRRandomWreckage hides it)
+		if (It->IsHidden())
+		{
+			continue;
+		}
 		const FVector CoverCenter(It->GetActorLocation().X, It->GetActorLocation().Y, SelfLocation.Z);
 		if (FVector::Dist2D(CoverCenter, SelfLocation) > CoverSearchRadius)
 		{
