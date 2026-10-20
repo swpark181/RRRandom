@@ -72,6 +72,8 @@ URRRandomBodyAnimInstance::URRRandomBodyAnimInstance()
 	TailBoneNames = { TEXT("Tail1"), TEXT("Tail2"), TEXT("Tail3"), TEXT("Tail4") };
 	WingBoneNames = { TEXT("WingL1"), TEXT("WingL2"), TEXT("WingR1"), TEXT("WingR2") };
 	FlightBoneNames = { TEXT("LeftUpLeg"), TEXT("LeftLeg"), TEXT("LeftFoot"), TEXT("RightUpLeg"), TEXT("RightLeg"), TEXT("RightFoot"), TEXT("Neck"), TEXT("Head") };
+	JumpBoneNames = { TEXT("LeftUpLeg"), TEXT("LeftLeg"), TEXT("LeftFoot"), TEXT("RightUpLeg"), TEXT("RightLeg"), TEXT("RightFoot"), TEXT("Spine"),
+		TEXT("LeftArm"), TEXT("LeftForeArm"), TEXT("RightArm"), TEXT("RightForeArm") };
 }
 
 void URRRandomBodyAnimInstance::UpdateFlightPose(float DeltaSeconds)
@@ -111,6 +113,65 @@ void URRRandomBodyAnimInstance::UpdateFlightPose(float DeltaSeconds)
 	{
 		FlightBends[Index] = FQuat(FVector::ForwardVector, FMath::DegreesToRadians(Angles[Index] * W));
 	}
+}
+
+namespace
+{
+	/**
+	 * The jumping pose (round 64), over the idle while ARRRandomCharacter::IsJumping, in degrees in mesh space. Legs and spine
+	 * about the side axis (positive swings a leg forward, tips the chest back); arms raised forward (Fwd), out to the side
+	 * (Out) and the forearm bent up (Bend).
+	 * - Going up: the front leg's knee pulled high, the back leg tucked, toes pointed, leaning in, arms up in front.
+	 * - Coming down: the legs reaching for the floor (one ahead, one a little behind), arms spread for balance, leaning back.
+	 * - Landing (ARRRandomCharacter::GetLandSquash): both knees bent deep with the feet kept flat, leaning in, arms forward.
+	 */
+	struct FJumpPose
+	{
+		float ThighL, KneeL, FootL, ThighR, KneeR, FootR, Spine, Fwd, Out, Bend;
+	};
+	constexpr FJumpPose JumpRisePose = { 48.f, -82.f, -20.f, 14.f, -48.f, -25.f, -6.f, 55.f, 20.f, 35.f };
+	constexpr FJumpPose JumpFallPose = { 18.f, -22.f, -10.f, -8.f, -30.f, -15.f, 4.f, 15.f, 65.f, 15.f };
+	constexpr FJumpPose JumpLandPose = { 34.f, -64.f, 28.f, 34.f, -64.f, 28.f, -12.f, 25.f, 15.f, 20.f };
+	// Into the pose and out of it this fast (seconds), and the rise / fall mix by the speed up (from all fall to all rise)
+	constexpr float JumpInTime = 0.08f;
+	constexpr float JumpOutTime = 0.12f;
+	const FVector2D JumpRiseSpeeds(-150.f, 250.f);
+}
+
+void URRRandomBodyAnimInstance::UpdateJumpPose(float DeltaSeconds)
+{
+	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetOwningActor());
+	if (!Brawler)
+	{
+		JumpBends.Reset();
+		return;
+	}
+	const bool bJumping = Brawler->IsJumping();
+	JumpWeight = FMath::FInterpConstantTo(JumpWeight, bJumping ? 1.f : 0.f, DeltaSeconds, 1.f / (bJumping ? JumpInTime : JumpOutTime));
+	const float Rise = FMath::GetMappedRangeValueClamped(JumpRiseSpeeds, FVector2D(0.f, 1.f), Brawler->GetVelocity().Z);
+	JumpRise = bJumping ? FMath::FInterpTo(JumpRise, Rise, DeltaSeconds, 8.f) : Rise;
+	const float Land = FMath::Sin(Brawler->GetLandSquash() * HALF_PI);
+	if (JumpWeight <= 0.f && Land <= 0.f)
+	{
+		JumpBends.Reset();
+		return;
+	}
+	// The air's pose (rise and fall mixed by the speed up) faded by its weight, the landing's added on
+	const auto Mix = [&](float FJumpPose::* Field)
+	{
+		return FMath::Lerp(JumpFallPose.*Field, JumpRisePose.*Field, JumpRise) * JumpWeight + JumpLandPose.*Field * Land;
+	};
+	// The arms only where they aren't holding the gun up to aim
+	const float Arms = 1.f - GetAimWeight();
+	const float Fwd = Mix(&FJumpPose::Fwd) * Arms;
+	const float Out = Mix(&FJumpPose::Out) * Arms;
+	const float Bend = Mix(&FJumpPose::Bend) * Arms;
+	const auto Side = [](float Degrees) { return FQuat(FVector::ForwardVector, FMath::DegreesToRadians(Degrees)); };
+	// Out to the side: the left arm (on +X) about -Y, the right about +Y
+	const auto ArmTurn = [&](float OutSign) { return Side(Fwd) * FQuat(FVector::RightVector, FMath::DegreesToRadians(Out * OutSign)); };
+	JumpBends = { Side(Mix(&FJumpPose::ThighL)), Side(Mix(&FJumpPose::KneeL)), Side(Mix(&FJumpPose::FootL)),
+		Side(Mix(&FJumpPose::ThighR)), Side(Mix(&FJumpPose::KneeR)), Side(Mix(&FJumpPose::FootR)), Side(Mix(&FJumpPose::Spine)),
+		ArmTurn(-1.f), Side(Bend), ArmTurn(1.f), Side(Bend) };
 }
 
 void FRRRandomBodyAnimInstanceProxy::TurnBones(FPoseContext& Output, const TArray<FName>& Names, const TArray<FQuat>& Bends)
@@ -218,6 +279,7 @@ void URRRandomBodyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	if (DeltaSeconds > 0.f)
 	{
 		UpdateFlightPose(DeltaSeconds);
+		UpdateJumpPose(DeltaSeconds);
 		UpdateWings(DeltaSeconds);
 	}
 
@@ -318,7 +380,7 @@ void URRRandomBodyAnimInstance::UpdateAim(float DeltaSeconds)
 	const float Ahead = FVector::DotProduct(Velocity, Brawler->GetActorForwardVector());
 	const float Side = FVector::DotProduct(Velocity, Brawler->GetActorRightVector());
 	// (in flight no running legs: the standing aim over the flying pose)
-	Aim.MoveWeight = FMath::FInterpTo(Aim.MoveWeight, Brawler->IsInFlight() ? 0.f : FMath::Clamp(Speed / FMath::Max(AimRunSpeed, 1.f), 0.f, 1.f), DeltaSeconds, MoveBlendSpeed);
+	Aim.MoveWeight = FMath::FInterpTo(Aim.MoveWeight, Brawler->IsInFlight() || Brawler->IsJumping() ? 0.f : FMath::Clamp(Speed / FMath::Max(AimRunSpeed, 1.f), 0.f, 1.f), DeltaSeconds, MoveBlendSpeed);
 	if (Speed > MinStrafeSpeed)
 	{
 		// 0 ahead, 90 right, -90 left, 180 behind; between two runs, a share of each
@@ -382,6 +444,8 @@ void FRRRandomBodyAnimInstanceProxy::PreUpdate(UAnimInstance* InAnimInstance, fl
 	TailLift = Instance->GetTailLift();
 	FlightBones = Instance->GetFlightBones();
 	FlightBends = Instance->GetFlightBends();
+	JumpBones = Instance->GetJumpBones();
+	JumpBends = Instance->GetJumpBends();
 	WingBones = Instance->GetWingBones();
 	WingBends = Instance->GetWingBends();
 	Aim = Instance->GetAimFrame();
@@ -521,8 +585,9 @@ bool FRRRandomBodyAnimInstanceProxy::Evaluate(FPoseContext& Output)
 		Local.SetRotation((ParentRotation.Inverse() * Bend * ParentRotation * Local.GetRotation()).GetNormalized());
 	}
 
-	// The flying pose, then the wings (roots before tips, so a tip's parent is already turned)
+	// The flying or jumping pose, then the wings (roots before tips, so a tip's parent is already turned)
 	TurnBones(Output, FlightBones, FlightBends);
+	TurnBones(Output, JumpBones, JumpBends);
 	TurnBones(Output, WingBones, WingBends);
 	return true;
 }

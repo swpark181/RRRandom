@@ -53,6 +53,8 @@ private:
 	/** Copied from the instance each frame: the flying pose's and the wings' bones and each one's turn in mesh space. */
 	TArray<FName> FlightBones;
 	TArray<FQuat> FlightBends;
+	TArray<FName> JumpBones;
+	TArray<FQuat> JumpBends;
 	TArray<FName> WingBones;
 	TArray<FQuat> WingBends;
 	/** Turns each named bone in mesh space about its own root, in order (parents first). */
@@ -213,6 +215,8 @@ public:
 	const TArray<FName>& GetTailBones() const { return TailBoneNames; }
 	const TArray<FName>& GetFlightBones() const { return FlightBoneNames; }
 	const TArray<FQuat>& GetFlightBends() const { return FlightBends; }
+	const TArray<FName>& GetJumpBones() const { return JumpBoneNames; }
+	const TArray<FQuat>& GetJumpBends() const { return JumpBends; }
 	const TArray<FName>& GetWingBones() const { return WingBoneNames; }
 	const TArray<FQuat>& GetWingBends() const { return WingBends; }
 	const TArray<float>& GetTailSwing() const { return BoneSwing; }
@@ -247,6 +251,13 @@ private:
 	void UpdateWings(float DeltaSeconds);
 	/** The flying pose's turns for this frame (FlightBends). */
 	void UpdateFlightPose(float DeltaSeconds);
+	/** The jumping pose's turns for this frame (JumpBends). */
+	void UpdateJumpPose(float DeltaSeconds);
+	/** The legs (thigh, knee, foot; left then right), the spine, then the arms (upper arm, forearm; left then right). */
+	TArray<FName> JumpBoneNames;
+	TArray<FQuat> JumpBends;
+	float JumpWeight = 0.f;
+	float JumpRise = 0.f;
 
 	/** The legs (thigh, knee, foot; left then right) and the neck and head, in that order. */
 	TArray<FName> FlightBoneNames;

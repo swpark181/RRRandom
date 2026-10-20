@@ -28,6 +28,9 @@ public:
 
 	bool IsBuilt() const { return bBuilt; }
 
+	/** Where flying is allowed (round 65): over the grid (X, Y) with the feet up to Max.Z. */
+	FBox GetFlightArea() const;
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -47,5 +50,6 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UInstancedStaticMeshComponent> AxisY;
 
+	float FloorZ = 0.f;
 	bool bBuilt = false;
 };

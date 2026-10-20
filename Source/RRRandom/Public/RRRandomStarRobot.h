@@ -301,6 +301,10 @@ private:
 	float LastPoseYaw = 0.f;
 	/** A jolt through the body as a foot comes down (1, easing to 0). */
 	float StepJolt = 0.f;
+	/** Jumping: its driver in the air last frame, how far into the air pose (0 to 1), a landing's crouch (1 easing to 0). */
+	bool bWasAirborne = false;
+	float AirAmount = 0.f;
+	float LandJolt = 0.f;
 	/** When each forearm (left, right) that flew off as a rocket grows back (this machine's time; below 0: in place). */
 	float ForearmBackL = -1.f;
 	float ForearmBackR = -1.f;

@@ -52,6 +52,11 @@ public:
 
 	/** The map's area in the world (X up the minimap, Y to the right), a square round the island. */
 	FBox2D GetMapBounds() const;
+	/**
+	 * Where flying is allowed (round 65): over the map (X, Y) with the feet up to Max.Z, high enough to land on its tallest
+	 * structure and look over it (ARRRandomCharacter keeps flyers inside).
+	 */
+	FBox GetFlightArea() const;
 	/** What the minimap shows at a world spot (sky off the island), and how many blocks high it stands there. */
 	FColor GetMapColor(const FVector2D& WorldLocation, int32& OutLevels) const;
 	/** True once the town has laid itself out (BeginPlay). */
@@ -336,6 +341,8 @@ private:
 
 	/** The floor's height under the middle; level 0's top. */
 	float FloorZ = 0.f;
+	/** The highest level anything solid reaches (MakeCollision), for the flight ceiling. */
+	int32 TopLevel = 0;
 	float AppliedSaturation = -1.f;
 	float AppliedBrightness = -1.f;
 	float RulesTimer = 0.f;

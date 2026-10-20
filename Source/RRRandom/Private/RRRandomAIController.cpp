@@ -7,12 +7,14 @@
 #include "RRRandomGameState.h"
 #include "RRRandomMeteor.h"
 #include "RRRandomOre.h"
+#include "RRRandomProjectile.h"
 #include "RRRandomStarRobot.h"
 #include "RRRandomVehicle.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "HAL/IConsoleManager.h"
 
 namespace
 {
@@ -49,7 +51,7 @@ namespace
 	constexpr float RoutePatrolTime = 25.f;
 	constexpr float RouteRefreshTime = 1.5f;
 	constexpr float RouteRefreshDistance = 300.f;
-	constexpr float RouteArriveRadius = 60.f;
+	constexpr float RouteArriveRadius = 35.f;
 	constexpr float RouteStuckJumpTime = 0.5f;
 	// Between bursts with this few rounds left, the bot reloads instead of running dry mid-fight
 	constexpr int32 LowAmmo = 3;
@@ -86,6 +88,21 @@ namespace
 	// How far ahead the bot checks for cover in its way, and how far it turns aside to get around it
 	constexpr float AvoidProbeDistance = 120.f;
 	constexpr float AvoidAngles[] = { 35.f, 70.f, 105.f, 140.f };
+	// A bot that means to walk but gets less than this far in this long is stalled: out of a fight it gives its goal up and
+	// heads off another way (and it is logged with rr.Bot.LogStalls)
+	constexpr float StallDistance = 80.f;
+	constexpr float StallTime = 3.f;
+	// Wedged this long (meaning to walk, slower than StuckSpeed): go round for DetourTime; this many times without getting
+	// anywhere, give the goal up (and keep away from a cover spot that couldn't be reached for this long)
+	constexpr float WedgedTime = 0.6f;
+	constexpr float DetourTime = 0.5f;
+	constexpr int32 WedgesToGiveUp = 3;
+	constexpr float BadCoverMemory = 8.f;
+	constexpr float BadCoverRadius = 200.f;
+	// How much of the push away from teammates is kept while following a route
+	constexpr float RouteSeparationShare = 0.25f;
+	TAutoConsoleVariable<int32> CVarLogStalls(TEXT("rr.Bot.LogStalls"), 0,
+		TEXT("1: log each time a bot means to walk but gets nowhere for a while (where, why, what's in the way)."));
 
 	/** Whether cover (anything world static) is between two capsule centers, along the line a shot from From would fly. */
 	bool SweepHitsCover(const UWorld* World, const FVector& From, const FVector& To, float Radius)
@@ -335,11 +352,14 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	}
 
 	// (a route already goes round walls, and its stairs would look like walls to the steering's probe)
-	const FVector Move = (bOnRoute ? Wanted : SteerAroundObstacles(Self, Wanted)) + GetSeparation(Self);
+	// (On a route the push away from teammates is weak: in a lane between walls it would only shove them into the walls)
+	const FVector Move = Unstick(Self, (bOnRoute ? Wanted : SteerAroundObstacles(Self, Wanted)) + GetSeparation(Self) * (bOnRoute ? RouteSeparationShare : 1.f), DeltaSeconds);
+	BadCoverTimer -= DeltaSeconds;
 	if (!Move.IsNearlyZero())
 	{
 		Self->AddMovementInput(Move.GetSafeNormal2D());
 	}
+	WatchProgress(Self, Move, bOnRoute ? TEXT("route") : bWantsCover ? TEXT("cover") : bRushing ? TEXT("rush") : Target ? TEXT("fight") : TEXT("roam"), DeltaSeconds);
 
 	if (bCanSee && ReactionTimer <= 0.f)
 	{
@@ -776,7 +796,13 @@ bool ARRRandomAIController::FindCoverSpot(const ARRRandomCharacter* Self, const 
 			continue;
 		}
 		const FVector Spot = CoverCenter + Away * (It->GetExtentAlong(Away) + Radius + CoverSpotGap);
-		if (FVector::Dist2D(Spot, Threat) < MinCoverDistanceFromThreat)
+		if (FVector::Dist2D(Spot, Threat) < MinCoverDistanceFromThreat || (BadCoverTimer > 0.f && FVector::Dist2D(Spot, BadCoverSpot) < BadCoverRadius))
+		{
+			continue;
+		}
+		// Not past a wall that stops brawlers only (the island's rim, the water's edge): a spot there can't be reached
+		FCollisionQueryParams RimParams(SCENE_QUERY_STAT(RRRandomCoverRim), false, Self);
+		if (World->SweepTestByObjectType(CoverCenter, Spot, FQuat::Identity, FCollisionObjectQueryParams(ECC_WorldDynamic), FCollisionShape::MakeSphere(Radius * 0.5f), RimParams))
 		{
 			continue;
 		}
@@ -815,15 +841,7 @@ FVector ARRRandomAIController::SteerAroundObstacles(const ARRRandomCharacter* Se
 		return FVector::ZeroVector;
 	}
 
-	// A slightly thin probe, so a bot already pressed against a wall isn't stuck inside its own check
-	UWorld* World = GetWorld();
-	const FVector Location = Self->GetActorLocation();
-	const FCollisionShape Probe = FCollisionShape::MakeSphere(Self->GetCapsuleComponent()->GetScaledCapsuleRadius() * 0.8f);
-	const FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomSteer), false);
-	auto IsClear = [&](const FVector& Direction)
-	{
-		return !World->SweepTestByObjectType(Location, Location + Direction * AvoidProbeDistance, FQuat::Identity, FCollisionObjectQueryParams(ECC_WorldStatic), Probe, Params);
-	};
+	auto IsClear = [&](const FVector& Direction) { return IsWayClear(Self, Direction, AvoidProbeDistance); };
 
 	const FVector Direction = Wanted.GetSafeNormal2D();
 	if (IsClear(Direction))
@@ -845,6 +863,164 @@ FVector ARRRandomAIController::SteerAroundObstacles(const ARRRandomCharacter* Se
 		}
 	}
 	return Direction;
+}
+
+bool ARRRandomAIController::IsWayClear(const ARRRandomCharacter* Self, const FVector& Direction, float Distance, FHitResult* OutHit) const
+{
+	// The body from just over a step up to the head, a little thinner (so a bot already pressed against a wall isn't stuck
+	// inside its own check): low things it can't step onto count, the floor and steps don't. What stops walking: cover and
+	// walls (world static) and the island's rim walls, which stop brawlers only (world dynamic)
+	const UCapsuleComponent* Capsule = Self->GetCapsuleComponent();
+	const float Radius = Capsule->GetScaledCapsuleRadius() * 0.8f;
+	const float Lift = Self->GetCharacterMovement()->MaxStepHeight + 5.f;
+	const float HalfHeight = FMath::Max(Radius, Capsule->GetScaledCapsuleHalfHeight() - Lift * 0.5f);
+	const FVector From = Self->GetActorLocation() + FVector(0.f, 0.f, Lift * 0.5f);
+	FCollisionObjectQueryParams Objects(ECC_WorldStatic);
+	Objects.AddObjectTypesToQuery(ECC_WorldDynamic);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomSteer), false, Self);
+	FHitResult Hit;
+	const bool bHit = GetWorld()->SweepSingleByObjectType(Hit, From, From + Direction.GetSafeNormal2D() * Distance, FQuat::Identity, Objects,
+		FCollisionShape::MakeCapsule(Radius, HalfHeight), Params);
+	// (Shots fly as world dynamic too; one passing by isn't a wall)
+	const bool bBlocked = bHit && !(Hit.GetActor() && Hit.GetActor()->IsA<ARRRandomProjectile>());
+	if (OutHit)
+	{
+		*OutHit = Hit;
+	}
+	return !bBlocked;
+}
+
+FVector ARRRandomAIController::Unstick(ARRRandomCharacter* Self, const FVector& Move, float DeltaSeconds)
+{
+	if (DetourTimer > 0.f)
+	{
+		DetourTimer -= DeltaSeconds;
+		return DetourWay;
+	}
+	// (In the air too: a bot hopping against a wall it can't climb is as stuck as one pushing it; not flying, though)
+	const bool bTrying = !Move.IsNearlyZero() && !Self->GetVehicle() && !Self->GetRobot() && !Self->IsUsingUltimate() && !Self->IsInFlight()
+		&& Self->GetCharacterMovement()->MaxWalkSpeed > 1.f;
+	WedgedTimer = bTrying && Self->GetVelocity().Size2D() < StuckSpeed ? WedgedTimer + DeltaSeconds : 0.f;
+	if (WedgedTimer < WedgedTime)
+	{
+		return Move;
+	}
+	WedgedTimer = 0.f;
+	++WedgeCount;
+
+	// Along whatever is in the way (the way that keeps closest to where it wanted to go) and a little away from it; nothing
+	// to see (another animal friend in the way, or something odd): off to one side
+	const FVector Want = Move.GetSafeNormal2D();
+	FHitResult Hit;
+	FVector Away = FVector::ZeroVector;
+	if (!IsWayClear(Self, Want, Self->GetCapsuleComponent()->GetScaledCapsuleRadius() + 60.f, &Hit) && Hit.bBlockingHit)
+	{
+		Away = Hit.ImpactNormal.GetSafeNormal2D();
+	}
+	const FVector Along = Away.IsNearlyZero() ? FVector::CrossProduct(FVector::UpVector, Want) : (Want - Away * FVector::DotProduct(Want, Away));
+	const FVector Side = Along.Size2D() > 0.2f ? Along.GetSafeNormal2D() : FVector::CrossProduct(FVector::UpVector, Want) * AvoidSign;
+	// Each try the other way round, if the first didn't do it
+	const float Turn = WedgeCount % 2 == 0 ? -1.f : 1.f;
+	FVector Pick = FVector::ZeroVector;
+	for (const FVector& Try : { (Side * Turn + Away * 0.6f), (-Side * Turn + Away * 0.6f), Away.IsNearlyZero() ? -Want : Away, -Want })
+	{
+		if (!Try.IsNearlyZero() && IsWayClear(Self, Try, AvoidProbeDistance))
+		{
+			Pick = Try.GetSafeNormal2D();
+			break;
+		}
+	}
+	DetourWay = Pick.IsNearlyZero() ? -Want : Pick;
+	DetourTimer = DetourTime;
+	// Wedged again and again on the way there: give the goal up
+	if (WedgeCount >= WedgesToGiveUp)
+	{
+		WedgeCount = 0;
+		if (bHasCoverSpot)
+		{
+			BadCoverSpot = CoverSpot;
+			BadCoverTimer = BadCoverMemory;
+			bHasCoverSpot = false;
+			CoverSearchTimer = 0.f;
+		}
+		PatrolTimer = 0.f;
+		RouteTimer = 0.f;
+		StrafeSign = -StrafeSign;
+	}
+	UE_CLOG(CVarLogStalls.GetValueOnGameThread() != 0, LogTemp, Log, TEXT("RRRandom: bot unstick: %s at %s goes %s for %.1f s (try %d, blocked by %s)."),
+		*Self->GetName(), *Self->GetActorLocation().ToCompactString(), *DetourWay.ToCompactString(), DetourTime, WedgeCount, *GetNameSafe(Hit.GetActor()));
+	return DetourWay;
+}
+
+void ARRRandomAIController::WatchProgress(const ARRRandomCharacter* Self, const FVector& Move, const TCHAR* Mode, float DeltaSeconds)
+{
+	// Only while it means to walk on its own feet
+	const FVector Location = Self->GetActorLocation();
+	if (Move.IsNearlyZero() || Self->GetVehicle() || Self->GetRobot() || Self->IsUsingUltimate())
+	{
+		ProgressFrom = Location;
+		ProgressTimer = 0.f;
+		bStallLogged = false;
+		return;
+	}
+	ProgressTimer += DeltaSeconds;
+	if (FVector::Dist2D(Location, ProgressFrom) >= StallDistance)
+	{
+		ProgressFrom = Location;
+		ProgressTimer = 0.f;
+		bStallLogged = false;
+		// Getting somewhere again: the tries at getting unstuck start over
+		WedgeCount = 0;
+		return;
+	}
+	if (ProgressTimer < StallTime || bStallLogged)
+	{
+		return;
+	}
+	bStallLogged = true;
+	// Getting nowhere for a while without being quite stopped (dithering in a nook): give the goal up as a run of wedges
+	// would, and head off another way for a moment. (Not in a fight: sidestepping back and forth there is meant)
+	if (FCString::Strcmp(Mode, TEXT("fight")) != 0)
+	{
+		if (bHasCoverSpot)
+		{
+			BadCoverSpot = CoverSpot;
+			BadCoverTimer = BadCoverMemory;
+			bHasCoverSpot = false;
+			CoverSearchTimer = 0.f;
+		}
+		PatrolTimer = 0.f;
+		RouteTimer = 0.f;
+		const FVector Off = Move.GetSafeNormal2D().RotateAngleAxis(Stream.FRandRange(100.f, 260.f), FVector::UpVector);
+		DetourWay = IsWayClear(Self, Off, AvoidProbeDistance) ? Off : -Move.GetSafeNormal2D();
+		DetourTimer = DetourTime * 2.f;
+	}
+	if (CVarLogStalls.GetValueOnGameThread() == 0)
+	{
+		return;
+	}
+	// What's in the way, straight along the way it wants to go
+	FHitResult Hit;
+	const FVector Way = Move.GetSafeNormal2D();
+	IsWayClear(Self, Way, Self->GetCapsuleComponent()->GetScaledCapsuleRadius() + 60.f, &Hit);
+	// And the nearest other animal friend (they block each other)
+	const ARRRandomCharacter* Nearest = nullptr;
+	float NearestDistance = UE_BIG_NUMBER;
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		const float Distance = *It != Self && It->IsAlive() ? FVector::Dist2D(It->GetActorLocation(), Location) : UE_BIG_NUMBER;
+		if (Distance < NearestDistance)
+		{
+			Nearest = *It;
+			NearestDistance = Distance;
+		}
+	}
+	const FVector Next = Route.IsValidIndex(RouteIndex) ? Route[RouteIndex] : FVector::ZeroVector;
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: bot stall: %s (%s) at %s for %.1f s, wants %s, speed %.0f (max %.0f), %s, route %d/%d next %s, blocked by %s (%s) normal %s, nearest %s %.0f away (team %d)."),
+		*Self->GetName(), Mode, *Location.ToCompactString(), ProgressTimer, *Way.ToCompactString(), Self->GetVelocity().Size2D(), Self->GetCharacterMovement()->MaxWalkSpeed,
+		Self->GetCharacterMovement()->IsMovingOnGround() ? TEXT("on ground") : TEXT("in the air"), RouteIndex, Route.Num(), *Next.ToCompactString(),
+		Hit.bBlockingHit ? *GetNameSafe(Hit.GetActor()) : TEXT("nothing"), Hit.bBlockingHit ? *GetNameSafe(Hit.GetComponent()) : TEXT(""),
+		*Hit.ImpactNormal.ToCompactString(), *GetNameSafe(Nearest), NearestDistance, Nearest ? Nearest->GetTeam() : -1);
 }
 
 FVector ARRRandomAIController::GetSeparation(const ARRRandomCharacter* Self) const

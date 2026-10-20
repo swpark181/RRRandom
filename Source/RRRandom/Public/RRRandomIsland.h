@@ -76,6 +76,8 @@ public:
 
 	/** The map's area in the world (X up the screen, Y to the right). */
 	FBox2D GetMapBounds() const;
+	/** Where flying is allowed (round 65): over the map (X, Y) with the feet up to Max.Z (ARRRandomCharacter keeps flyers inside). */
+	FBox GetFlightArea() const;
 	/** The map cell under a world spot: its row and column, or false off the map. */
 	bool GetCellAt(const FVector2D& WorldLocation, int32& OutRow, int32& OutCol) const;
 	/** True on a road cell ('s'), where the island lays its own dirt tiles instead of the grass floor's. */
@@ -132,5 +134,7 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UTexture2D> ShoreMask;
 
+	/** The floor the island stands on (Build). */
+	float FloorZ = 0.f;
 	bool bBuilt = false;
 };

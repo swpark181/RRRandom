@@ -7,6 +7,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/DamageEvents.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -114,6 +115,18 @@ namespace
 	constexpr float StepJoltSink = 12.f;
 	// Raised into the aim, the forearms straighten out level with it
 	constexpr float AimElbow = -28.f;
+	// Jumping: in the air the thighs come up and the knees bend this much, the arms go up this far; a landing crouches this
+	// deep (thighs, knees, the chest leaning in) and stands up again over this long; the shock ring's size. The thigh is this
+	// long (hip 300 to knee 160)
+	constexpr float JumpTuckHip = 32.f;
+	constexpr float JumpTuckKnee = 62.f;
+	constexpr float JumpArmsUp = 50.f;
+	constexpr float JumpCrouchHip = 38.f;
+	constexpr float JumpCrouchKnee = 76.f;
+	constexpr float JumpCrouchLean = 10.f;
+	constexpr float JumpLandTime = 0.45f;
+	constexpr float JumpLandRing = 0.7f;
+	constexpr float ThighLength = 140.f;
 	// Turning on the spot, each degree a second steps like this much walking speed
 	constexpr float TurnStepShare = 2.5f;
 
@@ -1207,7 +1220,41 @@ void ARRRandomStarRobot::PoseAssembled(float DeltaSeconds)
 	const float TurnSpeed = DeltaSeconds > 0.f ? FMath::Abs(FRotator::NormalizeAxis(Yaw - LastPoseYaw)) / DeltaSeconds * TurnStepShare : 0.f;
 	LastPoseYaw = Yaw;
 	const float Speed = FMath::Max(Driver ? Driver->GetVelocity().Size2D() : 0.f, TurnSpeed);
-	WalkAmount = FMath::FInterpTo(WalkAmount, FMath::Clamp(Speed / 250.f, 0.f, 1.f), DeltaSeconds, 5.f);
+
+	// Jumping (its driver in the air, ARRRandomCharacter::CanJumpRobot): the legs tuck up and the arms go up for balance,
+	// rockets under the feet fire on the way up; it comes down in a deep crouch with a thud of dust and a shock ring
+	const UCharacterMovementComponent* DriverMovement = Driver ? Driver->GetCharacterMovement() : nullptr;
+	const bool bAirborne = DriverMovement && DriverMovement->IsFalling();
+	AirAmount = FMath::FInterpTo(AirAmount, bAirborne ? 1.f : 0.f, DeltaSeconds, bAirborne ? 10.f : 16.f);
+	ARRRandomEffects* JumpEffects = bHasJoints && (bAirborne || bWasAirborne) ? ARRRandomEffects::Get(this) : nullptr;
+	const auto Soles = [this](TFunctionRef<void(const FVector&)> Visit)
+	{
+		Visit(ShinL->GetComponentTransform().TransformPosition(SoleL));
+		Visit(ShinR->GetComponentTransform().TransformPosition(SoleR));
+	};
+	if (JumpEffects && bAirborne && !bWasAirborne)
+	{
+		Soles([&](const FVector& Sole) { JumpEffects->Footstep(FVector(Sole.X, Sole.Y, GetActorLocation().Z), 1.5f); });
+	}
+	if (!bAirborne && bWasAirborne)
+	{
+		LandJolt = 1.f;
+		if (JumpEffects)
+		{
+			Soles([&](const FVector& Sole) { JumpEffects->Footstep(FVector(Sole.X, Sole.Y, GetActorLocation().Z), 2.f); });
+			JumpEffects->GiantBurst(GetActorLocation(), JumpLandRing, StarGold);
+		}
+	}
+	if (JumpEffects && bAirborne && Driver->GetVelocity().Z > 0.f)
+	{
+		Soles([&](const FVector& Sole) { JumpEffects->RocketExhaust(Sole, FVector::DownVector, 1.3f, DeltaSeconds); });
+	}
+	bWasAirborne = bAirborne;
+	LandJolt = FMath::FInterpConstantTo(LandJolt, 0.f, DeltaSeconds, 1.f / JumpLandTime);
+	const float Crouch = FMath::Sin(LandJolt * HALF_PI);
+	const float Tuck = AirAmount;
+
+	WalkAmount = FMath::FInterpTo(WalkAmount, FMath::Clamp(Speed / 250.f, 0.f, 1.f) * (1.f - AirAmount), DeltaSeconds, 5.f);
 	// A whole cycle (2 pi) is two steps, left then right
 	const float LastPhase = WalkPhase;
 	WalkPhase = FMath::Fmod(WalkPhase + DeltaSeconds * Speed / StrideLength * PI, 2.f * PI);
@@ -1233,21 +1280,29 @@ void ARRRandomStarRobot::PoseAssembled(float DeltaSeconds)
 	// The hips: sinking as the legs open (the planted leg straight: its foot stays on the floor), a jolt as a foot lands,
 	// leaning over the planted foot, turning with the swinging leg; idle, breathing
 	const float Breath = FMath::Sin(Now * 2.2f) * 4.f * (1.f - WalkAmount);
-	const float Sink = LegLength * (1.f - FMath::Cos(FMath::DegreesToRadians(HipAngleL))) + StepJoltSink * FMath::Sin(StepJolt * PI);
+	// The crouch of a landing (thighs forward, knees bent, the feet staying on the floor: the hips sink by what the bent
+	// legs lose in height), the tuck of a jump (in the air: no floor to keep to)
+	const float BendHip = JumpCrouchHip * Crouch + JumpTuckHip * Tuck;
+	const float BendKnee = JumpCrouchKnee * Crouch + JumpTuckKnee * Tuck;
+	const float CrouchHip = FMath::DegreesToRadians(JumpCrouchHip * Crouch);
+	const float CrouchShin = FMath::DegreesToRadians(JumpCrouchHip * Crouch - JumpCrouchKnee * Crouch);
+	const float CrouchSink = ThighLength * (1.f - FMath::Cos(CrouchHip)) + (LegLength - ThighLength) * (1.f - FMath::Cos(CrouchShin));
+	const float Sink = (LegLength * (1.f - FMath::Cos(FMath::DegreesToRadians(HipAngleL))) + StepJoltSink * FMath::Sin(StepJolt * PI)) * (1.f - Tuck) + CrouchSink;
 	const float HipYaw = WalkHipYaw * S * WalkAmount;
 	Hips->SetRelativeLocationAndRotation(FVector(0.f, 0.f, Breath - Sink), FRotator(0.f, HipYaw, -WalkRoll * C * WalkAmount));
 	Legs->SetRelativeScale3D(FVector::OneVector);
 	if (bHasJoints)
 	{
-		HipL->SetRelativeRotation(FRotator(HipAngleL + KneeBendL * SwingHipLift, 0.f, 0.f));
-		HipR->SetRelativeRotation(FRotator(-HipAngleL + KneeBendR * SwingHipLift, 0.f, 0.f));
-		KneeL->SetRelativeRotation(FRotator(-KneeBendL, 0.f, 0.f));
-		KneeR->SetRelativeRotation(FRotator(-KneeBendR, 0.f, 0.f));
+		HipL->SetRelativeRotation(FRotator(HipAngleL + KneeBendL * SwingHipLift + BendHip, 0.f, 0.f));
+		HipR->SetRelativeRotation(FRotator(-HipAngleL + KneeBendR * SwingHipLift + BendHip, 0.f, 0.f));
+		KneeL->SetRelativeRotation(FRotator(-KneeBendL - BendKnee, 0.f, 0.f));
+		KneeR->SetRelativeRotation(FRotator(-KneeBendR - BendKnee, 0.f, 0.f));
 	}
 
-	// The upper body turns to the aim, twists back against the hips and leans into the walk (about the hips' height)
+	// The upper body turns to the aim, twists back against the hips and leans into the walk (about the hips' height), and
+	// over its knees in a landing
 	ShownAimYaw = FMath::FixedTurn(ShownAimYaw, AimYaw, AimTurnRate * DeltaSeconds);
-	const FRotator Chest(-WalkLean * WalkAmount, ShownAimYaw - HipYaw * ChestCounterYaw, 0.f);
+	const FRotator Chest(-WalkLean * WalkAmount - JumpCrouchLean * Crouch, ShownAimYaw - HipYaw * ChestCounterYaw, 0.f);
 	const FVector Waist(0.f, 0.f, LegLength);
 	Upper->SetRelativeLocationAndRotation(Waist - Chest.RotateVector(Waist), Chest);
 	// The head nods a little with each step
@@ -1265,7 +1320,8 @@ void ARRRandomStarRobot::PoseAssembled(float DeltaSeconds)
 	ArmsUp = FMath::FInterpTo(ArmsUp, bAiming ? 1.f : 0.f, DeltaSeconds, 8.f);
 	const float SwingL = -WalkArmSwing * S * WalkAmount * (1.f - ArmsUp);
 	const float SwingR = -SwingL;
-	const float Up = 85.f * ArmsUp;
+	// (Up for balance in a jump, unless they're raised into the aim already)
+	const float Up = 85.f * ArmsUp + JumpArmsUp * Tuck * (1.f - ArmsUp);
 	ShoulderL->SetRelativeLocationAndRotation(ShoulderPivotL - FVector(PunchL * 60.f, 0.f, 0.f), FRotator(Up + SwingL - PunchL * 25.f, 0.f, 0.f));
 	ShoulderR->SetRelativeLocationAndRotation(ShoulderPivotR - FVector(PunchR * 60.f, 0.f, 0.f), FRotator(Up + SwingR - PunchR * 25.f, 0.f, 0.f));
 	if (bHasJoints)

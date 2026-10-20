@@ -37,6 +37,14 @@ ARRRandomStudio::ARRRandomStudio()
 	bAlwaysRelevant = true;
 }
 
+FBox ARRRandomStudio::GetFlightArea() const
+{
+	// Over the grid and a little past it, the feet up to well over anything tested here (the robot stands 640)
+	const FVector Middle = GetActorLocation();
+	return FBox(FVector(Middle.X - GridHalf - 2000.f, Middle.Y - GridHalf - 2000.f, FloorZ - 1000.f),
+		FVector(Middle.X + GridHalf + 2000.f, Middle.Y + GridHalf + 2000.f, FloorZ + 3000.f));
+}
+
 void ARRRandomStudio::BeginPlay()
 {
 	Super::BeginPlay();
@@ -53,7 +61,7 @@ void ARRRandomStudio::Build()
 		return;
 	}
 	// The level's floor under it: the studio's floor goes on top and hides it
-	float FloorZ = GetActorLocation().Z;
+	FloorZ = GetActorLocation().Z;
 	FHitResult Hit;
 	const FVector Start = GetActorLocation() + FVector(0.f, 0.f, FloorSearchUp);
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomStudio), false, this);

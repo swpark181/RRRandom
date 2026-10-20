@@ -213,6 +213,30 @@ private:
 	/** Seconds following a route without moving. */
 	float RouteStuckTimer = 0.f;
 
+	/**
+	 * Stalls (wanting to move but getting nowhere): where the bot was at the start of the current window and how long the
+	 * window has run; logged once a stall goes on (rr.Bot.LogStalls).
+	 */
+	FVector ProgressFrom = FVector::ZeroVector;
+	float ProgressTimer = 0.f;
+	bool bStallLogged = false;
+	void WatchProgress(const ARRRandomCharacter* Self, const FVector& Move, const TCHAR* Mode, float DeltaSeconds);
+
+	/**
+	 * Getting unstuck: wedged (meaning to walk on the ground but barely moving) for a moment, the bot goes round whatever
+	 * holds it, along it and a little away, for a moment (DetourWay); wedged again and again on the way to the same goal, it
+	 * gives that goal up (a cover spot it can't reach is avoided for a while, a roaming spot or route is picked again).
+	 */
+	FVector Unstick(ARRRandomCharacter* Self, const FVector& Move, float DeltaSeconds);
+	/** Whether the bot's body (from knee height up) fits along a way this far: cover, walls and the island's rim. */
+	bool IsWayClear(const ARRRandomCharacter* Self, const FVector& Direction, float Distance, FHitResult* OutHit = nullptr) const;
+	float WedgedTimer = 0.f;
+	FVector DetourWay = FVector::ZeroVector;
+	float DetourTimer = 0.f;
+	int32 WedgeCount = 0;
+	FVector BadCoverSpot = FVector::ZeroVector;
+	float BadCoverTimer = 0.f;
+
 	/** Meteor Rush (UpdateRushGoal): where to go, whether there is anywhere, keeping the ore safe, until the next look. */
 	FVector RushGoal = FVector::ZeroVector;
 	bool bHasRushGoal = false;

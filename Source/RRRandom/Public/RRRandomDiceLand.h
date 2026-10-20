@@ -41,6 +41,8 @@ public:
 
 	/** The map's area in the world (X up the minimap, Y to the right), a square around the island. */
 	FBox2D GetMapBounds() const;
+	/** Where flying is allowed (round 65): over the map (X, Y) with the feet up to Max.Z (ARRRandomCharacter keeps flyers inside). */
+	FBox GetFlightArea() const;
 	/** What the minimap shows at a world spot (sky off the island), and how high it stands there (for its shading). */
 	FColor GetMapColor(const FVector2D& WorldLocation, int32& OutLevels) const;
 	/** True once the land has laid itself out (BeginPlay). */
