@@ -113,6 +113,13 @@ public:
 	UFUNCTION(Exec)
 	void RRHurt(float Amount = 70.f);
 
+	/**
+	 * Cheat: my brawler's own die lands on this face right now (the fox's invisibility, the rabbit's super hops, the
+	 * squirrel's shield, the tiger's giant, the dragon's flight; console only); 1 after the face: every brawler's, bots too. Not in shipping builds.
+	 */
+	UFUNCTION(Exec)
+	void RROwnDie(int32 Face = 6, int32 bEveryone = 0);
+
 	/** While my tiger's spirit is out: the floor under the cursor, where a strike would land (false off the arena). */
 	bool GetUltimateSpot(FVector& OutSpot) const;
 
@@ -252,6 +259,8 @@ private:
 	void ServerCheatStar();
 	UFUNCTION(Server, Reliable)
 	void ServerCheatHurt(float Amount);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatOwnDie(int32 Face, bool bEveryone);
 
 	/** My tiger's spirit strikes at this spot (if it's ready for one). */
 	UFUNCTION(Server, Reliable)

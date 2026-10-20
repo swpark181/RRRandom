@@ -2,6 +2,7 @@
 #include "RRRandomCharacter.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomGameState.h"
+#include "RRRandomKit.h"
 #include "RRRandomMeteor.h"
 #include "RRRandomOre.h"
 #include "RRRandomOverheadDieComponent.h"
@@ -187,7 +188,8 @@ void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRand
 		return;
 	}
 	DrawDamagePopups(Brawler, Viewer);
-	if (!Brawler.IsAlive())
+	// An invisible opponent (the fox's own die) has nothing over it but the numbers of hits on it
+	if (!Brawler.IsAlive() || Brawler.GetKit()->IsCloakedOnThisScreen())
 	{
 		return;
 	}
@@ -265,6 +267,27 @@ void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRand
 		PowerLabels.Add(TEXT("FLY"));
 		PowerColors.Add(URRRandomDiceBuffComponent::GetFlightColor());
 		PowerRemaining.Add(Brawler.GetFlightRemaining());
+	}
+	// The powers of its own die (FRRKit)
+	const URRRandomKitComponent& Kit = *Brawler.GetKit();
+	const FLinearColor OwnColor = RRKit::Get(Brawler.GetSpecies()).DieColor;
+	if (Kit.IsCloaked())
+	{
+		PowerLabels.Add(TEXT("INVISIBLE"));
+		PowerColors.Add(OwnColor);
+		PowerRemaining.Add(Kit.GetCloakRemaining());
+	}
+	if (Kit.GetSuperHops() > 0)
+	{
+		PowerLabels.Add(FString::Printf(TEXT("HOP x%d"), Kit.GetSuperHops()));
+		PowerColors.Add(OwnColor);
+		PowerRemaining.Add(UE_BIG_NUMBER);
+	}
+	if (Kit.GetShield() > 0.f)
+	{
+		PowerLabels.Add(FString::Printf(TEXT("SHIELD %d"), FMath::CeilToInt(Kit.GetShield())));
+		PowerColors.Add(OwnColor);
+		PowerRemaining.Add(Kit.GetShieldRemaining());
 	}
 	if (Brawler.IsInvincible())
 	{
@@ -519,8 +542,11 @@ float ARRRandomHUD::DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float 
 
 	const FRRDiceRoll& Die = Dice.GetLastRoll();
 	const ARRRandomCharacter* Roller = Cast<ARRRandomCharacter>(Dice.GetOwner());
-	const FString UltimateName = RRSpecies::GetUltimateName(Roller ? Roller->GetSpecies() : RRSpecies::Tiger);
-	const FString Text = FString::Printf(TEXT("%d %s"), Die.Face, Die.bUltimate ? *UltimateName : Die.bWeapon ? TEXT("GUN") : Die.bGiant ? TEXT("GIANT") : Die.bFlight ? TEXT("FLY") : *URRRandomDiceBuffComponent::GetStatShortName(Die.Stat));
+	const int32 RollerSpecies = Roller ? Roller->GetSpecies() : RRSpecies::Tiger;
+	const FString UltimateName = RRSpecies::GetUltimateName(RollerSpecies);
+	const FRRKit& RollerKit = RRKit::Get(RollerSpecies);
+	const FString Text = FString::Printf(TEXT("%d %s"), Die.Face, Die.bUltimate ? *UltimateName : Die.bWeapon ? TEXT("GUN") : Die.bGiant ? TEXT("GIANT") : Die.bFlight ? TEXT("FLY")
+		: Die.bOwn ? RollerKit.DieWord : *URRRandomDiceBuffComponent::GetStatShortName(Die.Stat));
 	const float Size = 13.f * UIScale;
 	const FVector2D TextSize = RRUI::MeasureText(Text, Size, EWeight::Black, Size * 0.04f);
 	const float Y = Bottom - TextSize.Y;
@@ -528,7 +554,7 @@ float ARRRandomHUD::DrawRollPopup(const URRRandomDiceBuffComponent& Dice, float 
 	{
 		const FLinearColor DieColor = Die.bUltimate ? URRRandomDiceBuffComponent::GetUltimateColor() : Die.bWeapon ? WeaponDieColor
 			: Die.bGiant ? URRRandomDiceBuffComponent::GetGiantColor()
-			: Die.bFlight ? URRRandomDiceBuffComponent::GetFlightColor() : URRRandomDiceBuffComponent::GetStatColor(Die.Stat);
+			: Die.bFlight ? URRRandomDiceBuffComponent::GetFlightColor() : Die.bOwn ? RollerKit.DieColor : URRRandomDiceBuffComponent::GetStatColor(Die.Stat);
 		const float Alpha = FMath::Clamp((RollPopupTime - Landed) / RollPopupFadeTime, 0.f, 1.f);
 		RRUI::DrawGlowText(Canvas, Text, FVector2D(CenterX - TextSize.X * 0.5f, Y), Size, EWeight::Black, WithAlpha(RRUI::Readable(DieColor), Alpha), Size * 0.04f);
 	}
@@ -578,15 +604,19 @@ void ARRRandomHUD::DrawDamagePopups(const ARRRandomCharacter& Brawler, const ARR
 		}
 	}
 
-	const float Size = 18.f * S;
 	for (const FRRDamagePopup& Popup : Brawler.GetDamagePopups())
 	{
-		const FString Text = FString::FromInt(FMath::RoundToInt(Popup.Amount));
+		// A fox's backstab: bigger, gold, popping in with a bounce
+		const float Pop = Popup.bBackstab ? 1.f + 0.35f * FMath::Max(0.f, 1.f - Popup.Age / 0.15f) : 1.f;
+		const float Size = (Popup.bBackstab ? 25.f : 18.f) * S * Pop;
+		const FString Text = FString::FromInt(FMath::RoundToInt(Popup.Amount)) + (Popup.bBackstab ? TEXT("!") : TEXT(""));
 		const FVector2D TextSize = RRUI::MeasureText(Text, Size, EWeight::Black);
 		const float Alpha = FMath::Max(0.f, 1.f - Popup.Age / ARRRandomCharacter::DamagePopupLifetime);
 		const FVector2D Pos(Body.X + (50.f + Popup.OffsetX) * S - TextSize.X * 0.5f, Body.Y - Popup.Age * DamagePopupRiseSpeed * S);
 		// White numbers with an ink edge on opponents; pink with a white edge when it's our side
-		DrawEdgedText(Canvas, Text, Pos, Size, WithAlpha(bFriendly ? RRUI::PinkDeep : RRUI::White, Alpha), WithAlpha(bFriendly ? RRUI::White : RRUI::Ink, 0.7f * Alpha));
+		const FLinearColor Fill = Popup.bBackstab ? RRUI::Gold : bFriendly ? RRUI::PinkDeep : RRUI::White;
+		const FLinearColor Edge = Popup.bBackstab ? RRUI::White : bFriendly ? RRUI::White : RRUI::Ink;
+		DrawEdgedText(Canvas, Text, Pos, Size, WithAlpha(Fill, Alpha), WithAlpha(Edge, 0.8f * Alpha));
 	}
 }
 
@@ -686,6 +716,27 @@ void ARRRandomHUD::DrawDicePanel(const ARRRandomCharacter& Viewer)
 	{
 		Line(TEXT("GIANT"), FString::Printf(TEXT("ATK x%.1f · DMG TAKEN x%.1f · %.0fs"), Viewer.GetGiantDamageMultiplier(), Viewer.GetGiantDamageTakenMultiplier(), FMath::CeilToFloat(Viewer.GetGiantRemaining())),
 			RRUI::Pastel(URRRandomDiceBuffComponent::GetGiantColor(), 0.2f), Viewer.GetGiantRemaining() < BuffBlinkTime ? Blink(GetWorld()) : 1.f);
+	}
+	// The powers of my own die (FRRKit)
+	const URRRandomKitComponent& Kit = *Viewer.GetKit();
+	const FLinearColor OwnMark = RRUI::Pastel(RRKit::Get(Viewer.GetSpecies()).DieColor, 0.2f);
+	if (Kit.IsCloaked())
+	{
+		Line(TEXT("INVISIBLE"), FString::Printf(TEXT("SHOOTING ENDS IT · FIRST SHOT x%.2f · %.0fs"), RRKit::BackstabMultiplier, FMath::CeilToFloat(Kit.GetCloakRemaining())),
+			OwnMark, Kit.GetCloakRemaining() < BuffBlinkTime ? Blink(GetWorld()) : 1.f);
+	}
+	if (Kit.GetSuperHops() > 0)
+	{
+		Line(FString::Printf(TEXT("SUPER HOP x%d"), Kit.GetSuperHops()), TEXT("SPACE IN THE AIR"), OwnMark, 1.f);
+	}
+	if (Kit.GetShield() > 0.f)
+	{
+		Line(FString::Printf(TEXT("SHIELD %d"), FMath::CeilToInt(Kit.GetShield())), FString::Printf(TEXT("%.0fs"), FMath::CeilToFloat(Kit.GetShieldRemaining())),
+			OwnMark, Kit.GetShieldRemaining() < BuffBlinkTime ? Blink(GetWorld()) : 1.f);
+	}
+	if (Kit.GetMagnetRemaining() > 0.f)
+	{
+		Line(TEXT("ORE MAGNET"), FString::Printf(TEXT("%.0fs"), FMath::CeilToFloat(Kit.GetMagnetRemaining())), OwnMark, Kit.GetMagnetRemaining() < BuffBlinkTime ? Blink(GetWorld()) : 1.f);
 	}
 	for (const FRRDiceBuff& Buff : Dice.GetActiveBuffs())
 	{
@@ -849,10 +900,11 @@ void ARRRandomHUD::UpdateOreFeedback(const ARRRandomCharacter* Viewer)
 		// Two gains close together sit side by side
 		Gain.From.X += (OreGains.Num() - 1) % 3 * 34.f * UIScale;
 	}
-	else if (Points == 0 && LastOrePoints > 0)
+	else if (Points < LastOrePoints)
 	{
-		// Knocked out (or fallen) with ore on me
-		DroppedOre = LastOrePoints;
+		// Knocked out (or fallen) with ore on me; the squirrel's cheek pouch keeps some
+		DroppedOre = LastOrePoints - Points;
+		KeptOre = Points;
 		DroppedAt = Now;
 		OreGains.Reset();
 	}
@@ -917,7 +969,7 @@ void ARRRandomHUD::DrawOreFeedback(const ARRRandomCharacter* Viewer)
 		const FVector2D Box = RRUI::MeasureText(Text, Size, EWeight::Black, Size * 0.06f);
 		const float Y = Canvas->ClipY * 0.28f + 96.f * S;
 		RRUI::DrawGlowText(Canvas, Text, FVector2D((Canvas->ClipX - Box.X) * 0.5f + Shake, Y), Size, EWeight::Black, WithAlpha(RRUI::PinkDeep, Alpha), Size * 0.06f);
-		const FString Hint = TEXT("GRAB IT BACK!");
+		const FString Hint = KeptOre > 0 ? FString::Printf(TEXT("CHEEK POUCH KEPT %d · GRAB THE REST BACK!"), KeptOre) : FString(TEXT("GRAB IT BACK!"));
 		const float HintSize = 11.f * S;
 		const FVector2D HintBox = RRUI::MeasureText(Hint, HintSize, EWeight::ExtraBold, HintSize * 0.2f);
 		RRUI::DrawGlowText(Canvas, Hint, FVector2D((Canvas->ClipX - HintBox.X) * 0.5f, Y + Box.Y + 4.f * S), HintSize, EWeight::ExtraBold, WithAlpha(RRUI::InkSoft, Alpha), HintSize * 0.2f);

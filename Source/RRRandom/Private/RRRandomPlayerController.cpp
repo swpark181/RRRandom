@@ -651,6 +651,25 @@ void ARRRandomPlayerController::RRHurt(float Amount)
 	ServerCheatHurt(Amount);
 }
 
+void ARRRandomPlayerController::RROwnDie(int32 Face, int32 bEveryone)
+{
+	ServerCheatOwnDie(Face, bEveryone != 0);
+}
+
+void ARRRandomPlayerController::ServerCheatOwnDie_Implementation(int32 Face, bool bEveryone)
+{
+#if !UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, own die %d%s."), Face, bEveryone ? TEXT(" for everyone") : TEXT(""));
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		if ((bEveryone || *It == GetPawn()) && It->IsAlive() && !It->IsDecoy())
+		{
+			It->CheatOwnDie(FMath::Clamp(Face, 1, 6));
+		}
+	}
+#endif
+}
+
 void ARRRandomPlayerController::ServerCheatHurt_Implementation(float Amount)
 {
 #if !UE_BUILD_SHIPPING

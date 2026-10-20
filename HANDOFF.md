@@ -1,6 +1,6 @@
 # 작업 이어하기 메모 — 팀전 프로토타입 (FPS식 사격 + 엄폐물)
 
-최종 업데이트: 2026-10-19 (53차)
+최종 업데이트: 2026-10-20 (54차)
 
 Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMemory/` 에 복사해 둠 — 다른 PC 세션은 먼저 읽기.
 
@@ -59,6 +59,23 @@ Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMem
 - (49차) 프로젝트 전체 UI 를 깔끔한 파스텔톤, 단순하게. 트라이포와 클로드로 시안 3개씩 뽑아 먼저 보여주고, 적용은 확인 후. → 클로드 시안 A 마시멜로 / B 스티커 / C 에어 라인 비교 페이지. 사용자 선택(조합안): 인게임 HUD 는 에어 라인, 캐릭터 선택은 스티커 구조에 에어 라인 느낌, 결과 화면은 마시멜로 + 에어 라인, 결과 화면에 배경 음영 없음. → "조합안으로 적용해줘".
 - (53차) 하늘에서 운석·조각 등 모든 아이템이 떨어질 때 별꼬리처럼 길게 그리며 떨어지고, 떨어지면 이펙트.
 - (53차 추가) Meteor Rush 제한 시간 15분, 목표 77점. 운석 간격 1분.
+- (54차) 캐릭터 아이덴티티: 시안 비교(A 성격 키트 / B 액션 스킬 / C 전용 주사위) 끝에 "패시브 + 전용 주사위" 를 적용. 여우는 상대로 변장 대신 투명화(집중해서 보면 보이는 실루엣).
+
+## 54차 — 캐릭터 키트: 패시브 + 전용 주사위 (사용자: 각 캐릭터 아이덴티티 → 시안 5개 → 3개(A/B/C) → "패시브랑 전용 주사위 적용" + 여우는 투명화, 실루엣이 집중하면 보일 만큼)
+
+- 기획 페이지: 시안 비교 https://claude.ai/artifact/UEncvLw1Erz5pnvRQT1Kvo, 1차 적용안 https://claude.ai/artifact/8r7K6cQc5U3v6M82b6UcKF. 페이지의 "정할 것" 3개(거인·비행 전용화, 여우 패시브, 수치)는 답이 없어서 페이지 제안대로 적용.
+- 새 `RRRandomKit.h/.cpp`: `FRRKit`(종별 패시브 수치·주사위 확률·메뉴 문구, `RRKit::Get`) + `URRRandomKitComponent`(캐릭터 기본 서브오브젝트 `Kit`, 복제: 투명 남은 시간·슈퍼 점프 수·보호막·자석 시간).
+  - 주사위: `FRRDiceRoll::bOwn`, `OwnDieChance`, `OnOwnDie`. 모두 1/10이던 거인·비행 대신 종마다 1/5 하나: 호랑이 거인, 용 비행, 여우·토끼·다람쥐는 전용. 캐릭터 `ApplyKit`(종 적용·BeginPlay 때)이 체력(기본 × 배수, 진행 중 바뀌면 비율 유지), `JumpMaxCount`, 주사위 확률을 설정(분신은 0).
+  - 여우: 등 뒤(맞는 쪽 정면과 총알 방향 내적 ≥ cos60°) 또는 투명 해제 뒤 1.5초 안 첫 피해 ×1.25(`TakeDamage`, 팝업 `bBackstab` → 금색 큰 숫자 + `!`). 투명 = `ShootAt` 서버에서 `Kit->OnShot()` 으로 풀림. 그리기(기계마다): 몸·총 머티리얼을 `M_FXCloak` MID 로 바꿨다 되돌림, 상대 화면은 그림자·커스텀 뎁스(툰 윤곽선) 끔 + HUD 머리 위·굴리는 주사위(`OverheadDie`)·발밑 블롭 그림자(`FlightEffects`) 숨김. 밝기: 나 0.9+채움 0.35, 아군 0.75+0.2, 상대 0.3(정지)~0.55(달림), 피격 0.3초 0.9. 시작/끝에 작은 `FoxPoof`. 봇·미니맵은 `IsNoticedByTeam` = `IsSeenByTeam` && !`Kit->IsHiddenFrom`(투명 중, 0.3초 피격 노출 아님, 그 팀 누구도 250 안에 없음).
+  - 토끼: 이동 ×1.15, 2단 점프, 원석 줍기(원석 `TryPickUp` 을 겹침 대신 캡슐 거리로 바꾸고 줍는 쪽 배수). 슈퍼 점프: `Jump()` 에서 공중 + 충전 있으면 `TrySuperHop`(조종 기계가 예측 + `ServerSuperHop`) → `LaunchCharacter` Z = 기본 점프 × 1.6 (높이 약 3.5배), `JumpCurrentCount = JumpMaxCount`, `SonicBoom`.
+  - 다람쥐: 쓰러질 때 총 유지(`KnockOut`), `DropAll` 이 1/3(올림, 작은 조각 점수 안에서) 유지 → 원석·조각으로 남김(HUD `CHEEK POUCH KEPT n`). 보호막 = `AbsorbDamage`(`TakeDamage` 에서 체력 전에), 엔진 구 + `M_MRGlass` 민트 방울. 자석(Meteor Rush) = 0.15초마다 600 안 쉬는 원석 `PullToward(다람쥐)`: 0.45초 동안 발밑으로 호를 그리며 따라감(충돌 무시) → 도착하면 `TryPickUp`. 처음엔 포물선으로 던졌더니 봇 다람쥐가 당긴 결정 2개가 바닥을 뚫고 떨어져서(원인 미확정) 따라가기로 바꿈.
+  - 호랑이: 체력 130, `LaunchCharacter` 오버라이드로 모든 밀림 × 0.5, 차 치임 날아가는 속도 × 0.5, 이동 × 0.9.
+  - 용: `UpdateFlight` 에서 `bJumpHeld && 낙하 중(Velocity.Z ≤ 0)` 이면 `bGliding`(비행 뒤 활공은 `bFlightGlide` 로 분리). **엔진 `bPressedJump` 는 `JumpMaxHoldTime` 뒤 저절로 꺼져서 못 씀** → `Jump`/`StopJumping` 에서 직접 `bJumpHeld`, 원격 플레이어는 `ServerSetJumpHeld`(용만).
+- HUD: 머리 위 칩 `INVISIBLE`/`HOP x3`/`SHIELD 40`, 굴림 팝업 `5 INVISIBLE`(종 색), 왼쪽 아래 줄(`INVISIBLE · SHOOTING ENDS IT …`, `SUPER HOP x6 · SPACE IN THE AIR`, `SHIELD 60 · 19s`, `ORE MAGNET 12s`), 원석 잃음 경고는 줄어든 만큼. 타이틀 캐릭터 카드 설명 아래 태그 2줄(`PASSIVE · …`, 전용 주사위), 설명 자리 54 → 108.
+- 머티리얼 `C:\work\char-pipeline\scripts\ue_make_cloak.py`(새, `Tools/char-pipeline/scripts` 에도) → `/Game/Effects/DiceFX/M_FXCloak`: 언릿 반투명, 프레넬(3) × 위로 흐르는 띠(월드 Z, 0.45~1), 발광 = Color × Glow × (테두리 + Fill), 불투명 = (테두리 + Fill) × Opacity. 처음엔 흰 테두리만(상대 0.08~0.18)이라 파스텔 바닥에서 아예 안 보여서 → 보라(0.5, 0.4, 0.95) + 값 올림 + Fill.
+- 치트 `RROwnDie [눈] [1]`(1 = 봇까지 모두), 테스트 스위치 `-RRBotSpecies=<이름>`. 스크래치 `game_seq.py` 에 `jump`/`unjump`/`z`/`lineup`(다른 캐릭터를 내 앞 `RR_LINEUP_AHEAD` 거리에 일렬) 추가, `title_tour.ps1`(타이틀 키 입력 캡처).
+- 확인: 빌드 경고 없음. 토끼 점프 최고 266(여우 187), 슈퍼 점프 약 +320, 용 활공 하강 0.6초(여우 0.4초), 자석으로 조각·원석 바로 주움(600 밖 결정은 그대로), 탑뷰 일렬 캡처에서 아군 투명 여우 = 라벤더 반투명, 상대 = 희미한 보라 테두리, 블롭 그림자는 그 뒤 숨김 처리, 금색 `11!`, 다람쥐 방울·칩·패널, 타이틀 5종 태그. Meteor Rush·넉아웃 90초 봇전 오류 없음(투명·슈퍼 점프·보호막·등 뒤 공격·`keeps n` 로그).
+- 확인 못 한 것: 온라인(원격 플레이어의 슈퍼 점프 예측 보정, 활공 RPC, 참가자 화면의 투명 밝기), 호랑이 넉백 반감 실측(코드만), 실제 밸런스(봇은 투명해도 바로 쏴서 풀림 — 봇은 투명을 활용하지 못함), 3인칭에서 상대 투명 여우가 실제로 "집중하면 보이는" 정도인지 사용자 확인 필요, 원래 포물선 자석이 바닥을 뚫은 원인.
 
 ## 53차 — 떨어지는 아이템에 별꼬리, 착지 이펙트 (사용자: 운석이나 조각 모든 아이템이 떨어질 때 별꼬리처럼 길게, 떨어지면 이펙트)
 

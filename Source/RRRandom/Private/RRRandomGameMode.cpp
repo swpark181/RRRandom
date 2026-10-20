@@ -661,8 +661,10 @@ void ARRRandomGameMode::FillEmptySlotsWithBots()
 			{
 				continue;
 			}
-			// Bots are any of the brawlers
-			ARRRandomCharacter* Bot = SpawnBrawler(BotClass, Team, Slot, FMath::RandRange(0, RRSpecies::Count - 1));
+			// Bots are any of the brawlers (-RRBotSpecies=Fox makes them all one, for tests)
+			FString BotSpeciesName;
+			const int32 BotSpecies = FParse::Value(FCommandLine::Get(), TEXT("RRBotSpecies="), BotSpeciesName) ? RRSpecies::FromName(BotSpeciesName) : INDEX_NONE;
+			ARRRandomCharacter* Bot = SpawnBrawler(BotClass, Team, Slot, BotSpecies != INDEX_NONE ? BotSpecies : FMath::RandRange(0, RRSpecies::Count - 1));
 			if (!Bot)
 			{
 				continue;

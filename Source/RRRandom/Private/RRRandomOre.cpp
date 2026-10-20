@@ -2,12 +2,14 @@
 #include "RRRandomCharacter.h"
 #include "RRRandomEffects.h"
 #include "RRRandomGameState.h"
+#include "RRRandomKit.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/PointLightComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
@@ -399,6 +401,32 @@ void ARRRandomOre::UpdateEffects(float DeltaSeconds)
 
 void ARRRandomOre::UpdateFlight(float DeltaSeconds)
 {
+	// Pulled by an ore magnet: an arc that homes in on the puller's feet over PullTime, through anything in the way; there
+	// it is picked up (TryPickUp). If the puller is gone or down, it drops from wherever it got to.
+	if (Puller.IsValid())
+	{
+		constexpr float PullTime = 0.45f;
+		constexpr float PullHop = 140.f;
+		const ARRRandomCharacter* Target = Puller.Get();
+		if (!Target->IsAlive())
+		{
+			Puller = nullptr;
+			Velocity = FVector::ZeroVector;
+			return;
+		}
+		PullAge += DeltaSeconds;
+		const float Alpha = FMath::Clamp(PullAge / PullTime, 0.f, 1.f);
+		const FVector Feet = Target->GetActorLocation() - FVector(0.f, 0.f, Target->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+		SetActorLocation(FMath::Lerp(PullFrom, Feet, Alpha * Alpha) + FVector(0.f, 0.f, PullHop * FMath::Sin(Alpha * PI)));
+		if (Alpha >= 1.f && PullAge > PullTime + 0.5f)
+		{
+			// Arrived but not taken (an ultimate holds the puller): let it fall where it is
+			Puller = nullptr;
+			Velocity = FVector::ZeroVector;
+		}
+		return;
+	}
+
 	// A falling star: straight down its line to the spot
 	if (bFallingStar)
 	{
@@ -445,6 +473,21 @@ void ARRRandomOre::UpdateFlight(float DeltaSeconds)
 	}
 }
 
+void ARRRandomOre::PullToward(const ARRRandomCharacter* InPuller)
+{
+	if (!HasAuthority() || !bResting || !InPuller)
+	{
+		return;
+	}
+	// No longer a falling star (it would head back to its spot); ready to be picked up the moment it arrives
+	Puller = InPuller;
+	PullFrom = GetActorLocation();
+	PullAge = 0.f;
+	bResting = false;
+	bFallingStar = false;
+	Age = FMath::Max(Age, PickupDelay);
+}
+
 void ARRRandomOre::OnTouch(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
 	if (Age >= PickupDelay)
@@ -459,13 +502,21 @@ void ARRRandomOre::TryPickUp()
 	{
 		return;
 	}
-	TArray<AActor*> Touching;
-	Touch->GetOverlappingActors(Touching, ARRRandomCharacter::StaticClass());
-	for (AActor* Actor : Touching)
+	// Whoever's capsule is within the touch sphere, which reaches further for a brawler whose kit picks up from further
+	// (the rabbit's)
+	const FVector Center = Touch->GetComponentLocation();
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{
-		ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(Actor);
-		URRRandomOreCarryComponent* Carry = Brawler ? Brawler->GetOreCarry() : nullptr;
-		if (Carry && Brawler->IsAlive() && !Brawler->IsDecoy() && !Brawler->IsUsingUltimate())
+		ARRRandomCharacter* Brawler = *It;
+		URRRandomOreCarryComponent* Carry = Brawler->GetOreCarry();
+		if (!Carry || !Brawler->IsAlive() || Brawler->IsDecoy() || Brawler->IsUsingUltimate())
+		{
+			continue;
+		}
+		const float Reach = TouchRadius * Brawler->GetKit()->GetKit().OrePickupScale;
+		const UCapsuleComponent* Capsule = Brawler->GetCapsuleComponent();
+		const FVector Offset = Brawler->GetActorLocation() - Center;
+		if (Offset.Size2D() <= Reach + Capsule->GetScaledCapsuleRadius() && FMath::Abs(Offset.Z) <= Reach + Capsule->GetScaledCapsuleHalfHeight())
 		{
 			Carry->Add(Kind);
 			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) picks up a %s; carries %d."), *Brawler->GetName(), Brawler->GetTeam(),
@@ -528,6 +579,9 @@ void URRRandomOreCarryComponent::DropAll(bool bLost)
 		bGolden = false;
 		return;
 	}
+	// The squirrel's cheek pouch keeps a third of the points (rounded up), out of the shards and lumps: crystals always drop
+	const int32 CrystalPoints = RROre::GetPoints(ERROreKind::Big) * (Crystals + (bGolden ? 1 : 0));
+	const int32 Kept = Owner->GetKit()->GetKit().bCheekPouch ? FMath::Min(FMath::DivideAndRoundUp(Points, 3), Points - CrystalPoints) : 0;
 	if (!bLost)
 	{
 		// From the waist: crystals whole and close by, the rest broken into one-point shards flying all round (three-point
@@ -541,7 +595,7 @@ void URRRandomOreCarryComponent::DropAll(bool bLost)
 		{
 			Pieces.Add(ERROreKind::Big);
 		}
-		int32 Rest = Points - RROre::GetPoints(ERROreKind::Big) * (Crystals + (bGolden ? 1 : 0));
+		int32 Rest = Points - CrystalPoints - Kept;
 		constexpr int32 MaxPieces = 16;
 		while (Rest > 0)
 		{
@@ -564,16 +618,17 @@ void URRRandomOreCarryComponent::DropAll(bool bLost)
 				Piece->FinishSpawning(Spawn);
 			}
 		}
-		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s drops %d ore points in %d pieces."), *Owner->GetName(), Points, Pieces.Num());
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s drops %d ore points in %d pieces, keeps %d."), *Owner->GetName(), Points - Kept, Pieces.Num(), Kept);
 	}
 	else
 	{
-		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s falls off with %d ore points; they are lost."), *Owner->GetName(), Points);
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s falls off with %d ore points; %d are lost, %d kept."), *Owner->GetName(), Points, Points - Kept, Kept);
 	}
-	Points = 0;
+	// What the pouch kept, as lumps and shards
+	Points = Kept;
 	Crystals = 0;
-	Shards = 0;
-	Ores = 0;
+	Ores = Kept / RROre::GetPoints(ERROreKind::Ore);
+	Shards = Kept % RROre::GetPoints(ERROreKind::Ore);
 	bGolden = false;
 }
 

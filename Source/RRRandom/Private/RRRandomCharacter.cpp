@@ -12,6 +12,7 @@
 #include "RRRandomGunComponent.h"
 #include "RRRandomGameMode.h"
 #include "RRRandomGameState.h"
+#include "RRRandomKit.h"
 #include "RRRandomMovementComponent.h"
 #include "RRRandomOre.h"
 #include "RRRandomOverheadDieComponent.h"
@@ -98,6 +99,8 @@ namespace
 	constexpr float AfterimageInterval = 0.035f;
 	constexpr float AfterimageLife = 0.3f;
 	constexpr float AfterimageOpacity = 0.55f;
+	// The rabbit's super hop: launched up at this share of a normal jump's speed (about 2.5 times as high)
+	constexpr float SuperHopJumpShare = 1.6f;
 	const FLinearColor AfterimageColor(1.f, 0.8f, 0.25f);
 	constexpr float HitFlashBrightness = 2.5f;
 	constexpr float HitFlashTime = 0.18f;
@@ -246,6 +249,7 @@ ARRRandomCharacter::ARRRandomCharacter(const FObjectInitializer& ObjectInitializ
 	DiceBuffs = CreateDefaultSubobject<URRRandomDiceBuffComponent>(TEXT("DiceBuffs"));
 	OreCarry = CreateDefaultSubobject<URRRandomOreCarryComponent>(TEXT("OreCarry"));
 	OreCarry->SetupAttachment(RootComponent);
+	Kit = CreateDefaultSubobject<URRRandomKitComponent>(TEXT("Kit"));
 	OverheadDie = CreateDefaultSubobject<URRRandomOverheadDieComponent>(TEXT("OverheadDie"));
 	OverheadDie->SetupAttachment(RootComponent);
 	Wings = CreateDefaultSubobject<URRRandomWingsComponent>(TEXT("Wings"));
@@ -314,6 +318,7 @@ void ARRRandomCharacter::ApplySpecies()
 	UseLook(SpeciesLooks[Species]);
 	// Every species has its ultimate (OnUltimateDie); a clone rolls nothing
 	DiceBuffs->UltimateDieChance = bDecoy ? 0.f : UltimateDieChance;
+	ApplyKit();
 	CurrentAnimation = nullptr;
 	if (!HasActorBegunPlay())
 	{
@@ -349,6 +354,7 @@ void ARRRandomCharacter::BeginPlay()
 	// random event component picks up the tintable material when it begins play) the body's materials
 	ApplySpecies();
 	DiceBuffs->UltimateDieChance = bDecoy ? 0.f : UltimateDieChance;
+	ApplyKit();
 	UE_CLOG(!HasAuthority(), LogTemp, Log, TEXT("RRRandom: %s arrives as the %s."), *GetName(), RRSpecies::GetAssetName(ShownSpecies));
 	USkeletalMeshComponent* BodyMesh = GetMesh();
 	if (BodyBaseMaterial)
@@ -388,6 +394,7 @@ void ARRRandomCharacter::BeginPlay()
 		DiceBuffs->OnGiantDie.AddUObject(this, &ARRRandomCharacter::OnGiantDie);
 		DiceBuffs->OnUltimateDie.AddUObject(this, &ARRRandomCharacter::OnUltimateDie);
 		DiceBuffs->OnFlightDie.AddUObject(this, &ARRRandomCharacter::OnFlightDie);
+		DiceBuffs->OnOwnDie.AddUObject(this, &ARRRandomCharacter::OnOwnDie);
 		// (a fox's clone starts with its fox's health)
 		if (!bDecoy)
 		{
@@ -618,6 +625,101 @@ void ARRRandomCharacter::OnFlightDie(int32 Face)
 	StartFlight(FlightBaseDuration + Face * FlightSecondsPerPip);
 }
 
+void ARRRandomCharacter::OnOwnDie(int32 Face)
+{
+	Kit->ApplyOwnDie(Face);
+}
+
+void ARRRandomCharacter::CheatOwnDie(int32 Face)
+{
+	const FRRKit& Traits = RRKit::Get(Species);
+	if (Traits.GiantDieChance > 0.f)
+	{
+		OnGiantDie(Face);
+	}
+	else if (Traits.FlightDieChance > 0.f)
+	{
+		OnFlightDie(Face);
+	}
+	else
+	{
+		OnOwnDie(Face);
+	}
+}
+
+void ARRRandomCharacter::ApplyKit()
+{
+	const FRRKit& Traits = RRKit::Get(Species);
+	if (BaseMaxHealth <= 0.f)
+	{
+		BaseMaxHealth = MaxHealth;
+	}
+	// Health keeps its share of the new maximum (a joiner's pick arriving after its brawler began play)
+	const float OldMax = MaxHealth;
+	MaxHealth = BaseMaxHealth * Traits.HealthScale;
+	if (HasAuthority() && HasActorBegunPlay() && OldMax > 0.f)
+	{
+		Health = FMath::Min(MaxHealth, Health * MaxHealth / OldMax);
+	}
+	JumpMaxCount = Traits.JumpCount;
+	// The giant and flight dice are the tiger's and the dragon's; the others roll their own die instead. A clone rolls nothing.
+	DiceBuffs->GiantDieChance = bDecoy ? 0.f : Traits.GiantDieChance;
+	DiceBuffs->FlightDieChance = bDecoy ? 0.f : Traits.FlightDieChance;
+	DiceBuffs->OwnDieChance = bDecoy ? 0.f : Traits.OwnDieChance;
+}
+
+bool ARRRandomCharacter::TrySuperHop()
+{
+	// In mid-air with a super hop stored: the second jump goes super high instead (the rabbit's own die)
+	if (Kit->GetSuperHops() <= 0 || bFlying || !GetCharacterMovement()->IsFalling())
+	{
+		return false;
+	}
+	if (!HasAuthority())
+	{
+		ServerSuperHop();
+	}
+	DoSuperHop();
+	return true;
+}
+
+void ARRRandomCharacter::ServerSuperHop_Implementation()
+{
+	if (bAlive && Kit->GetSuperHops() > 0 && GetCharacterMovement()->IsFalling())
+	{
+		DoSuperHop();
+	}
+}
+
+void ARRRandomCharacter::DoSuperHop()
+{
+	if (HasAuthority() && !Kit->SpendSuperHop())
+	{
+		return;
+	}
+	// Keeps going the way it was, launched up at SuperHopJumpShare of a normal jump's speed (about 2.5 times as high); no
+	// more jumps until landing
+	const FVector Velocity = GetCharacterMovement()->Velocity;
+	LaunchCharacter(FVector(Velocity.X, Velocity.Y, BaseJumpZVelocity * SuperHopJumpShare), true, true);
+	JumpCurrentCount = JumpMaxCount;
+	if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+	{
+		const FVector Feet = GetActorLocation() - FVector(0.f, 0.f, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+		Effects->SonicBoom(Feet, FVector::UpVector, RRKit::Get(Species).DieColor);
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s super hops (%d left)."), *GetName(), Kit->GetSuperHops());
+}
+
+void ARRRandomCharacter::LaunchCharacter(FVector LaunchVelocity, bool bXYOverride, bool bZOverride)
+{
+	Super::LaunchCharacter(LaunchVelocity * RRKit::Get(Species).KnockbackScale, bXYOverride, bZOverride);
+}
+
+bool ARRRandomCharacter::IsNoticedByTeam(int32 InTeam) const
+{
+	return IsSeenByTeam(GetWorld(), InTeam, GetActorLocation()) && !Kit->IsHiddenFrom(InTeam);
+}
+
 void ARRRandomCharacter::StartFlight(float Seconds)
 {
 	if (!bAlive)
@@ -636,11 +738,14 @@ void ARRRandomCharacter::UpdateFlight()
 	Movement->JumpZVelocity = bFlying ? FlightRiseSpeed : BaseJumpZVelocity;
 	JumpMaxHoldTime = bFlying ? FlightMaxHoldTime : BaseJumpMaxHoldTime;
 
-	// The glide lasts until landing even if the power runs out mid-air, but not once falling off the arena
+	// The glide lasts until landing even if the power runs out mid-air, but not once falling off the arena. The dragon's
+	// kit glides too while jump is held on the way down (not on the way up: the glide's braking would cut its jump short).
 	if (URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(Movement))
 	{
-		const bool bStillInAir = RandomMovement->bGliding && Movement->IsFalling() && GetActorLocation().Z > HomeLocation.Z - GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
-		RandomMovement->bGliding = bFlying || bStillInAir;
+		const bool bAboveArena = Movement->IsFalling() && GetActorLocation().Z > HomeLocation.Z - GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+		bFlightGlide = bFlying || (bFlightGlide && bAboveArena);
+		const bool bHeldGlide = RRKit::Get(Species).bGlide && bAlive && bJumpHeld && bAboveArena && Movement->Velocity.Z <= 0.f;
+		RandomMovement->bGliding = bFlightGlide || bHeldGlide;
 		Movement->AirControl = RandomMovement->bGliding ? FlightAirControl : BaseAirControl;
 
 		// Feet at most FlightMaxHeightInBodies normal body heights above the arena floor (where the brawler started)
@@ -788,8 +893,28 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 	UpdateCamera(DeltaSeconds);
 }
 
+void ARRRandomCharacter::SetJumpHeld(bool bHeld)
+{
+	if (bJumpHeld == bHeld)
+	{
+		return;
+	}
+	bJumpHeld = bHeld;
+	// Only a gliding kit needs the server to know
+	if (!HasAuthority() && IsLocallyControlled() && RRKit::Get(Species).bGlide)
+	{
+		ServerSetJumpHeld(bHeld);
+	}
+}
+
+void ARRRandomCharacter::ServerSetJumpHeld_Implementation(bool bHeld)
+{
+	bJumpHeld = bHeld;
+}
+
 void ARRRandomCharacter::Jump()
 {
+	SetJumpHeld(true);
 	// No jumping (or climbing) on a vehicle, or while the tiger's spirit is out
 	if (!bAlive || bClimbing || Vehicle || IsUsingUltimate())
 	{
@@ -804,10 +929,14 @@ void ARRRandomCharacter::Jump()
 		JumpPressedTime = -UE_BIG_NUMBER;
 		return;
 	}
-	// With the flight power the jump is the lift-off; holding it keeps rising
+	// With the flight power the jump is the lift-off; holding it keeps rising. In mid-air a stored super hop (the rabbit's)
+	// takes the place of the second jump.
 	if (bFlying || !TryClimb())
 	{
-		Super::Jump();
+		if (!TrySuperHop())
+		{
+			Super::Jump();
+		}
 	}
 }
 
@@ -1003,6 +1132,7 @@ void ARRRandomCharacter::EndDash()
 void ARRRandomCharacter::StopJumping()
 {
 	Super::StopJumping();
+	SetJumpHeld(false);
 	// Letting go of the second press ends the dash
 	if (bDashing && IsLocallyControlled())
 	{
@@ -1104,8 +1234,10 @@ void ARRRandomCharacter::UpdateDamagePopups(float DeltaSeconds)
 void ARRRandomCharacter::UpdateWalkSpeed()
 {
 	const float VehicleSpeed = Vehicle ? Vehicle->GetHandling().SpeedMultiplier : 1.f;
+	// On foot the species' kit counts too (the rabbit quicker, the tiger slower); a vehicle goes at its own speed
+	const float KitSpeed = Vehicle ? 1.f : RRKit::Get(Species).MoveSpeedScale;
 	GetCharacterMovement()->MaxWalkSpeed = IsUsingUltimate() ? 0.f
-		: BaseWalkSpeed * VehicleSpeed * RandomEvents->GetSpeedMultiplier() * DiceBuffs->GetMultiplier(ERRDiceBuffStat::MoveSpeed);
+		: BaseWalkSpeed * VehicleSpeed * KitSpeed * RandomEvents->GetSpeedMultiplier() * DiceBuffs->GetMultiplier(ERRDiceBuffStat::MoveSpeed);
 	if (IsDashingToFormation())
 	{
 		GetCharacterMovement()->MaxWalkSpeed = FormationDashSpeed;
@@ -1544,6 +1676,11 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 	NextFireTime = Now + GetFireInterval();
 	--Ammo;
 	LastCombatTime = Now;
+	// Shooting gives an invisible brawler away (and that shot gets the fox's ambush bonus)
+	if (HasAuthority())
+	{
+		Kit->OnShot();
+	}
 	LastShotTime = Now;
 	// Other machines play the firing animation when this changes
 	++ShotCount;
@@ -1639,10 +1776,11 @@ void ARRRandomCharacter::ServerRollDice_Implementation()
 	RollDice();
 }
 
-void ARRRandomCharacter::AddDamagePopup(float Amount, ERRHitEffect Effect)
+void ARRRandomCharacter::AddDamagePopup(float Amount, ERRHitEffect Effect, bool bBackstab)
 {
 	FRRDamagePopup& Popup = DamagePopups.AddDefaulted_GetRef();
 	Popup.Amount = Amount;
+	Popup.bBackstab = bBackstab;
 	Popup.OffsetX = FMath::FRandRange(-25.f, 25.f);
 	Popup.Effect = Effect;
 	Popup.Spin = FMath::FRandRange(-25.f, 25.f);
@@ -1650,9 +1788,9 @@ void ARRRandomCharacter::AddDamagePopup(float Amount, ERRHitEffect Effect)
 	Popup.Lifetime = Effect == ERRHitEffect::Skull ? 1.6f : DamagePopupLifetime;
 }
 
-void ARRRandomCharacter::MulticastDamagePopup_Implementation(float Amount, ERRHitEffect Effect)
+void ARRRandomCharacter::MulticastDamagePopup_Implementation(float Amount, ERRHitEffect Effect, bool bBackstab)
 {
-	AddDamagePopup(Amount, Effect);
+	AddDamagePopup(Amount, Effect, bBackstab);
 	// Every machine: the body flashes, and a burst of sparks flies off it toward the camera, the gun's color and size
 	HitFlash = 1.f;
 	if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
@@ -1948,6 +2086,26 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 		return 0.f;
 	}
 
+	FVector ShotDirection = DamageCauser ? DamageCauser->GetActorForwardVector() : -GetActorForwardVector();
+	if (DamageEvent.IsOfType(FPointDamageEvent::ClassID))
+	{
+		ShotDirection = static_cast<const FPointDamageEvent&>(DamageEvent).ShotDirection;
+	}
+	const ARRRandomProjectile* Shot = Cast<ARRRandomProjectile>(DamageCauser);
+
+	// A fox's shot in the back (within BackstabHalfAngle of straight behind: going the way this brawler faces), or its first
+	// shot out of invisibility, hits harder
+	bool bBackstab = false;
+	if (Shot && Attacker && Attacker != this && RRKit::Get(Attacker->GetSpecies()).bBackstab)
+	{
+		const float Behind = FVector::DotProduct(GetActorForwardVector().GetSafeNormal2D(), ShotDirection.GetSafeNormal2D());
+		bBackstab = Behind >= FMath::Cos(FMath::DegreesToRadians(RRKit::BackstabHalfAngle)) || Attacker->GetKit()->ConsumeAmbush();
+		if (bBackstab)
+		{
+			DamageAmount *= RRKit::BackstabMultiplier;
+		}
+	}
+
 	// Giants shrug off part of every hit
 	const float Damage = Super::TakeDamage(DamageAmount * (bGiant ? GiantDamageTakenMultiplier : 1.f), DamageEvent, EventInstigator, DamageCauser);
 	if (Damage <= 0.f)
@@ -1955,25 +2113,22 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 		return 0.f;
 	}
 
-	Health = FMath::Max(0.f, Health - Damage);
+	// A shield (the squirrel's own die) takes what it can first; an invisible brawler flickers into view
+	Health = FMath::Max(0.f, Health - Kit->AbsorbDamage(Damage));
+	Kit->OnHit();
 	LastCombatTime = GetWorld()->GetTimeSeconds();
 	// The number floats up on every machine, the host included, with the sticker of the gun that hit; a foam finger's
 	// knockout shows a skull
-	const ARRRandomProjectile* Shot = Cast<ARRRandomProjectile>(DamageCauser);
 	ERRHitEffect Effect = Shot ? Shot->HitEffect : ERRHitEffect::Pistol;
 	if (Effect == ERRHitEffect::Poke && Health <= 0.f)
 	{
 		Effect = ERRHitEffect::Skull;
 	}
-	MulticastDamagePopup(Damage, Effect);
+	MulticastDamagePopup(Damage, Effect, bBackstab);
+	UE_CLOG(bBackstab, LogTemp, Log, TEXT("RRRandom: %s backstabs %s for %.0f."), *Attacker->GetName(), *GetName(), Damage);
 
 	if (Health <= 0.f)
 	{
-		FVector ShotDirection = DamageCauser ? DamageCauser->GetActorForwardVector() : -GetActorForwardVector();
-		if (DamageEvent.IsOfType(FPointDamageEvent::ClassID))
-		{
-			ShotDirection = static_cast<const FPointDamageEvent&>(DamageEvent).ShotDirection;
-		}
 		KnockOut(ShotDirection, Attacker);
 	}
 	return Damage;
@@ -1985,8 +2140,13 @@ void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharact
 	Health = 0.f;
 	RespawnRemaining = RespawnDelay;
 	DiceBuffs->ClearBuffs();
-	// Back to the starting pistol. A giant falls as one and gets back up normal size (see ApplyStandingBody).
-	Weapon = FRRWeapon();
+	Kit->ClearPowers();
+	// Back to the starting pistol (the squirrel keeps its gun in its cheek pouch). A giant falls as one and gets back up
+	// normal size (see ApplyStandingBody).
+	if (!RRKit::Get(Species).bCheekPouch)
+	{
+		Weapon = FRRWeapon();
+	}
 	bGiant = false;
 	GiantRemaining = 0.f;
 	bFlying = false;
@@ -1996,7 +2156,7 @@ void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharact
 	FlingVelocity = FVector::ZeroVector;
 	if (FlyBackAnimation && RamImpactTime == GetWorld()->GetTimeSeconds() && !RamImpact.IsNearlyZero())
 	{
-		const float Speed = FMath::Clamp(RamImpact.Size2D() * FlingSpeedShare, FlingSpeedRange.X, FlingSpeedRange.Y);
+		const float Speed = FMath::Clamp(RamImpact.Size2D() * FlingSpeedShare, FlingSpeedRange.X, FlingSpeedRange.Y) * RRKit::Get(Species).KnockbackScale;
 		KnockdownDirection = RamImpact.GetSafeNormal2D();
 		FlingVelocity = RamImpact.GetSafeNormal2D() * Speed + FVector(0.f, 0.f, FlingLift);
 	}

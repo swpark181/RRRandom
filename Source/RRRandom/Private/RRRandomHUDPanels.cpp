@@ -571,7 +571,7 @@ void ARRRandomHUD::DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* 
 			continue;
 		}
 		// Opponents: only those the team sees; in a third-person game none (no fog of war, so no shared sight to show)
-		if (!bAlly && (bThirdPersonGame || !Brawler->IsAlive() || !ARRRandomCharacter::IsSeenByTeam(GetWorld(), Team, Brawler->GetActorLocation())))
+		if (!bAlly && (bThirdPersonGame || !Brawler->IsAlive() || !Brawler->IsNoticedByTeam(Team)))
 		{
 			continue;
 		}

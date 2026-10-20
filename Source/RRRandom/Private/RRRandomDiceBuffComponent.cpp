@@ -104,12 +104,13 @@ bool URRRandomDiceBuffComponent::RollDice()
 	}
 	else
 	{
-		// One draw picks the kind: weapon, giant, flight, or else a buff
+		// One draw picks the kind: weapon, giant, flight, the owner's own, or else a buff
 		const float Kind = Stream.FRand();
 		LastRoll.bWeapon = Kind < WeaponDieChance;
 		LastRoll.bGiant = !LastRoll.bWeapon && Kind < WeaponDieChance + GiantDieChance;
 		LastRoll.bFlight = !LastRoll.bWeapon && !LastRoll.bGiant && Kind < WeaponDieChance + GiantDieChance + FlightDieChance;
-		if (!LastRoll.bWeapon && !LastRoll.bGiant && !LastRoll.bFlight)
+		LastRoll.bOwn = !LastRoll.bWeapon && !LastRoll.bGiant && !LastRoll.bFlight && Kind < WeaponDieChance + GiantDieChance + FlightDieChance + OwnDieChance;
+		if (!LastRoll.bWeapon && !LastRoll.bGiant && !LastRoll.bFlight && !LastRoll.bOwn)
 		{
 			LastRoll.Stat = static_cast<ERRDiceBuffStat>(Stream.RandRange(0, 2));
 		}
@@ -153,6 +154,10 @@ void URRRandomDiceBuffComponent::ApplyRoll(const FRRDiceRoll& Roll)
 	else if (Roll.bFlight)
 	{
 		OnFlightDie.Broadcast(Roll.Face);
+	}
+	else if (Roll.bOwn)
+	{
+		OnOwnDie.Broadcast(Roll.Face);
 	}
 	else
 	{

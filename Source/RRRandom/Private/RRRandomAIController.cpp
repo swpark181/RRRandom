@@ -150,7 +150,7 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	}
 
 	// Bots go by the fog of war like players: an opponent out of the team's sight is lost (remembered where last seen)
-	if (Opponent.IsValid() && !ARRRandomCharacter::IsSeenByTeam(GetWorld(), Self->GetTeam(), Opponent->GetActorLocation()))
+	if (Opponent.IsValid() && !Opponent->IsNoticedByTeam(Self->GetTeam()))
 	{
 		Opponent = nullptr;
 	}
@@ -619,7 +619,7 @@ ARRRandomCharacter* ARRRandomAIController::FindBestOpponent(const ARRRandomChara
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{
 		// Only opponents the team can see through the fog of war
-		if (It->GetTeam() == Self->GetTeam() || !It->IsAlive() || !ARRRandomCharacter::IsSeenByTeam(GetWorld(), Self->GetTeam(), It->GetActorLocation()))
+		if (It->GetTeam() == Self->GetTeam() || !It->IsAlive() || !It->IsNoticedByTeam(Self->GetTeam()))
 		{
 			continue;
 		}

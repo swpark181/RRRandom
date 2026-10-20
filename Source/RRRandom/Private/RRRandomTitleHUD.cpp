@@ -1,4 +1,5 @@
 #include "RRRandomTitleHUD.h"
+#include "RRRandomKit.h"
 #include "RRRandomSessionSubsystem.h"
 #include "RRRandomSpecies.h"
 #include "RRRandomTitlePlayerController.h"
@@ -434,8 +435,8 @@ void ARRRandomTitleHUD::DrawHUD()
 		CardCount += bCards && ARRRandomTitlePlayerController::GetSpeciesOf(Choice) != INDEX_NONE ? 1 : 0;
 	}
 	const float CardWidth = CardCount > 0 ? (CardRowWidth - CardGap * (CardCount - 1)) / CardCount * S : 0.f;
-	// Room under the cards for the selected brawler's line
-	const float DescriptionRoom = 54.f * S;
+	// Room under the cards for the selected brawler's line and its passive and own die
+	const float DescriptionRoom = 108.f * S;
 	float NextTop = Top;
 	for (int32 Index = 0; Index < Choices.Num(); ++Index)
 	{
@@ -545,6 +546,23 @@ void ARRRandomTitleHUD::DrawHUD()
 		const float Left = ColumnX - (Box.X + Mark + 10.f * S) * 0.5f;
 		RRUI::DrawPill(Canvas, FBox2D(FVector2D(Left, DescriptionY + Box.Y * 0.15f), FVector2D(Left + Mark, DescriptionY + Box.Y * 0.85f)), RRUI::Pink);
 		RRUI::DrawText(Canvas, Description, FVector2D(Left + Mark + 10.f * S, DescriptionY), Size, RRUI::EWeight::SemiBold, RRUI::Ink);
+
+		// A brawler: its passive and its own die (FRRKit), one tag each, centered under the line
+		const int32 Species = ARRRandomTitlePlayerController::GetSpeciesOf(Choices[Menu->GetSelected()]);
+		if (Species != INDEX_NONE)
+		{
+			const FRRKit& Kit = RRKit::Get(Species);
+			const float TagSize = 12.f * S;
+			float TagY = DescriptionY + Box.Y + 10.f * S;
+			auto Tag = [&](const FString& Label, const FString& Detail, const FLinearColor& Mark)
+			{
+				const FVector2D TagBox = RRUI::MeasureTag(Label, Detail, TagSize);
+				RRUI::DrawTag(Canvas, Label, Detail, FVector2D(ColumnX - TagBox.X * 0.5f, TagY), TagSize, Mark);
+				TagY += TagBox.Y + 6.f * S;
+			};
+			Tag(FString(TEXT("PASSIVE · ")) + Kit.PassiveName, Kit.PassiveLine, RRUI::Mint);
+			Tag(Kit.DieName, Kit.DieLine, RRUI::Pastel(Kit.DieColor, 0.2f));
+		}
 	}
 
 	// Then the online status
