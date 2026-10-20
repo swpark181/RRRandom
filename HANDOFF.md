@@ -71,6 +71,37 @@ Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMem
 - (63차) 로봇도 점프할 수 있게.
 - (64차) 동물친구들 점프도 조금 더 높고 멀리, 점프 모션 추가.
 - (65차) 용이 날 때 땅 기준으로 날기 때문에 건물 위로 못 올라감 → 맵 전체에 날 수 있는 영역을 정하고 지금 있는 제한은 해제.
+- (66차) 캐릭터 카메라(3인칭)가 앞이 너무 안 보임 → 조금 더 뒤에서. 너무 뒤로 빠져 RPG 같은 느낌은 아니게.
+- (67차) Shift 를 눌러 달리는 기능.
+
+## 67차 — Shift 달리기 (사용자: shift 눌러서 달릴 수 있는 기능)
+
+- 입력: `IA_Sprint`(왼쪽·오른쪽 Shift, 누르는 동안) → `ARRRandomPlayerController::bSprintHeld`. 매 프레임 `UpdateSprint`: 누르고 있고, 입력이 막히지 않았고, 쏘는 중(`IsAiming`, 쏜 뒤 잠깐)·조준(`IsAimingDownSights`)이 아니면 이동 컴포넌트의 `bWantsToSprint` 를 켬.
+- 속도는 `URRRandomMovementComponent::GetMaxSpeed` × `SprintSpeedScale` 1.5 (걷기·점프 중). `bWantsToSprint` 를 저장된 이동(`FRRSavedMove`, `FLAG_Custom_0`)에 실어 보내서 서버도 같은 속도 — 예측·재생 그대로, 온라인에서 되돌려지지 않게. 언제 되는지는 `ARRRandomCharacter::CanSprint`(살아 있고 탈것·로봇·오르기·궁극기·결과 화면 줄 서기가 아닐 때, 걷기 속도 > 0).
+- 겉모습: 걷기 애니메이션이 속도에 맞춰 빨라지는 기존 방식 그대로(재생 속도 = 속도 / 걷기 애니메이션 속도) + 걷기보다 빠른 만큼 몸이 앞으로 최대 9° 기울어짐(속도로 판단해서 다른 사람 화면에도 보임). 3인칭 카메라는 달리는 동안 12% 뒤로(`SprintCameraPull`). 탑뷰 카메라는 그대로.
+- 테스트 명령 `RRSprint 1|0`(쉬핑 제외, 스크립트로 Shift 를 누르고 있을 수 없어서).
+- 확인(빌드 경고 없음, 스튜디오 맵 3인칭 여우, 스크래치 `game_seq.py` 에 `speed`): 걷기 300 → `RRSprint 1` 450 → `RRSprint 0` 300. 옆 시점 캡처 `C:\work\char-pipeline\output\screens\sprint\sprint_compare.png`.
+- 확인 못 한 것: 실제 Shift 키(바인딩은 다른 키들과 같은 방식), 온라인 참가자의 달리기(되돌림 없는지), 봇은 안 달림. 제대로 된 달리기 모션(Mixamo "Run")은 아직 없음 — 종마다 Mixamo 를 다시 거쳐야 함.
+
+### 67차 덧붙임 — 달리는 동안 공격 불가, 총구 아래로 (사용자: 달리기 중에는 공격할 수 없고, 자연스럽게 달리기 위해 총구를 아래로)
+
+- 쏘기 막기: `ARRRandomCharacter::FireAt`(클라이언트 예측)과 `ShootAt`(서버) 둘 다 `IsSprinting()` 이면 안 쏨. 이제 Shift 가 발사보다 우선(처음엔 쏘는 중이면 달리기가 꺼졌는데 반대로 바꿈 — `UpdateSprint` 에서 `IsAiming` 조건 뺌). 조준(오른쪽 버튼) 중엔 여전히 걷기.
+- 총 내리기(모든 머신, 속도로 판단하는 `ARRRandomCharacter::GetSprintShare` — 몸 기울기도 이걸로 바꿈): `URRRandomBodyAnimInstance::UpdateSprintPose` 가 양 윗팔(`LeftArm`, `RightArm`)을 메시 옆축으로 42° 내림(같은 회전이라 두 손이 같이 움직임, 0.15초 in / 0.12초 out, 사격 자세 비중만큼 빠짐). 총 방향은 오른손→왼손 선이라 팔 회전만으론 거의 안 숙여져서 `URRRandomGunComponent` 가 손 회전에 총 자체의 옆축으로 `SprintMuzzleDown` 50° 를 더함.
+- 확인(빌드 경고 없음, 스튜디오, `RRSprint`/`RRShoot`/`RRStudioCam`): 달리는 중 `RRShoot` 세 번 → 탄창 15/15 그대로, 멈춘 뒤 한 번 → 14/15.
+
+### 67차 덧붙임 2 — Mixamo 달리기 모션 (사용자: 달리기 모션 믹사모에서 받아서 적용)
+
+- Mixamo(사용자 계정 — 로그아웃돼 있어서 사용자가 직접 로그인): 남은 캐릭터 `dragon_body_mixamo` 그대로(업로드 안 함). "Rifle Run — Running With Rifle Down"(`c9cd4d5c-b96c-11e4-a802-0aaa78deedf9`, 0.67초, In Place, 30fps, With Skin — 리그 재기용) → `C:\work\char-pipeline\input\shared_anims\dragon_rifle_run.fbx`. 리그 엉덩이 20.4, 발 속도 105 cm/s(`blender_rig_measure.py`, `blender_anim_speed.py`).
+- `char-pipeline\scripts\ue_import_shared_anim.py`(새, `ue_import_flyback.py` 일반화: `<fbx>|<이름>|<리그 엉덩이>|<종>=<엉덩이>...`; 다람쥐 엄지 없음 오류는 잡고 계속) → 다섯 종 `A_<종>_Run`(Fox 27.5, Rabbit 17.5, Squirrel 21.2, Tiger 26.3, Dragon 20.4 — `FSpeciesTuning` 값).
+- 코드: `FRRSpeciesLook::Run`/`RunSpeed`(여우 엉덩이 기준 `FoxRunSpeed` 141.5 × 보폭), 캐릭터 `RunAnimation`/`RunAnimationSpeed`. `UpdateLocomotionAnimation`: 걷기 대신 `GetSprintShare()` > 0.5 이면 달리기(나갈 땐 0.2 아래 — 깜빡임 없게), 재생 속도 = 속도 / RunSpeed(0.5~2.5; 여우 450 → 약 1.76배). 달리기 모션이 나오는 동안 67차의 만든 자세(팔 내리기 42°, 총구 50°)는 꺼짐(`GetSprintPoseShare`) — 모션 자체가 총을 내리고 있음. 모션이 없는 종은 예전처럼.
+- 확인(빌드 경고 없음, 스튜디오 옆·앞 캡처): 다섯 종 모두 달리기 모션, 권총은 총구 아래, 라이플은 가슴 앞에 비스듬히. `C:\work\char-pipeline\output\screens\run_fox\run_fox_sheet.png`, `run_all_species.png`.
+- 확인 못 한 것: 실제 Shift 로 오래 달릴 때 1.76배 재생이 너무 빠르게 느껴지는지(그러면 `SprintSpeedScale` 을 낮추거나 `RunSpeed` 를 키움), 온라인 다른 사람 화면(속도로 판단하니 될 것), 걷기↔달리기 전환이 블렌드 없이 바로 바뀜. 옆·앞 시점에서 권총·라이플 모두 총구가 아래·앞을 향함. `C:\work\char-pipeline\output\screens\sprint2\sprint_pose.png`, `sprint3\sprint_pose_zoom.png`.
+
+## 66차 — 3인칭 카메라 조금 뒤로 (사용자: 앞이 너무 안 보이는 느낌, 조금 더 뒤에서, 너무 빠지면 RPG 같으니 그건 아니게)
+
+- `RRRandomCharacter.cpp` 상수만: 어깨 카메라 거리 `ShoulderArmLength` 340 → 470, 오프셋 `ShoulderOffset` (0, 75, 95) → (0, 85, 120) — 조금 더 오른쪽·위로, 시야 80 그대로. 조준 `SightsArmLength` 290 → 340, `SightsOffset` (0, 125, 95) → (0, 130, 110). 비행·거인·로봇·합체 배율은 그대로 이 값에 곱해짐. 탑뷰는 안 바꿈.
+- 확인(빌드 경고 없음, 스크래치 `run_seq.ps1`/`game_seq.py`, 주사위 마을 3인칭 여우): 전에는 머리·어깨가 화면 아래 1/4 을 덮고 잘렸는데, 이제 온몸이 화면 아래 가운데에 작게 들어오고 길 앞·좌우 엄폐물이 보임. 눈높이 근처 시점이라 내려다보는 RPG 느낌은 아님. `C:\work\char-pipeline\output\screens\tps_camera\tps_camera_compare.png`(before/after).
+- 확인 못 한 것: 조준(오른쪽 버튼) 화면 — 스크립트로 조준 입력을 못 넣음. 좁은 실내(벽에 붙을 때 충돌로 당겨짐)와 거인·비행 때 체감.
 
 ## 65차 — 맵별 비행 영역, 예전 비행 제한 해제 (사용자: 용이 땅 기준으로 날아 건물 위로 못 올라감, 맵 전체에 날 수 있는 영역을 제한하고 지금 제한은 해제)
 

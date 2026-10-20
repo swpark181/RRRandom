@@ -154,6 +154,17 @@ public:
 	bool IsInRobot() const { return Robot && RobotSeat != ERRRobotSeat::Combiner && RobotSeat != ERRRobotSeat::None; }
 	/** Driving the star robot with the whole crew in, alive and in play: its jump is this one's (Jump). */
 	bool CanJumpRobot() const;
+	/** On its own feet, free to run (not on a vehicle, in the robot, an ultimate, climbing or the dance line). */
+	bool CanSprint() const;
+	/** Running with Shift right now (URRRandomMovementComponent), for the camera, HUD and animation. */
+	bool IsSprinting() const;
+	/**
+	 * 0..1: how far over its walking speed it runs on the ground (a sprint, as every machine sees it from the speed):
+	 * the forward lean and the gun held low (URRRandomBodyAnimInstance) follow it.
+	 */
+	float GetSprintShare() const;
+	/** The made-up "gun held low" pose's share: the sprint's, unless the species' own run (rifle already down) plays. */
+	float GetSprintPoseShare() const { return RunAnimation && CurrentAnimation == RunAnimation ? 0.f : GetSprintShare(); }
 	/** Server, by the robot: combining it, in a seat, or done with it (null). */
 	void SetRobotSeat(ARRRandomStarRobot* NewRobot, ERRRobotSeat NewSeat);
 	/** Server: off the vehicle ridden, if any (the driver getting off lets the one behind out too). */
@@ -574,6 +585,10 @@ protected:
 	/** Ground speed at which the walk animation plays at its normal rate. */
 	UPROPERTY(EditAnywhere, Category = "Animation")
 	float WalkAnimationSpeed = 200.f;
+	/** Sprinting: the species' run (FRRSpeciesLook::Run) and the ground speed it plays at its normal rate. */
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequence> RunAnimation;
+	float RunAnimationSpeed = 300.f;
 
 private:
 	void UpdateLocomotionAnimation();
@@ -945,6 +960,8 @@ private:
 	void UpdateCamera(float DeltaSeconds);
 	void ApplyThirdPersonRotation();
 	float FlightCameraPull = 0.f;
+	/** 0..1, eased: my own sprint, for the over-the-shoulder camera's pull back. */
+	float SprintCameraBlend = 0.f;
 	float BaseCameraArmLength = 0.f;
 	FName MeshCollisionProfile;
 };
