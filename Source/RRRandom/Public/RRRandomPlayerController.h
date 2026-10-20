@@ -43,6 +43,10 @@ public:
 	FVector GetAimTarget(const FVector& CursorOrigin, const FVector& CursorDirection) const;
 
 	/** Hosts an online game (F1). */
+	/** Testing (not in Shipping): holds Shift's sprint on (1) or lets go (0), for scripts that can't hold a key. */
+	UFUNCTION(Exec)
+	void RRSprint(int32 bOn);
+
 	UFUNCTION(Exec)
 	void RRHost();
 
@@ -267,6 +271,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> AimAction;
 
+	/** Held (Shift): run, while not shooting or in the sights. */
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> SprintAction;
+
 	/** Third person: held, the cursor comes back and the mouse stops turning the camera. */
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> FreeCursorAction;
@@ -375,6 +383,11 @@ private:
 	void OnLook(const FInputActionValue& Value);
 	void OnAimStart();
 	void OnAimStop();
+	void OnSprintStart() { bSprintHeld = true; }
+	void OnSprintStop() { bSprintHeld = false; }
+	bool bSprintHeld = false;
+	/** Every frame: tells my animal friend's movement whether to sprint (Shift held, not shooting or in the sights). */
+	void UpdateSprint();
 	void OnFreeCursorStart();
 	void OnFreeCursorStop();
 	/** The game's window is the one in use and its view has the keyboard and mouse. */

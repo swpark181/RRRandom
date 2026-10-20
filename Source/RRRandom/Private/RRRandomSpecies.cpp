@@ -34,6 +34,9 @@ namespace
 	// blender_anim_speed.py). The others' Mixamo copies stride in proportion to their hips height (the rabbit's walk: 52).
 	constexpr float FoxWalkSpeed = 79.f;
 	constexpr float FoxAimRunSpeeds[4] = { 148.f, 134.f, 125.f, 148.f };
+	// Mixamo "Rifle Run" (rifle down; round 67, ue_import_shared_anim.py from the dragon body rig): its feet show 105 a
+	// second on that rig's hips height (20.4, blender_anim_speed.py), so 141.5 on the fox's
+	constexpr float FoxRunSpeed = 141.5f;
 
 	template <typename T>
 	T* Find(const FString& Path)
@@ -111,8 +114,9 @@ const TArray<FRRSpeciesLook>& FRRSpeciesLook::GetAll()
 		Look.Walk = Anim(TEXT("Walk"));
 		Look.Fire = Anim(TEXT("Fire"));
 		Look.Death = Anim(TEXT("Death"));
-		// One Mixamo rig's motion on every skeleton (char-pipeline/scripts/ue_import_flyback.py)
+		// One Mixamo rig's motion on every skeleton (char-pipeline/scripts/ue_import_flyback.py, ue_import_shared_anim.py)
 		Look.FlyBack = Anim(TEXT("FlyBack"));
+		Look.Run = Anim(TEXT("Run"));
 		// Mixamo "House Dancing", then twist, shimmy, running man and chicken dance; frustrated, crying and sad
 		for (const TCHAR* Dance : { TEXT("Victory"), TEXT("Dance1"), TEXT("Dance2"), TEXT("Dance3"), TEXT("Dance4") })
 		{
@@ -138,6 +142,7 @@ const TArray<FRRSpeciesLook>& FRRSpeciesLook::GetAll()
 		Look.MeshScale = Tuning.MeshScale;
 		const float Stride = Tuning.HipsHeight / FoxTuning.HipsHeight * Tuning.MeshScale;
 		Look.WalkSpeed = FoxWalkSpeed * Stride;
+		Look.RunSpeed = FoxRunSpeed * Stride;
 		for (int32 Direction = 0; Direction < 4; ++Direction)
 		{
 			Look.Aim.MoveSpeed[Direction] = FoxAimRunSpeeds[Direction] * Stride;

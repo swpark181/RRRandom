@@ -6,6 +6,7 @@
 #include "RRRandomGameState.h"
 #include "RRRandomHUD.h"
 #include "RRRandomMeteor.h"
+#include "RRRandomMovementComponent.h"
 #include "RRRandomOre.h"
 #include "RRRandomResultsDirector.h"
 #include "RRRandomSessionSubsystem.h"
@@ -163,6 +164,11 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 		AimAction = NewObject<UInputAction>(this, TEXT("IA_Aim"));
 		AimAction->ValueType = EInputActionValueType::Boolean;
 	}
+	if (!SprintAction)
+	{
+		SprintAction = NewObject<UInputAction>(this, TEXT("IA_Sprint"));
+		SprintAction->ValueType = EInputActionValueType::Boolean;
+	}
 	if (CheatGunActions.IsEmpty())
 	{
 		for (int32 Type = 0; Type < FRRWeapon::GetTypeCount(); ++Type)
@@ -194,6 +200,8 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 	MappingContext->MapKey(TitleAction, EKeys::Escape);
 	MappingContext->MapKey(ConfirmAction, EKeys::Enter);
 	MappingContext->MapKey(MapAction, EKeys::M);
+	MappingContext->MapKey(SprintAction, EKeys::LeftShift);
+	MappingContext->MapKey(SprintAction, EKeys::RightShift);
 	// Third person: the mouse looks, the right button aims down the sights
 	MappingContext->MapKey(LookAction, EKeys::Mouse2D);
 	MappingContext->MapKey(AimAction, EKeys::RightMouseButton);
@@ -312,6 +320,8 @@ void ARRRandomPlayerController::SetupInputComponent()
 	EnhancedInput->BindAction(LookAction, ETriggerEvent::Triggered, this, &ARRRandomPlayerController::OnLook);
 	EnhancedInput->BindAction(AimAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnAimStart);
 	EnhancedInput->BindAction(AimAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnAimStop);
+	EnhancedInput->BindAction(SprintAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnSprintStart);
+	EnhancedInput->BindAction(SprintAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnSprintStop);
 	EnhancedInput->BindAction(FreeCursorAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnFreeCursorStart);
 	EnhancedInput->BindAction(FreeCursorAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnFreeCursorStop);
 	EnhancedInput->BindAction(CheatFlyAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRFly);
@@ -325,6 +335,7 @@ void ARRRandomPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
 
+	UpdateSprint();
 	if (bPauseMenuOpen && ARRRandomGameState::IsMatchOver(this))
 	{
 		ClosePauseMenu();
@@ -549,6 +560,13 @@ void ARRRandomPlayerController::ClosePauseMenu()
 bool ARRRandomPlayerController::IsGameplayInputBlocked() const
 {
 	return bPauseMenuOpen || ARRRandomGameState::IsPlayLocked(this);
+}
+
+void ARRRandomPlayerController::RRSprint(int32 bOn)
+{
+#if !UE_BUILD_SHIPPING
+	bSprintHeld = bOn != 0;
+#endif
 }
 
 void ARRRandomPlayerController::RRWin()
@@ -1258,6 +1276,18 @@ void ARRRandomPlayerController::OnLook(const FInputActionValue& Value)
 	AddYawInput(Delta.X * Sensitivity);
 	// Mouse up looks up
 	AddPitchInput(-Delta.Y * Sensitivity);
+}
+
+void ARRRandomPlayerController::UpdateSprint()
+{
+	ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	URRRandomMovementComponent* Movement = RandomCharacter ? Cast<URRRandomMovementComponent>(RandomCharacter->GetCharacterMovement()) : nullptr;
+	if (!Movement || !IsLocalController())
+	{
+		return;
+	}
+	// Running wins over the fire button (no shots while running, ARRRandomCharacter::ShootAt); in the sights it walks
+	Movement->bWantsToSprint = bSprintHeld && !IsGameplayInputBlocked() && !RandomCharacter->IsAimingDownSights();
 }
 
 void ARRRandomPlayerController::OnAimStart()

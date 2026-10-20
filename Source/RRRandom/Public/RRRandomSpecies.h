@@ -58,6 +58,14 @@ struct FRRSpeciesLook
 	UPROPERTY()
 	TObjectPtr<UAnimSequence> Fire;
 
+	/** Running with Shift (round 67): Mixamo "Rifle Run" (running with the rifle down), in place; null: the walk, sped up. */
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> Run;
+
+	/** Ground speed at which the run plays at its normal rate, at MeshScale. */
+	UPROPERTY()
+	float RunSpeed = 300.f;
+
 	UPROPERTY()
 	TObjectPtr<UAnimSequence> Death;
 

@@ -7,6 +7,9 @@
 
 namespace
 {
+	/** Running (Shift, round 67): degrees the muzzle tips down at full run (ARRRandomCharacter::GetSprintShare). */
+	constexpr float SprintMuzzleDown = 50.f;
+
 	/**
 	 * A gun's model: the asset, its length in the hands at normal size, its muzzle tip on the 100-long mesh, and where on
 	 * the gun the hands hold it, from the grip (the mesh's origin), also on the 100-long mesh. The aiming pose holds a gun
@@ -128,7 +131,13 @@ void URRRandomGunComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	const float AimPose = Brawler->GetAimPoseWeight();
 	const float Stance = FMath::Max(Brawler->GetFireStanceAlpha(), AimPose);
 	const FVector Holding = Forward;
-	const FQuat HandRotation = FMath::Abs(Holding.Z) < 0.98f ? FRotationMatrix::MakeFromXZ(Holding, FVector::UpVector).ToQuat() : GetComponentQuat();
+	FQuat HandRotation = FMath::Abs(Holding.Z) < 0.98f ? FRotationMatrix::MakeFromXZ(Holding, FVector::UpVector).ToQuat() : GetComponentQuat();
+	// Running (Shift): the muzzle tipped down (the arms drop too, URRRandomBodyAnimInstance), about the gun's own side
+	// axis so it stays in the hands; positive pitch about +Y tips the muzzle (+X) down
+	if (const float Sprint = Brawler->GetSprintPoseShare(); Sprint > 0.f)
+	{
+		HandRotation = HandRotation * FQuat(FVector::RightVector, FMath::DegreesToRadians(SprintMuzzleDown * Sprint));
+	}
 	const FVector Hold = bOwnLook ? GunLooks[Kind].Hold : FVector::ZeroVector;
 	const FVector HandLocation = Palm + Actor.TransformVectorNoScale(HoldOffset) * Size * (1.f - Stance)
 		- HandRotation.RotateVector(Hold) * Length / 100.f * Size;

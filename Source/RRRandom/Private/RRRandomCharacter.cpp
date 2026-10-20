@@ -75,6 +75,12 @@ namespace
 	constexpr float FlightLeanSpeed = 600.f;
 	constexpr float FlightLeanRate = 6.f;
 	constexpr float FlightCameraPullShare = 0.12f;
+	// Sprinting (round 67, Shift; URRRandomMovementComponent::SprintSpeedScale): the body leans this far forward once it
+	// runs this share of its walking speed faster than a walk, and the over-the-shoulder camera pulls back by this share
+	constexpr float SprintLean = 9.f;
+	constexpr float SprintLeanSpan = 0.35f;
+	constexpr float SprintCameraPull = 0.12f;
+	constexpr float SprintCameraRate = 4.f;
 	constexpr float FlightCameraPullRate = 2.f;
 	// Crew of the star robot ask it to fire (its fists or its shield) this often at most
 	constexpr float RobotFireRequestInterval = 0.1f;
@@ -104,13 +110,15 @@ namespace
 	constexpr float VehicleCameraClearHeight = 100.f;
 	// Third person (a cheat): the over-the-shoulder camera's distance, its offset from the brawler (forward, right, up), and its
 	// field of view; the same into the sights, and how fast the camera goes into and out of them
-	constexpr float ShoulderArmLength = 340.f;
-	const FVector ShoulderOffset(0.f, 75.f, 95.f);
+	// (round 66: from 340 / 95 up — the big head filled the bottom of the screen and hid the way ahead; much further back,
+	// or higher, and it starts to look like an RPG's follow camera)
+	constexpr float ShoulderArmLength = 470.f;
+	const FVector ShoulderOffset(0.f, 85.f, 120.f);
 	constexpr float ShoulderFieldOfView = 80.f;
 	// (the fox's head is big: in the sights the camera stays back and well off to the right, so the brawler sits at the
 	// screen's lower left edge instead of filling the middle; the narrower view still zooms)
-	constexpr float SightsArmLength = 290.f;
-	const FVector SightsOffset(0.f, 125.f, 95.f);
+	constexpr float SightsArmLength = 340.f;
+	const FVector SightsOffset(0.f, 130.f, 110.f);
 	constexpr float SightsFieldOfView = 52.f;
 	// Third person in flight: the camera pulls back by this share, rises this much and widens this many degrees, so the
 	// ground below and around stays in view; all of it, distance and offset, also grows with a giant's size
@@ -330,6 +338,8 @@ void ARRRandomCharacter::UseLook(const FRRSpeciesLook& Look)
 	IdleAnimation = Look.Idle;
 	WalkAnimation = Look.Walk;
 	WalkAnimationSpeed = Look.WalkSpeed;
+	RunAnimation = Look.Run;
+	RunAnimationSpeed = Look.RunSpeed;
 	FireAnimation = Look.Fire;
 	DeathAnimation = Look.Death;
 	FlyBackAnimation = Look.FlyBack;
@@ -1737,6 +1747,29 @@ void ARRRandomCharacter::GetOffVehicle()
 	}
 }
 
+bool ARRRandomCharacter::CanSprint() const
+{
+	return bAlive && !Vehicle && !Robot && !bClimbing && !IsUsingUltimate() && !IsDashingToFormation()
+		&& GetCharacterMovement()->MaxWalkSpeed > 0.f;
+}
+
+bool ARRRandomCharacter::IsSprinting() const
+{
+	const URRRandomMovementComponent* Movement = Cast<URRRandomMovementComponent>(GetCharacterMovement());
+	return Movement && Movement->IsSprinting() && GetVelocity().Size2D() > WalkAnimationThreshold;
+}
+
+float ARRRandomCharacter::GetSprintShare() const
+{
+	const UCharacterMovementComponent* Movement = GetCharacterMovement();
+	const float WalkMax = Movement ? Movement->MaxWalkSpeed : 0.f;
+	if (!bAlive || Vehicle || Robot || WalkMax <= 0.f || !Movement->IsMovingOnGround() || IsJumping() || IsDashingToFormation())
+	{
+		return 0.f;
+	}
+	return FMath::Clamp((GetVelocity().Size2D() - WalkMax * 1.05f) / (WalkMax * SprintLeanSpan), 0.f, 1.f);
+}
+
 bool ARRRandomCharacter::IsInFlight() const
 {
 	const UCharacterMovementComponent* Movement = GetCharacterMovement();
@@ -1758,6 +1791,12 @@ void ARRRandomCharacter::UpdateLocomotionAnimation()
 	const bool bInFlight = IsInFlight();
 	const bool bInAir = bInFlight || IsJumping() || LandSquash > 0.f;
 	UAnimSequence* Wanted = Speed > WalkAnimationThreshold && !bInAir ? WalkAnimation : (bShooting ? FireAnimation : IdleAnimation);
+	// Sprinting (Shift): the species' run, once clearly over a walk (and kept till clearly back under, no flicker)
+	const bool bRunning = RunAnimation && Wanted == WalkAnimation && GetSprintShare() > (CurrentAnimation == RunAnimation ? 0.2f : 0.5f);
+	if (bRunning)
+	{
+		Wanted = RunAnimation;
+	}
 
 	if (IsCelebrating())
 	{
@@ -1775,6 +1814,10 @@ void ARRRandomCharacter::UpdateLocomotionAnimation()
 	{
 		GetMesh()->SetPlayRate(FMath::Clamp(Speed / WalkAnimationSpeed, 0.5f, 3.f));
 	}
+	else if (CurrentAnimation == RunAnimation && RunAnimation)
+	{
+		GetMesh()->SetPlayRate(FMath::Clamp(Speed / RunAnimationSpeed, 0.5f, 2.5f));
+	}
 
 	// Standing and shooting: turn the body into the bladed stance so the rifle in its hands points down the line of fire.
 	// The aiming set does the same standing, and on the move keeps the legs on the way the brawler goes (the anim
@@ -1791,7 +1834,9 @@ void ARRRandomCharacter::UpdateLocomotionAnimation()
 	const float DeltaSeconds = GetWorld()->GetDeltaSeconds();
 	const float Pace = FMath::Clamp(Speed / FlightLeanSpeed, 0.f, 1.f);
 	const float Climb = GetVelocity().Z;
-	const float Lean = !bInFlight ? 0.f : Climb < -20.f ? FlightGlideLean + FlightGlideLeanAtSpeed * Pace
+	// Sprinting (Shift) on the ground: a little forward lean, by how far over its walking speed it goes (so everyone's
+	// screen shows it, not only the runner's)
+	const float Lean = !bInFlight ? SprintLean * (bInAir ? 0.f : GetSprintShare()) :Climb < -20.f ? FlightGlideLean + FlightGlideLeanAtSpeed * Pace
 		: FlightLeanMax * Pace * (Climb > 100.f ? FlightRiseLeanShare : 1.f);
 	// And it banks into turns like a bird, the harder the faster the way it flies turns
 	const float WayYaw = GetVelocity().Rotation().Yaw;
@@ -1824,6 +1869,7 @@ void ARRRandomCharacter::UpdateCamera(float DeltaSeconds)
 	const URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(GetCharacterMovement());
 	const bool bInFlight = !Vehicle && GetCharacterMovement()->IsFalling() && (bFlying || (RandomMovement && RandomMovement->bGliding));
 	FlightCameraPull = FMath::FInterpTo(FlightCameraPull, bInFlight ? 1.f : 0.f, DeltaSeconds, FlightCameraPullRate);
+	SprintCameraBlend = FMath::FInterpTo(SprintCameraBlend, IsSprinting() && !bInFlight ? 1.f : 0.f, DeltaSeconds, SprintCameraRate);
 	// In the star robot: framed round something that big. Combining it: watching it come together (where it stands is
 	// kept, so the view can ease back once it is done)
 	RobotCameraPull = FMath::FInterpTo(RobotCameraPull, IsInRobot() ? 1.f : 0.f, DeltaSeconds, RobotCameraPullRate);
@@ -1842,7 +1888,8 @@ void ARRRandomCharacter::UpdateCamera(float DeltaSeconds)
 		const float Body = GetActorScale3D().Z;
 		CameraBoom->bUsePawnControlRotation = true;
 		CameraBoom->bDoCollisionTest = true;
-		float ArmLength = FMath::Lerp(ShoulderArmLength, SightsArmLength, SightsBlend) * Body * (1.f + ShoulderFlightPull * FlightCameraPull);
+		float ArmLength = FMath::Lerp(ShoulderArmLength, SightsArmLength, SightsBlend) * Body
+			* (1.f + ShoulderFlightPull * FlightCameraPull + SprintCameraPull * SprintCameraBlend);
 		// Over a tall vehicle's sides (the star cars' pods and fenders), not inside them
 		const float VehicleRise = Vehicle && Vehicle->GetStarPart() >= 0 ? FMath::Max(0.f, Vehicle->GetHeight() - VehicleCameraClearHeight) : 0.f;
 		FVector Socket = FMath::Lerp(ShoulderOffset, SightsOffset, SightsBlend) * Body + FVector(0.f, 0.f, ShoulderFlightRise * FlightCameraPull + VehicleRise);
@@ -2036,7 +2083,8 @@ bool ARRRandomCharacter::FireAt(const FVector& TargetLocation)
 	// Client: run the cooldown here so holding the button sends one request per shot, and let the server shoot.
 	// Ammo comes back replicated; the server reloads an empty magazine by itself.
 	const float Now = GetWorld()->GetTimeSeconds();
-	if (!bAlive || !ProjectileClass || bReloading || bClimbing || Ammo <= 0 || Now < NextFireTime)
+	// Running (Shift) the gun is down: no shots till the run stops
+	if (!bAlive || !ProjectileClass || bReloading || bClimbing || IsSprinting() || Ammo <= 0 || Now < NextFireTime)
 	{
 		return false;
 	}
@@ -2066,7 +2114,8 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 		}
 		return false;
 	}
-	if (!bAlive || !ProjectileClass || bReloading || bClimbing || IsUsingUltimate() || Now + CooldownSlack < NextFireTime || ARRRandomGameState::IsPlayLocked(this))
+	if (!bAlive || !ProjectileClass || bReloading || bClimbing || IsSprinting() || IsUsingUltimate() || Now + CooldownSlack < NextFireTime
+		|| ARRRandomGameState::IsPlayLocked(this))
 	{
 		return false;
 	}

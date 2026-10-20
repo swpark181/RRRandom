@@ -55,6 +55,8 @@ private:
 	TArray<FQuat> FlightBends;
 	TArray<FName> JumpBones;
 	TArray<FQuat> JumpBends;
+	TArray<FName> SprintBones;
+	TArray<FQuat> SprintBends;
 	TArray<FName> WingBones;
 	TArray<FQuat> WingBends;
 	/** Turns each named bone in mesh space about its own root, in order (parents first). */
@@ -217,6 +219,8 @@ public:
 	const TArray<FQuat>& GetFlightBends() const { return FlightBends; }
 	const TArray<FName>& GetJumpBones() const { return JumpBoneNames; }
 	const TArray<FQuat>& GetJumpBends() const { return JumpBends; }
+	const TArray<FName>& GetSprintBones() const { return SprintBoneNames; }
+	const TArray<FQuat>& GetSprintBends() const { return SprintBends; }
 	const TArray<FName>& GetWingBones() const { return WingBoneNames; }
 	const TArray<FQuat>& GetWingBends() const { return WingBends; }
 	const TArray<float>& GetTailSwing() const { return BoneSwing; }
@@ -258,6 +262,12 @@ private:
 	TArray<FQuat> JumpBends;
 	float JumpWeight = 0.f;
 	float JumpRise = 0.f;
+
+	/** Running (Shift): the gun held low, muzzle down (round 67). The upper arms (left, right), then the hands. */
+	void UpdateSprintPose(float DeltaSeconds);
+	TArray<FName> SprintBoneNames;
+	TArray<FQuat> SprintBends;
+	float SprintWeight = 0.f;
 
 	/** The legs (thigh, knee, foot; left then right) and the neck and head, in that order. */
 	TArray<FName> FlightBoneNames;

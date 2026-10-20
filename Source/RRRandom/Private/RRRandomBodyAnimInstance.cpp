@@ -74,6 +74,7 @@ URRRandomBodyAnimInstance::URRRandomBodyAnimInstance()
 	FlightBoneNames = { TEXT("LeftUpLeg"), TEXT("LeftLeg"), TEXT("LeftFoot"), TEXT("RightUpLeg"), TEXT("RightLeg"), TEXT("RightFoot"), TEXT("Neck"), TEXT("Head") };
 	JumpBoneNames = { TEXT("LeftUpLeg"), TEXT("LeftLeg"), TEXT("LeftFoot"), TEXT("RightUpLeg"), TEXT("RightLeg"), TEXT("RightFoot"), TEXT("Spine"),
 		TEXT("LeftArm"), TEXT("LeftForeArm"), TEXT("RightArm"), TEXT("RightForeArm") };
+	SprintBoneNames = { TEXT("LeftArm"), TEXT("RightArm") };
 }
 
 void URRRandomBodyAnimInstance::UpdateFlightPose(float DeltaSeconds)
@@ -172,6 +173,30 @@ void URRRandomBodyAnimInstance::UpdateJumpPose(float DeltaSeconds)
 	JumpBends = { Side(Mix(&FJumpPose::ThighL)), Side(Mix(&FJumpPose::KneeL)), Side(Mix(&FJumpPose::FootL)),
 		Side(Mix(&FJumpPose::ThighR)), Side(Mix(&FJumpPose::KneeR)), Side(Mix(&FJumpPose::FootR)), Side(Mix(&FJumpPose::Spine)),
 		ArmTurn(-1.f), Side(Bend), ArmTurn(1.f), Side(Bend) };
+}
+
+namespace
+{
+	// Running (Shift, round 67): both upper arms swing down this far about the mesh's side axis (the same turn for both
+	// keeps the hands, and the gun between them, together; its muzzle then points down and ahead), easing in and out
+	constexpr float SprintArmDrop = 42.f;
+	constexpr float SprintPoseInTime = 0.15f;
+	constexpr float SprintPoseOutTime = 0.12f;
+}
+
+void URRRandomBodyAnimInstance::UpdateSprintPose(float DeltaSeconds)
+{
+	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetOwningActor());
+	const float Wanted = Brawler ? Brawler->GetSprintPoseShare() * (1.f - GetAimWeight()) : 0.f;
+	SprintWeight = FMath::FInterpConstantTo(SprintWeight, Wanted, DeltaSeconds, 1.f / (Wanted > SprintWeight ? SprintPoseInTime : SprintPoseOutTime));
+	if (SprintWeight <= 0.f)
+	{
+		SprintBends.Reset();
+		return;
+	}
+	// About the side axis (+X): negative tips the front (+Y) down
+	const FQuat Down(FVector::ForwardVector, FMath::DegreesToRadians(-SprintArmDrop * SprintWeight));
+	SprintBends = { Down, Down };
 }
 
 void FRRRandomBodyAnimInstanceProxy::TurnBones(FPoseContext& Output, const TArray<FName>& Names, const TArray<FQuat>& Bends)
@@ -280,6 +305,7 @@ void URRRandomBodyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	{
 		UpdateFlightPose(DeltaSeconds);
 		UpdateJumpPose(DeltaSeconds);
+		UpdateSprintPose(DeltaSeconds);
 		UpdateWings(DeltaSeconds);
 	}
 
@@ -446,6 +472,8 @@ void FRRRandomBodyAnimInstanceProxy::PreUpdate(UAnimInstance* InAnimInstance, fl
 	FlightBends = Instance->GetFlightBends();
 	JumpBones = Instance->GetJumpBones();
 	JumpBends = Instance->GetJumpBends();
+	SprintBones = Instance->GetSprintBones();
+	SprintBends = Instance->GetSprintBends();
 	WingBones = Instance->GetWingBones();
 	WingBends = Instance->GetWingBends();
 	Aim = Instance->GetAimFrame();
@@ -588,6 +616,7 @@ bool FRRRandomBodyAnimInstanceProxy::Evaluate(FPoseContext& Output)
 	// The flying or jumping pose, then the wings (roots before tips, so a tip's parent is already turned)
 	TurnBones(Output, FlightBones, FlightBends);
 	TurnBones(Output, JumpBones, JumpBends);
+	TurnBones(Output, SprintBones, SprintBends);
 	TurnBones(Output, WingBones, WingBends);
 	return true;
 }
