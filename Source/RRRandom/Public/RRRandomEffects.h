@@ -84,6 +84,16 @@ public:
 	/** A hit: sparks and stars thrown back toward where the shot came from, a quick ring and a flash; Strength 1 is a pistol shot. */
 	void HitBurst(const FVector& Where, const FVector& FromDirection, float Strength, const FLinearColor& Tint);
 	/**
+	 * A shot running out of range in the air: the ball drifts on a little, swelling soft and fading, with a thin ring and a
+	 * scatter of glitter. Direction: the way it flew; Size: the shot's scale (1 for a pistol's).
+	 */
+	void ShotFizzle(const FVector& Where, const FVector& Direction, float Size, const FLinearColor& Tint);
+	/**
+	 * A shot landing on anything but a brawler (floor, wall, statue, prop): a ring spreading flat over the surface, a flash,
+	 * bits and stars bouncing off along Normal and a puff of dust. Size: the shot's scale, more for stronger guns.
+	 */
+	void ShotSplat(const FVector& Where, const FVector& Normal, float Size, const FLinearColor& Tint);
+	/**
 	 * The star robot's rocket fist leaving its arm (Direction: the way it flies): a flash, a jet of flame and smoke out
 	 * of the elbow behind it, a ring of smoke round the arm, a shock ring ahead, sparks.
 	 */

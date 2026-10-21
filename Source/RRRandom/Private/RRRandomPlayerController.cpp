@@ -1138,6 +1138,23 @@ void ARRRandomPlayerController::OnFire()
 	}
 }
 
+bool ARRRandomPlayerController::GetFireTarget(FVector& OutTarget) const
+{
+	if (bThirdPerson)
+	{
+		OutTarget = GetCrosshairTarget();
+		return true;
+	}
+	FVector CursorOrigin;
+	FVector CursorDirection;
+	if (!DeprojectMousePositionToWorld(CursorOrigin, CursorDirection))
+	{
+		return false;
+	}
+	OutTarget = GetAimTarget(CursorOrigin, CursorDirection);
+	return true;
+}
+
 FVector ARRRandomPlayerController::GetAimTarget(const FVector& CursorOrigin, const FVector& CursorDirection) const
 {
 	const ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());

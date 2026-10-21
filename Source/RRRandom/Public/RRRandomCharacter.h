@@ -105,6 +105,11 @@ public:
 	 * On a client this only predicts the cooldown and asks the server to shoot.
 	 */
 	bool FireAt(const FVector& TargetLocation);
+	/**
+	 * Where a shot at TargetLocation would set off (just ahead of the muzzle, facing the target) and which way it would fly.
+	 * False when that spot is buried in a wall the brawler hugs: then it can't fire (the HUD shows it on the aim).
+	 */
+	bool GetShotStart(const FVector& TargetLocation, FTransform& OutSpawn) const;
 
 	/** Throws one stored die (once the previous one has landed). On a client, asks the server to roll. */
 	void RollDice();
@@ -144,6 +149,8 @@ public:
 	void ToggleRide();
 	/** The vehicle being ridden, if any (replicated). */
 	ARRRandomVehicle* GetVehicle() const { return Vehicle; }
+	/** At the wheel (not in the rear seat): both hands on it, so no shooting, and the gun is put away. */
+	bool IsDriving() const { return Vehicle && !bPassenger; }
 	/**
 	 * The star robot this animal friend is combining (standing still till it is done) or sitting in, and how
 	 * (replicated). F does the robot's things first: starts combining the gathered cars, gets in, gets out.
@@ -212,8 +219,10 @@ public:
 	const FRRWeapon& GetWeapon() const { return Weapon; }
 	/** Swaps to another gun with a full magazine. */
 	void EquipWeapon(const FRRWeapon& NewWeapon);
-	/** How far its shots reach with the gun it holds (a foam finger only pokes). */
+	/** How far it fights from with the gun it holds (the bots keep to it; a foam finger only pokes this far). */
 	float GetAttackRange() const { return AttackRange * Weapon.RangeMultiplier; }
+	/** How far its shots fly before fizzling out: from one corner of the map to the other (a foam finger's poke: GetAttackRange). */
+	float GetShotRange() const;
 	float GetVisionRadius() const { return VisionRadius; }
 	/**
 	 * Whether a spot is inside the team's shared sight: within VisionRadius of any of its brawlers still standing,
@@ -419,7 +428,10 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	float FireInterval = 0.15f;
 
-	/** How far shots fly before disappearing. */
+	/**
+	 * How far the bots fight from, and the foam finger's reach (FRRWeapon::RangeMultiplier). Gun shots fly on across the
+	 * whole map (GetShotRange); this is their reach only where there is no map.
+	 */
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	float AttackRange = 1300.f;
 
@@ -816,8 +828,9 @@ private:
 	float JumpFallSpeed = 0.f;
 	float LandSquash = 0.f;
 
-	/** The map whose flight area this one keeps to (GetFlightArea), looked for until found. */
+	/** The map whose flight area this one keeps to (GetFlightArea) and shots cross (GetShotRange), looked for until found. */
 	mutable TWeakObjectPtr<AActor> FlightMap;
+	const AActor* FindMap() const;
 
 	/** Set on a knockout by a vehicle: the velocity the body was thrown with (zero for any other knockout). */
 	UPROPERTY(Replicated)
@@ -913,6 +926,16 @@ private:
 	FRotator HomeRotation = FRotator::ZeroRotator;
 	FVector MeshRelativeLocation = FVector::ZeroVector;
 	FRotator MeshRelativeRotation = FRotator::ZeroRotator;
+
+	/**
+	 * Riding: where the body goes from its own place (the capsule's middle, put on the seat's spot by the vehicle), eased in
+	 * with the ride pose. Sitting, the hips bone over the seat's spot and RideHipsClear of the hips height above its cushion;
+	 * standing (the kickboard), the feet on the deck, sunk by the bent knees. Plus the species' RideFit.
+	 */
+	FVector GetRideOffset() const;
+	/** The species' rest hips height and riding nudge (FRRSpeciesLook). */
+	float RideHipsHeight = 43.f;
+	FVector RideFit = FVector::ZeroVector;
 	/** Degrees the body leans forward in flight (eased), and how far the camera has pulled back for it (0 .. 1). */
 	float FlightLean = 0.f;
 	/** Degrees the body banks into turns in flight (eased), and the way it flew last frame. */

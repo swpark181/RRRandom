@@ -25,6 +25,7 @@ enum class ERRTitleChoice : uint8
 	Squirrel,
 	Tiger,
 	Dragon,
+	RedFox,
 	/** The third person maps, picked after THIRD PERSON (ERRThirdPersonMap). */
 	DiceTown,
 	DiceLand,

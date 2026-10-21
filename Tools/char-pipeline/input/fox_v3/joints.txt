@@ -1,0 +1,28 @@
+# Fox v3 (Tripo retry, task 14ceb331) joints on the tiger's Mixamo rig frame (m; faces -Y, +X his left, Z up), read off
+# front/side renders of input/fox_v3/mixamo_obj/fox.obj on a grid (blender_fit_rig.py). His middle is x = -0.067:
+# blender_tripo_to_obj.py centered the feet with the tail's tip among them.
+MIRROR -0.067
+Hips -0.067 -0.145 0.240
+Spine -0.067 -0.145 0.300
+Spine1 -0.067 -0.145 0.372
+Spine2 -0.067 -0.145 0.440
+Neck -0.067 -0.146 0.505
+Head -0.067 -0.145 0.545
+HeadTop_End -0.067 -0.145 0.860
+RightShoulder -0.097 -0.145 0.490
+RightArm -0.175 -0.120 0.440
+RightForeArm -0.215 -0.117 0.395
+RightHand -0.267 -0.120 0.338
+RightHandThumb1 -0.245 -0.150 0.335
+RightHandThumb2 -0.250 -0.160 0.3175
+RightHandThumb3 -0.255 -0.168 0.3025
+RightHandThumb4 -0.2575 -0.172 0.2925
+RightHandIndex1 -0.279 -0.140 0.319
+RightHandIndex2 -0.293 -0.145 0.300
+RightHandIndex3 -0.306 -0.150 0.283
+RightHandIndex4 -0.315 -0.152 0.268
+RightUpLeg -0.132 -0.145 0.200
+RightLeg -0.137 -0.150 0.130
+RightFoot -0.139 -0.140 0.040
+RightToeBase -0.148 -0.200 0.020
+RightToe_End -0.153 -0.235 0.012

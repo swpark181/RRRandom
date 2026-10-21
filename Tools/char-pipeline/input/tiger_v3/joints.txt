@@ -1,0 +1,28 @@
+# Tiger v3 (Tripo retry, task 25f04cbd) joints on the old tiger's Mixamo rig frame (m; faces -Y, +X his left, Z up), read
+# off front/side grid renders of input/tiger_v3/mixamo_obj/tiger.obj (blender_fit_rig.py). His middle is x = -0.053 (the
+# tail's curl to his left pulls the feet's center over).
+MIRROR -0.053
+Hips -0.053 -0.095 0.250
+Spine -0.053 -0.095 0.310
+Spine1 -0.053 -0.095 0.390
+Spine2 -0.053 -0.095 0.460
+Neck -0.053 -0.100 0.565
+Head -0.053 -0.100 0.600
+HeadTop_End -0.053 -0.100 1.000
+RightShoulder -0.085 -0.090 0.500
+RightArm -0.180 -0.080 0.495
+RightForeArm -0.255 -0.080 0.405
+RightHand -0.295 -0.085 0.360
+RightHandThumb1 -0.290 -0.110 0.345
+RightHandThumb2 -0.290 -0.125 0.330
+RightHandThumb3 -0.290 -0.135 0.318
+RightHandThumb4 -0.290 -0.142 0.305
+RightHandIndex1 -0.310 -0.090 0.335
+RightHandIndex2 -0.318 -0.095 0.318
+RightHandIndex3 -0.323 -0.100 0.303
+RightHandIndex4 -0.327 -0.105 0.290
+RightUpLeg -0.135 -0.095 0.225
+RightLeg -0.140 -0.100 0.120
+RightFoot -0.140 -0.095 0.040
+RightToeBase -0.142 -0.170 0.020
+RightToe_End -0.144 -0.205 0.012

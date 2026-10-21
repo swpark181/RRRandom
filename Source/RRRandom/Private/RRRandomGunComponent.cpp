@@ -75,7 +75,8 @@ void URRRandomGunComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	const bool bHands = Body && Body->GetBoneIndex(RightHandBone) != INDEX_NONE && Body->GetBoneIndex(RightPalmBone) != INDEX_NONE
 		&& Body->GetBoneIndex(LeftHandBone) != INDEX_NONE;
 	// Put away while knocked out and while dancing after a win
-	const bool bShow = bHands && Brawler->IsAlive() && !Brawler->IsCelebrating() && !Brawler->IsDespairing() && !Brawler->IsUsingUltimate();
+	const bool bShow = bHands && Brawler->IsAlive() && !Brawler->IsCelebrating() && !Brawler->IsDespairing() && !Brawler->IsUsingUltimate()
+		&& !Brawler->IsDriving();
 	if (IsVisible() != bShow)
 	{
 		SetVisibility(bShow);

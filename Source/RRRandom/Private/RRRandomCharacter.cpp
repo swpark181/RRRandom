@@ -334,6 +334,8 @@ void ARRRandomCharacter::UseLook(const FRRSpeciesLook& Look)
 	USkeletalMeshComponent* BodyMesh = GetMesh();
 	BodyMesh->SetSkeletalMeshAsset(Look.Mesh);
 	BodyMesh->SetRelativeScale3D(FVector(Look.MeshScale));
+	RideHipsHeight = Look.HipsHeight;
+	RideFit = Look.RideFit;
 	BodyBaseMaterial = Look.Material;
 	IdleAnimation = Look.Idle;
 	WalkAnimation = Look.Walk;
@@ -457,6 +459,11 @@ void ARRRandomCharacter::BeginPlay()
 	// Health, ammo, guns and dice are the server's; clients get them replicated (already, by the time they begin play)
 	if (HasAuthority())
 	{
+		// Teammates' shots already flying pass through this one too (a fox's clones pop up right where the fox shoots)
+		for (TActorIterator<ARRRandomProjectile> It(GetWorld()); It; ++It)
+		{
+			It->PassThroughIfTeammate(this);
+		}
 		WeaponStream.GenerateNewSeed();
 		DiceBuffs->OnWeaponDie.AddUObject(this, &ARRRandomCharacter::OnWeaponDie);
 		DiceBuffs->OnGiantDie.AddUObject(this, &ARRRandomCharacter::OnGiantDie);
@@ -624,11 +631,12 @@ void ARRRandomCharacter::OnUltimateDie(int32 Face)
 		return;
 	}
 	// Each species' own: the tiger's giant, the fox's clones, the rabbit's moon hops, the squirrel's acorn rain, the
-	// dragon's flight
-	UClass* Kind = ShownSpecies == RRSpecies::Fox ? ARRRandomFoxClones::StaticClass()
-		: ShownSpecies == RRSpecies::Rabbit ? ARRRandomMoonHop::StaticClass()
-		: ShownSpecies == RRSpecies::Squirrel ? ARRRandomAcornRain::StaticClass()
-		: ShownSpecies == RRSpecies::Dragon ? ARRRandomDragonFlight::StaticClass()
+	// dragon's flight (the red fox: the fox's clones)
+	const int32 KitSpecies = RRSpecies::GetKitSpecies(ShownSpecies);
+	UClass* Kind = KitSpecies == RRSpecies::Fox ? ARRRandomFoxClones::StaticClass()
+		: KitSpecies == RRSpecies::Rabbit ? ARRRandomMoonHop::StaticClass()
+		: KitSpecies == RRSpecies::Squirrel ? ARRRandomAcornRain::StaticClass()
+		: KitSpecies == RRSpecies::Dragon ? ARRRandomDragonFlight::StaticClass()
 		: ARRRandomTigerSpirit::StaticClass();
 	FActorSpawnParameters Params;
 	Params.Owner = this;
@@ -1061,7 +1069,7 @@ void ARRRandomCharacter::Jump()
 	}
 }
 
-bool ARRRandomCharacter::GetFlightArea(FBox& OutArea) const
+const AActor* ARRRandomCharacter::FindMap() const
 {
 	UWorld* World = GetWorld();
 	if (!FlightMap.IsValid() && World)
@@ -1084,7 +1092,36 @@ bool ARRRandomCharacter::GetFlightArea(FBox& OutArea) const
 			FlightMap = It->IsBuilt() ? *It : nullptr;
 		}
 	}
-	const AActor* Map = FlightMap.Get();
+	return FlightMap.Get();
+}
+
+float ARRRandomCharacter::GetShotRange() const
+{
+	if (Weapon.bFoamFinger)
+	{
+		return GetAttackRange();
+	}
+	// Corner to corner, so a shot can cross the whole map
+	const AActor* Map = FindMap();
+	FBox2D Bounds(ForceInit);
+	if (const ARRRandomDiceTown* Town = Cast<ARRRandomDiceTown>(Map))
+	{
+		Bounds = Town->GetMapBounds();
+	}
+	else if (const ARRRandomDiceLand* Land = Cast<ARRRandomDiceLand>(Map))
+	{
+		Bounds = Land->GetMapBounds();
+	}
+	else if (const ARRRandomIsland* Island = Cast<ARRRandomIsland>(Map))
+	{
+		Bounds = Island->GetMapBounds();
+	}
+	return FMath::Max(GetAttackRange(), Bounds.bIsValid ? Bounds.GetSize().Size() : 0.f);
+}
+
+bool ARRRandomCharacter::GetFlightArea(FBox& OutArea) const
+{
+	const AActor* Map = FindMap();
 	if (const ARRRandomDiceTown* Town = Cast<ARRRandomDiceTown>(Map))
 	{
 		OutArea = Town->GetFlightArea();
@@ -1508,11 +1545,41 @@ void ARRRandomCharacter::UpdateVehicleHandling()
 	// Up on the deck or in the seat (the body's own offset otherwise; knocked out it is a ragdoll and left alone)
 	if (bAlive && !bClimbing)
 	{
-		const float Seat = Vehicle ? Vehicle->GetHandling().SeatHeight : 0.f;
 		// (A landing's crouch: the body sinks with its bent legs)
 		const float Crouch = JumpLandDrop * FMath::Sin(LandSquash * HALF_PI);
-		GetMesh()->SetRelativeLocation(MeshRelativeLocation + FVector(0.f, 0.f, Seat - Crouch));
+		GetMesh()->SetRelativeLocation(MeshRelativeLocation + GetRideOffset() - FVector(0.f, 0.f, Crouch));
 	}
+}
+
+namespace
+{
+	// Sitting, the hips bone is this share of the standing hips height above the cushion (the bottom's own thickness)
+	constexpr float RideHipsClear = 0.22f;
+}
+
+FVector ARRRandomCharacter::GetRideOffset() const
+{
+	const URRRandomBodyAnimInstance* BodyAnim = Cast<URRRandomBodyAnimInstance>(GetMesh()->GetAnimInstance());
+	const float Weight = BodyAnim ? BodyAnim->GetRideWeight() : 1.f;
+	if (!Vehicle || Weight <= 0.f)
+	{
+		return FVector::ZeroVector;
+	}
+	const float Seat = Vehicle->GetSeatHeight(bPassenger);
+	if (Vehicle->IsStoodOn())
+	{
+		return (FVector(0.f, 0.f, Seat - (BodyAnim ? BodyAnim->GetRideDrop() : 0.f)) + RideFit) * Weight;
+	}
+	// Where the hips bone is now from the body's own place (the mesh's origin), in the brawler's frame: moved over the
+	// seat's spot (the capsule's middle) and down onto the cushion (the capsule's bottom is the vehicle's)
+	const USkeletalMeshComponent* Body = GetMesh();
+	if (Body->GetBoneIndex(TEXT("Hips")) == INDEX_NONE)
+	{
+		return FVector(0.f, 0.f, Seat) * Weight;
+	}
+	const FVector Hips = GetActorTransform().InverseTransformPositionNoScale(Body->GetBoneLocation(TEXT("Hips"))) - Body->GetRelativeLocation();
+	const FVector Spot(0.f, 0.f, Seat + RideHipsClear * RideHipsHeight - GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	return (Spot - Hips - MeshRelativeLocation + RideFit) * Weight;
 }
 
 ARRRandomVehicle* ARRRandomCharacter::FindVehicleInReach() const
@@ -2028,8 +2095,8 @@ bool ARRRandomCharacter::IsAiming() const
 
 bool ARRRandomCharacter::WantsAimPose() const
 {
-	// The foam finger has its own pose (URRRandomGunComponent); a climber's hands are on the wall
-	return AimAnimations.IsComplete() && bAlive && !bClimbing && !Weapon.bFoamFinger && IsAiming() && !IsCelebrating();
+	// The foam finger has its own pose (URRRandomGunComponent); a climber's hands are on the wall, a driver's on the wheel
+	return AimAnimations.IsComplete() && bAlive && !bClimbing && !IsDriving() && !Weapon.bFoamFinger && IsAiming() && !IsCelebrating();
 }
 
 float ARRRandomCharacter::GetAimPoseWeight() const
@@ -2084,8 +2151,14 @@ bool ARRRandomCharacter::FireAt(const FVector& TargetLocation)
 	// Ammo comes back replicated; the server reloads an empty magazine by itself.
 	const float Now = GetWorld()->GetTimeSeconds();
 	// Running (Shift) the gun is down: no shots till the run stops
-	if (!bAlive || !ProjectileClass || bReloading || bClimbing || IsSprinting() || Ammo <= 0 || Now < NextFireTime)
+	if (!bAlive || !ProjectileClass || bReloading || bClimbing || IsSprinting() || IsDriving() || Ammo <= 0 || Now < NextFireTime)
 	{
+		return false;
+	}
+	FTransform Spawn;
+	if (!GetShotStart(TargetLocation, Spawn))
+	{
+		FaceToward(TargetLocation);
 		return false;
 	}
 	NextFireTime = Now + GetFireInterval();
@@ -2114,7 +2187,8 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 		}
 		return false;
 	}
-	if (!bAlive || !ProjectileClass || bReloading || bClimbing || IsSprinting() || IsUsingUltimate() || Now + CooldownSlack < NextFireTime
+	// The driver's hands are on the wheel (the one in the rear seat still shoots)
+	if (!bAlive || !ProjectileClass || bReloading || bClimbing || IsSprinting() || IsDriving() || IsUsingUltimate() || Now + CooldownSlack < NextFireTime
 		|| ARRRandomGameState::IsPlayLocked(this))
 	{
 		return false;
@@ -2122,6 +2196,13 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 	if (Ammo <= 0)
 	{
 		StartReload();
+		return false;
+	}
+	// The muzzle buried in a wall: no shot, nothing spent (it still turns to aim)
+	FTransform SpawnTransform;
+	if (!GetShotStart(TargetLocation, SpawnTransform))
+	{
+		FaceToward(TargetLocation);
 		return false;
 	}
 	NextFireTime = Now + GetFireInterval();
@@ -2141,7 +2222,35 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 		StartReload();
 	}
 
-	const FVector Direction = FaceToward(TargetLocation);
+	FaceToward(TargetLocation);
+
+	// Deferred so damage, range, speed and look are in place before the shot begins play. Heavy guns fire bigger shots.
+	if (ARRRandomProjectile* Projectile = World->SpawnActorDeferred<ARRRandomProjectile>(ProjectileClass, SpawnTransform, this, this, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+	{
+		Projectile->DamageMultiplier = DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackPower) * Weapon.DamageMultiplier * (bGiant ? GiantDamageMultiplier : 1.f);
+		Projectile->MaxRange = GetShotRange();
+		Projectile->SetSpeedMultiplier(Weapon.ProjectileSpeedMultiplier);
+		// A foam finger's poke: unseen, a flat point of damage, a knockout from behind
+		Projectile->bPoke = Weapon.bFoamFinger;
+		Projectile->HitEffect = Weapon.GetHitEffect();
+		Projectile->Tier = Weapon.bFoamFinger ? ERRWeaponTier::Common : Weapon.Tier;
+		Projectile->FinishSpawning(SpawnTransform);
+	}
+	return true;
+}
+
+bool ARRRandomCharacter::GetShotStart(const FVector& TargetLocation, FTransform& OutSpawn) const
+{
+	if (!ProjectileClass)
+	{
+		return false;
+	}
+	// Facing the target, as FaceToward turns the body to shoot
+	FVector Direction = (TargetLocation - GetActorLocation()).GetSafeNormal2D();
+	if (Direction.IsNearlyZero())
+	{
+		Direction = GetActorForwardVector().GetSafeNormal2D();
+	}
 	const FRotator Aim = Direction.Rotation();
 
 	// Out of the gun's muzzle as it sits in the aiming pose (URRRandomGunComponent keeps track of it)
@@ -2172,18 +2281,26 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 	FRotator ShotRotation = ShotDirection.Rotation();
 	ShotRotation.Pitch = FMath::Clamp(ShotRotation.Pitch, -PitchLimit, PitchLimit);
 
-	// Deferred so damage, range, speed and look are in place before the shot begins play. Heavy guns fire bigger shots.
-	const FTransform SpawnTransform(ShotRotation, Muzzle, FVector(Weapon.ProjectileScale));
-	if (ARRRandomProjectile* Projectile = World->SpawnActorDeferred<ARRRandomProjectile>(ProjectileClass, SpawnTransform, this, this, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+	// Just ahead of the barrel, the ball's back on the muzzle's tip
+	const float ShotRadius = ProjectileClass->GetDefaultObject<ARRRandomProjectile>()->GetRadius() * Weapon.ProjectileScale;
+	const FVector Start = Muzzle + ShotRotation.Vector() * ShotRadius;
+	OutSpawn = FTransform(ShotRotation, Start, FVector(Weapon.ProjectileScale));
+
+	// Buried: something solid between the body and that spot (a wall the gun pokes through). Shots in the air and the
+	// team's star robot, which shots pass through, don't count.
+	const FVector Body(GetActorLocation().X, GetActorLocation().Y, Muzzle.Z);
+	FCollisionObjectQueryParams Walls(ECC_WorldStatic);
+	Walls.AddObjectTypesToQuery(ECC_WorldDynamic);
+	TArray<FHitResult> Hits;
+	GetWorld()->LineTraceMultiByObjectType(Hits, Body, Start, Walls, FCollisionQueryParams(SCENE_QUERY_STAT(RRRandomMuzzleWall), false, this));
+	for (const FHitResult& Hit : Hits)
 	{
-		Projectile->DamageMultiplier = DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackPower) * Weapon.DamageMultiplier * (bGiant ? GiantDamageMultiplier : 1.f);
-		Projectile->MaxRange = GetAttackRange();
-		Projectile->SetSpeedMultiplier(Weapon.ProjectileSpeedMultiplier);
-		// A foam finger's poke: unseen, a flat point of damage, a knockout from behind
-		Projectile->bPoke = Weapon.bFoamFinger;
-		Projectile->HitEffect = Weapon.GetHitEffect();
-		Projectile->Tier = Weapon.bFoamFinger ? ERRWeaponTier::Common : Weapon.Tier;
-		Projectile->FinishSpawning(SpawnTransform);
+		const AActor* Other = Hit.GetActor();
+		const ARRRandomStarRobot* TeamRobot = Cast<ARRRandomStarRobot>(Other);
+		if (!Cast<ARRRandomProjectile>(Other) && !(TeamRobot && TeamRobot->GetTeam() == Team))
+		{
+			return false;
+		}
 	}
 	return true;
 }

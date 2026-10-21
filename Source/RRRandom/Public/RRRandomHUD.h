@@ -142,6 +142,9 @@ private:
 	/** This frame's screen scale (720 pixels tall = 1). */
 	float UIScale = 1.f;
 
+	/** 0 .. 1: how far the aim shows that the muzzle is buried in a wall (ARRRandomCharacter::GetShotStart), easing in and out. */
+	float MuzzleBlockedBlend = 0.f;
+
 	/** White sprites for rounded shapes and soft shadows (RRRandomUIStyle). */
 	UPROPERTY()
 	TObjectPtr<UTexture2D> UICircle;
