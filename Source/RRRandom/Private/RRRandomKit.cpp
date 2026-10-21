@@ -79,7 +79,8 @@ namespace
 		return Kit;
 	}
 
-	const FRRKit Kits[RRSpecies::Count] = { MakeKits(0), MakeKits(1), MakeKits(2), MakeKits(3), MakeKits(4) };
+	// The red fox's is the fox's (RRSpecies::GetKitSpecies)
+	const FRRKit Kits[RRSpecies::Count] = { MakeKits(0), MakeKits(1), MakeKits(2), MakeKits(3), MakeKits(4), MakeKits(RRSpecies::Fox) };
 
 	// The invisible look (M_FXCloak): on the brawler's own screen and its teammates' a see-through body (outline plus some
 	// fill), on its opponents' just the outline, fainter standing still than at full run; a hit flashes it up for
@@ -148,7 +149,7 @@ void URRRandomKitComponent::ApplyOwnDie(int32 Face)
 	{
 		return;
 	}
-	switch (Brawler->GetSpecies())
+	switch (RRSpecies::GetKitSpecies(Brawler->GetSpecies()))
 	{
 	case RRSpecies::Fox:
 		CloakRemaining = FMath::Max(CloakRemaining, Face * RRKit::CloakSecondsPerPip);

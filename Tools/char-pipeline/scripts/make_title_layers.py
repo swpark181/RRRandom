@@ -42,7 +42,7 @@ WATER_SOFTEN = 2
 # Only the fox's corner of the picture holds the fox (anything keyed elsewhere is noise)
 FOX_BOX = (860, 140, 1376, 720)  # x0, y0, x1, y1
 # Around the visible tail, right of the arm, the rifle's stock and the shorts (clockwise, art pixels, y down)
-TAIL_POLYGON = [(1240, 435), (1352, 435), (1352, 605), (1229, 605), (1224, 546), (1213, 540), (1245, 488), (1240, 470)]
+TAIL_POLYGON = [(1245, 435), (1352, 435), (1352, 605), (1215, 605), (1215, 584), (1244, 582), (1245, 525), (1245, 480)]
 TAIL_BLEED = 16
 
 

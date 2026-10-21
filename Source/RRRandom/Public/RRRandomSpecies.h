@@ -10,8 +10,9 @@ class USkeletalMesh;
 class UTexture2D;
 
 /**
- * The brawlers to pick from: the fox, the rabbit, the squirrel, the tiger and the dragon. Each is a Tripo model rigged and animated in
- * Mixamo (char-pipeline/scripts/ue_import_animal.py), in /Game/Characters/<Name>: SK_<Name>, M_<Name> and
+ * The brawlers to pick from: the fox, the rabbit, the squirrel, the tiger, the dragon and the red fox. Each is a Tripo model rigged and
+ * animated in Mixamo (char-pipeline/scripts/ue_import_animal.py; the red fox on the tiger's rig fitted in Blender,
+ * blender_fit_rig.py + ue_import_rig_anims.py, with the tiger's Mixamo motions), in /Game/Characters/<Name>: SK_<Name>, M_<Name> and
  * Anims/A_<Name>_Idle, Walk, Fire, Death, FlyBack, Victory, Dance1..4, Defeat1..3, AimIdle, AimRunF/B/L/R, with its HUD card picture at
  * /Game/UI/T_<Name>Portrait. Players pick one on the title (URRRandomSessionSubsystem::GetSpecies); bots get one at random.
  */
@@ -22,11 +23,15 @@ namespace RRSpecies
 	constexpr int32 Squirrel = 2;
 	constexpr int32 Tiger = 3;
 	constexpr int32 Dragon = 4;
-	constexpr int32 Count = 5;
+	/** The red fennec fox girl (round 68): her own look, the fox's kit and ultimate (GetKitSpecies). */
+	constexpr int32 RedFox = 5;
+	constexpr int32 Count = 6;
 
-	/** "Fox", "Rabbit", "Squirrel", "Tiger", "Dragon": the asset names. */
+	/** The species whose passive, own die and ultimate it has: the red fox has the fox's; the others their own. */
+	int32 GetKitSpecies(int32 Species);
+	/** "Fox", "Rabbit", "Squirrel", "Tiger", "Dragon", "RedFox": the asset names. */
 	const TCHAR* GetAssetName(int32 Species);
-	/** FOX, RABBIT, SQUIRREL, TIGER, DRAGON: for menus. */
+	/** FOX, RABBIT, SQUIRREL, TIGER, DRAGON, RED FOX: for menus. */
 	FString GetDisplayName(int32 Species);
 	/** The species named (any case), or INDEX_NONE. */
 	int32 FromName(const FString& Name);
@@ -91,6 +96,17 @@ struct FRRSpeciesLook
 	/** Ground speed at which the walk plays at its normal rate, at MeshScale. */
 	UPROPERTY()
 	float WalkSpeed = 200.f;
+
+	/** The rest pose's hips height on the brawler (at MeshScale). */
+	UPROPERTY()
+	float HipsHeight = 43.f;
+
+	/**
+	 * Riding: this body's own nudge from where the seat puts it (forward, right, up; at MeshScale), for the shape of its
+	 * bottom and legs (ARRRandomCharacter::GetRideOffset).
+	 */
+	UPROPERTY()
+	FVector RideFit = FVector::ZeroVector;
 
 	UPROPERTY()
 	TObjectPtr<UTexture2D> Portrait;

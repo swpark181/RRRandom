@@ -57,6 +57,8 @@ private:
 	TArray<FQuat> JumpBends;
 	TArray<FName> SprintBones;
 	TArray<FQuat> SprintBends;
+	TArray<FName> RideBones;
+	TArray<FQuat> RideBends;
 	TArray<FName> WingBones;
 	TArray<FQuat> WingBends;
 	/** Turns each named bone in mesh space about its own root, in order (parents first). */
@@ -126,6 +128,10 @@ public:
 	float RunBob = 4.f;
 	UPROPERTY(EditAnywhere, Category = "Tail")
 	float WagRunSpeed = 600.f;
+
+	/** Degrees the tail lifts while riding (UpdateRidePose), up off the seat and out of the vehicle's body. */
+	UPROPERTY(EditAnywhere, Category = "Tail")
+	float RideTailLift = 60.f;
 
 	/**
 	 * Wing bones (the dragon's own wings): left root, left tip, right root, right tip. A mesh without them skips this.
@@ -219,6 +225,12 @@ public:
 	const TArray<FQuat>& GetFlightBends() const { return FlightBends; }
 	const TArray<FName>& GetJumpBones() const { return JumpBoneNames; }
 	const TArray<FQuat>& GetJumpBends() const { return JumpBends; }
+	const TArray<FName>& GetRideBones() const { return RideBoneNames; }
+	const TArray<FQuat>& GetRideBends() const { return RideBends; }
+	/** How far the body sinks to sit in the ride pose this frame (the character lowers the mesh by it). */
+	float GetRideDrop() const { return RideDrop; }
+	/** 0 .. 1: how far into the ride pose. */
+	float GetRideWeight() const { return RideWeight; }
 	const TArray<FName>& GetSprintBones() const { return SprintBoneNames; }
 	const TArray<FQuat>& GetSprintBends() const { return SprintBends; }
 	const TArray<FName>& GetWingBones() const { return WingBoneNames; }
@@ -262,6 +274,20 @@ private:
 	TArray<FQuat> JumpBends;
 	float JumpWeight = 0.f;
 	float JumpRise = 0.f;
+
+	/**
+	 * Riding a vehicle: at the wheel, a pose for the kind of vehicle (standing on the kickboard with both hands on the
+	 * bar, astride the motorbike, sitting in a car with the hands on the wheel); in a car's rear seat, sitting with the
+	 * arms left free to shoot. The legs (thigh, knee, foot; left then right), the spine, then the arms (upper arm, forearm;
+	 * left then right), like the jump.
+	 */
+	void UpdateRidePose(float DeltaSeconds);
+	TArray<FName> RideBoneNames;
+	TArray<FQuat> RideBends;
+	float RideWeight = 0.f;
+	float RideDrop = 0.f;
+	/** The last pose ridden, kept while easing out of it. */
+	int32 RidePose = 0;
 
 	/** Running (Shift): the gun held low, muzzle down (round 67). The upper arms (left, right), then the hands. */
 	void UpdateSprintPose(float DeltaSeconds);

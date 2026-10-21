@@ -1059,6 +1059,88 @@ void ARRRandomEffects::HitBurst(const FVector& Where, const FVector& FromDirecti
 	Spawn(Flash);
 }
 
+void ARRRandomEffects::ShotFizzle(const FVector& Where, const FVector& Direction, float Size, const FLinearColor& Tint)
+{
+	const FVector Way = Direction.IsNearlyZero() ? FVector::UpVector : Direction.GetSafeNormal();
+	// The ball itself (a quarter of the 100 unit mesh, like the shot) carrying on a little, swelling soft as it fades
+	FParticle Puff;
+	Puff.Shape = EShape::Ball;
+	Puff.Location = Where;
+	Puff.Velocity = Way * 500.f * Size;
+	Puff.Drag = 6.f;
+	Puff.Life = 0.35f;
+	Puff.StartSize = FVector(0.25f * Size);
+	Puff.EndSize = FVector(0.75f * Size);
+	Puff.Color = FMath::Lerp(Tint, FLinearColor::White, 0.35f);
+	Puff.Glow = 4.f;
+	Puff.Opacity = 0.55f;
+	Puff.FadeIn = 0.01f;
+	Spawn(Puff);
+	FParticle Ring;
+	Ring.Shape = EShape::Ring;
+	Ring.Location = Where;
+	Ring.Life = 0.25f;
+	Ring.StartSize = FVector(0.15f * Size, 0.15f * Size, 1.5f);
+	Ring.EndSize = FVector(0.8f * Size, 0.8f * Size, 1.f);
+	Ring.Color = Tint;
+	Ring.Glow = 5.f;
+	Ring.Opacity = 0.7f;
+	Ring.FadeIn = 0.01f;
+	Ring.bFacesCamera = true;
+	Spawn(Ring);
+	// Glitter scattering on ahead and drifting down
+	Spray(EShape::Ball, Where, 8, Way, 70.f, FVector2D(120.f, 320.f) * Size, FVector2D(0.03f, 0.06f) * Size, FVector2D(0.3f, 0.55f), Tint, 6.f, 250.f);
+	Spray(EShape::Star, Where, 3, Way, 90.f, FVector2D(80.f, 220.f), FVector2D(2.5f, 4.f) * FMath::Sqrt(Size), FVector2D(0.35f, 0.55f), Tint, 6.f, 150.f);
+}
+
+void ARRRandomEffects::ShotSplat(const FVector& Where, const FVector& Normal, float Size, const FLinearColor& Tint)
+{
+	const FVector Out = Normal.IsNearlyZero() ? FVector::UpVector : Normal.GetSafeNormal();
+	const float Grow = FMath::Sqrt(FMath::Max(Size, 0.3f));
+	// A ring spreading flat over the surface it hit
+	FParticle Ring;
+	Ring.Shape = EShape::Ring;
+	Ring.Location = Where + Out * 2.f;
+	Ring.Life = 0.3f;
+	Ring.StartSize = FVector(0.2f * Grow, 0.2f * Grow, 1.5f);
+	Ring.EndSize = FVector(1.2f * Grow, 1.2f * Grow, 1.f);
+	Ring.Turn = FRotationMatrix::MakeFromZ(Out).Rotator();
+	Ring.Color = Tint;
+	Ring.Glow = 6.f;
+	Ring.Opacity = 0.85f;
+	Ring.FadeIn = 0.01f;
+	Spawn(Ring);
+	FParticle Flash;
+	Flash.Shape = EShape::Ball;
+	Flash.Location = Where + Out * 5.f;
+	Flash.Life = 0.1f;
+	Flash.StartSize = FVector(0.15f * Grow);
+	Flash.EndSize = FVector(0.6f * Grow);
+	Flash.Color = FLinearColor::White;
+	Flash.Glow = 6.f;
+	Flash.Opacity = 0.8f;
+	Flash.FadeIn = 0.01f;
+	Spawn(Flash);
+	// Bits and stars bouncing off the surface and falling back
+	Spray(EShape::Ball, Where, FMath::Clamp(FMath::RoundToInt(8.f * Size), 6, 20), Out, 60.f, FVector2D(300.f, 750.f) * Grow, FVector2D(0.05f, 0.09f),
+		FVector2D(0.25f, 0.5f), Tint, 7.f, 900.f);
+	Spray(EShape::Star, Where, FMath::Clamp(FMath::RoundToInt(4.f * Size), 3, 10), Out, 70.f, FVector2D(150.f, 400.f) * Grow, FVector2D(3.5f, 6.f) * Grow,
+		FVector2D(0.3f, 0.5f), Tint, 6.f, 300.f);
+	// A soft puff of dust
+	FParticle Puff;
+	Puff.Shape = EShape::Ball;
+	Puff.Location = Where + Out * 10.f;
+	Puff.Velocity = Out * 120.f;
+	Puff.Drag = 3.f;
+	Puff.Life = 0.45f;
+	Puff.StartSize = FVector(0.2f * Grow);
+	Puff.EndSize = FVector(0.7f * Grow);
+	Puff.Color = FMath::Lerp(Tint, Cream, 0.6f);
+	Puff.Glow = 1.5f;
+	Puff.Opacity = 0.45f;
+	Spawn(Puff);
+}
+
 void ARRRandomEffects::DragonBreath(const FVector& Mouth, const FVector& Impact, float Radius, float DeltaSeconds, const FVector& Carry)
 {
 	// The stream: balls of fire leaving the mouth small and hot, swelling and reddening on their way to where it lands

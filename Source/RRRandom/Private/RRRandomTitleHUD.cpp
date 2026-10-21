@@ -22,7 +22,7 @@ namespace
 	constexpr float ButtonHeight = 50.f;
 	constexpr float ButtonGap = 12.f;
 	// The brawler page: a row of portrait cards this wide in all, each this tall, and BACK as a smaller pill under them
-	constexpr float CardRowWidth = 570.f;
+	constexpr float CardRowWidth = 620.f;
 	constexpr float CardGap = 10.f;
 	constexpr float CardHeight = 128.f;
 	constexpr float CardFace = 80.f;

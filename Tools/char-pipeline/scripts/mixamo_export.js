@@ -26,13 +26,19 @@ window.__LIST = [
   ['c9cce12b' + S, 'defeat3_sad', 'false', false],
   ['c9cdb4c8' + S, 'flyback', 'false', false],      // Flying Back Death (24차)
 ];
-window.__runAll = async (prefix, only) => {
+// Extra motions for one species' ultimate (round 29/25): window.__runAll('rabbit', null, window.__EXTRA.rabbit)
+window.__EXTRA = {
+  rabbit: [['c9c9d919' + S, 'jumpup', 'false', false], ['c9cab793' + S, 'frontflip', 'false', false],
+           ['c9c991b1' + S, 'fallidle', 'false', false], ['c9c99c82' + S, 'hardlanding', 'false', false]],
+  tiger: [['c9ccb4c2' + S, 'roar', 'false', false], ['c9c95db7' + S, 'jumpattack', 'false', false]],  // Mutant Roaring, Mutant Jump Attack
+};
+window.__runAll = async (prefix, only, list) => {
   window.__prog = [];
   const H = window.__H, sleep = ms => new Promise(r => setTimeout(r, ms));
   const primary = await fetch('/api/v1/characters/primary', {headers: H}).then(r => r.json());
   const CID = window.__CID = primary.primary_character_id;
   window.__prog.push('character ' + primary.primary_character_name);
-  for (const [pid, name, skin, inplace] of window.__LIST) {
+  for (const [pid, name, skin, inplace] of (list || window.__LIST)) {
     if (only && !only.includes(name)) continue;
     let tries = 0, done = false;
     while (!done && tries < 4) {

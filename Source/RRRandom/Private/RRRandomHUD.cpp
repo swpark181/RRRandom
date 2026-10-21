@@ -1635,20 +1635,62 @@ void ARRRandomHUD::DrawPauseMenu()
 void ARRRandomHUD::DrawCrosshair(const ARRRandomCharacter& Brawler)
 {
 	const ARRRandomPlayerController* Controller = Cast<ARRRandomPlayerController>(GetOwningPlayerController());
-	if (!Controller || !Controller->IsThirdPerson())
+	// At the wheel the gun is put away: nothing to aim
+	if (!Controller || Brawler.IsDriving())
 	{
+		MuzzleBlockedBlend = 0.f;
 		return;
 	}
-	// A dot in a dashed ring; the ring closes in the sights and opens briefly after a shot
+	// The muzzle buried in a wall the brawler hugs: the gun won't fire (ARRRandomCharacter::GetShotStart), and the aim says so
+	FVector Target;
+	FTransform Shot;
+	const bool bBlocked = !Brawler.IsInRobot() && Controller->GetFireTarget(Target) && !Brawler.GetShotStart(Target, Shot);
+	MuzzleBlockedBlend = FMath::FInterpConstantTo(MuzzleBlockedBlend, bBlocked ? 1.f : 0.f, GetWorld()->GetDeltaSeconds(), 8.f);
+	const float Warn = MuzzleBlockedBlend;
 	const float S = UIScale;
+	const float Thickness = FMath::Max(1.5f, 1.6f * S);
+	// A small pink cross with BLOCKED under it
+	auto DrawBlocked = [this, Warn, S, Thickness](const FVector2D& Center, float Below)
+	{
+		const float Arm = 4.5f * S;
+		for (const FVector2D& Way : { FVector2D(1.f, 1.f), FVector2D(1.f, -1.f) })
+		{
+			Canvas->K2_DrawLine(Center - Way * Arm, Center + Way * Arm, Thickness + 2.f, WithAlpha(RRUI::Ink, 0.6f * Warn));
+			Canvas->K2_DrawLine(Center - Way * Arm, Center + Way * Arm, Thickness, WithAlpha(RRUI::Pink, Warn));
+		}
+		const float Size = 9.f * S;
+		const FString Label = TEXT("BLOCKED");
+		const FVector2D Box = RRUI::MeasureText(Label, Size, EWeight::Black, Size * 0.12f);
+		RRUI::DrawGlowText(Canvas, Label, FVector2D(Center.X - Box.X * 0.5f, Center.Y + Below), Size, EWeight::Black, WithAlpha(RRUI::PinkDeep, Warn), Size * 0.12f);
+	};
+
+	if (!Controller->IsThirdPerson())
+	{
+		// From above there is no crosshair: the warning sits just under the cursor
+		float MouseX;
+		float MouseY;
+		if (Warn > 0.f && Controller->GetMousePosition(MouseX, MouseY))
+		{
+			DrawBlocked(FVector2D(MouseX, MouseY + 22.f * S), 8.f * S);
+		}
+		return;
+	}
+	// A dot in a dashed ring; the ring closes in the sights and opens briefly after a shot. Blocked, it turns pink and the
+	// dot becomes a cross.
 	const FVector2D Middle(Canvas->ClipX * 0.5f, Canvas->ClipY * 0.5f);
 	const float Kick = FMath::Clamp(1.f - Brawler.GetTimeSinceShot() / 0.18f, 0.f, 1.f);
 	const float Radius = (FMath::Lerp(13.f, 8.f, Brawler.GetSightsBlend()) + 8.f * Kick) * S;
-	const float Thickness = FMath::Max(1.5f, 1.6f * S);
 	RRUI::DrawDashedRing(Canvas, Middle, Radius, Thickness + 2.f, 8, 0.55f, WithAlpha(RRUI::Ink, 0.45f));
-	RRUI::DrawDashedRing(Canvas, Middle, Radius, Thickness, 8, 0.5f, RRUI::White);
-	RRUI::DrawDisc(Canvas, Middle, 3.2f * S, WithAlpha(RRUI::Ink, 0.8f));
-	RRUI::DrawDisc(Canvas, Middle, 2.f * S, RRUI::White);
+	RRUI::DrawDashedRing(Canvas, Middle, Radius, Thickness, 8, 0.5f, FMath::Lerp(RRUI::White, RRUI::Pink, Warn));
+	if (Warn < 1.f)
+	{
+		RRUI::DrawDisc(Canvas, Middle, 3.2f * S, WithAlpha(RRUI::Ink, 0.8f * (1.f - Warn)));
+		RRUI::DrawDisc(Canvas, Middle, 2.f * S, WithAlpha(RRUI::White, 1.f - Warn));
+	}
+	if (Warn > 0.f)
+	{
+		DrawBlocked(Middle, Radius + 5.f * S);
+	}
 }
 
 namespace

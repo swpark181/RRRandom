@@ -5,6 +5,7 @@
 #include "RRRandomWeapon.h"
 #include "RRRandomProjectile.generated.h"
 
+class ARRRandomCharacter;
 class UNiagaraComponent;
 class UNiagaraSystem;
 class UPointLightComponent;
@@ -14,7 +15,7 @@ class UStaticMeshComponent;
 
 /**
  * Straight-flying shot that deals a random amount of damage to whatever it hits, then disappears.
- * Passes through the shooter's teammates and other shots, and fades out after MaxRange.
+ * Passes through the shooter, its teammates and other shots, and fizzles out in the air after MaxRange.
  * Shots from stronger guns (higher Tier) glow, leave a trail and burst bigger on impact.
  *
  * Networking: only the server spawns shots and decides hits. Clients get a replicated copy that flies without
@@ -33,6 +34,12 @@ public:
 	virtual void PostNetReceiveVelocity(const FVector& NewVelocity) override;
 
 	float GetSpeed() const;
+
+	/** Collision radius at normal size (actor scale 1). */
+	float GetRadius() const;
+
+	/** Shots already flying pass through a brawler of the shooter's team that turns up after they set off (a fox's clones). Server only. */
+	void PassThroughIfTeammate(ARRRandomCharacter* Newcomer);
 
 	/** Scales the flying speed; call before the shot finishes spawning. */
 	void SetSpeedMultiplier(float Multiplier);
@@ -56,7 +63,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	float DamageMultiplier = 1.f;
 
-	/** Distance flown before the shot disappears; 0 keeps InitialLifeSpan. The shooter sets it from its attack range. */
+	/**
+	 * Distance flown before the shot fizzles out in the air (a rocket fist blows up); 0 keeps InitialLifeSpan. The shooter
+	 * sets it from its shot range (ARRRandomCharacter::GetShotRange).
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	float MaxRange = 0.f;
 
@@ -150,6 +160,19 @@ private:
 	/** Stops and hides the shot where it landed; the server destroys it a moment later. */
 	void HideAfterImpact();
 
+	/** Server: MaxRange flown without hitting anything; ends the shot where it is, in the air. */
+	void RunOutOfRange();
+
+	/**
+	 * Server: the shot and Friend (the shooter, a teammate) go through each other, whichever of them is moving. Friend's
+	 * body ignores the shot until ForgetFriends, when it lands or goes.
+	 */
+	void PassThrough(AActor* Friend);
+	void ForgetFriends();
+
+	/** The friends' bodies told to ignore this shot (PassThrough). */
+	TArray<TWeakObjectPtr<UPrimitiveComponent>> FriendBodies;
+
 	UFUNCTION()
 	void OnRep_Impact();
 
@@ -160,6 +183,14 @@ private:
 	/** Set by the server when the shot hits something; clients play the impact from it. */
 	UPROPERTY(ReplicatedUsing = OnRep_Impact)
 	bool bImpacted = false;
+
+	/** The shot ended in the air at the end of its range, not on something it hit: it fizzles out instead. */
+	UPROPERTY(Replicated)
+	bool bOutOfRange = false;
+
+	/** The shot landed on a brawler, which shows the hit itself; anything else gets a splash (ARRRandomEffects::ShotSplat). */
+	UPROPERTY(Replicated)
+	bool bHitBrawler = false;
 
 	UPROPERTY(Replicated)
 	FVector_NetQuantize ImpactLocation;

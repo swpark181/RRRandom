@@ -17,19 +17,30 @@ namespace
 		/** The rest pose's hips height at scale 1 (the strides scale with it). Across and front to back the rest pose doesn't
 		 * matter: every Mixamo animation plays with the hips over the origin, whatever the bind pose. */
 		float HipsHeight;
+		/** FRRSpeciesLook::RideFit: forward, right, up, on the brawler. */
+		FVector RideFit;
 	};
 
 	const FSpeciesTuning Tunings[RRSpecies::Count] = {
-		{ TEXT("Fox"), 1.8f, 27.5f },
-		{ TEXT("Rabbit"), 2.45f, 17.5f },
-		{ TEXT("Squirrel"), 2.05f, 21.2f },
-		{ TEXT("Tiger"), 1.75f, 26.3f },
+		// The fox, rabbit, squirrel and tiger remade in rounds 69-70 and rigged in Mixamo (hips heights of those rigs,
+		// blender_rig_measure.py). The fox is still 100 units to its ear tips, so the same 1.8; the squirrel's longer legs
+		// bring it down to between the fox's hips and head heights
+		{ TEXT("Fox"), 1.8f, 23.9f, FVector::ZeroVector },
+		// (Riding, the rabbit's long body sits 6 lower, so it shows no more above the sides than the others)
+		{ TEXT("Rabbit"), 2.45f, 16.9f, FVector(0.f, 0.f, -6.f) },
+		{ TEXT("Squirrel"), 1.93f, 23.4f, FVector::ZeroVector },
+		// The fluffy tiger (round 72) keeps the round-70 tiger's size; its own Mixamo rig's hips stand at 24.9
+		{ TEXT("Tiger"), 1.75f, 24.9f, FVector::ZeroVector },
 		// Its horns stand tall: between the fox's hips height (2.43) and head height (1.8), a little toward the hips
-		{ TEXT("Dragon"), 2.15f, 20.4f },
+		{ TEXT("Dragon"), 2.15f, 20.4f, FVector::ZeroVector },
+		// Her ears and head are big: between the fox's hips and head heights (Mixamo rig since round 70, hips 27)
+		{ TEXT("RedFox"), 1.95f, 27.f, FVector::ZeroVector },
 	};
-	const FSpeciesTuning& FoxTuning = Tunings[RRSpecies::Fox];
+	// The speeds below were measured on the first fox's rig (round 9), whose hips stood this high at scale 1; every species'
+	// copy of a motion strides in proportion to its own hips height against it
+	constexpr float SpeedHipsHeight = 27.5f;
 
-	// The fox's walk covers 79 units a second at scale 1 (its hips' drift before it was made to walk in place), and its
+	// The first fox's walk covers 79 units a second at scale 1 (its hips' drift before it was made to walk in place), and its
 	// aimed runs (forward, backward, left, right) 148, 134, 125, 148 (how fast the planted foot slides back,
 	// blender_anim_speed.py). The others' Mixamo copies stride in proportion to their hips height (the rabbit's walk: 52).
 	constexpr float FoxWalkSpeed = 79.f;
@@ -51,9 +62,14 @@ const TCHAR* RRSpecies::GetAssetName(int32 Species)
 	return Tunings[FMath::Clamp(Species, 0, Count - 1)].Name;
 }
 
+int32 RRSpecies::GetKitSpecies(int32 Species)
+{
+	return Species == RedFox ? Fox : Species;
+}
+
 FString RRSpecies::GetDisplayName(int32 Species)
 {
-	return FString(GetAssetName(Species)).ToUpper();
+	return Species == RedFox ? TEXT("RED FOX") : FString(GetAssetName(Species)).ToUpper();
 }
 
 int32 RRSpecies::FromName(const FString& Name)
@@ -70,7 +86,7 @@ int32 RRSpecies::FromName(const FString& Name)
 
 FString RRSpecies::GetUltimateName(int32 Species)
 {
-	switch (Species)
+	switch (GetKitSpecies(Species))
 	{
 	case Fox: return TEXT("FOX CLONES");
 	case Rabbit: return TEXT("MOON HOP");
@@ -140,7 +156,9 @@ const TArray<FRRSpeciesLook>& FRRSpeciesLook::GetAll()
 		Look.Aim.Move[2] = Anim(TEXT("AimRunL"));
 		Look.Aim.Move[3] = Anim(TEXT("AimRunR"));
 		Look.MeshScale = Tuning.MeshScale;
-		const float Stride = Tuning.HipsHeight / FoxTuning.HipsHeight * Tuning.MeshScale;
+		Look.HipsHeight = Tuning.HipsHeight * Tuning.MeshScale;
+		Look.RideFit = Tuning.RideFit;
+		const float Stride = Tuning.HipsHeight / SpeedHipsHeight * Tuning.MeshScale;
 		Look.WalkSpeed = FoxWalkSpeed * Stride;
 		Look.RunSpeed = FoxRunSpeed * Stride;
 		for (int32 Direction = 0; Direction < 4; ++Direction)
@@ -148,7 +166,7 @@ const TArray<FRRSpeciesLook>& FRRSpeciesLook::GetAll()
 			Look.Aim.MoveSpeed[Direction] = FoxAimRunSpeeds[Direction] * Stride;
 		}
 		Look.Portrait = Find<UTexture2D>(FString::Printf(TEXT("/Game/UI/T_%sPortrait.T_%sPortrait"), *Name, *Name));
-		UE_CLOG(!Look.IsUsable(), LogTemp, Warning, TEXT("RRRandom: the %s's assets are missing; it falls back to the fox."), *Name);
+		UE_CLOG(!Look.IsUsable(), LogTemp, Warning, TEXT("RRRandom: the %s's assets are missing: it is drawn as the fox."), *Name);
 	}
 	return Looks;
 }

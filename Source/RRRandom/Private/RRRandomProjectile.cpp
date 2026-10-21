@@ -153,6 +153,8 @@ void ARRRandomProjectile::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	DOREPLIFETIME(ARRRandomProjectile, bPoke);
 	DOREPLIFETIME(ARRRandomProjectile, RocketArm);
 	DOREPLIFETIME(ARRRandomProjectile, bImpacted);
+	DOREPLIFETIME(ARRRandomProjectile, bOutOfRange);
+	DOREPLIFETIME(ARRRandomProjectile, bHitBrawler);
 	DOREPLIFETIME(ARRRandomProjectile, ImpactLocation);
 	DOREPLIFETIME(ARRRandomProjectile, ImpactNormal);
 }
@@ -221,14 +223,14 @@ void ARRRandomProjectile::BeginPlay()
 		// Don't hit the shooter on the way out, nor anyone on the shooter's team
 		if (APawn* Shooter = GetInstigator())
 		{
-			Collision->IgnoreActorWhenMoving(Shooter, true);
+			PassThrough(Shooter);
 			if (const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(Shooter))
 			{
 				for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 				{
 					if (It->GetTeam() == Brawler->GetTeam())
 					{
-						Collision->IgnoreActorWhenMoving(*It, true);
+						PassThrough(*It);
 					}
 				}
 				// The team's star robot too (its own fists start next to it)
@@ -236,7 +238,7 @@ void ARRRandomProjectile::BeginPlay()
 				{
 					if (It->GetTeam() == Brawler->GetTeam())
 					{
-						Collision->IgnoreActorWhenMoving(*It, true);
+						PassThrough(*It);
 					}
 				}
 			}
@@ -252,28 +254,15 @@ void ARRRandomProjectile::BeginPlay()
 			}
 		}
 
-		if (MaxRange > 0.f && GetSpeed() > 0.f && bRocket)
+		if (MaxRange > 0.f && GetSpeed() > 0.f)
 		{
-			// A rocket fist that reaches its range without hitting anything blows up in the air
+			// One that reaches its range without hitting anything ends in the air: a shot fizzles out, a rocket fist blows up
 			SetLifeSpan(0.f);
 			FTimerHandle Handle;
 			GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this]()
 			{
-				if (!bImpacted)
-				{
-					bImpacted = true;
-					ImpactLocation = GetActorLocation();
-					ImpactNormal = -GetActorForwardVector();
-					ForceNetUpdate();
-					SpawnImpactEffects(ImpactLocation, ImpactNormal);
-					HideAfterImpact();
-					SetLifeSpan(ImpactLingerTime);
-				}
+				RunOutOfRange();
 			}), MaxRange / GetSpeed(), false);
-		}
-		else if (MaxRange > 0.f && GetSpeed() > 0.f)
-		{
-			SetLifeSpan(MaxRange / GetSpeed());
 		}
 	}
 	else
@@ -306,6 +295,7 @@ void ARRRandomProjectile::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		Trail->Deactivate();
 		Trail = nullptr;
 	}
+	ForgetFriends();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -335,6 +325,59 @@ float ARRRandomProjectile::GetSpeed() const
 	return Movement->InitialSpeed;
 }
 
+float ARRRandomProjectile::GetRadius() const
+{
+	return Collision->GetUnscaledSphereRadius();
+}
+
+void ARRRandomProjectile::PassThroughIfTeammate(ARRRandomCharacter* Newcomer)
+{
+	const ARRRandomCharacter* Shooter = Cast<ARRRandomCharacter>(GetInstigator());
+	if (HasAuthority() && !bImpacted && Shooter && Newcomer && Newcomer->GetTeam() == Shooter->GetTeam())
+	{
+		PassThrough(Newcomer);
+	}
+}
+
+void ARRRandomProjectile::PassThrough(AActor* Friend)
+{
+	Collision->IgnoreActorWhenMoving(Friend, true);
+	// Both ways: a brawler walking into its own shot just ahead of the muzzle would otherwise stop it (and bump into it)
+	if (UPrimitiveComponent* Body = Cast<UPrimitiveComponent>(Friend->GetRootComponent()))
+	{
+		Body->IgnoreActorWhenMoving(this, true);
+		FriendBodies.Add(Body);
+	}
+}
+
+void ARRRandomProjectile::ForgetFriends()
+{
+	for (const TWeakObjectPtr<UPrimitiveComponent>& Body : FriendBodies)
+	{
+		if (Body.IsValid())
+		{
+			Body->IgnoreActorWhenMoving(this, false);
+		}
+	}
+	FriendBodies.Reset();
+}
+
+void ARRRandomProjectile::RunOutOfRange()
+{
+	if (bImpacted)
+	{
+		return;
+	}
+	bImpacted = true;
+	bOutOfRange = true;
+	ImpactLocation = GetActorLocation();
+	ImpactNormal = -GetActorForwardVector();
+	ForceNetUpdate();
+	SpawnImpactEffects(ImpactLocation, ImpactNormal);
+	HideAfterImpact();
+	SetLifeSpan(ImpactLingerTime);
+}
+
 void ARRRandomProjectile::SetSpeedMultiplier(float Multiplier)
 {
 	// Before the movement component initializes, which turns InitialSpeed into the starting velocity
@@ -351,6 +394,25 @@ void ARRRandomProjectile::SpawnImpactEffects(const FVector& Location, const FVec
 			Effects->RocketBlast(Location, Normal, 1.5f);
 		}
 		return;
+	}
+	// Out of range in the air: the ball puffs away where it got to (a poke is never seen)
+	if (bOutOfRange)
+	{
+		ARRRandomEffects* Effects = bPoke ? nullptr : ARRRandomEffects::Get(this);
+		if (Effects)
+		{
+			Effects->ShotFizzle(Location, -Normal, GetActorScale3D().X, ShotColor);
+		}
+		return;
+	}
+	// Landing on anything but a brawler (which shows its own hit, ARRRandomCharacter::MulticastDamagePopup): a splash on
+	// the surface, a little bigger for each tier
+	if (!bHitBrawler && !bPoke)
+	{
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			Effects->ShotSplat(Location, Normal, GetActorScale3D().X * (1.f + 0.2f * static_cast<int32>(Tier)), ShotColor);
+		}
 	}
 	const FTierLook& Look = TierLooks[static_cast<int32>(Tier)];
 	const FRotator AwayFromSurface = Normal.Rotation();
@@ -376,6 +438,7 @@ void ARRRandomProjectile::HideAfterImpact()
 	Movement->StopMovementImmediately();
 	Movement->Deactivate();
 	Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ForgetFriends();
 	Visual->SetVisibility(false);
 	Glow->SetVisibility(false);
 	if (Trail)
@@ -397,7 +460,8 @@ void ARRRandomProjectile::OnRep_Impact()
 
 void ARRRandomProjectile::OnHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
-	if (bImpacted || !HasAuthority())
+	// Also called when something else moves into the shot: the shooter and its team (PassThrough) never stop it either way
+	if (bImpacted || !HasAuthority() || (OtherActor && Collision->GetMoveIgnoreActors().Contains(OtherActor)))
 	{
 		return;
 	}
@@ -432,6 +496,7 @@ void ARRRandomProjectile::OnHit(UPrimitiveComponent* HitComponent, AActor* Other
 
 	// Tell the clients where it landed, then go once they've had time to hear it
 	bImpacted = true;
+	bHitBrawler = Cast<ARRRandomCharacter>(OtherActor) != nullptr;
 	ImpactLocation = Hit.ImpactPoint;
 	ImpactNormal = Hit.ImpactNormal;
 	ForceNetUpdate();

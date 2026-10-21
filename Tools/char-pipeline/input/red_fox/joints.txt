@@ -1,0 +1,28 @@
+# Red fox (fox girl v3) joints on the tiger's Mixamo rig frame (m; faces -Y, +X her left, Z up), read off
+# front/side renders of input/red_fox/mixamo_obj/redfox.obj on a grid (blender_fit_rig.py). Her middle is x = -0.025:
+# blender_tripo_to_obj.py centered the feet with the tail's tip among them.
+MIRROR -0.025
+Hips -0.025 -0.150 0.235
+Spine -0.025 -0.150 0.285
+Spine1 -0.025 -0.152 0.345
+Spine2 -0.025 -0.152 0.405
+Neck -0.025 -0.148 0.488
+Head -0.025 -0.150 0.522
+HeadTop_End -0.025 -0.150 0.840
+RightShoulder -0.055 -0.150 0.468
+RightArm -0.125 -0.125 0.430
+RightForeArm -0.170 -0.120 0.385
+RightHand -0.2125 -0.135 0.3425
+RightHandThumb1 -0.215 -0.160 0.330
+RightHandThumb2 -0.218 -0.176 0.318
+RightHandThumb3 -0.219 -0.188 0.305
+RightHandThumb4 -0.220 -0.196 0.292
+RightHandIndex1 -0.238 -0.150 0.322
+RightHandIndex2 -0.250 -0.155 0.302
+RightHandIndex3 -0.257 -0.160 0.285
+RightHandIndex4 -0.264 -0.165 0.270
+RightUpLeg -0.091 -0.150 0.200
+RightLeg -0.097 -0.155 0.130
+RightFoot -0.098 -0.145 0.065
+RightToeBase -0.105 -0.205 0.020
+RightToe_End -0.110 -0.240 0.012

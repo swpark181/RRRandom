@@ -1,6 +1,8 @@
 #include "RRRandomBodyAnimInstance.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomMovementComponent.h"
+#include "RRRandomVehicle.h"
+#include "AnimationRuntime.h"
 #include "Animation/AnimNodeBase.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AttributesRuntime.h"
@@ -75,6 +77,7 @@ URRRandomBodyAnimInstance::URRRandomBodyAnimInstance()
 	JumpBoneNames = { TEXT("LeftUpLeg"), TEXT("LeftLeg"), TEXT("LeftFoot"), TEXT("RightUpLeg"), TEXT("RightLeg"), TEXT("RightFoot"), TEXT("Spine"),
 		TEXT("LeftArm"), TEXT("LeftForeArm"), TEXT("RightArm"), TEXT("RightForeArm") };
 	SprintBoneNames = { TEXT("LeftArm"), TEXT("RightArm") };
+	RideBoneNames = JumpBoneNames;
 }
 
 void URRRandomBodyAnimInstance::UpdateFlightPose(float DeltaSeconds)
@@ -199,6 +202,76 @@ void URRRandomBodyAnimInstance::UpdateSprintPose(float DeltaSeconds)
 	SprintBends = { Down, Down };
 }
 
+namespace
+{
+	/** A riding pose (UpdateRidePose), in degrees in mesh space like the jump's (FJumpPose). */
+	struct FRidePose
+	{
+		float ThighL, KneeL, FootL, ThighR, KneeR, FootR, Spine, Fwd, Out, Bend;
+	};
+	const FRidePose RidePoses[] =
+	{
+		// Kickboard: standing on the deck, the left foot ahead, knees soft, leaning on the bar with both hands
+		{ 12.f, -22.f, 10.f, -8.f, -12.f, 20.f, -8.f, 50.f, 8.f, 15.f },
+		// Motorbike: astride, knees up by the tank, leaning on the bars held wide
+		{ 65.f, -95.f, 25.f, 65.f, -95.f, 25.f, -10.f, 70.f, 18.f, 10.f },
+		// Car (the star team's too): sitting, the hands on the wheel in front
+		{ 85.f, -85.f, 0.f, 85.f, -85.f, 0.f, 4.f, 50.f, 12.f, 40.f },
+		// A car's rear seat: sitting, the arms left free to shoot
+		{ 85.f, -85.f, 0.f, 85.f, -85.f, 0.f, 0.f, 0.f, 0.f, 0.f },
+	};
+	constexpr float RidePoseInTime = 0.2f;
+	constexpr float RidePoseOutTime = 0.15f;
+}
+
+void URRRandomBodyAnimInstance::UpdateRidePose(float DeltaSeconds)
+{
+	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetOwningActor());
+	const ARRRandomVehicle* Vehicle = Brawler && Brawler->IsAlive() ? Brawler->GetVehicle() : nullptr;
+	if (Vehicle)
+	{
+		const ERRVehicleKind Kind = Vehicle->GetKind();
+		RidePose = !Brawler->IsDriving() ? 3 : (Kind == ERRVehicleKind::Kickboard ? 0 : (Kind == ERRVehicleKind::Motorbike ? 1 : 2));
+	}
+	RideWeight = FMath::FInterpConstantTo(RideWeight, Vehicle ? 1.f : 0.f, DeltaSeconds, 1.f / (Vehicle ? RidePoseInTime : RidePoseOutTime));
+	const USkeletalMeshComponent* Mesh = GetSkelMeshComponent();
+	if (RideWeight <= 0.f || !Mesh || !Mesh->GetSkinnedAsset())
+	{
+		RideBends.Reset();
+		RideDrop = 0.f;
+		return;
+	}
+	const FRidePose& Pose = RidePoses[RidePose];
+	const float W = RideWeight;
+	const auto Side = [W](float Degrees) { return FQuat(FVector::ForwardVector, FMath::DegreesToRadians(Degrees * W)); };
+	// Out to the side: the left arm (on +X) about -Y, the right about +Y
+	const auto ArmTurn = [&](float OutSign) { return Side(Pose.Fwd) * FQuat(FVector::RightVector, FMath::DegreesToRadians(Pose.Out * W * OutSign)); };
+	RideBends = { Side(Pose.ThighL), Side(Pose.KneeL), Side(Pose.FootL), Side(Pose.ThighR), Side(Pose.KneeR), Side(Pose.FootR), Side(Pose.Spine),
+		ArmTurn(-1.f), Side(Pose.Bend), ArmTurn(1.f), Side(Pose.Bend) };
+
+	// Bending the legs lifts the feet: the body sinks by as much (the lower foot's), so they stay down and it sits.
+	// The thigh and shin lengths are the mesh's own, from its reference pose.
+	const FReferenceSkeleton& Skeleton = Mesh->GetSkinnedAsset()->GetRefSkeleton();
+	const int32 Hip = Skeleton.FindBoneIndex(TEXT("LeftUpLeg"));
+	const int32 Knee = Skeleton.FindBoneIndex(TEXT("LeftLeg"));
+	const int32 Ankle = Skeleton.FindBoneIndex(TEXT("LeftFoot"));
+	if (Hip == INDEX_NONE || Knee == INDEX_NONE || Ankle == INDEX_NONE)
+	{
+		RideDrop = 0.f;
+		return;
+	}
+	const FVector HipAt = FAnimationRuntime::GetComponentSpaceTransformRefPose(Skeleton, Hip).GetLocation();
+	const FVector KneeAt = FAnimationRuntime::GetComponentSpaceTransformRefPose(Skeleton, Knee).GetLocation();
+	const FVector AnkleAt = FAnimationRuntime::GetComponentSpaceTransformRefPose(Skeleton, Ankle).GetLocation();
+	const float Thigh = FVector::Dist(HipAt, KneeAt);
+	const float Shin = FVector::Dist(KneeAt, AnkleAt);
+	const auto Rise = [&](float ThighAngle, float KneeAngle)
+	{
+		return Thigh * (1.f - FMath::Cos(FMath::DegreesToRadians(ThighAngle * W))) + Shin * (1.f - FMath::Cos(FMath::DegreesToRadians((ThighAngle + KneeAngle) * W)));
+	};
+	RideDrop = FMath::Min(Rise(Pose.ThighL, Pose.KneeL), Rise(Pose.ThighR, Pose.KneeR)) * Mesh->GetRelativeScale3D().Z;
+}
+
 void FRRRandomBodyAnimInstanceProxy::TurnBones(FPoseContext& Output, const TArray<FName>& Names, const TArray<FQuat>& Bends)
 {
 	const FBoneContainer& Bones = Output.Pose.GetBoneContainer();
@@ -306,6 +379,7 @@ void URRRandomBodyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		UpdateFlightPose(DeltaSeconds);
 		UpdateJumpPose(DeltaSeconds);
 		UpdateSprintPose(DeltaSeconds);
+		UpdateRidePose(DeltaSeconds);
 		UpdateWings(DeltaSeconds);
 	}
 
@@ -359,7 +433,8 @@ void URRRandomBodyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	Life = FMath::FInterpConstantTo(Life, !Brawler || Brawler->IsAlive() ? 1.f : 0.f, DeltaSeconds, LifeFadeSpeed);
 	const float Run = FMath::Clamp(Velocity.Size2D() / FMath::Max(WagRunSpeed, 1.f), 0.f, 1.f);
 	WagPhase = FMath::Fmod(WagPhase + 2.f * PI * FMath::Lerp(WagFrequency.X, WagFrequency.Y, Run) * DeltaSeconds, 2.f * PI);
-	Lift = FMath::FInterpTo(Lift, RunLift * Run, DeltaSeconds, LiftSpeed);
+	// Riding, the tail lifts up off the seat and out of the vehicle's body
+	Lift = FMath::FInterpTo(Lift, RunLift * Run + RideTailLift * RideWeight, DeltaSeconds, LiftSpeed);
 	const float Wag = FMath::Lerp(WagAmplitude.X, WagAmplitude.Y, Run);
 	const float TotalLift = (Lift + RunBob * Run * FMath::Sin(2.f * WagPhase)) * Life;
 
@@ -474,6 +549,8 @@ void FRRRandomBodyAnimInstanceProxy::PreUpdate(UAnimInstance* InAnimInstance, fl
 	JumpBends = Instance->GetJumpBends();
 	SprintBones = Instance->GetSprintBones();
 	SprintBends = Instance->GetSprintBends();
+	RideBones = Instance->GetRideBones();
+	RideBends = Instance->GetRideBends();
 	WingBones = Instance->GetWingBones();
 	WingBends = Instance->GetWingBends();
 	Aim = Instance->GetAimFrame();
@@ -617,6 +694,7 @@ bool FRRRandomBodyAnimInstanceProxy::Evaluate(FPoseContext& Output)
 	TurnBones(Output, FlightBones, FlightBends);
 	TurnBones(Output, JumpBones, JumpBends);
 	TurnBones(Output, SprintBones, SprintBends);
+	TurnBones(Output, RideBones, RideBends);
 	TurnBones(Output, WingBones, WingBends);
 	return true;
 }

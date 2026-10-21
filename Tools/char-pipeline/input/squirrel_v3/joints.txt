@@ -1,0 +1,27 @@
+# Squirrel v3 (Tripo retry, task b90eebc9) joints on the old tiger's Mixamo rig frame (m; faces -Y, +X his left, Z up),
+# read off front/side grid renders of input/squirrel_v3/mixamo_obj/squirrel.obj (blender_fit_rig.py).
+MIRROR 0.0
+Hips 0.0 0.020 0.240
+Spine 0.0 0.020 0.290
+Spine1 0.0 0.020 0.360
+Spine2 0.0 0.020 0.430
+Neck 0.0 0.025 0.495
+Head 0.0 0.025 0.530
+HeadTop_End 0.0 0.025 1.000
+RightShoulder -0.040 0.030 0.470
+RightArm -0.141 0.045 0.470
+RightForeArm -0.204 0.045 0.382
+RightHand -0.236 0.040 0.335
+RightHandThumb1 -0.225 0.015 0.325
+RightHandThumb2 -0.218 0.000 0.315
+RightHandThumb3 -0.212 -0.010 0.305
+RightHandThumb4 -0.208 -0.018 0.297
+RightHandIndex1 -0.245 0.040 0.315
+RightHandIndex2 -0.250 0.035 0.302
+RightHandIndex3 -0.254 0.030 0.290
+RightHandIndex4 -0.257 0.025 0.278
+RightUpLeg -0.075 0.030 0.200
+RightLeg -0.083 0.035 0.105
+RightFoot -0.083 0.040 0.030
+RightToeBase -0.085 -0.040 0.020
+RightToe_End -0.087 -0.090 0.012

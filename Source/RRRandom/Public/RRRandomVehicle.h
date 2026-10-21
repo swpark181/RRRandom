@@ -38,13 +38,16 @@ struct FRRVehicleHandling
 	float Braking = 2048.f;
 	/** Whether it drifts at all; drifting leans the body (bike) or rolls it a little (car). */
 	bool bDrifts = false;
-	/** How high the rider's feet are above the ground on it (on the deck, in the seat). */
+	/**
+	 * Above the vehicle's bottom: the deck the rider stands on (the kickboard), or the top of the driver's seat cushion,
+	 * which the rider sits on with its hips over the seat's spot (ARRRandomCharacter::GetRideOffset).
+	 */
 	float SeatHeight = 0.f;
 	/** Degrees of lean per degree of drift, and the most. */
 	float LeanPerDrift = 0.f;
 	float MaxLean = 0.f;
 	const TCHAR* Name = TEXT("");
-	/** Where the driver sits, forward of the vehicle's middle; and whether there is a rear seat for a passenger, and where. */
+	/** Where the driver's hips go, forward of the vehicle's middle; and whether there is a rear seat for a passenger, and where. */
 	float DriverSeatX = 0.f;
 	bool bRearSeat = false;
 	float RearSeatX = 0.f;
@@ -60,6 +63,8 @@ struct FRRVehicleHandling
 	float RearSeatY = 0.f;
 	/** Whether it runs enemies over like a car (UpdateRam). */
 	bool bRams = false;
+	/** The top of the rear seat's cushion, like SeatHeight. */
+	float RearSeatHeight = 0.f;
 };
 
 /**
@@ -128,6 +133,11 @@ public:
 	void RemovePassenger(ARRRandomCharacter* Who);
 	/** Where a passenger's capsule middle sits, relative to the vehicle's pivot (the middle of its bottom). */
 	FVector GetRearSeatLocation(float CapsuleHalfHeight) const { return FVector(GetHandling().RearSeatX, GetHandling().RearSeatY, CapsuleHalfHeight); }
+
+	/** The kickboard is stood on; everything else is sat in (FRRVehicleHandling::SeatHeight). */
+	bool IsStoodOn() const { return Kind == ERRVehicleKind::Kickboard; }
+	/** The deck's or the cushion's height above the vehicle's bottom, at the driver's seat or the rear one. */
+	float GetSeatHeight(bool bRear) const { return bRear ? GetHandling().RearSeatHeight : GetHandling().SeatHeight; }
 
 	/** Brawlers this close (flat) to a parked vehicle can get on. */
 	static constexpr float MountRange = 170.f;

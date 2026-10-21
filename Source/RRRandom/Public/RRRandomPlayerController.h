@@ -42,6 +42,9 @@ public:
 	/** The capsule-center point a shot along this cursor ray should go for. */
 	FVector GetAimTarget(const FVector& CursorOrigin, const FVector& CursorDirection) const;
 
+	/** Where the fire button would shoot right now: the crosshair's target in third person, else the cursor's. */
+	bool GetFireTarget(FVector& OutTarget) const;
+
 	/** Hosts an online game (F1). */
 	/** Testing (not in Shipping): holds Shift's sprint on (1) or lets go (0), for scripts that can't hold a key. */
 	UFUNCTION(Exec)

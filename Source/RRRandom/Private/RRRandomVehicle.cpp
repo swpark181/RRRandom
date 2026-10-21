@@ -17,21 +17,28 @@ namespace
 {
 	// By ERRVehicleKind. Each clearly faster than the last, and all of them much faster than walking (speed is a share of
 	// the walk); the motorbike and the car trade grip for drifts.
+	// Seats (round 71): where the hips go and how high the deck or cushion is, measured on the meshes (the top surface's
+	// height every 5 units along each seat's line, from char-pipeline/output/vehicles: a cushion is the low flat stretch
+	// in front of a backrest).
 	const FRRVehicleHandling Handlings[] =
 	{
-		// Kickboard: twice the walk, otherwise like walking
-		{ 2.f, 2600.f, 8.f, 720.f, 2200.f, false, 12.f, 0.f, 0.f, TEXT("KICKBOARD") },
-		// Motorbike: faster, slides out in tight turns and leans into them; one rear wheel's mark
-		{ 2.7f, 2400.f, 1.6f, 560.f, 1100.f, true, 22.f, 0.7f, 28.f, TEXT("MOTORBIKE"), 0.f, false, 0.f, 16.f, 0.65f, 0.f },
+		// Kickboard: twice the walk, otherwise like walking; standing on the deck (53 high, -45 .. 30), the bar's stem at 35
+		{ 2.f, 2600.f, 8.f, 720.f, 2200.f, false, 53.f, 0.f, 0.f, TEXT("KICKBOARD"), -8.f },
+		// Motorbike: faster, slides out in tight turns and leans into them; one rear wheel's mark. The saddle runs from
+		// -75 to -5, sloping from 93 down to 86 toward the tank (0 .. 40, 100 .. 109 high)
+		{ 2.7f, 2400.f, 1.6f, 560.f, 1100.f, true, 86.f, 0.7f, 28.f, TEXT("MOTORBIKE"), -22.f, false, 0.f, 16.f, 0.65f, 0.f },
 		// Car: fastest, slides the most, rolls a little; a tandem two-seater, the rear seat right behind the driver's;
-		// two rear wheels' marks
-		{ 3.5f, 2200.f, 1.1f, 460.f, 1000.f, true, 18.f, 0.15f, 6.f, TEXT("CAR"), -7.f, true, -93.f, 22.f, 0.55f, 0.72f, 0.f, 0.f, true },
-		// The star team (Tripo models, measured from char-pipeline/output/vehicles/star/vehicles_top.png): two seats side
-		// by side in the chest car and the arms car, one behind the other in the long legs car. The chest car is the
-		// sturdy one, the arms car the nimble one, the legs car (a rocket) the fastest that turns the slowest; all ram.
-		{ 3.f, 2000.f, 1.4f, 440.f, 1100.f, true, 45.f, 0.12f, 5.f, TEXT("STAR CHEST"), -90.f, true, -90.f, 24.f, 0.55f, 0.75f, -42.f, 42.f, true },
-		{ 3.2f, 2200.f, 1.2f, 500.f, 1000.f, true, 45.f, 0.15f, 6.f, TEXT("STAR ARMS"), -45.f, true, -45.f, 22.f, 0.55f, 0.7f, -42.f, 42.f, true },
-		{ 3.8f, 2400.f, 1.f, 380.f, 900.f, true, 30.f, 0.1f, 4.f, TEXT("STAR LEGS"), 120.f, true, -57.f, 18.f, 0.7f, 0.5f, 0.f, 0.f, true },
+		// two rear wheels' marks. Driver's cushion -20 .. 20 at 52 (backrest at -40 .. -30), the rear one -115 .. -55 at 62
+		// (backrest -135 .. -120)
+		{ 3.5f, 2200.f, 1.1f, 460.f, 1000.f, true, 52.f, 0.15f, 6.f, TEXT("CAR"), -12.f, true, -95.f, 22.f, 0.55f, 0.72f, 0.f, 0.f, true, 62.f },
+		// The star team (Tripo models): two seats side by side in the chest car (cushions -70 .. 5 at 96, backrests -120 ..
+		// -80) and the arms car (cushions -55 .. 35 at 120 .. 130, backrests -100 .. -65), one behind the other in the long
+		// legs car (cushions 20 .. 55 and -80 .. -40, at 75 on its middle line; riders go 9 lower, into its shallow
+		// cockpits rather than on top of them). The chest car is the sturdy one, the arms car the nimble one, the legs car
+		// (a rocket) the fastest that turns the slowest; all ram.
+		{ 3.f, 2000.f, 1.4f, 440.f, 1100.f, true, 96.f, 0.12f, 5.f, TEXT("STAR CHEST"), -58.f, true, -58.f, 24.f, 0.55f, 0.75f, -42.f, 42.f, true, 96.f },
+		{ 3.2f, 2200.f, 1.2f, 500.f, 1000.f, true, 121.f, 0.15f, 6.f, TEXT("STAR ARMS"), -43.f, true, -43.f, 22.f, 0.55f, 0.7f, -42.f, 42.f, true, 121.f },
+		{ 3.8f, 2400.f, 1.f, 380.f, 900.f, true, 66.f, 0.1f, 4.f, TEXT("STAR LEGS"), 28.f, true, -68.f, 18.f, 0.7f, 0.5f, 0.f, 0.f, true, 66.f },
 	};
 	const TCHAR* MeshPaths[] =
 	{

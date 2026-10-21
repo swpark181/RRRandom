@@ -1,6 +1,6 @@
 # 작업 이어하기 메모 — 팀전 프로토타입 (FPS식 사격 + 엄폐물)
 
-최종 업데이트: 2026-10-20 (65차)
+최종 업데이트: 2026-10-21 (72차)
 
 Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMemory/` 에 복사해 둠 — 다른 PC 세션은 먼저 읽기.
 
@@ -73,6 +73,100 @@ Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMem
 - (65차) 용이 날 때 땅 기준으로 날기 때문에 건물 위로 못 올라감 → 맵 전체에 날 수 있는 영역을 정하고 지금 있는 제한은 해제.
 - (66차) 캐릭터 카메라(3인칭)가 앞이 너무 안 보임 → 조금 더 뒤에서. 너무 뒤로 빠져 RPG 같은 느낌은 아니게.
 - (67차) Shift 를 눌러 달리는 기능.
+- (68차) 여우 여자(붉은 사막여우, Tripo v3 재시도 모델 + 텍스처 정리본)를 "red fox" 라는 이름으로 게임에 추가. 스킬은 원래 여우와 같게.
+- (69차) 기존 여우를 지금까지 노하우(8방향, 꼬리 하나, 멀티뷰 Ultra + 재시도)로 다시 만들어 재시도 모델로 게임 여우를 교체.
+- (70차) 용을 뺀 나머지 동물(토끼·다람쥐·호랑이)도 같은 방식으로 다시 만들어 교체.
+- (71차) 총 사거리를 맵 끝에서 끝까지, 허공에서 사거리가 끝나면 사라지는 이펙트, 아군·본인은 안 맞고 총구 앞에서 생성. 구조물·오브젝트에 맞아도 이펙트. 총구가 벽에 묻히면 조준점에 경고하고 발사 안 됨. 운전자는 못 쏘고 탈것마다 운전 자세. 각 탈것 좌석에 맞게 앉고 캐릭터별 보정. 앞으로 캐릭터를 추가할 때 고려되도록 파이프라인에 기록.
+- (72차) 호랑이를 여우들처럼 털이 복슬거리게 다시 만들어(시안 A-2, 3D 재시도, 귀 뒷면 흰 반점 없음) 리깅하고 게임의 호랑이와 교체.
+
+## 72차 — 복슬 호랑이로 교체 (사용자: 호랑이를 여우들처럼 털이 복슬거리게 → 시안 A-2 → 3D 재시도 → 귀 뒷면 흰 반점 지우기 → 리깅·게임 교체)
+
+- 컨셉(Tripo Image, 무료): 호랑이 v3 정면 + 여우 v3 정면(털 기준)을 참고로 A(은은)·B·C 시안 → 사용자 **A-2**. 8방향 + 탑뷰는 방향마다 A-2 + 같은 각도의 v3 그림(각도·자세·꼬리 기준)을 참고로. 옷 마감 정리 4장. `C:\work\char-pipeline\input\tiger_fluffy\concept\`, 시트 `output\tiger_fluffy\tiger_fluffy_turn8.png`.
+- 3D: Tripo 멀티뷰 Ultra 45 (22,230 → 22,185), 작업 `ed0e2d04-b0ce-4b29-8bf4-b8f64bdfd1db`, 사용자가 **재시도** 선택(비교 페이지 artifact `SCGAJuNKSjrm98Jtq4DWgt`). 귀 뒷면 흰 반점: Blender 로 직접 칠한 건 사용자가 "이상하다"고 해서 버림 → 뒷모습 입력 그림만 Tripo Image 로 고쳐 Texture 탭 멀티뷰 재생성(2K, 조명 제거, 10 크레딧 → 22,175). Magic Brush 는 두 번 다 반점을 다시 그려서 못 씀. 결과 `input\tiger_fluffy\tripo\tiger_fluffy_retex.fbx`.
+- 리깅: `blender_tripo_to_obj.py` → 꼬리 떼기(새 `blender_obj_grid.py` 로 꼬리 중심선 읽고 새 `blender_strip_polyline.py <obj> <out> <joints> 7 0` — 꼬리 뼈 리그 없이 OBJ 에서 바로, 정점 648개) → Mixamo(사용자 로그인 필요했음; 2 Chain Fingers 골랐지만 이번에도 33뼈·엄지 없음, 엉덩이 24.9) → `mixamo_export.js` 18 + 호랑이 궁극기 2 → `blender_merge_parts.py … Hips,0.4,Spine` → `blender_animal_tail.py "-0.06,-0.01,0.26;-0.03,0.03,0.11;0.05,0.11,0.05;0.17,0.21,0.065;0.29,0.31,0.15" 0.07 1.1`(꼬리 62cm, 정점 935) → `blender_head_weights.py` → `input\tiger_fluffy\rig_mx\tiger_rig.fbx`. 새 `blender_pose_check.py` 로 꼬리 들기·다리·팔·고개 굽힘 확인(`rig_mx\check\pose.png`, 찢어짐 없음). 지금 Mixamo 에 남은 캐릭터: `tiger_fluffy_body_mixamo`.
+- 언리얼: 옛 호랑이 에셋·얼굴은 `C:\work\char-pipeline\input\tiger_v3\ue_backup\` 에 백업 → `input\ue_import_mixamo_v3.sh Tiger tiger 24.9 tiger_fluffy/tripo/tiger_fluffy_retex.fbm/tiger_fluffy_retex_basecolor.jpg tiger_fluffy`(애니메이션 21). 얼굴 `blender_portrait.py`(Mixamo FBX 재질이 번들거려 무광으로 고정하도록 스크립트 수정) → `/Game/UI/T_TigerPortrait`. 튜닝 `{Tiger, 1.75, 24.9}` — 크기는 v3 그대로, 엉덩이는 새 리그 실측. 단 걷기 이동 실측 60.8/s 는 계산값(79×24.9/27.5 = 71.5)보다 15% 느림: 발 미끄러짐이 보이면 엉덩이 값을 21 쯤으로.
+- 확인(빌드 경고 없음): 스튜디오 옆·앞·뒤·걷기·달리기·사격 `C:\work\char-pipeline\output\screens\tiger_fluffy\tiger72_sheet.png`, 호랑이 기운(주사위 `RRUltimate` 뒤 `RRRoll` 해야 발동; 거대 호랑이도 새 모델, 3번 내려침) `tiger72ult_sheet.png`, 6탈것 탑승 `output\screens\ride\round72_tiger_ride.png`. 확인 못 함: 춤·좌절·쓰러짐 화면, 온라인, 타이틀 카드 화면.
+
+## 71차 — 사격 정리 + 탈것 탑승 (사용자 요청 7개, 위 목록)
+
+- 사거리: 총알 `MaxRange` = `ARRRandomCharacter::GetShotRange`(지금 맵 `GetMapBounds` 대각선, 주사위 랜드 약 9,600 · 마을 약 24,900; 맵이 없으면 `AttackRange`). 봇의 교전 거리와 폼 핑거는 `AttackRange`(1300) 그대로.
+- 사거리 끝: 모든 총알이 서버 타이머 `RunOutOfRange` → 복제 `bOutOfRange` → `ARRRandomEffects::ShotFizzle`(공이 조금 더 밀려가며 부풀어 흐려짐 + 링 + 반짝이). 로봇 주먹은 전처럼 공중 폭발.
+- 본인·아군: **원인** — 엔진은 캐릭터가 걸어서 총알에 부딪혀도 총알의 OnComponentHit 을 부름(`DispatchBlockingHit` 이 양쪽에 알림). `IgnoreActorWhenMoving` 은 총알 쪽 이동만 막아서 앞으로 걸으며 쏘면 자기 총알에 걸려 터짐(헤드리스 100초 봇전에서 26건). `ARRRandomProjectile::PassThrough` 로 양쪽(총알 ↔ 사수·아군 캡슐) 무시, `OnHit` 은 무시 목록이면 그냥 지나감, 날아가는 중 생긴 아군(여우 분신)도 `PassThroughIfTeammate`. 고친 뒤 0건.
+- 생성 위치·벽: `ARRRandomCharacter::GetShotStart` — 총구 끝 + 총알 반지름 앞. 몸 중심(총구 높이)→시작점 사이에 벽이 있으면 false: 서버·클라 발사 모두 막고(탄·쿨다운 안 씀), HUD 가 3인칭 크로스헤어를 분홍 + X + `BLOCKED`(탑뷰는 커서 아래)로. 공중 총알·우리 팀 로봇은 무시.
+- 구조물 충돌: 브롤러가 아닌 것에 맞으면 `ARRRandomEffects::ShotSplat`(면에 눕는 링, 섬광, 튀는 조각·별, 먼지; 등급마다 조금 크게). 전엔 Common 등급의 `Impact` 가 None 이라 아무것도 안 떴음. 브롤러는 원래 `MulticastDamagePopup` 의 `HitBurst`, 복제 `bHitBrawler` 로 구분.
+- 운전: `ARRRandomCharacter::IsDriving`(뒷좌석 제외) — 사격·조준 자세 막고 총 숨김, 크로스헤어 없음. 자세 `URRRandomBodyAnimInstance::UpdateRidePose`(`RidePoses`: 킥보드 서서 핸들, 오토바이 걸터앉아 핸들바, 차·스타카 앉아서 핸들, 뒷좌석은 다리만 앉고 팔은 자유) + 탑승 중 꼬리 60° 들기(`RideTailLift`).
+- 좌석: 메시 실측(`char-pipeline\scripts\blender_seat_profile.py`, 윗면 높이를 5cm 마다) → `Handlings` 의 `SeatHeight`(킥보드는 발판, 나머지는 쿠션 윗면)·새 `RearSeatHeight`·`DriverSeatX`/`RearSeatX`. 킥보드 53(발판) −8, 오토바이 86 −22, 차 52 −12 / 뒷좌석 62 −95, 스타 가슴 96 −58, 스타 팔 121 −43, 스타 다리 66 앞 28 / 뒤 −68. **전 값 중 스타 가슴(−90 = 등받이 속)과 스타 다리 운전석(+120 = 보닛 위)은 틀렸었음.** 앉는 탈것은 `GetRideOffset` 이 매 프레임 `Hips` 뼈를 좌석 지점 위, 쿠션 + 서 있는 엉덩이 높이 22% 에 둠(체형 자동); 종 보정 `FRRSpeciesLook::RideFit`(종 표 `Tunings` 넷째 값; 토끼만 위 −6).
+- 확인: 헤드리스 봇전(사거리 끝 소멸 21~31건, 본인·아군 충돌 26→0, 벽 막힘 오탐 0/263), 6종 × 6탈것 측면 캡처 `C:\work\char-pipeline\output\screens\ride\round71_*.png`. **확인 못 함**: 뒷좌석 탑승자 자세(운전자가 따로 필요), 구조물 충돌·사거리 소멸 이펙트를 눈으로(헤드리스였음), 벽에 실제로 막히는 경우, 운전 중 사격 시도.
+- 파이프라인: 새 동물친구 체크리스트를 animal-friend 스킬 "탈것 탑승 맞추기" 에 기록. 도구 `char-pipeline\scripts\`(+ `Tools/char-pipeline/scripts`): `capture_game_seq.ps1`(게임 창 + 순서 스크립트 + 샷 복사), `ue_game_seq.py`(전 스크래치 `game_seq.py`; `nearmesh=<메시>#n` 추가, `sidecam` 은 이 엔진에서 안 됨 → `RRStudioCam`), `shot_sheet.ps1`(시트), `blender_seat_profile.py`.
+- 남은 것: 호랑이·여우 꼬리 끝이 스타 팔차·다리차 옆으로 조금 나옴. 멀티 클라이언트는 총알이 서버 위치에서 나타나 지연이 있으면 총구보다 조금 뒤에서 보일 수 있음.
+
+## 70차 수정 3 — 얼굴(턱 이음새) 늘어남 (사용자: 여우 얼굴 쪽 리깅 잘못됨 → 얼굴이 찌그러지거나 늘어남)
+
+- 원인: Mixamo 자동 가중치가 큰 머리 치비의 얼굴은 Head, 바로 아래 티셔츠 목둘레는 Spine2 에 주고(Neck 은 거의 0) 바뀌는 곳이 턱 볼털이 목둘레에 닿는 면 한 줄뿐 — 고개가 움직일 때마다 그 면이 최대 16~18배 늘어남(여우·호랑이·레드 폭스가 심함, 토끼·다람쥐 덜함). 블렌더에서 각 종 자기 Mixamo 걷기·러닝맨·울기 프레임을 재생해 모서리 길이 비율로 잼(스크래치 `redfox\stretch.py`).
+- `C:\work\char-pipeline\scripts\blender_head_weights.py`(새, `Tools/char-pipeline/scripts` 에도): 목·머리 관절 중 낮은 것 −4cm ~ 머리 관절 +2cm 띠 안의 Spine1·Spine2·Neck·Head·어깨 몫을 메시 이웃 평균으로 200번 이완(표면을 따라 조화 보간), 띠 위 얼굴은 Head 만. 레드 폭스는 Mixamo 가 Neck 관절(0.59)을 Head 관절(0.539) 위, 머리 안에 잡아서 낮은 쪽 기준.
+- 결과(최대 늘어남, 울기/걷기): 여우 18→5.5 / 16.7→3.8, 레드 폭스 16→1.8 / 16→1.5, 호랑이 15.4→4.2, 토끼 5.9→3.8, 다람쥐 4.2→5.8(머리 뒤에 닿는 큰 꼬리 쪽, 큰 차이 없음). 얼굴 위쪽은 1.0~1.3.
+- 리그: `input\<종>\rig_mx\<종>_rig.fbx` 를 덮어씀(전 것 `<종>_rig_before_head.fbx`) → `ue_import_mixamo_v3.sh` 로 다섯 종 다시.
+
+## 70차 수정 2 — Mixamo 정식 리깅으로 교체 (사용자: 리깅을 믹사모로 했던 게 아닌가? → 토끼를 직접 올리니 잘 됨, 나머지도 확인 → 정식 리깅 진행)
+
+- **Mixamo 는 고장이 아니었음**: 자동 리거는 꼬리가 발 옆 바닥에 닿은 메시에서만 "Unknown error while generating motion"(레드 폭스, 여우 v3, 옛 호랑이 zip). 토끼(솜뭉치)·다람쥐(위로 솟은 꼬리)는 그대로, 여우·호랑이는 꼬리를 떼면 됨. 68~70차의 Blender 기증 리그(`blender_fit_rig.py`)는 이 판단 실수로 쓴 대체 방식.
+- 꼬리 떼기: `blender_strip_parts.py <Tail 뼈 있는 리그 fbx> <obj> input\<종>_v3\mixamo_body\<종>_body.obj Tail` → `<종>_v3_body_mixamo.zip`. 업로드 zip(꼬리 포함) `input\<종>_v3\<종>_v3_mixamo.zip`.
+- Mixamo(사용자 계정, Claude in Chrome): 토끼 → 다람쥐 → 여우 몸 → 호랑이 몸 차례로 업로드·마커·확정 후 `scripts\mixamo_export.js`(이제 `window.__EXTRA` 와 `__runAll(prefix, only, list)`)로 18개(기본 17 + flyback) + 토끼 궁극기 4(Jumping Up, Big Front Flip, Mid-Air Falling Idle, Mid-Air Falling To A Hard Landing) + 호랑이 2(Mutant Roaring, Mutant Jump Attack — 옛 것과 같은 112프레임) → `input\<종>_v3\mixamo\`, `mixamo_extra\`. 마커는 꼬리 때문에 몸 가운데가 대칭선에서 어긋나면 대칭 끄고 하나씩. 지금 Mixamo 에 남은 캐릭터: `tiger_v3_body_mixamo`. 뼈: 토끼·다람쥐·여우 33(엄지 없음 — 2 Chain Fingers 를 JS 로 골랐는데 반영 안 된 듯; 코드가 쓰는 손 뼈는 있음), 호랑이 41.
+- 꼬리: 토끼·다람쥐는 Mixamo SK 에 바로 `blender_animal_tail.py`(같은 중심선·반경), 여우·호랑이는 `blender_merge_parts.py <SK> <body obj> <whole obj> rig_mx\<종>_whole.fbx Hips,0.4,Spine` 뒤 `blender_animal_tail.py` → `input\<종>_v3\rig_mx\<종>_rig.fbx`. Mixamo 프레임 = OBJ × 0.01 이라 꼬리 좌표 그대로.
+- 언리얼: `input\ue_import_mixamo_v3.sh <Name> <종> <엉덩이> <베이스컬러>`(새, `Tools/char-pipeline/input` 에도): `ue_import_animal.py`(자기 Mixamo 17개 + 꼬리 메시) → 공통 Rifle Run(`ue_import_shared_anim.py`, 용 리그 20.4) → 자기 flyback(제자리) → 궁극기 모션(`ue_import_extra_anims.py`). 애니메이션 수 여우 19, 토끼 23, 다람쥐 19, 호랑이 21.
+- 튜닝(`blender_rig_measure.py` 엉덩이): 여우 23.9, 토끼 16.9, 다람쥐 23.4, 호랑이 29.0 — 걷기 이동 실측(65.3, 49.2, 64.6, 80.0 /s)과 계산값(79 × 엉덩이/27.5)이 맞음.
+- 확인(빌드 경고 없음): 스튜디오 슬로 근접 걷기·달리기 네 종 — 다리가 펴지고 발이 바닥을 디딤, 접힘 없음(`C:\work\char-pipeline\output\screens\rigcheck_mx\all.png`, 전 `rigcheck\pair.png`). 토끼 달토끼 낙하 착지·호랑이 기운 내려치기(`rigcheck_mx\ult.png`). 얼굴 그림은 메시가 같아 그대로.
+- 확인 못 한 것: 춤·좌절·쓰러짐 화면, 온라인.
+- 추가 (사용자: 레드 폭스도 같은 방식으로 믹사모 리깅): `blender_strip_parts.py input/red_fox/rig/redfox_rig.fbx … redfox_onetail.obj … mixamo_body/redfox_body.obj Tail`(1,218 정점 떼어냄) → `input\red_fox\redfox_body_mixamo.zip` → Mixamo(리깅 성공, 41뼈) → 18개 `input\red_fox\mixamo\` → `blender_merge_parts.py … Hips,0.4,Spine` → `blender_animal_tail.py`(68차 수정 때 중심선, 0.15/1.3) → `rig_mx\redfox_rig.fbx` → `input\ue_import_mixamo_v3.sh RedFox redfox 27.0 fox_girl/tripo_v3/fox_girl_v3_basecolor_final.png red_fox`(스크립트에 폴더 인자 추가). 튜닝 `{RedFox, 1.95, 27}`(Mixamo 엉덩이 27.0, 걷기 실측 71.4/s). 이제 용 말고 모든 동물친구가 Mixamo 리그.
+  - 빌드 후 스마트 앱 컨트롤이 DLL 을 막음(4551) — 로그 문구를 두 번 바꿔 다시 빌드해서 풀림(`RRRandomSpecies.cpp` 의 에셋 없음 경고 문구).
+  - 확인: 스튜디오 슬로 걷기·달리기 근접(다리 펴짐, 발 디딤), 궁극기 `splits into 6 clones` — `C:\work\char-pipeline\output\screens\rigcheck_mx\RedFox\sheet.png`. 지금 Mixamo 에 남은 캐릭터: `redfox_body_mixamo`.
+
+## 70차 수정 — 리그 다시 (사용자: 용·레드 폭스 빼고 리깅이 전부 잘못된 것 같다, 발 위치를 너무 높게 잡아 폴리곤이 접혀 보임, 팔도 마찬가지)
+
+- 원인 두 가지(확인: 가중치를 뼈별 색으로 칠한 렌더 `scratchpad\redfox\lw\`, 근접 걷기 캡처 `C:\work\char-pipeline\output\screens\rigcheck\`):
+  1. 가중치: 기증 리그(옛 호랑이 Mixamo 자동 리그)의 가중치를 그대로 옮겨서, 치비 체형의 정강이 전체가 발 뼈, 아래팔 아래쪽이 손 뼈에 붙어 있었음(Mixamo 원본도 그랬음) — 발목을 꺾으면 정강이째 접힘.
+  2. 관절: 발목을 부츠 모양 발의 꼭대기(반바지 밑단 바로 아래)에 찍었음, 여우는 손목도 아래팔 중간.
+- `blender_fit_rig.py` 에 팔다리 재분배 추가(늘 켜짐): 각 정점이 팔/다리 사슬을 따르는 총량은 그대로 두고, 관절을 잇는 선 위 위치로 UpLeg/Leg/Foot/ToeBase, Arm/ForeArm/Hand 에 다시 나눔(관절 앞뒤 `LIMB_BLEND` 1.2cm 섞기). 발목 아래는 발·발가락만, 손목 너머(손·손가락)는 기증 그대로.
+- 관절(`joints.txt`): 발목 여우 0.065→0.040, 토끼 0.035→0.028, 다람쥐 0.050→0.030, 호랑이 0.055→0.040; 무릎 토끼 0.075→0.085, 다람쥐 0.100→0.105; 여우 손목 (−0.2575, 0.3525)→(−0.267, 0.338)·검지 따라 내림. 근접 격자 렌더로 정함(`scratchpad\redfox\lz\`).
+- 재생성: `C:\work\char-pipeline\input\rerig_v3.sh`(네 종 리그+꼬리) → `ue_reimport_v3.sh`(언리얼 네 종 다시 + 전용 궁극기 모션). 굽힘 시험 렌더 `scratchpad\redfox\bt\all.png`.
+- 레드 폭스는 사용자가 괜찮다고 해서 그대로(같은 원인이 있지만 반바지가 길고 다리가 가늘어 덜 보임). 용도 그대로.
+
+## 70차 — 토끼·다람쥐·호랑이 다시 만들기 (사용자: 용을 제외한 나머지 동물도 같은 방식으로 적용)
+
+- 69차 여우와 같은 과정을 세 종에. 컨셉(Tripo Image, 무료): 옛 Tripo 모델 정면 렌더(`blender_fullbody.py` → `input\<종>_v3\concept\<종>_old_front.png`)를 참고로 "다듬은 최종 디자인"(정체성·색 그대로, 꼬리 하나·자세 고정 문장) → 세 정면 모두 주머니가 한쪽에 둘이라 벨트 정리(양쪽 하나씩) → 정리본으로 왼쪽·뒤·오른쪽 → 대각 4 + 위(뒤-왼쪽은 왼쪽+뒤 두 장만 참고로 "중간 각도"). 토끼 앞-오른쪽 1번은 2D 그림체로 나와 2번. 시트 `C:\work\char-pipeline\output\<rabbit|squirrel|tiger>_v3\<종>_v3_turn8.png`, 고른 그림 `input\<종>_v3\concept\<종>_v3_*.png`(후보 `turn8_candidates\`).
+  - 꼬리: 토끼 = 엉덩이 가운데 작은 솜뭉치, 다람쥐 = 엉덩이에서 등 뒤로 곧게 솟아 머리 뒤에서 크게 말림, 호랑이 = 여우처럼 그의 왼쪽으로 휘어 끝이 왼발 옆 바닥.
+- 3D: Tripo 멀티뷰 Ultra 45 × 3 (22,365 → 22,230): 토끼 `29199cad-5bb7-455b-b3cf-e7d49f853956`, 다람쥐 `b90eebc9-8b81-4586-8c43-9a482855c103`, 호랑이 `25f04cbd-9379-4beb-8086-fe12c61ab8d3`. 동시 생성은 2개까지(세 번째 Generate 는 크레딧도 안 빠지고 무시됨 — 하나 끝난 뒤 다시). 무료 재시도까지 둘 다 FBX 로 받아(무료) 블렌더 8방향으로 비교(`output\<종>_v3\model\try1_turn8.png`, `try2_turn8.png`; 뷰어 드래그 캡처는 각도가 들쭉날쭉해서 이 방식으로 바꿈). 셋 다 1차·재시도가 거의 같아 사용자의 지난 선택대로 **재시도** 사용(`input\<종>_v3\tripo\<종>_v3_try2.fbx`). 텍스처는 2K 그대로.
+- 리그(68·69차 방식, 기증 = 옛 호랑이 Mixamo 리그): 관절 `input\<종>_v3\rig\joints.txt`(`Tools/char-pipeline/input/<종>_v3/joints.txt` 에도) → `blender_fit_rig.py` → 꼬리 `blender_animal_tail.py`: 토끼 2뼈 10cm(`"0,0.08,0.20;0,0.13,0.20;0,0.18,0.20" 0.07 1.0`), 다람쥐 4뼈 82cm(`"0.02,0.10,0.28;0.06,0.26,0.27;0.08,0.34,0.45;0.10,0.38,0.65;0.11,0.40,0.90" 0.34 1.15 0.03`, 3,801 정점 — 기증 무게는 꼬리를 머리·왼팔에 붙였는데 모두 꼬리 뼈로), 호랑이 4뼈 57cm(`"-0.055,-0.01,0.27;-0.05,0.07,0.15;0.02,0.12,0.06;0.15,0.165,0.07;0.28,0.18,0.16" 0.07 1.1`, 꼬리 중심선은 위에서 본 렌더로). 토끼 귀·다람쥐 귀털은 머리 뼈(HeadTop_End 를 귀 끝 높이로). 확인 `input\<종>_v3\rig\check\`.
+- 언리얼(옛 `Content\Characters\Rabbit|Squirrel|Tiger` 와 얼굴은 스크래치 `backup_species_v2\`): `ue_import_animal.py` → `ue_import_rig_anims.py <Name>|<엉덩이>|input/tiger/mixamo|tiger|26.3`(토끼 15, 다람쥐 24, 호랑이 25) → Run·FlyBack(`ue_import_shared_anim.py`). 궁극기 전용 모션은 `ue_import_rig_anims.py` 새 옵션(뒤에 `<접미사>=<이름>` 을 주면 그것만, 아무것도 안 뺌)으로: 토끼 `input/rabbit/mixamo_extra|rabbit|17.5|jumpup=JumpUp|frontflip=FrontFlip|fallidle=FallIdle|hardlanding=HardLanding`(달토끼 낙하), 호랑이 `roar=Roar|jumpattack=JumpAttack`(호랑이 기운 — 앞으로 뛰는 이동 포함). 얼굴 `output\ui\T_<종>Portrait.png`(토끼는 귀가 길어 360px 로 그려 얼굴 쪽으로 잘라냄) → `/Game/UI`.
+- 코드 `RRRandomSpecies.cpp` 튜닝: `{Rabbit, 2.45, 15}`, `{Squirrel, 1.93, 24}`(다리가 길어져 옛 2.05 면 여우보다 커 보여서 여우 엉덩이 맞춤·머리 맞춤의 중간), `{Tiger, 1.75, 25}`.
+- 확인(빌드 경고 없음): 스튜디오 3인칭 세 종 각각 — 대기 뒤·옆·앞, 걷기, Shift 달리기, 사격, 점프, 궁극기(토끼 `calls the moon hop`, 다람쥐 도토리 비, 호랑이 `calls the tiger spirit ... strikes` — 거대 호랑이도 새 모델), `C:\work\char-pipeline\output\screens\species_v3\<Rabbit|Squirrel|Tiger>_sheet.png`; 타이틀 카드 새 얼굴 `species_v3\title\`.
+- 확인 못 한 것: 쓰러짐·날아감·춤·좌절 화면, 키트 표시(보호막·슈퍼 점프), 거인·비행, 온라인, 큰 다람쥐 꼬리가 3인칭 카메라를 가리는지. 옛 다람쥐(엄지 없음)와 달리 이제 세 종 모두 41뼈 + 꼬리. 용만 옛 모델.
+
+## 69차 — 여우 다시 만들기 (사용자: 기존 여우도 지금까지 노하우로 다시 뽑아 모델링 → 재시도 모델로 현재 여우에 덮어씌워줘)
+
+- 컨셉(Tripo Image, 무료): 옛 여우 렌더 `output\animals\fox_front.png` 를 참고로 정면 다듬기(얼굴 조금 더 다듬고 진한 적갈색 반바지) → 정면 하나만 벨트 정리(주머니 양쪽 하나씩) → 8방향 + 위 `C:\work\char-pipeline\input\fox_v3\concept\fox_v3_*.png`, 시트 `output\fox_v3\fox_v3_turn8.png`. 꼬리는 처음부터 하나·같은 자세(엉덩이 가운데에서 나와 그의 왼쪽으로 휘고 흰 끝은 왼발 옆 바닥)를 모든 뷰 프롬프트에 같은 문장으로.
+- 3D: Tripo 멀티뷰(정면 정리본/왼쪽/오른쪽/뒤, Ultra 45 크레딧, 22,410 → 22,365, 작업 `14ceb331-de92-45b0-8a4c-c645f7d3e857`) 1차 19,810면 + 무료 재시도 19,802면 → 사용자가 **재시도** 선택. 비교 `output\fox_v3\fox_v3_model_compare.png`. FBX(Blender, 2K, 무료) → `input\fox_v3\tripo\fox_v3.fbx` + `fox_v3.fbm\fox_v3_basecolor.JPEG`(텍스처 재생성·정리 없이 그대로 — 벨트·반바지·손·꼬리 깨끗함, `output\fox_v3\texture\raw_*.png`). 위에서 본 꼬리 하나 확인(갈래 없음).
+- 리그(Mixamo 자동 리거 여전히 고장 가정, 68차 방식): `blender_tripo_to_obj.py` → `input\fox_v3\mixamo_obj\fox.obj`(9,903 정점) → 관절 `input\fox_v3\rig\joints.txt`(`Tools/char-pipeline/input/fox_v3/joints.txt` 에도; 몸 가운데 x = −0.067) → `blender_fit_rig.py`(호랑이 리그, 뼈 방향 유지) → `blender_animal_tail.py ... "-0.05,-0.07,0.215;-0.02,0.03,0.155;0.05,0.11,0.10;0.14,0.18,0.105;0.24,0.255,0.16" 0.16 1.3`(Tail1~4, 49cm, 1,622 정점; 점 6개를 주면 Tail5 까지 생기는데 게임은 1~4만 움직이니 5개) → `input\fox_v3\rig\fox_rig.fbx`, 미리보기 `check\rig_sheet.png`.
+- 언리얼: 옛 `Content\Characters\Fox` 와 `T_FoxPortrait` 는 스크래치 `backup_fox_content\` 로 복사 후 지움 → `ue_import_animal.py Fox|input/fox_v3/ue|<basecolor JPEG>` → `ue_import_rig_anims.py Fox|24.0|input/tiger/mixamo|tiger|26.3` → Run·FlyBack(`ue_import_shared_anim.py`, Fox=24.0) → 얼굴 `output\ui\T_FoxPortrait.png`(옛 것은 백업) → `/Game/UI/T_FoxPortrait`. 옛 여우만 있던 `A_Fox_AimWalk*`, `TurnLeft`, `FireBurst` 는 코드가 안 써서 없어짐.
+- 코드: `RRRandomSpecies.cpp` 여우 튜닝 `{Fox, 1.8, 24}`(귀 끝까지 100 이라 크기 그대로, 다리가 옛 여우 27.5 보다 짧음). 걷기·달리기 속도 기준이던 `FoxTuning.HipsHeight` 를 `SpeedHipsHeight = 27.5`(그 속도를 잰 옛 여우 리그) 상수로 분리 — 다른 종 속도는 그대로, 새 여우 걷기 79×24/27.5 = 68.9 ≈ 실측(엉덩이 이동 96.8/1.43초 = 67.7).
+- 확인(빌드 경고 없음): 스튜디오 3인칭 여우 — 대기 뒤·옆·앞, 걷기, Shift 달리기, 사격, 점프, 궁극기 `splits into 6 clones`(`C:\work\char-pipeline\output\screens\fox_v3\play1\sheet.png`), 타이틀 캐릭터 페이지 FOX 카드 새 얼굴(`title\t_3fox.png`).
+- 확인 못 한 것: 쓰러짐·날아감·춤·좌절을 화면으로(같은 방식의 레드 폭스에선 춤 확인), 투명화, 거인·비행, 온라인.
+- 추가 (사용자: 타이틀 여우 그림도 새 여우로): Tripo Image(Nano Banana Pro, 16:9, 무료)에 옛 `input\title\tripo_fox_green.png` 한 장만 참고로 "그대로 두고 옷·색만 새 여우로"(맨발 주황, 적갈색 반바지, 벨트·양쪽 주머니, 호박색 눈, 귀 끝 진갈색) → 2장 모두 같은 자리·자세, 반쯤 감은 눈 쪽 `title_fox_v3_green_2.png` 사용(`_1` 은 눈을 크게 뜬 것). 정면 컨셉을 두 번째 참고로 같이 넣으면 캐릭터를 둘 그려서 안 됨. `make_title_layers.py`(배경은 옛 것 그대로) — 새 디자인은 왼쪽 엉덩이 주머니가 꼬리 뿌리 앞이라 `TAIL_POLYGON` 을 주머니 오른쪽 가장자리(x 1245) 따라 다시 자름(안 그러면 주머니 조각이 꼬리와 같이 돎) → `/Game/UI/T_TitleFoxBody`, `T_TitleFoxTail` 만 다시 가져옴(옛 것은 스크래치 `backup_fox_content`). HUD 좌표(꼬리 축·머리·귀·총구)는 그대로 맞음. 확인 `C:\work\char-pipeline\output\screens\fox_v3\title2\`(첫 화면·캐릭터 페이지, 꼬리 흔들림). 한 장짜리 대체 그림 `T_TitleArt` 는 레이어가 있으면 안 쓰여서 그대로.
+
+## 68차 — 레드 폭스(여우 여자) 동물친구 (사용자: red fox 라는 이름으로 게임에 추가, 스킬은 기본적으로 원래 여우와 동일)
+
+- 모델: 여우 여자 v3(Tripo 재시도 모델, `C:\work\char-pipeline\input\fox_girl\tripo_v3\fox_girl_v3.fbx`, 정리된 4K 베이스컬러 `fox_girl_v3_basecolor_final.png` — 컨셉·3D·텍스처 과정은 char-pipeline 쪽 기록과 Claude 스킬 `animal-friend`) → `blender_tripo_to_obj.py` → `input\red_fox\mixamo_obj\redfox.obj`(9,517 정점, 높이 100) + 2K jpg → `input\red_fox\redfox_mixamo.zip`.
+- **Mixamo 자동 리거가 또 실패**("ERROR occured on rig: Unknown error while generating motion", 44차와 같음): 레드 폭스(2 Chain Fingers / Standard 둘 다), 그리고 10-14 에 성공했던 `input\tiger\tiger_mixamo.zip` 까지. 실패한 업로드는 Mixamo 의 남은 캐릭터(`dragon_body_mixamo`)를 바꾸지 않음.
+- 대신 블렌더에서 리그 맞추기 — `scripts\blender_fit_rig.py <기증 리그 fbx> <기증 obj> <새 obj> <관절 txt> <out fbx> [미리보기]`(새, `Tools/char-pipeline/scripts` 에도): 호랑이 Mixamo 리그(`input\tiger\mixamo\tiger_SK.fbx`, 같은 치비 체형·41뼈)의 뼈를 레드 폭스 관절로 옮기고(위치만 — 뼈 방향·롤은 호랑이 그대로; 아래 "수정" 참고), 호랑이 몸을 같은 스플라인으로 구부린 표면에서 가장 가까운 점(같은 쪽을 보는 면)의 가중치를 받아옴(큰 4개). 관절은 정면·옆 격자 렌더를 보고 읽음 → `input\red_fox\rig\joints.txt`(`Tools/char-pipeline/input/red_fox/joints.txt` 에도; 몸 가운데 x = −0.025 — `blender_tripo_to_obj.py` 가 꼬리 끝까지 발로 쳐서 가운데를 잡았기 때문, 좌우는 `MIRROR`). 결과 `redfox_body.fbx`, 미리보기 `input\red_fox\rig\check\fit_sheet.png`(뼈 색칠 + 팔 들기·한 발 들기·허리 굽힘·고개 돌림).
+- 꼬리(아래 수정 후): `blender_animal_tail.py redfox_body.fbx redfox_rig.fbx "-0.01,-0.07,0.22;-0.005,0.02,0.155;0.005,0.105,0.098;0.0,0.18,0.088;0.01,0.26,0.12" 0.15 1.3` → Tail1~4, 38cm, 1,463 정점(처음 반경 0.13·몸 비율 0.9 로는 털 끝 몇 개가 왼다리에 남아 꼬리를 들면 길게 늘어났음). 꼬리 중심선은 엉덩이 뒤(y > −0.05, z < 0.33) 정점을 뿌리에서 거리별로 묶은 평균에서.
+- 수정 (사용자: 여우 꼬리는 하나여야 하고, 리깅이 잘못되어 달릴 때 애니메이션이 이상함):
+  - 꼬리: Tripo 메시의 꼬리가 엉덩이 뒤에서 V 자로 갈라져 있었음(위에서 보면 똑바로 뒤로 가는 갈래 + 왼쪽 뒤로 39° 가는 갈래 — 컨셉 정면은 꼬리가 옆으로, 뒷면은 아래로 늘어져 Tripo 가 둘 다 만듦) → 뒤에서 꼬리 두 개. `scripts\blender_fold_lobe.py redfox.obj redfox_onetail.obj 0.03,0.04 -10 39 0.78`(새): 갈라지는 점(0.03, 0.04)에서 옆 갈래를 수직축으로 −49° 돌려 가운데 갈래에 겹치고 22% 줄여 그 안으로(갈래 사이에서 서서히, 엉덩이 위 z 0.33 아래만, 490 정점). 확인 `input\red_fox\rig\check\fold\fold_compare.png`(뒤·비스듬히·옆·위, 전/후). 리그는 `redfox_onetail.obj` 로 다시.
+  - 달리기: 처음 리그는 뼈를 새 관절 사이를 잇게 다시 향하게 했는데, 애니메이션은 로컬 회전(= 기증 리그의 기준 회전 × 움직임)으로 옮겨지므로 기증 뼈 방향이 그대로 덮어씌워짐 — 호랑이 머리 뼈는 큰 머리 꼭대기로 18° 앞으로 기울어 있어서 레드 폭스 머리가 늘 푹 숙여지고, 달릴 때 몸이 접힌 듯 보였음. `blender_fit_rig.py` 가 이제 뼈를 옮기기만 하고 방향·롤은 기증 리그 그대로 둠 → 각 뼈가 자기 기본 자세에서 호랑이 뼈가 도는 만큼 돎.
+  - 언리얼 다시(먼저 `Content\Characters\RedFox` 지움): `ue_import_animal.py` → `ue_import_rig_anims.py` → Run·FlyBack(위와 같은 명령). 확인: 스튜디오 슬로 달리기 옆·뒤·앞·대각 — 호랑이와 같은 자세, 정면에서 얼굴이 앞을 봄, 뒤에서 꼬리 하나(`C:\work\char-pipeline\output\screens\redfox\run2_compare.png`, 윗줄 레드 폭스 / 아랫줄 호랑이). 고치기 전 `run1\sheet.png`.
+- 언리얼: `ue_import_animal.py RedFox|input/red_fox/ue|<최종 베이스컬러 png>`(`ue\redfox_SK.fbx` = `redfox_rig.fbx` 복사; 애니메이션은 없어서 메시·스켈레톤(45뼈)·`M_RedFox`·텍스처만) → `scripts\ue_import_rig_anims.py RedFox|23.5|input/tiger/mixamo|tiger|26.3`(새: 호랑이 Mixamo 17개를 `ue_import_shared_anim.py` 방식으로 — 로컬 회전 그대로, 엉덩이 말고는 자기 뼈 길이, 엉덩이 이동은 엉덩이 높이 비율로 줄이고 흔들림은 유지, 걷기·승리·춤은 시작-끝 이동만 뺌) → `ue_import_shared_anim.py` 로 `A_RedFox_Run`(dragon_rifle_run 20.4)·`A_RedFox_FlyBack`(tiger_flyback 26.3). 얼굴: 리그 FBX 에 텍스처가 없어 스크래치 래퍼(기본 자세 + 최종 베이스컬러)로 `blender_portrait.py ... 256 -0.025` → `output\ui\T_RedFoxPortrait.png` → `/Game/UI/T_RedFoxPortrait`.
+- 코드: `RRSpecies::RedFox = 5`, `Count = 6`, 튜닝 `{RedFox, 1.95, 23.5}`(여우 엉덩이 맞춤 2.11 과 머리 맞춤 1.8 사이 — 귀와 머리가 큼), `GetDisplayName` → `RED FOX`. 새 `RRSpecies::GetKitSpecies`(레드 폭스 → 여우): `RRKit` 의 키트 표(패시브 BACKSTAB, 전용 주사위 INVISIBLE), `ApplyOwnDie`(투명화), `GetUltimateName`(FOX CLONES), `OnUltimateDie`(`ARRRandomFoxClones`) 가 이걸로 고름. 타이틀 `ERRTitleChoice::RedFox`("Red fennec fox girl with a bell on her ear. Fox tricks."), 카드 줄 폭 570 → 620(6장). 봇 랜덤 6종.
+- 확인(빌드 경고 없음, 캡처 `C:\work\char-pipeline\output\screens\redfox\`): 스튜디오 3인칭 레드 폭스 — 대기(옆·앞·뒤), 걷기, Shift 달리기 모션, 사격, 점프, 궁극기 주사위 → `splits into 5 clones`, 분신도 레드 폭스(`play1\sheet.png`); 봇도 레드 폭스로 나옴; 승리 화면 대열 춤(`dance\`); 타이틀 캐릭터 페이지 6장, RED FOX 선택 시 여우와 같은 패시브·주사위 태그(`title\t_8redfox.png`).
+- 확인 못 한 것: 투명화 모습(머티리얼 교체라 같을 것), 쓰러짐·날아감·좌절 모션을 화면으로, 거인·비행, 온라인 참가자, 큰 귀가 엄폐물·카메라에 걸리는지. 기증 리그 방식이라 Mixamo 정식 리그보다 어깨·손가락 가중치가 덜 정교할 수 있음 — Mixamo 자동 리거가 다시 되면 `input\red_fox\redfox_mixamo.zip` 으로 정식 리그로 바꿀 수 있음(그땐 `ue_import_animal.py` 표준 경로, 튜닝 엉덩이 높이 다시 재기).
 
 ## 67차 — Shift 달리기 (사용자: shift 눌러서 달릴 수 있는 기능)
 

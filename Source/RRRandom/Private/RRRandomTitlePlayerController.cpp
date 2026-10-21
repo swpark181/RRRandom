@@ -18,7 +18,7 @@ TArray<ERRTitleChoice> ARRRandomTitlePlayerController::GetChoices() const
 {
 	if (bSpeciesPage)
 	{
-		return { ERRTitleChoice::Fox, ERRTitleChoice::Rabbit, ERRTitleChoice::Squirrel, ERRTitleChoice::Tiger, ERRTitleChoice::Dragon, ERRTitleChoice::Back };
+		return { ERRTitleChoice::Fox, ERRTitleChoice::Rabbit, ERRTitleChoice::Squirrel, ERRTitleChoice::Tiger, ERRTitleChoice::Dragon, ERRTitleChoice::RedFox, ERRTitleChoice::Back };
 	}
 	if (bRulePage)
 	{
@@ -66,7 +66,8 @@ FString ARRRandomTitlePlayerController::GetLabel(ERRTitleChoice Choice)
 	case ERRTitleChoice::Rabbit:
 	case ERRTitleChoice::Squirrel:
 	case ERRTitleChoice::Tiger:
-	case ERRTitleChoice::Dragon: return RRSpecies::GetDisplayName(GetSpeciesOf(Choice));
+	case ERRTitleChoice::Dragon:
+	case ERRTitleChoice::RedFox: return RRSpecies::GetDisplayName(GetSpeciesOf(Choice));
 	case ERRTitleChoice::DiceTown: return TEXT("DICE TOWN");
 	case ERRTitleChoice::DiceLand: return TEXT("DICE LAND");
 	case ERRTitleChoice::Knockout: return TEXT("KNOCKOUT");
@@ -77,7 +78,7 @@ FString ARRRandomTitlePlayerController::GetLabel(ERRTitleChoice Choice)
 
 int32 ARRRandomTitlePlayerController::GetSpeciesOf(ERRTitleChoice Choice)
 {
-	return Choice >= ERRTitleChoice::Fox && Choice <= ERRTitleChoice::Dragon ? static_cast<int32>(Choice) - static_cast<int32>(ERRTitleChoice::Fox) : INDEX_NONE;
+	return Choice >= ERRTitleChoice::Fox && Choice <= ERRTitleChoice::RedFox ? static_cast<int32>(Choice) - static_cast<int32>(ERRTitleChoice::Fox) : INDEX_NONE;
 }
 
 FString ARRRandomTitlePlayerController::GetDescription(ERRTitleChoice Choice)
@@ -97,6 +98,7 @@ FString ARRRandomTitlePlayerController::GetDescription(ERRTitleChoice Choice)
 	case ERRTitleChoice::Squirrel: return TEXT("Cheeky squirrel with a big curly tail.");
 	case ERRTitleChoice::Tiger: return TEXT("Bold little tiger in stripes.");
 	case ERRTitleChoice::Dragon: return TEXT("Little red dragon. Its true form breathes fire.");
+	case ERRTitleChoice::RedFox: return TEXT("Red fennec fox girl with a bell on her ear. Fox tricks.");
 	case ERRTitleChoice::DiceTown: return TEXT("Big block town: climb houses and towers, fight on rooftops, by canals and in the woods.");
 	case ERRTitleChoice::DiceLand: return TEXT("Small round island of candy dice. Quick fights in the open.");
 	case ERRTitleChoice::Knockout: return TEXT("The first team to 10 knockouts wins.");
@@ -158,6 +160,7 @@ void ARRRandomTitlePlayerController::Choose(ERRTitleChoice Choice)
 	case ERRTitleChoice::Squirrel:
 	case ERRTitleChoice::Tiger:
 	case ERRTitleChoice::Dragon:
+	case ERRTitleChoice::RedFox:
 		Sessions->SetSpecies(GetSpeciesOf(Choice));
 		Start == EStart::Join ? Sessions->JoinGame() : Start == EStart::Host ? Sessions->HostGame() : Sessions->PlaySolo();
 		break;

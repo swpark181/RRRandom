@@ -25,6 +25,19 @@ scene = bpy.context.scene
 scene.frame_set(0)
 meshes = [o for o in scene.objects if o.type == "MESH"]
 arm = next((o for o in scene.objects if o.type == "ARMATURE"), None)
+# Matte, like the game's toon-ish look: a Mixamo download brings a shiny Phong material (the fluffy tiger's face came
+# out glossy, round 72)
+for mat in bpy.data.materials:
+    for node in (mat.node_tree.nodes if mat.node_tree else []):
+        if node.type == "BSDF_PRINCIPLED":
+            node.inputs["Roughness"].default_value = 1.0
+            for name in ("Specular IOR Level", "Specular"):
+                if name in node.inputs:
+                    node.inputs[name].default_value = 0.0
+                    if node.inputs[name].is_linked:
+                        mat.node_tree.links.remove(node.inputs[name].links[0])
+            if node.inputs["Roughness"].is_linked:
+                mat.node_tree.links.remove(node.inputs["Roughness"].links[0])
 
 # Frame: from the neck bone up to the top of the mesh
 depsgraph = bpy.context.evaluated_depsgraph_get()
