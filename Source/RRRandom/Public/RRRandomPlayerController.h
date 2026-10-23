@@ -169,14 +169,44 @@ public:
 	void RRSlomo(float Rate = 0.25f);
 
 	/**
-	 * Cheat: the star robot I'm aboard fires a rocket fist this far straight ahead of its upper body, as its ATTACK seat
-	 * would (it needs someone in that seat; console only, for animation work). Not in shipping builds.
+	 * Cheats for animation work (console only, not in shipping builds), as the star robot I'm aboard's crew would: its
+	 * sword swings at a spot this far straight ahead of its upper body (again during a swing: the next of the combo), its
+	 * missiles fly at such a spot (both need someone in the ATTACK seat), its shield goes up for this many seconds.
 	 */
 	UFUNCTION(Exec)
-	void RRRobotFire(float Distance = 1500.f);
+	void RRRobotFire(float Distance = 500.f);
+	UFUNCTION(Exec)
+	void RRRobotMissiles(float Distance = 1500.f);
+	UFUNCTION(Exec)
+	void RRRobotShield(float Seconds = 3.f);
+	/**
+	 * Cheats for the duel (console only, not in shipping builds): the other team's robot combined at once this far in front
+	 * of me (or my robot), facing me, its team's bots in it; and that rival robot's crew doing something at me: "fire" (its
+	 * sword), "missiles", "shield", or "hurt" (down to a little health, to knock it down).
+	 */
+	UFUNCTION(Exec)
+	void RRRivalRobot(float Distance = 1100.f);
+	UFUNCTION(Exec)
+	void RRRival(const FString& What);
+	/** Cheat for scripted captures: in a clash, presses the right next key for my seat. */
+	UFUNCTION(Exec)
+	void RRClashPress();
+	/**
+	 * Cheat (Ctrl+8, or the console): a sword clash to try. Both teams' robots made at once on the floor ahead of me, facing
+	 * each other within the sword's reach (any robot about comes apart first), every animal friend of each team put in its
+	 * own (me in mine), and a moment later both swing at once: the blades meet and the clash starts.
+	 */
+	UFUNCTION(Exec)
+	void RRClashTest();
+	/** Cheat (this screen only): where the camera sits in a robot's sword clash, in the robot's frame turned to the rival
+	 * (ahead, right, up from its feet), how far on from the crossed blades to the rival's head it looks (0 to 1), its view. */
+	UFUNCTION(Exec)
+	void RRClashCam(float Ahead = -200.f, float Side = 300.f, float Up = 720.f, float LookRival = 0.45f, float FieldOfView = 68.f);
 
 	/** The 0 key: with Ctrl held, RRStarCars. */
 	void OnCheatStarCarsKey();
+	/** The 8 key: with Ctrl held, RRClashTest. */
+	void OnCheatClashTestKey();
 
 	/** While my tiger's spirit is out: the floor under the cursor, where a strike would land (false off the arena). */
 	bool GetUltimateSpot(FVector& OutSpot) const;
@@ -295,6 +325,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> CheatStarCarsAction;
 
+	/** The 8 key: with Ctrl held, RRClashTest. */
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> CheatClashTestAction;
+
 	/** One per gun, in RRGun's numbering (keys 1 to 6). */
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TArray<TObjectPtr<UInputAction>> CheatGunActions;
@@ -333,7 +367,15 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerCheatSlomo(float Rate);
 	UFUNCTION(Server, Reliable)
-	void ServerCheatRobotFire(float Distance);
+	void ServerCheatRobotFire(float Distance, bool bMissiles);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatRobotShield(float Seconds);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatRivalRobot(float Distance);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatRival(const FString& What);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatClashTest();
 
 	/** RRStudioCam: the camera (this screen's own), whether it's on, its angle, distance and height, and the yaw it follows. */
 	void UpdateStudioCam(float DeltaTime);
@@ -386,6 +428,8 @@ private:
 	void OnLook(const FInputActionValue& Value);
 	void OnAimStart();
 	void OnAimStop();
+	/** The right button held: in the star robot's ATTACK seat, its missiles at the aim. */
+	void OnAimHeld();
 	void OnSprintStart() { bSprintHeld = true; }
 	void OnSprintStop() { bSprintHeld = false; }
 	bool bSprintHeld = false;

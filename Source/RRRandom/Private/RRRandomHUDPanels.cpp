@@ -11,6 +11,7 @@
 #include "RRRandomMeteor.h"
 #include "RRRandomOre.h"
 #include "RRRandomPlayerController.h"
+#include "RRRandomStarRobot.h"
 #include "RRRandomUIStyle.h"
 #include "RRRandomWeapon.h"
 #include "Engine/Canvas.h"
@@ -254,6 +255,35 @@ void ARRRandomHUD::DrawTeamCard(const ARRRandomCharacter& Mate, const ARRRandomC
 		Going.Add(TEXT("RELOAD"));
 	}
 	RRUI::DrawText(Canvas, FString::Join(Going, TEXT(" · ")), FVector2D(TextX, Y), SmallSize, EWeight::ExtraBold, RRUI::InkSoft, SmallSize * 0.06f);
+
+	// In a sword clash in the robot: beside the card, the mate's own row of keys, the ones pressed faded, the next one
+	// lit, and how far along it is (DONE! once through)
+	const ARRRandomStarRobot* Robot = Mate.IsInRobot() ? Mate.GetRobot() : nullptr;
+	if (!Robot || !Robot->IsClashing())
+	{
+		return;
+	}
+	const int32 Seat = Mate.GetRobotSeat() == ERRRobotSeat::Move ? 0 : Mate.GetRobotSeat() == ERRRobotSeat::Attack ? 1 : 2;
+	const int32 Count = ARRRandomStarRobot::ClashKeyCount;
+	const int32 Done = Robot->GetClashDone(Seat);
+	static const TCHAR* const Letters[] = { TEXT("W"), TEXT("A"), TEXT("S"), TEXT("D") };
+	const float Cap = 15.f * S;
+	const float Gap = 3.f * S;
+	const float RowRight = Left - 10.f * S;
+	const float RowLeft = RowRight - Count * Cap - (Count - 1) * Gap;
+	const float RowTop = Top + (CardHeight * S - Cap) * 0.5f + 6.f * S;
+	RRUI::DrawPlate(Canvas, FBox2D(FVector2D(RowLeft - 4.f * S, RowTop - 15.f * S), FVector2D(RowRight + 4.f * S, RowTop + Cap + 4.f * S)), 12.f * S);
+	const FString Progress = Done >= Count ? FString(TEXT("DONE!")) : FString::Printf(TEXT("KEYS %d/%d"), Done, Count);
+	RRUI::DrawText(Canvas, Progress, FVector2D(RowLeft, RowTop - 14.f * S), SmallSize, EWeight::Black, Done >= Count ? RRUI::MintDeep : RRUI::Ink, SmallSize * 0.06f);
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const FVector2D Pos(RowLeft + Index * (Cap + Gap), RowTop);
+		if (Index == Done)
+		{
+			RRUI::DrawRounded(Canvas, FBox2D(Pos - FVector2D(2.f * S), Pos + FVector2D(Cap + 2.f * S)), Cap * 0.3f, RRUI::Gold);
+		}
+		RRUI::DrawKey(Canvas, Letters[Robot->GetClashKey(Seat, Index) & 3], Pos, Cap, Index < Done ? 0.3f : 1.f);
+	}
 }
 
 FVector2D ARRRandomHUD::MapPixelToWorld(int32 X, int32 Y) const

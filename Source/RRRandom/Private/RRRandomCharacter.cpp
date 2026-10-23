@@ -67,6 +67,8 @@ namespace
 	// Gliding down: this lean, plus this much more at FlightLeanSpeed; rising: this share of the usual lean
 	constexpr float FlightGlideLean = 12.f;
 	constexpr float FlightGlideLeanAtSpeed = 26.f;
+	// The dragon (its own wings, RRKit::bOwnWings) lies out flatter still when gliding, wings spread under it (round 85)
+	constexpr float FlightOwnWingsGlideLean = 20.f;
 	constexpr float FlightRiseLeanShare = 0.4f;
 	// Banking in flight: degrees per degree a second the way it flies turns, at most FlightBankMax, easing at FlightBankRate
 	constexpr float FlightBankPerTurn = 0.3f;
@@ -98,6 +100,13 @@ namespace
 	// way over to it and pulls back by this share; third person, the camera turns to it (this fast) and looks at this
 	// height on it from this far, this much down
 	constexpr float CombineCameraRate = 2.6f;
+	// Locked in a sword clash in the robot: the camera swings in (at this rate, back out at the other) to where the robot's
+	// own eyes would be (its place set by SetClashCameraTuning), looking at the crossed blades and the rival, and closes
+	// in by this share over the clash; the rival's head is this high
+	constexpr float ClashCameraInRate = 3.f;
+	constexpr float ClashCameraOutRate = 2.f;
+	constexpr float ClashCameraPushIn = 0.12f;
+	constexpr float RivalHeadHeight = 560.f;
 	constexpr float CombineTopDownShare = 0.75f;
 	constexpr float CombineTopDownPull = 0.55f;
 	constexpr float CombineLookHeight = 330.f;
@@ -811,7 +820,7 @@ void ARRRandomCharacter::StartFlight(float Seconds)
 	}
 	bFlying = true;
 	FlightRemaining = FMath::Max(FlightRemaining, Seconds);
-	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) can fly for %.0f s."), *GetName(), Team, FlightRemaining);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) can fly for %.0f more seconds."), *GetName(), Team, FlightRemaining);
 }
 
 void ARRRandomCharacter::UpdateFlight()
@@ -1187,7 +1196,7 @@ void ARRRandomCharacter::UpdateJumpLanding(float DeltaSeconds)
 
 bool ARRRandomCharacter::CanJumpRobot() const
 {
-	return bAlive && Robot && RobotSeat == ERRRobotSeat::Move && Robot->IsAssembled() && Robot->IsCrewFull() && !ARRRandomGameState::IsPlayLocked(this);
+	return bAlive && Robot && RobotSeat == ERRRobotSeat::Move && Robot->IsAssembled() && Robot->IsCrewFull() && !Robot->IsHeldStill() && !ARRRandomGameState::IsPlayLocked(this);
 }
 
 bool ARRRandomCharacter::TryClimb()
@@ -1486,10 +1495,11 @@ void ARRRandomCharacter::UpdateDamagePopups(float DeltaSeconds)
 
 void ARRRandomCharacter::UpdateWalkSpeed()
 {
-	// Combining the star robot: standing still till it is done; driving it: only with the whole crew in
+	// Combining the star robot: standing still till it is done; driving it: only with the whole crew in, and not while it
+	// is held still (a sword clash, reeling, knocked down)
 	if (Robot)
 	{
-		GetCharacterMovement()->MaxWalkSpeed = RobotSeat == ERRRobotSeat::Move && Robot->IsCrewFull() && !ARRRandomGameState::IsPlayLocked(this)
+		GetCharacterMovement()->MaxWalkSpeed = RobotSeat == ERRRobotSeat::Move && Robot->IsCrewFull() && !Robot->IsHeldStill() && !ARRRandomGameState::IsPlayLocked(this)
 			? BaseWalkSpeed * ARRRandomStarRobot::WalkSpeedShare * DiceBuffs->GetMultiplier(ERRDiceBuffStat::MoveSpeed) : 0.f;
 		return;
 	}
@@ -1626,7 +1636,7 @@ void ARRRandomCharacter::ToggleRide()
 		ARRRandomStarRobot::StartCombine(this);
 		return;
 	}
-	if (ARRRandomStarRobot* Near = ARRRandomStarRobot::Get(this); Near && !Vehicle && !bClimbing && Near->CanBoard(this))
+	if (ARRRandomStarRobot* Near = ARRRandomStarRobot::Get(this, GetTeam()); Near && !Vehicle && !bClimbing && Near->CanBoard(this))
 	{
 		Near->Board(this);
 		return;
@@ -1903,7 +1913,8 @@ void ARRRandomCharacter::UpdateLocomotionAnimation()
 	const float Climb = GetVelocity().Z;
 	// Sprinting (Shift) on the ground: a little forward lean, by how far over its walking speed it goes (so everyone's
 	// screen shows it, not only the runner's)
-	const float Lean = !bInFlight ? SprintLean * (bInAir ? 0.f : GetSprintShare()) :Climb < -20.f ? FlightGlideLean + FlightGlideLeanAtSpeed * Pace
+	const float GlideLean = FlightGlideLean + (RRKit::Get(Species).bOwnWings ? FlightOwnWingsGlideLean : 0.f);
+	const float Lean = !bInFlight ? SprintLean * (bInAir ? 0.f : GetSprintShare()) :Climb < -20.f ? GlideLean + FlightGlideLeanAtSpeed * Pace
 		: FlightLeanMax * Pace * (Climb > 100.f ? FlightRiseLeanShare : 1.f);
 	// And it banks into turns like a bird, the harder the faster the way it flies turns
 	const float WayYaw = GetVelocity().Rotation().Yaw;
@@ -1947,6 +1958,25 @@ void ARRRandomCharacter::UpdateCamera(float DeltaSeconds)
 	}
 	CombineCameraBlend = FMath::FInterpTo(CombineCameraBlend, bWatchingCombine ? 1.f : 0.f, DeltaSeconds, CombineCameraRate);
 	const FVector ToCombine = CombineCameraBlend > 0.f ? CombineFocus - GetActorLocation() : FVector::ZeroVector;
+	// Locked in a sword clash: over to it (kept while it eases back out)
+	const ARRRandomStarRobot* Foe = IsInRobot() ? Robot->GetClashRival() : nullptr;
+	if (Foe)
+	{
+		// In the robot's own frame, turned to the rival: the camera this far ahead, to the right and up; looking at the crossed
+		// blades, or a share of the way on to the rival's head
+		const FVector Mine = Robot->GetActorLocation();
+		const FVector Toward = (Foe->GetActorLocation() - Mine).GetSafeNormal2D();
+		const FVector Right = FVector::CrossProduct(FVector::UpVector, Toward);
+		ClashEye = Mine + Toward * ClashCamAhead + Right * ClashCamSide + FVector(0.f, 0.f, ClashCamUp);
+		ClashFocus = FMath::Lerp(Robot->GetClashFocus(), Foe->GetActorLocation() + FVector(0.f, 0.f, RivalHeadHeight), ClashCamLookRival);
+		ClashCameraTime = Robot->GetClashTime();
+	}
+	ClashCameraBlend = FMath::FInterpTo(ClashCameraBlend, Foe ? 1.f : 0.f, DeltaSeconds, Foe ? ClashCameraInRate : ClashCameraOutRate);
+	// Looking out from where the robot's eyes are (ahead of its middle): its own head out of the way on this screen
+	if (Robot)
+	{
+		Robot->HideHeadOnThisScreen(IsInRobot() && ClashCameraBlend > 0.5f && ClashCamAhead > 0.f);
+	}
 	if (bThirdPerson)
 	{
 		// Over the right shoulder, turned by the mouse (the controller's rotation), kept out of walls; into the sights:
@@ -1977,6 +2007,7 @@ void ARRRandomCharacter::UpdateCamera(float DeltaSeconds)
 		CameraBoom->SocketOffset = Socket;
 		CameraBoom->TargetOffset = Pivot;
 		TopDownCamera->SetFieldOfView(FMath::Lerp(ShoulderFieldOfView, SightsFieldOfView, SightsBlend) + ShoulderFlightFieldOfView * FlightCameraPull);
+		ApplyClashCamera();
 		return;
 	}
 
@@ -1990,6 +2021,37 @@ void ARRRandomCharacter::UpdateCamera(float DeltaSeconds)
 		+ (ToCombine * FVector(1.f, 1.f, 0.f) * CombineTopDownShare + FVector(0.f, 0.f, RobotTopDownLookHeight)) * CombineCameraBlend;
 	CameraBoom->TargetArmLength = BaseCameraArmLength * (1.f + FlightCameraPullShare * FlightCameraPull + RobotCameraPullShare * RobotCameraPull + CombineTopDownPull * CombineCameraBlend);
 	TopDownCamera->SetFieldOfView(CameraFieldOfView);
+	ApplyClashCamera();
+}
+
+void ARRRandomCharacter::ApplyClashCamera()
+{
+	if (ClashCameraBlend <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+	// From the robot's own eyes (ClashEye) at the crossed blades and the rival (ClashFocus), closing in as the clash goes on:
+	// the arm swung round to that line and as long as it
+	const float Blend = FMath::SmoothStep(0.f, 1.f, ClashCameraBlend);
+	const FVector Line = ClashFocus - ClashEye;
+	const FQuat From = CameraBoom->bUsePawnControlRotation && Controller ? Controller->GetControlRotation().Quaternion() : CameraBoom->GetComponentQuat();
+	const float Arm = Line.Size() * (1.f - ClashCameraPushIn * FMath::Clamp(ClashCameraTime / ARRRandomStarRobot::ClashSeconds, 0.f, 1.f));
+	CameraBoom->bUsePawnControlRotation = false;
+	CameraBoom->bDoCollisionTest = false;
+	CameraBoom->SetWorldRotation(FQuat::Slerp(From, Line.Rotation().Quaternion(), Blend));
+	CameraBoom->TargetOffset = FMath::Lerp(CameraBoom->TargetOffset, ClashFocus - CameraBoom->GetComponentLocation(), Blend);
+	CameraBoom->SocketOffset = FMath::Lerp(CameraBoom->SocketOffset, FVector::ZeroVector, Blend);
+	CameraBoom->TargetArmLength = FMath::Lerp(CameraBoom->TargetArmLength, Arm, Blend);
+	TopDownCamera->SetFieldOfView(FMath::Lerp(TopDownCamera->FieldOfView, ClashCamFieldOfView, Blend));
+}
+
+void ARRRandomCharacter::SetClashCameraTuning(float Ahead, float Side, float Up, float LookRival, float FieldOfView)
+{
+	ClashCamAhead = Ahead;
+	ClashCamSide = Side;
+	ClashCamUp = Up;
+	ClashCamLookRival = FMath::Clamp(LookRival, 0.f, 1.f);
+	ClashCamFieldOfView = FMath::Clamp(FieldOfView, 30.f, 120.f);
 }
 
 void ARRRandomCharacter::SetThirdPerson(bool bOn)
@@ -2171,6 +2233,50 @@ bool ARRRandomCharacter::FireAt(const FVector& TargetLocation)
 void ARRRandomCharacter::ServerFireAt_Implementation(FVector_NetQuantize TargetLocation)
 {
 	ShootAt(TargetLocation, FireTimeSlack);
+}
+
+void ARRRandomCharacter::RobotAltFireAt(const FVector& TargetLocation)
+{
+	if (!Robot || !IsInRobot() || !bAlive)
+	{
+		return;
+	}
+	if (HasAuthority())
+	{
+		Robot->CrewAltFire(this, TargetLocation);
+		return;
+	}
+	// The robot keeps the missiles' cooldown; held, the button asks a few times a second
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (Now >= NextAltFireTime)
+	{
+		NextAltFireTime = Now + RobotFireRequestInterval;
+		ServerRobotAltFireAt(TargetLocation);
+	}
+}
+
+void ARRRandomCharacter::ServerRobotAltFireAt_Implementation(FVector_NetQuantize TargetLocation)
+{
+	RobotAltFireAt(TargetLocation);
+}
+
+void ARRRandomCharacter::RobotClashKey(uint8 Key)
+{
+	if (!Robot || !IsInRobot())
+	{
+		return;
+	}
+	if (HasAuthority())
+	{
+		Robot->ClashKey(this, Key);
+		return;
+	}
+	ServerRobotClashKey(Key);
+}
+
+void ARRRandomCharacter::ServerRobotClashKey_Implementation(uint8 Key)
+{
+	RobotClashKey(Key);
 }
 
 bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSlack)

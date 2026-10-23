@@ -110,6 +110,10 @@ public:
 
 	/** One of the star team's three cars, and which (0 chest, 1 arms, 2 legs), or -1. */
 	int32 GetStarPart() const { return Kind >= ERRVehicleKind::StarChest ? static_cast<int32>(Kind) - static_cast<int32>(ERRVehicleKind::StarChest) : -1; }
+	/** Which team's star cars these are (each team has its own three; only that team can combine them). Set before it
+	 * finishes spawning. */
+	void SetStarTeam(int32 NewTeam) { StarTeam = NewTeam; }
+	int32 GetStarTeam() const { return StarTeam; }
 	/**
 	 * Server: taken into the robot (hidden, no seats, out of the way) or back out of it, parked at Where facing Yaw on
 	 * the floor below it. Its riders must be off first.
@@ -163,6 +167,10 @@ private:
 
 	UPROPERTY(EditAnywhere, ReplicatedUsing = OnRep_Kind, Category = "Vehicle")
 	ERRVehicleKind Kind = ERRVehicleKind::Kickboard;
+
+	/** A star car: whose team's (SetStarTeam). */
+	UPROPERTY(Replicated)
+	int32 StarTeam = 0;
 
 	UPROPERTY(Replicated)
 	TObjectPtr<ARRRandomCharacter> Rider;

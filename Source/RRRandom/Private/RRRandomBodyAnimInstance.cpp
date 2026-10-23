@@ -103,10 +103,8 @@ void URRRandomBodyAnimInstance::UpdateFlightPose(float DeltaSeconds)
 	const float W = FlightWeight;
 	const float G = FlightGlide;
 	const float Kick = FlightKick.Y * FMath::Sin(KickPhase) * (1.f - 0.6f * G);
-	// A beat of the wings in the glide (UpdateWings) tucks the legs in for a moment
-	const float Tuck = StrokeAlpha < 1.f ? FMath::Sin(PI * StrokeAlpha) * G : 0.f;
-	const float Thigh = FMath::Lerp(FlightThigh.X, FlightThigh.Y, G) + 12.f * Tuck;
-	const float Knee = FMath::Lerp(FlightKnee.X, FlightKnee.Y, G) - 22.f * Tuck;
+	const float Thigh = FMath::Lerp(FlightThigh.X, FlightThigh.Y, G);
+	const float Knee = FMath::Lerp(FlightKnee.X, FlightKnee.Y, G);
 	const float Toes = FMath::Lerp(FlightToes.X, FlightToes.Y, G);
 	// Against the body's lean, split between neck and head
 	const float HeadLift = Brawler->GetFlightLean() * FlightHeadLift * 0.5f;
@@ -320,33 +318,16 @@ void URRRandomBodyAnimInstance::UpdateWings(float DeltaSeconds)
 	FlapSize = FMath::FInterpTo(FlapSize, Flap.Y, DeltaSeconds, 6.f);
 	FlapPhase = FMath::Fmod(FlapPhase + 2.f * PI * FlapRate * DeltaSeconds, 2.f * PI);
 
-	// Gliding: held spread, and every so often one big beat (down, then back up past the spread)
-	if (GlideWeight > 0.9f)
-	{
-		StrokeWait -= DeltaSeconds;
-		if (StrokeWait <= 0.f)
-		{
-			StrokeWait = FMath::FRandRange(GlideStrokeEvery.X, GlideStrokeEvery.Y);
-			StrokeAlpha = 0.f;
-		}
-	}
-	else
-	{
-		// A beat soon after settling into the glide
-		StrokeWait = FMath::Min(StrokeWait, 0.6f);
-	}
-	StrokeAlpha += DeltaSeconds / FMath::Max(GlideStrokeTime, 0.05f);
-	const float Stroke = StrokeAlpha < 1.f ? GlideStrokeSize * FMath::Sin(2.f * PI * StrokeAlpha) : 0.f;
-	const float StrokeTip = StrokeAlpha < 1.f ? 0.6f * GlideStrokeSize * FMath::Sin(2.f * PI * StrokeAlpha - 0.9f) : 0.f;
-
 	// The left wing's turns (degrees down, about the mesh's front axis, and forward, about its up axis); a knocked-out
-	// brawler's wings settle back to rest
+	// brawler's wings settle back to rest. Gliding, the roots hold the spread and only the tips flutter, harder the faster
+	// it goes: two shivers out of step, and the right tip out of step with the left, so it reads as wind, not a beat
 	const float Glide = GlideWeight;
 	const float Still = 1.f - Glide;
-	const float Shiver = 1.2f * FMath::Sin(GetWorld()->GetTimeSeconds() * 11.f);
-	const float RootDown = (GlideRootDownForward.X + Shiver + Stroke) * Glide + FlapSize * FMath::Sin(FlapPhase) * Still;
+	const float Time = GetWorld()->GetTimeSeconds();
+	const float Wind = 0.5f + 0.5f * FMath::Clamp(Velocity.Size() / FMath::Max(GlideFlutterSpeed, 1.f), 0.f, 1.f);
+	const float RootDown = GlideRootDownForward.X * Glide + FlapSize * FMath::Sin(FlapPhase) * Still;
 	const float RootForward = GlideRootDownForward.Y * Glide;
-	const float TipDown = (GlideTipDownForward.X + Shiver * 0.5f + StrokeTip) * Glide + 0.5f * FlapSize * FMath::Sin(FlapPhase - 0.9f) * Still;
+	const float TipDown = GlideTipDownForward.X * Glide + 0.5f * FlapSize * FMath::Sin(FlapPhase - 0.9f) * Still;
 	const float TipForward = GlideTipDownForward.Y * Glide;
 	const float Alive = Brawler->IsAlive() ? 1.f : 0.f;
 
@@ -358,8 +339,13 @@ void URRRandomBodyAnimInstance::UpdateWings(float DeltaSeconds)
 		const float Mirror = Side == 0 ? 1.f : -1.f;
 		const FVector Front(0.f, Mirror, 0.f);
 		const FVector Up(0.f, 0.f, Mirror);
-		const FQuat Root = FQuat(Up, FMath::DegreesToRadians(RootForward * Alive)) * FQuat(Front, FMath::DegreesToRadians(RootDown * Alive));
-		const FQuat Tip = FQuat(Up, FMath::DegreesToRadians(TipForward * Alive)) * FQuat(Front, FMath::DegreesToRadians(TipDown * Alive));
+		const float Beat = 2.f * PI * GlideTipFlutter.X * Time + Side * 1.9f;
+		const float Flutter = GlideTipFlutter.Y * Wind * Glide * (0.7f * FMath::Sin(Beat) + 0.3f * FMath::Sin(1.73f * Beat + 1.1f));
+		// The pitch is about the side axis for both wings alike (a mirror image of that turn is the same turn)
+		const FQuat Pitch(FVector::ForwardVector, FMath::DegreesToRadians(GlideWingPitch * Glide * Alive));
+		const FQuat Root = Pitch * FQuat(Up, FMath::DegreesToRadians(RootForward * Alive)) * FQuat(Front, FMath::DegreesToRadians(RootDown * Alive));
+		const FQuat Tip = FQuat(Up, FMath::DegreesToRadians(TipForward * Alive))
+			* FQuat(Front, FMath::DegreesToRadians((TipDown + Flutter) * Alive));
 		WingBends[Side * 2] = Root;
 		WingBends[Side * 2 + 1] = Root * Tip * Root.Inverse();
 	}

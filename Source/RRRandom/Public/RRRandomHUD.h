@@ -87,7 +87,15 @@ private:
 	 * COMBINE!" when close enough), over the robot coming together its gauge, over the finished one its health, shield and
 	 * three seats ("[F] GET IN" next to it), a banner when it is done, and for its crew which seat they have.
 	 */
-	void DrawStarRobot(const ARRRandomCharacter* Viewer);
+	void DrawStarRobot(const ARRRandomCharacter* Viewer, const class ARRRandomStarRobot* Robot);
+	/** Every team's robot (DrawStarRobot: the viewer's team's, or its combine sign; then the rival's), and the duel. */
+	void DrawStarRobots(const ARRRandomCharacter* Viewer);
+	/**
+	 * Robot against robot: the comic words over them (PARRY!, GUARD BREAK!, CLASH!, DOWN!, FINISH! ...); for the crew a
+	 * warning when the rival winds up a blow or its missiles come in; in a clash, the crew's row of keys to press, both
+	 * sides' progress, the time left and how it ended.
+	 */
+	void DrawRobotDuel(const ARRRandomCharacter* Viewer);
 	/** Third person (ARRRandomPlayerController::RRThirdPerson): a crosshair in the middle of the screen, tighter in the sights,
 	 * spreading for a moment after each shot. */
 	void DrawCrosshair(const ARRRandomCharacter& Brawler);
@@ -144,6 +152,10 @@ private:
 
 	/** 0 .. 1: how far the aim shows that the muzzle is buried in a wall (ARRRandomCharacter::GetShotStart), easing in and out. */
 	float MuzzleBlockedBlend = 0.f;
+
+	/** The clash: wrong keys seen so far for this viewer's seat, and when the last one flashed. */
+	int32 ClashMissesSeen = 0;
+	float ClashMissTime = -100.f;
 
 	/** White sprites for rounded shapes and soft shadows (RRRandomUIStyle). */
 	UPROPERTY()

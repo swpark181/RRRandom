@@ -105,6 +105,12 @@ public:
 	 * On a client this only predicts the cooldown and asks the server to shoot.
 	 */
 	bool FireAt(const FVector& TargetLocation);
+	/** In the star robot's ATTACK seat: its other attack (the missiles) at TargetLocation; on a client, asks the server. */
+	void RobotAltFireAt(const FVector& TargetLocation);
+	/** In the star robot locked in a sword clash: a key pressed (0 W, 1 A, 2 S, 3 D); on a client, tells the server. */
+	void RobotClashKey(uint8 Key);
+	/** This machine's camera in a robot's sword clash (ARRRandomPlayerController::RRClashCam): see ClashCamAhead. */
+	void SetClashCameraTuning(float Ahead, float Side, float Up, float LookRival, float FieldOfView);
 	/**
 	 * Where a shot at TargetLocation would set off (just ahead of the muzzle, facing the target) and which way it would fly.
 	 * False when that spot is buried in a wall the brawler hugs: then it can't fire (the HUD shows it on the aim).
@@ -697,6 +703,12 @@ private:
 	void ServerFireAt(FVector_NetQuantize TargetLocation);
 
 	UFUNCTION(Server, Reliable)
+	void ServerRobotAltFireAt(FVector_NetQuantize TargetLocation);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRobotClashKey(uint8 Key);
+
+	UFUNCTION(Server, Reliable)
 	void ServerSetThirdPerson(bool bOn);
 
 	UFUNCTION(Server, Reliable)
@@ -898,6 +910,19 @@ private:
 	/** The camera on the robot being combined, 0 to 1, and where that robot stands. */
 	float CombineCameraBlend = 0.f;
 	FVector CombineFocus = FVector::ZeroVector;
+	/** In a sword clash in the robot: how far the camera has closed in on the blades (0 to 1), on what, from which side,
+	 * how far into the clash. */
+	float ClashCameraBlend = 0.f;
+	FVector ClashFocus = FVector::ZeroVector;
+	FVector ClashEye = FVector::ZeroVector;
+	float ClashCameraTime = 0.f;
+	/** Where the clash camera sits, in the robot's own frame turned to the rival (ahead, right, up from its feet), how
+	 * far on from the crossed blades to the rival's head it looks (0 to 1), and its field of view. */
+	float ClashCamAhead = -200.f;
+	float ClashCamSide = 300.f;
+	float ClashCamUp = 720.f;
+	float ClashCamLookRival = 0.45f;
+	float ClashCamFieldOfView = 68.f;
 
 	/** Walking's movement settings, put back on getting off. */
 	float BaseMaxAcceleration = 0.f;
@@ -920,6 +945,8 @@ private:
 
 	float LastCombatTime = -UE_BIG_NUMBER;
 	float NextFireTime = 0.f;
+	/** In the robot's ATTACK seat: when this client may next ask for the missiles. */
+	float NextAltFireTime = 0.f;
 	float BaseWalkSpeed = 0.f;
 
 	FVector HomeLocation = FVector::ZeroVector;
@@ -981,6 +1008,8 @@ private:
 	float ThirdPersonBlend = 0.f;
 	float SightsBlend = 0.f;
 	void UpdateCamera(float DeltaSeconds);
+	/** The camera eased over to the sword clash (ClashCameraBlend of the way), from wherever UpdateCamera put it. */
+	void ApplyClashCamera();
 	void ApplyThirdPersonRotation();
 	float FlightCameraPull = 0.f;
 	/** 0..1, eased: my own sprint, for the over-the-shoulder camera's pull back. */

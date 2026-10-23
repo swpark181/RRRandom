@@ -40,6 +40,12 @@ namespace
 	constexpr float CursorPickSlack = 30.f;
 	// Third person: how far the crosshair looks for something to aim at
 	constexpr float CrosshairRange = 20000.f;
+	// The clash test (Ctrl+8: the 8 key is gun 7, counting from 0): its middle this far ahead of me, the two robots this
+	// far apart (within the sword's reach), both swinging this long after they're made (done and their crews in)
+	constexpr int32 ClashTestGunKey = 7;
+	constexpr float ClashTestAhead = 900.f;
+	constexpr float ClashTestGap = 800.f;
+	constexpr float ClashTestSwingDelay = 1.2f;
 	// Third person: the most one frame's mouse movement turns the camera (in mouse counts)
 	constexpr float MaxLookDelta = 60.f;
 	// Third person: how far (in pixels) the hidden cursor may drift from the middle of the view before it is put back
@@ -123,6 +129,11 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 	{
 		CheatStarCarsAction = NewObject<UInputAction>(this, TEXT("IA_CheatStarCars"));
 		CheatStarCarsAction->ValueType = EInputActionValueType::Boolean;
+	}
+	if (!CheatClashTestAction)
+	{
+		CheatClashTestAction = NewObject<UInputAction>(this, TEXT("IA_CheatClashTest"));
+		CheatClashTestAction->ValueType = EInputActionValueType::Boolean;
 	}
 	if (!CheatGiantAction)
 	{
@@ -219,6 +230,8 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 	MappingContext->MapKey(CheatWinAction, EKeys::F6);
 	// Ctrl + 0 (the 0 alone does nothing: OnCheatStarCarsKey checks for Ctrl)
 	MappingContext->MapKey(CheatStarCarsAction, EKeys::Zero);
+	// Ctrl + 8 (OnCheatClashTestKey checks for Ctrl)
+	MappingContext->MapKey(CheatClashTestAction, EKeys::Eight);
 	const FKey GunKeys[] = { EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine };
 	for (int32 Type = 0; Type < FMath::Min(CheatGunActions.Num(), static_cast<int32>(UE_ARRAY_COUNT(GunKeys))); ++Type)
 	{
@@ -313,12 +326,14 @@ void ARRRandomPlayerController::SetupInputComponent()
 	EnhancedInput->BindAction(TitleAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnEscape);
 	EnhancedInput->BindAction(CheatWinAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRWin);
 	EnhancedInput->BindAction(CheatStarCarsAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnCheatStarCarsKey);
+	EnhancedInput->BindAction(CheatClashTestAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnCheatClashTestKey);
 	EnhancedInput->BindAction(CheatGiantAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRGiant);
 	EnhancedInput->BindAction(CheatGodAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRGod);
 	EnhancedInput->BindAction(CheatUltimateAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRUltimate);
 	EnhancedInput->BindAction(CheatThirdPersonAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRThirdPerson);
 	EnhancedInput->BindAction(LookAction, ETriggerEvent::Triggered, this, &ARRRandomPlayerController::OnLook);
 	EnhancedInput->BindAction(AimAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnAimStart);
+	EnhancedInput->BindAction(AimAction, ETriggerEvent::Triggered, this, &ARRRandomPlayerController::OnAimHeld);
 	EnhancedInput->BindAction(AimAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnAimStop);
 	EnhancedInput->BindAction(SprintAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnSprintStart);
 	EnhancedInput->BindAction(SprintAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnSprintStop);
@@ -336,6 +351,18 @@ void ARRRandomPlayerController::PlayerTick(float DeltaTime)
 	Super::PlayerTick(DeltaTime);
 
 	UpdateSprint();
+	// Locked in a sword clash in the star robot: W A S D are the clash's keys (the robot can't walk meanwhile)
+	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()); Mine && Mine->IsInRobot() && Mine->GetRobot()->IsClashing() && !IsGameplayInputBlocked())
+	{
+		const FKey ClashKeys[] = { EKeys::W, EKeys::A, EKeys::S, EKeys::D };
+		for (uint8 Key = 0; Key < UE_ARRAY_COUNT(ClashKeys); ++Key)
+		{
+			if (WasInputKeyJustPressed(ClashKeys[Key]))
+			{
+				Mine->RobotClashKey(Key);
+			}
+		}
+	}
 	if (bPauseMenuOpen && ARRRandomGameState::IsMatchOver(this))
 	{
 		ClosePauseMenu();
@@ -629,6 +656,11 @@ void ARRRandomPlayerController::RRGun(const FString& Gun)
 
 void ARRRandomPlayerController::OnCheatGun(int32 Type)
 {
+	// Ctrl+8 is the sword clash test's (OnCheatClashTestKey), not a gun's
+	if (Type == ClashTestGunKey && (IsInputKeyDown(EKeys::LeftControl) || IsInputKeyDown(EKeys::RightControl)))
+	{
+		return;
+	}
 	ServerCheatGun(Type);
 }
 
@@ -734,11 +766,11 @@ void ARRRandomPlayerController::UpdateStudioCam(float DeltaTime)
 	{
 		return;
 	}
-	// Who it watches: my animal friend, or the robot I'm aboard
+	// Who it watches: my animal friend, or the robot I'm aboard (or combining)
 	AActor* Subject = GetPawn();
 	const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(Subject);
 	ARRRandomStarRobot* Robot = Mine ? Mine->GetRobot() : nullptr;
-	const bool bRobot = Robot && Robot->IsAssembled();
+	const bool bRobot = Robot != nullptr;
 	if (bRobot)
 	{
 		Subject = Robot;
@@ -776,10 +808,15 @@ void ARRRandomPlayerController::ServerCheatSlomo_Implementation(float Rate)
 
 void ARRRandomPlayerController::RRRobotFire(float Distance)
 {
-	ServerCheatRobotFire(Distance);
+	ServerCheatRobotFire(Distance, false);
 }
 
-void ARRRandomPlayerController::ServerCheatRobotFire_Implementation(float Distance)
+void ARRRandomPlayerController::RRRobotMissiles(float Distance)
+{
+	ServerCheatRobotFire(Distance, true);
+}
+
+void ARRRandomPlayerController::ServerCheatRobotFire_Implementation(float Distance, bool bMissiles)
 {
 #if !UE_BUILD_SHIPPING
 	const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
@@ -790,9 +827,198 @@ void ARRRandomPlayerController::ServerCheatRobotFire_Implementation(float Distan
 		UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, no robot with someone in its ATTACK seat to fire."));
 		return;
 	}
-	// Ahead at chest height of an animal friend, so it flies level
-	const FVector Ahead = Robot->GetActorLocation() + Robot->GetActorForwardVector().GetSafeNormal2D() * FMath::Max(Distance, 300.f) + FVector(0.f, 0.f, 300.f);
-	Robot->CrewFire(Gunner, Ahead);
+	// Ahead on the floor, about an animal friend's chest high; at the rival robot if there is one
+	const ARRRandomStarRobot* Rival = Robot->GetRival();
+	const FVector Ahead = Rival ? Rival->GetActorLocation() + FVector(0.f, 0.f, 300.f)
+		: Robot->GetActorLocation() + Robot->GetActorForwardVector().GetSafeNormal2D() * FMath::Max(Distance, 300.f) + FVector(0.f, 0.f, 60.f);
+	if (bMissiles)
+	{
+		Robot->CrewAltFire(Gunner, Ahead);
+	}
+	else
+	{
+		Robot->CrewFire(Gunner, Ahead);
+	}
+#endif
+}
+
+void ARRRandomPlayerController::RRRivalRobot(float Distance)
+{
+	ServerCheatRivalRobot(Distance);
+}
+
+void ARRRandomPlayerController::ServerCheatRivalRobot_Implementation(float Distance)
+{
+#if !UE_BUILD_SHIPPING
+	const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	if (!Mine)
+	{
+		return;
+	}
+	// In front of me (or my robot), on the floor, facing back at me
+	const AActor* From = Mine->GetRobot() ? static_cast<const AActor*>(Mine->GetRobot()) : Mine;
+	const float Yaw = From->GetActorRotation().Yaw;
+	FVector Where = From->GetActorLocation() + FRotator(0.f, Yaw, 0.f).Vector() * Distance;
+	FHitResult Hit;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRCheatRivalRobot), false, From);
+	if (GetWorld()->LineTraceSingleByChannel(Hit, Where + FVector(0.f, 0.f, 600.f), Where - FVector(0.f, 0.f, 2000.f), ECC_Visibility, Params))
+	{
+		Where = Hit.ImpactPoint;
+	}
+	// One of the other team's bots combines it
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		if (It->GetTeam() != Mine->GetTeam() && !It->IsPlayerControlled() && It->IsAlive() && !It->GetRobot())
+		{
+			if (!ARRRandomStarRobot::CheatAssemble(*It, Where, Yaw + 180.f))
+			{
+				UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, team %d's star robot can't be made (its cars in one already?)."), It->GetTeam());
+			}
+			return;
+		}
+	}
+#endif
+}
+
+void ARRRandomPlayerController::RRClashCam(float Ahead, float Side, float Up, float LookRival, float FieldOfView)
+{
+	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		Mine->SetClashCameraTuning(Ahead, Side, Up, LookRival, FieldOfView);
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: clash camera set: %.0f ahead, %.0f right, %.0f up, looking %.2f on to the rival, view %.0f."), Ahead, Side, Up, LookRival, FieldOfView);
+	}
+}
+
+void ARRRandomPlayerController::RRClashTest()
+{
+	ServerCheatClashTest();
+}
+
+void ARRRandomPlayerController::ServerCheatClashTest_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+	ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	UWorld* World = GetWorld();
+	if (!Mine || !Mine->IsAlive() || !World)
+	{
+		return;
+	}
+	// Any robot about comes apart first (its cars out again, everyone out)
+	TArray<ARRRandomStarRobot*> Robots;
+	for (TActorIterator<ARRRandomStarRobot> It(World); It; ++It)
+	{
+		Robots.Add(*It);
+	}
+	for (ARRRandomStarRobot* Robot : Robots)
+	{
+		Robot->CheatBreak();
+	}
+	// The floor ahead of me: the two robots either side of the middle, facing each other
+	const float Yaw = Mine->GetActorRotation().Yaw;
+	const FVector Forward = FRotator(0.f, Yaw, 0.f).Vector();
+	const FVector Middle = Mine->GetActorLocation() + Forward * ClashTestAhead;
+	const auto Floor = [World, Mine](const FVector& Spot)
+	{
+		FHitResult Hit;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(RRCheatClashTest), false, Mine);
+		return World->LineTraceSingleByChannel(Hit, Spot + FVector(0.f, 0.f, 600.f), Spot - FVector(0.f, 0.f, 2000.f), ECC_Visibility, Params) ? Hit.ImpactPoint : Spot;
+	};
+	// The other team's robot is combined by one of its players if it has any there, else by one of its bots
+	ARRRandomCharacter* Theirs = nullptr;
+	for (TActorIterator<ARRRandomCharacter> It(World); It; ++It)
+	{
+		if (It->GetTeam() != Mine->GetTeam() && It->IsAlive() && !It->GetRobot() && !It->IsDecoy() && (!Theirs || (It->IsPlayerControlled() && !Theirs->IsPlayerControlled())))
+		{
+			Theirs = *It;
+		}
+	}
+	ARRRandomStarRobot* Ours = ARRRandomStarRobot::CheatAssemble(Mine, Floor(Middle - Forward * ClashTestGap * 0.5f), Yaw);
+	ARRRandomStarRobot* Rival = Theirs ? ARRRandomStarRobot::CheatAssemble(Theirs, Floor(Middle + Forward * ClashTestGap * 0.5f), Yaw + 180.f) : nullptr;
+	if (!Ours || !Rival)
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, the clash test needs both teams' star cars free and someone on the other team."));
+		return;
+	}
+	// Once both are done and their crews in, both swing at once
+	FTimerHandle Handle;
+	GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [Ours = TWeakObjectPtr<ARRRandomStarRobot>(Ours), Rival = TWeakObjectPtr<ARRRandomStarRobot>(Rival)]()
+	{
+		if (Ours.IsValid() && Rival.IsValid())
+		{
+			Ours->CheatSwingAt(Rival.Get());
+			Rival->CheatSwingAt(Ours.Get());
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, both star robots swing at once (clash test)."));
+		}
+	}), ClashTestSwingDelay, false);
+#endif
+}
+
+void ARRRandomPlayerController::RRClashPress()
+{
+#if !UE_BUILD_SHIPPING
+	ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	const ARRRandomStarRobot* Robot = Mine && Mine->IsInRobot() ? Mine->GetRobot() : nullptr;
+	if (Robot && Robot->IsClashing())
+	{
+		const int32 Seat = Mine->GetRobotSeat() == ERRRobotSeat::Move ? 0 : Mine->GetRobotSeat() == ERRRobotSeat::Attack ? 1 : 2;
+		Mine->RobotClashKey(Robot->GetClashKey(Seat, Robot->GetClashDone(Seat)));
+	}
+#endif
+}
+
+void ARRRandomPlayerController::RRRival(const FString& What)
+{
+	ServerCheatRival(What);
+}
+
+void ARRRandomPlayerController::ServerCheatRival_Implementation(const FString& What)
+{
+#if !UE_BUILD_SHIPPING
+	const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	const AActor* Me = Mine && Mine->GetRobot() ? static_cast<const AActor*>(Mine->GetRobot()) : Mine;
+	ARRRandomStarRobot* Rival = nullptr;
+	for (TActorIterator<ARRRandomStarRobot> It(GetWorld()); It && Mine; ++It)
+	{
+		Rival = It->GetTeam() != Mine->GetTeam() && It->IsAssembled() ? *It : Rival;
+	}
+	if (!Rival || !Me)
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, no rival robot (RRRivalRobot makes one)."));
+		return;
+	}
+	const FVector At = Me->GetActorLocation() + FVector(0.f, 0.f, 300.f);
+	if (What == TEXT("fire"))
+	{
+		Rival->CrewFire(Rival->GetCrew(ERRRobotSeat::Attack), At);
+	}
+	else if (What == TEXT("missiles"))
+	{
+		Rival->CrewAltFire(Rival->GetCrew(ERRRobotSeat::Attack), At);
+	}
+	else if (What == TEXT("shield"))
+	{
+		Rival->CheatShield(3.f);
+	}
+	else if (What == TEXT("hurt"))
+	{
+		Rival->CheatHurt(40.f);
+	}
+#endif
+}
+
+void ARRRandomPlayerController::RRRobotShield(float Seconds)
+{
+	ServerCheatRobotShield(Seconds);
+}
+
+void ARRRandomPlayerController::ServerCheatRobotShield_Implementation(float Seconds)
+{
+#if !UE_BUILD_SHIPPING
+	const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	if (ARRRandomStarRobot* Robot = Mine ? Mine->GetRobot() : nullptr)
+	{
+		Robot->CheatShield(Seconds);
+	}
 #endif
 }
 
@@ -851,6 +1077,14 @@ void ARRRandomPlayerController::OnCheatStarCarsKey()
 	}
 }
 
+void ARRRandomPlayerController::OnCheatClashTestKey()
+{
+	if (IsInputKeyDown(EKeys::LeftControl) || IsInputKeyDown(EKeys::RightControl))
+	{
+		RRClashTest();
+	}
+}
+
 void ARRRandomPlayerController::RRStarCars()
 {
 	ServerCheatStarCars();
@@ -864,8 +1098,8 @@ void ARRRandomPlayerController::ServerCheatStarCars_Implementation()
 	{
 		return;
 	}
-	// A robot already about (combining or done) comes apart first, everyone out
-	if (ARRRandomStarRobot* Robot = ARRRandomStarRobot::Get(this))
+	// My team's cars: my team's robot already about (combining or done) comes apart first, everyone out
+	if (ARRRandomStarRobot* Robot = ARRRandomStarRobot::Get(this, RandomCharacter->GetTeam()))
 	{
 		Robot->CheatBreak();
 	}
@@ -875,7 +1109,7 @@ void ARRRandomPlayerController::ServerCheatStarCars_Implementation()
 	for (TActorIterator<ARRRandomVehicle> It(GetWorld()); It; ++It)
 	{
 		const int32 Part = It->GetStarPart();
-		if (Part < 0 || It->IsCombined())
+		if (Part < 0 || It->IsCombined() || It->GetStarTeam() != RandomCharacter->GetTeam())
 		{
 			continue;
 		}
@@ -1309,7 +1543,7 @@ void ARRRandomPlayerController::UpdateSprint()
 
 void ARRRandomPlayerController::OnAimStart()
 {
-	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()); RandomCharacter && bThirdPerson)
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()); RandomCharacter && bThirdPerson && !RandomCharacter->IsInRobot())
 	{
 		RandomCharacter->SetAimingDownSights(true);
 	}
@@ -1320,6 +1554,30 @@ void ARRRandomPlayerController::OnAimStop()
 	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()))
 	{
 		RandomCharacter->SetAimingDownSights(false);
+	}
+}
+
+void ARRRandomPlayerController::OnAimHeld()
+{
+	// Aimed like the left button: the crosshair over the shoulder, else the cursor
+	ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	if (!RandomCharacter || RandomCharacter->GetRobotSeat() != ERRRobotSeat::Attack || IsGameplayInputBlocked())
+	{
+		return;
+	}
+	if (bThirdPerson)
+	{
+		if (!bShowMouseCursor && IsViewportFocused())
+		{
+			RandomCharacter->RobotAltFireAt(GetCrosshairTarget());
+		}
+		return;
+	}
+	FVector CursorOrigin;
+	FVector CursorDirection;
+	if (DeprojectMousePositionToWorld(CursorOrigin, CursorDirection))
+	{
+		RandomCharacter->RobotAltFireAt(GetAimTarget(CursorOrigin, CursorDirection));
 	}
 }
 

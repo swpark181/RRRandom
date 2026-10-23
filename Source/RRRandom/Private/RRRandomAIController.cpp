@@ -71,6 +71,9 @@ namespace
 	constexpr float StuckTime = 1.5f;
 	// A bot heads for its team's star robot with a seat free from this far away at most
 	constexpr float RobotCrewSearchRadius = 12000.f;
+	// Driving the team's robot: at the rival robot from this far away, up to this close (its sword reaches it there)
+	constexpr float RobotRivalSearchRadius = 9000.f;
+	constexpr float RobotDuelDistance = 520.f;
 
 	// Shots fly this far above the capsule center, this far to the shooter's right (the rifle's muzzle in the fox's fire
 	// stance) and are this wide (see the character's MuzzleOffset and the projectile)
@@ -585,9 +588,26 @@ ARRRandomVehicle* ARRRandomAIController::FindVehicleToRide(const ARRRandomCharac
 
 bool ARRRandomAIController::UpdateStarRobot(ARRRandomCharacter* Self, bool bInFight, FVector& Wanted, bool& bOnRoute, float DeltaSeconds)
 {
-	// Combining it (standing still) or in it: the robot is all there is
-	if (Self->GetRobot())
+	// Combining it (standing still) or in it: the robot is all there is. Driving it with the rival robot about: at it, up
+	// to sword's reach, then circling it a little
+	if (const ARRRandomStarRobot* Mine = Self->GetRobot())
 	{
+		const ARRRandomStarRobot* Rival = Mine->IsAssembled() && Self->GetRobotSeat() == ERRRobotSeat::Move ? Mine->GetRival() : nullptr;
+		const FVector ToRival = Rival ? (Rival->GetActorLocation() - Mine->GetActorLocation()) * FVector(1.f, 1.f, 0.f) : FVector::ZeroVector;
+		if (Rival && ToRival.Size() <= RobotRivalSearchRadius)
+		{
+			const FVector Toward = ToRival.GetSafeNormal();
+			if (Town.IsValid() && ToRival.Size() > RobotDuelDistance * 3.f)
+			{
+				Wanted = FollowRoute(Self, Rival->GetActorLocation(), DeltaSeconds);
+				bOnRoute = true;
+			}
+			else
+			{
+				Wanted = ToRival.Size() > RobotDuelDistance ? Toward : FVector::CrossProduct(FVector::UpVector, Toward) * StrafeSign * 0.25f;
+				bOnRoute = false;
+			}
+		}
 		return true;
 	}
 	// Next to the gathered cars out of a fight: combine them, unless a player on the team is there too (most likely the
@@ -605,8 +625,29 @@ bool ARRRandomAIController::UpdateStarRobot(ARRRandomCharacter* Self, bool bInFi
 			return true;
 		}
 	}
+	// The team's own cars gathered with no robot yet, not too far, out of a fight: over to them (to combine, above)
+	ARRRandomVehicle* Cars[3];
+	FVector Gathered;
+	if (!bInFight && !Self->IsGiant() && !Self->CanFly() && ARRRandomStarRobot::FindGathered(this, Self->GetTeam(), Cars, Gathered))
+	{
+		const FVector ToCars = (Gathered - Self->GetActorLocation()) * FVector(1.f, 1.f, 0.f);
+		if (ToCars.Size() <= RobotCrewSearchRadius && ToCars.Size() > ARRRandomStarRobot::CombineReach * 0.6f)
+		{
+			if (Town.IsValid())
+			{
+				Wanted = FollowRoute(Self, Gathered, DeltaSeconds);
+				bOnRoute = true;
+			}
+			else
+			{
+				Wanted = ToCars.GetSafeNormal();
+				bOnRoute = false;
+			}
+			return true;
+		}
+	}
 	// The team's robot with a seat free, not too far: over to it and in
-	const ARRRandomStarRobot* Robot = ARRRandomStarRobot::Get(this);
+	const ARRRandomStarRobot* Robot = ARRRandomStarRobot::Get(this, Self->GetTeam());
 	if (!Robot || !Robot->IsAssembled() || Robot->GetTeam() != Self->GetTeam() || Robot->GetFreeSeat() == ERRRobotSeat::None || Self->IsGiant() || Self->CanFly())
 	{
 		return false;
@@ -1119,6 +1160,11 @@ void ARRRandomAIController::UpdateFlight(ARRRandomCharacter* Self, float Distanc
 
 void ARRRandomAIController::UpdateDice(ARRRandomCharacter* Self, float Distance, float DeltaSeconds)
 {
+	// In the star robot (combining it or inside): no dice, no ultimates, till it's out again
+	if (Self->GetRobot())
+	{
+		return;
+	}
 	URRRandomDiceBuffComponent* Dice = Self->GetDiceBuffs();
 	if (Dice->GetCharges() <= 0)
 	{
