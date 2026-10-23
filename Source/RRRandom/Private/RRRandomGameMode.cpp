@@ -180,7 +180,7 @@ void ARRRandomGameMode::OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRando
 		{
 			Carry->DropAll(bFell);
 		}
-		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) knocked out by %s."), *Victim->GetName(), Victim->GetTeam(), Attacker ? *Attacker->GetName() : TEXT("a fall"));
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) knocked out by %s (r77 film remakes)."), *Victim->GetName(), Victim->GetTeam(), Attacker ? *Attacker->GetName() : TEXT("a fall"));
 		return;
 	}
 	// A knockout without an opposing attacker still goes to the other team
@@ -727,10 +727,14 @@ void ARRRandomGameMode::SpawnVehiclesIfNoneExist()
 		ERRVehicleKind Kind;
 		FVector2D Offset;
 		float Yaw;
+		/** A star car: whose team's. */
+		int32 Team = 0;
 	};
 	// From the arena's center (X up the screen, Y right): each team's kickboard and motorbike just ahead of its village
 	// road, on opposite sides, facing the field; a car on each side lane of the ring road, halfway, pointing opposite ways
 	const float Near = TeamSpawnDistance * 0.5f - 230.f;
+	// Star cars parked in a row this far apart (well within ARRRandomStarRobot::GatherRadius of their middle)
+	constexpr float StarCarGap = 500.f;
 	const FParking Spots[] =
 	{
 		{ ERRVehicleKind::Kickboard, FVector2D(-Near, -900.f), 0.f },
@@ -739,11 +743,14 @@ void ARRRandomGameMode::SpawnVehiclesIfNoneExist()
 		{ ERRVehicleKind::Motorbike, FVector2D(Near, -900.f), 180.f },
 		{ ERRVehicleKind::Car, FVector2D(90.f, -1890.f), 0.f },
 		{ ERRVehicleKind::Car, FVector2D(-90.f, 1710.f), 180.f },
-		// The star team, spread out so it takes driving to gather them (ARRRandomStarRobot): the chest and the arms cars
-		// on the cross road at either flank, the legs car on the way to one team (all on open road in Dice Town too)
-		{ ERRVehicleKind::StarChest, FVector2D(0.f, -Near * 0.96f), 90.f },
-		{ ERRVehicleKind::StarArms, FVector2D(0.f, Near * 0.96f), -90.f },
-		{ ERRVehicleKind::StarLegs, FVector2D(-Near * 0.6f, 1250.f), 0.f },
+		// Each team's three star cars (ARRRandomStarRobot), parked nose to tail on the road out of its own side, already
+		// gathered: a teammate pressing F by them combines the team's robot (the other team's mirror the first round the middle)
+		{ ERRVehicleKind::StarChest, FVector2D(-Near * 0.6f - StarCarGap, 1250.f), 0.f, 0 },
+		{ ERRVehicleKind::StarArms, FVector2D(-Near * 0.6f + StarCarGap, 1250.f), 0.f, 0 },
+		{ ERRVehicleKind::StarLegs, FVector2D(-Near * 0.6f, 1250.f), 0.f, 0 },
+		{ ERRVehicleKind::StarChest, FVector2D(Near * 0.6f + StarCarGap, -1250.f), 180.f, 1 },
+		{ ERRVehicleKind::StarArms, FVector2D(Near * 0.6f - StarCarGap, -1250.f), 180.f, 1 },
+		{ ERRVehicleKind::StarLegs, FVector2D(Near * 0.6f, -1250.f), 180.f, 1 },
 	};
 	const FVector Origin = GetArenaCenter();
 	// Floor more than this above the arena's isn't the ground
@@ -778,6 +785,7 @@ void ARRRandomGameMode::SpawnVehiclesIfNoneExist()
 		if (ARRRandomVehicle* Vehicle = World->SpawnActorDeferred<ARRRandomVehicle>(ARRRandomVehicle::StaticClass(), SpawnTransform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
 		{
 			Vehicle->SetKind(Spot.Kind);
+			Vehicle->SetStarTeam(Spot.Team);
 			Vehicle->FinishSpawning(SpawnTransform);
 		}
 	}

@@ -1,5 +1,6 @@
 #include "RRRandomVehicle.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomEffects.h"
 #include "RRRandomSkidMarks.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -31,15 +32,28 @@ namespace
 		// two rear wheels' marks. Driver's cushion -20 .. 20 at 52 (backrest at -40 .. -30), the rear one -115 .. -55 at 62
 		// (backrest -135 .. -120)
 		{ 3.5f, 2200.f, 1.1f, 460.f, 1000.f, true, 52.f, 0.15f, 6.f, TEXT("CAR"), -12.f, true, -95.f, 22.f, 0.55f, 0.72f, 0.f, 0.f, true, 62.f },
-		// The star team (Tripo models): two seats side by side in the chest car (cushions -70 .. 5 at 96, backrests -120 ..
-		// -80) and the arms car (cushions -55 .. 35 at 120 .. 130, backrests -100 .. -65), one behind the other in the long
-		// legs car (cushions 20 .. 55 and -80 .. -40, at 75 on its middle line; riders go 9 lower, into its shallow
-		// cockpits rather than on top of them). The chest car is the sturdy one, the arms car the nimble one, the legs car
-		// (a rocket) the fastest that turns the slowest; all ram.
-		{ 3.f, 2000.f, 1.4f, 440.f, 1100.f, true, 96.f, 0.12f, 5.f, TEXT("STAR CHEST"), -58.f, true, -58.f, 24.f, 0.55f, 0.75f, -42.f, 42.f, true, 96.f },
-		{ 3.2f, 2200.f, 1.2f, 500.f, 1000.f, true, 121.f, 0.15f, 6.f, TEXT("STAR ARMS"), -43.f, true, -43.f, 22.f, 0.55f, 0.7f, -42.f, 42.f, true, 121.f },
-		{ 3.8f, 2400.f, 1.f, 380.f, 900.f, true, 66.f, 0.1f, 4.f, TEXT("STAR LEGS"), 28.f, true, -68.f, 18.f, 0.7f, 0.5f, 0.f, 0.f, true, 66.f },
+		// The star team (the haetae robot's cars, round 79): one seat on the middle line of the chest car (an open SUV
+		// carrying the robot's head under its floor: cushion -5 .. 30 at 82, backrest -45 .. -10) and of the arms car (a
+		// low hot rod with the fists folded inside: cushion -35 .. 0 at 58, backrest -55 .. -45), two one behind the other
+		// in the long legs car (cushions -15 .. 20 at 88 and -130 .. -90 at 112, backrests -45 .. -30 and -150 .. -135;
+		// riders go 6 lower, into the seats rather than on top of them). The chest car is the sturdy one, the arms car the
+		// nimble one, the legs car (rocket nozzles at its tail) the fastest that turns the slowest; all ram.
+		{ 3.f, 2000.f, 1.4f, 440.f, 1100.f, true, 82.f, 0.12f, 5.f, TEXT("STAR CHEST"), 2.f, false, 2.f, 24.f, 0.55f, 0.75f, 0.f, 0.f, true, 82.f },
+		{ 3.2f, 2200.f, 1.2f, 500.f, 1000.f, true, 58.f, 0.15f, 6.f, TEXT("STAR ARMS"), -25.f, false, -25.f, 22.f, 0.55f, 0.7f, 0.f, 0.f, true, 58.f },
+		{ 3.8f, 2400.f, 1.f, 380.f, 900.f, true, 82.f, 0.1f, 4.f, TEXT("STAR LEGS"), -5.f, true, -118.f, 18.f, 0.7f, 0.5f, 0.f, 0.f, true, 106.f },
 	};
+	// The star legs car's rocket nozzles (its mesh: front on +X, 420 long), where the flames come out, and how big each
+	// flame is; they burn above this speed
+	const FVector4f LegsRocketNozzles[] =
+	{
+		FVector4f(-206.f, -52.f, 120.f, 1.f),
+		FVector4f(-206.f, 52.f, 120.f, 1.f),
+		FVector4f(-203.f, -48.f, 64.f, 0.6f),
+		FVector4f(-203.f, 48.f, 64.f, 0.6f),
+	};
+	constexpr float LegsRocketMinSpeed = 80.f;
+	// Only a few smoke puffs: at speed the full rocket fist's smoke trails behind as a wall
+	constexpr float LegsRocketSmoke = 0.12f;
 	const TCHAR* MeshPaths[] =
 	{
 		TEXT("/Game/Vehicles/SM_Kickboard.SM_Kickboard"),
@@ -104,6 +118,7 @@ void ARRRandomVehicle::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ARRRandomVehicle, Kind);
+	DOREPLIFETIME(ARRRandomVehicle, StarTeam);
 	DOREPLIFETIME(ARRRandomVehicle, Rider);
 	DOREPLIFETIME(ARRRandomVehicle, Passenger);
 	DOREPLIFETIME(ARRRandomVehicle, bCombined);
@@ -162,7 +177,10 @@ void ARRRandomVehicle::SetCombined(bool bNewCombined, const FVector& Where, floa
 
 void ARRRandomVehicle::OnRep_Combined()
 {
+	// Part of the robot: out of sight and out of the way (the robot stands where the cars were gathered, often right on
+	// one of them)
 	SetActorHiddenInGame(bCombined);
+	SetActorEnableCollision(!bCombined);
 	SkidSpots.Reset();
 }
 
@@ -255,6 +273,20 @@ void ARRRandomVehicle::Tick(float DeltaSeconds)
 	Lean = FMath::FInterpConstantTo(Lean, Wanted, DeltaSeconds, LeanRate);
 	Body->SetRelativeRotation(FRotator(0.f, 0.f, Lean));
 	UpdateSkidMarks(bDrifting, Speed);
+	// The star legs car's four rocket nozzles at its tail (two big over two small) burn while it's going
+	if (Kind == ERRVehicleKind::StarLegs && Rider && Speed > LegsRocketMinSpeed)
+	{
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			const FTransform Frame = Body->GetComponentTransform();
+			const FVector Back = -Frame.GetUnitAxis(EAxis::X);
+			const float Size = FMath::GetMappedRangeValueClamped(FVector2D(LegsRocketMinSpeed, 900.f), FVector2D(0.45f, 0.85f), Speed);
+			for (const FVector4f& Nozzle : LegsRocketNozzles)
+			{
+				Effects->RocketExhaust(Frame.TransformPosition(FVector(Nozzle.X, Nozzle.Y, Nozzle.Z)), Back, Size * Nozzle.W, DeltaSeconds, LegsRocketSmoke);
+			}
+		}
+	}
 	if (HasAuthority() && Handling.bRams)
 	{
 		UpdateRam();

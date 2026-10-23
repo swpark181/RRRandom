@@ -52,6 +52,14 @@ public:
 	 */
 	void MakeRocketFist(bool bLeft, float Radius);
 
+	/**
+	 * Makes it one of the star robot's little missiles (call before it finishes spawning): a small glowing dart that sets off
+	 * the way it was spawned and curves in on Target, turning harder the longer it flies, a little jet of flame behind it;
+	 * it bursts in a small fireball where it lands, or at Target if it gets there without hitting anything. Radius wide
+	 * for hits.
+	 */
+	void MakeMissile(const FVector& Target, float Radius);
+
 	/** Damage is rolled between these on every hit. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat")
 	int32 MinDamage = 8;
@@ -105,6 +113,12 @@ public:
 	/** A rocket fist (MakeRocketFist): 0 not, 1 the left forearm, 2 the right. */
 	UPROPERTY(Replicated)
 	uint8 RocketArm = 0;
+
+	/** One of the star robot's missiles (MakeMissile), and where it curves in to. */
+	UPROPERTY(Replicated)
+	bool bMissile = false;
+	UPROPERTY(Replicated)
+	FVector_NetQuantize MissileTarget = FVector::ZeroVector;
 
 	/** How fast a rocket fist spins round the way it flies (degrees a second). */
 	UPROPERTY(EditAnywhere, Category = "Projectile")
@@ -201,4 +215,6 @@ private:
 	/** A rocket fist: the forearm's place relative to the shot (fist first), and how far round it has spun. */
 	FTransform RocketPose;
 	float RocketSpin = 0.f;
+	/** A missile: how long it has flown (it turns harder the longer). */
+	float MissileAge = 0.f;
 };

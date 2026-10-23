@@ -6,13 +6,13 @@ param([string]$OutDir = "C:\work\char-pipeline\output\ui", [string]$Only = "")
 Add-Type -AssemblyName System.Drawing
 $In = "C:\work\char-pipeline\input"
 $portraits = @(
-    @("Fox",      "$In\fox_v3\concept\fox_v3_front_clean.png",              237, 25, 550),
-    @("Rabbit",   "$In\rabbit_v3\concept\rabbit_v3_front_clean.png",        252, 90, 520),
-    @("Squirrel", "$In\squirrel_v3\concept\squirrel_v3_front_clean.png",    230, 40, 500),
-    @("Tiger",    "$In\tiger_fluffy\concept\tiger_fluffy_v2_front.png",     237, 25, 550),
-    @("RedFox",   "$In\fox_girl\concept\fox_girl_v2_front.png",             227,  5, 590),
-    # The dragon has no shirt in the game (round 44): its concept is a 404 px capture
-    @("Dragon",   "$In\dragon_v2\concept\dragon_front_noshirt_capture.png",  82, 18, 240)
+    @("Fox",      "$In\fox_film\concept\fox_neck_front.png",                237, 60, 550),
+    @("Rabbit",   "$In\rabbit_mjc\concept\rabbit_front.png",                257, 150, 520),
+    @("Squirrel", "$In\squirrel_film\concept\squirrel_front.png",           252, 70, 530),
+    @("Tiger",    "$In\tiger_film\concept\tiger_front.png",                 252, 50, 540),
+    @("RedFox",   "$In\redfox_mjc\concept\mjc_front.png",                   212, 90, 600),
+    # Round 77: the film-style dragon (front with its nose smoke edited out)
+    @("Dragon",   "$In\dragon_film\concept\dragon_front.png",               245, 70, 540)
 )
 foreach ($p in $portraits) {
     $name, $src, $x, $y, $size = $p

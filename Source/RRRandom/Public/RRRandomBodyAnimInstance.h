@@ -98,7 +98,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Tail", meta = (ClampMin = "0", ClampMax = "1"))
 	float TurnDrag = 0.7f;
 
-	/** Swing in degrees per cm/s² of sideways speeding up (the tail trails the other way). */
+	/** Swing in degrees per cm/s짼 of sideways speeding up (the tail trails the other way). */
 	UPROPERTY(EditAnywhere, Category = "Tail")
 	float SideAccelSwing = 0.006f;
 
@@ -152,24 +152,26 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Wings")
 	FVector2D WalkFlap = FVector2D(1.4f, 9.f);
 
-	/** The glide's spread from the wings' rest pose: the root turned down and forward, the tip further out in line with it. */
+	/** The glide's spread from the wings' rest pose: the root turned down and forward, the tip further out in line with it.
+	 * GlideWingPitch then turns both spread wings about the side axis (positive tips their upper edges back), so with the
+	 * dragon lying out flat in the glide (round 85) the membranes lie flat too instead of standing up behind it. */
 	UPROPERTY(EditAnywhere, Category = "Wings")
 	FVector2D GlideRootDownForward = FVector2D(16.f, 20.f);
 	UPROPERTY(EditAnywhere, Category = "Wings")
 	FVector2D GlideTipDownForward = FVector2D(6.f, 15.f);
+	UPROPERTY(EditAnywhere, Category = "Wings")
+	float GlideWingPitch = 30.f;
 
 	/** Seconds to spread into the glide and to fold out of it. */
 	UPROPERTY(EditAnywhere, Category = "Wings")
 	float GlideBlendTime = 0.2f;
 
-	/** Gliding, now and then one big beat of the spread wings: every so many seconds (min, max), lasting so long, so many
-	 * degrees down and back up at the root (the tip lags), the legs tucking in a little with it. */
+	/** Gliding, the spread wings are held still (round 85: the old beats every couple of seconds are gone) and only their
+	 * tips flutter in the wind: so many shivers a second and so many degrees, the full amount at GlideFlutterSpeed. */
 	UPROPERTY(EditAnywhere, Category = "Wings")
-	FVector2D GlideStrokeEvery = FVector2D(1.6f, 3.f);
+	FVector2D GlideTipFlutter = FVector2D(9.f, 7.f);
 	UPROPERTY(EditAnywhere, Category = "Wings")
-	float GlideStrokeTime = 0.5f;
-	UPROPERTY(EditAnywhere, Category = "Wings")
-	float GlideStrokeSize = 42.f;
+	float GlideFlutterSpeed = 600.f;
 
 	/**
 	 * The flying pose over the idle while ARRRandomCharacter::IsInFlight (any brawler: the Mixamo leg and neck bones):
@@ -309,7 +311,4 @@ private:
 	float FlapSize = 0.f;
 	float GlideWeight = 0.f;
 	float AirTime = 0.f;
-	/** The glide's beat: seconds to the next one, and how far through the one going on (0 .. 1; above 1 none). */
-	float StrokeWait = 1.f;
-	float StrokeAlpha = 2.f;
 };

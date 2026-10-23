@@ -16,4 +16,6 @@ if [ -d $I/$d/mixamo_extra ]; then
   args=""; for f in $I/$d/mixamo_extra/*.fbx; do s=$(basename $f .fbx); s=${s#${a}_}; case $s in jumpup) n=JumpUp;; frontflip) n=FrontFlip;; fallidle) n=FallIdle;; hardlanding) n=HardLanding;; roar) n=Roar;; jumpattack) n=JumpAttack;; *) continue;; esac; args="$args|$f=A_${N}_$n"; done
   run "$S/ue_import_extra_anims.py $N$args" "." 4
 fi
+# Round 74: FURRIM=1 adds the fur rim glow (ue_fur_rim.py) to M_<Name> — the red fox has it; a re-import without it drops it
+if [ -n "$FURRIM" ]; then run "$S/ue_fur_rim.py /Game/Characters/$N/M_$N" "FURRIM" 1; fi
 echo "$N anims: $(ls Content/Characters/$N/Anims | wc -l)"

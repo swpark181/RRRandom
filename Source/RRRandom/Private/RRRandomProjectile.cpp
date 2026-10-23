@@ -54,6 +54,14 @@ namespace
 		{ 70.f,  380.f, EImpact::Burst, 0.6f, true,  0.6f, EImpact::Explosion, 0.6f },
 	};
 
+	// The star robot's missiles: this long and thick (the ball stretched into a dart); turning this fast toward their aim at
+	// first (degrees a second), this much faster for each second flown; bursting this close to it, in a fireball this big
+	const FVector MissileLook(0.5f, 0.16f, 0.16f);
+	constexpr float MissileTurnRate = 90.f;
+	constexpr float MissileTurnGrowth = 500.f;
+	constexpr float MissileArrive = 60.f;
+	constexpr float MissileBlast = 0.45f;
+
 	// Templates may loop for previewing, so one-shot effects stop spawning after this and let their particles finish
 	constexpr float OneShotSpawnTime = 0.25f;
 
@@ -152,6 +160,8 @@ void ARRRandomProjectile::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	DOREPLIFETIME(ARRRandomProjectile, Tier);
 	DOREPLIFETIME(ARRRandomProjectile, bPoke);
 	DOREPLIFETIME(ARRRandomProjectile, RocketArm);
+	DOREPLIFETIME(ARRRandomProjectile, bMissile);
+	DOREPLIFETIME(ARRRandomProjectile, MissileTarget);
 	DOREPLIFETIME(ARRRandomProjectile, bImpacted);
 	DOREPLIFETIME(ARRRandomProjectile, bOutOfRange);
 	DOREPLIFETIME(ARRRandomProjectile, bHitBrawler);
@@ -208,11 +218,18 @@ void ARRRandomProjectile::BeginPlay()
 		Glow->SetLightColor(FLinearColor(1.f, 0.55f, 0.15f));
 		SetActorTickEnabled(true);
 	}
-	if (!bPoke && !bRocket)
+	// A missile: a little dart in the shot's color, steering and trailing flame as it goes (Tick)
+	if (bMissile)
+	{
+		Visual->SetRelativeScale3D(MissileLook);
+		Glow->SetLightColor(FLinearColor(1.f, 0.55f, 0.15f));
+		SetActorTickEnabled(true);
+	}
+	if (!bPoke && !bRocket && !bMissile)
 	{
 		SpawnOneShot(this, Look.Muzzle == EImpact::Spark ? SparkEffect : (Look.Muzzle == EImpact::Burst ? BurstEffect : nullptr), GetActorLocation(), GetActorRotation(), Look.MuzzleScale);
 	}
-	if (Look.bTrail && TrailEffect && !bPoke && !bRocket)
+	if (Look.bTrail && TrailEffect && !bPoke && !bRocket && !bMissile)
 	{
 		Trail = UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, TrailEffect, GetActorLocation(), GetActorRotation(), FVector(Look.TrailScale));
 		SetActorTickEnabled(Trail != nullptr);
@@ -287,6 +304,13 @@ void ARRRandomProjectile::MakeRocketFist(bool bLeft, float Radius)
 	Collision->SetSphereRadius(Radius);
 }
 
+void ARRRandomProjectile::MakeMissile(const FVector& Target, float Radius)
+{
+	bMissile = true;
+	MissileTarget = Target;
+	Collision->SetSphereRadius(Radius);
+}
+
 void ARRRandomProjectile::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// Let the trail's particles die out where they are
@@ -316,6 +340,29 @@ void ARRRandomProjectile::Tick(float DeltaSeconds)
 		{
 			const FVector Forward = GetActorForwardVector();
 			Effects->RocketExhaust(GetActorLocation() - Forward * ARRRandomStarRobot::GetForearmLength() * 0.5f, -Forward, 1.f, DeltaSeconds);
+		}
+	}
+	// A missile turns toward its aim, harder the longer it has flown (every machine steers its own copy the same way; the
+	// server's place corrects it), and bursts once it gets there
+	if (bMissile && !bImpacted)
+	{
+		MissileAge += DeltaSeconds;
+		const FVector ToTarget = FVector(MissileTarget) - GetActorLocation();
+		if (HasAuthority() && ToTarget.Size() < MissileArrive)
+		{
+			RunOutOfRange();
+			return;
+		}
+		const float Speed = Movement->Velocity.Size();
+		if (Speed > 0.f && !ToTarget.IsNearlyZero())
+		{
+			const FVector Heading = FMath::VInterpNormalRotationTo(Movement->Velocity / Speed, ToTarget.GetSafeNormal(), DeltaSeconds, MissileTurnRate + MissileTurnGrowth * MissileAge);
+			Movement->Velocity = Heading * Speed;
+		}
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			const FVector Forward = GetActorForwardVector();
+			Effects->RocketExhaust(GetActorLocation() - Forward * 25.f, -Forward, 0.35f, DeltaSeconds, 0.3f);
 		}
 	}
 }
@@ -387,6 +434,14 @@ void ARRRandomProjectile::SetSpeedMultiplier(float Multiplier)
 
 void ARRRandomProjectile::SpawnImpactEffects(const FVector& Location, const FVector& Normal)
 {
+	if (bMissile)
+	{
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			Effects->RocketBlast(Location, Normal, MissileBlast);
+		}
+		return;
+	}
 	if (RocketArm != 0)
 	{
 		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))

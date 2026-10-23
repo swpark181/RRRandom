@@ -25,16 +25,24 @@ namespace
 		// The fox, rabbit, squirrel and tiger remade in rounds 69-70 and rigged in Mixamo (hips heights of those rigs,
 		// blender_rig_measure.py). The fox is still 100 units to its ear tips, so the same 1.8; the squirrel's longer legs
 		// bring it down to between the fox's hips and head heights
-		{ TEXT("Fox"), 1.8f, 23.9f, FVector::ZeroVector },
-		// (Riding, the rabbit's long body sits 6 lower, so it shows no more above the sides than the others)
-		{ TEXT("Rabbit"), 2.45f, 16.9f, FVector(0.f, 0.f, -6.f) },
-		{ TEXT("Squirrel"), 1.93f, 23.4f, FVector::ZeroVector },
-		// The fluffy tiger (round 72) keeps the round-70 tiger's size; its own Mixamo rig's hips stand at 24.9
-		{ TEXT("Tiger"), 1.75f, 24.9f, FVector::ZeroVector },
+		// Round 77 (film-style remakes of the fox, squirrel and tiger): still 100 units to the ear tips, same sizes; the hips
+		// are the new rigs'
+		{ TEXT("Fox"), 1.8f, 19.8f, FVector::ZeroVector },
+		// (Riding, the rabbit's long body sits 6 lower, so it shows no more above the sides than the others.) The round-76
+		// remake (A-3 moon rabbit) is still 100 units to its ear tips; its own Mixamo rig's hips stand at 18.5
+		{ TEXT("Rabbit"), 2.45f, 18.5f, FVector(0.f, 0.f, -6.f) },
+		{ TEXT("Squirrel"), 1.93f, 21.5f, FVector::ZeroVector },
+		// The fluffy tiger (round 72) kept the round-70 tiger's size, and so does the round-77 one. Round 85: re-rigged in
+		// Mixamo (the user placed the markers by hand), hips at 25.6
+		{ TEXT("Tiger"), 1.75f, 25.6f, FVector::ZeroVector },
 		// Its horns stand tall: between the fox's hips height (2.43) and head height (1.8), a little toward the hips
-		{ TEXT("Dragon"), 2.15f, 20.4f, FVector::ZeroVector },
-		// Her ears and head are big: between the fox's hips and head heights (Mixamo rig since round 70, hips 27)
-		{ TEXT("RedFox"), 1.95f, 27.f, FVector::ZeroVector },
+		// Round 77 film-style dragon: same size; its rig (Mixamo body, arm joints refitted, tail and wing chains) has hips at 16.1
+		// Round 85: remodeled with its arms held away from the body (the old arms were fused to its sides, so Mixamo's weights
+		// smeared) and rigged in Mixamo by the user's own markers (body without tail and wings), hips at 22.0
+		{ TEXT("Dragon"), 2.15f, 22.0f, FVector::ZeroVector },
+		// Her ears and head are big: between the fox's hips and head heights. The round-74 remake (Midjourney C-3, fluffy
+		// crimson fur) is still 100 units to her ear tips; its own Mixamo rig's hips stand at 22.4
+		{ TEXT("RedFox"), 1.95f, 22.4f, FVector::ZeroVector },
 	};
 	// The speeds below were measured on the first fox's rig (round 9), whose hips stood this high at scale 1; every species'
 	// copy of a motion strides in proportion to its own hips height against it

@@ -98,8 +98,23 @@ public:
 	 * of the elbow behind it, a ring of smoke round the arm, a shock ring ahead, sparks.
 	 */
 	void RocketLaunch(const FVector& Where, const FVector& Direction, const FLinearColor& Tint);
-	/** One frame of a rocket fist's exhaust out of its back (Back: the way the exhaust goes): a hot core, flames, smoke, sparks. */
-	void RocketExhaust(const FVector& Nozzle, const FVector& Back, float Size, float DeltaSeconds);
+	/**
+	 * One frame of a rocket fist's exhaust out of its back (Back: the way the exhaust goes): a hot core, flames, smoke, sparks.
+	 * SmokeAmount scales how many smoke puffs it leaves (a fast car would draw a wall of them).
+	 */
+	void RocketExhaust(const FVector& Nozzle, const FVector& Back, float Size, float DeltaSeconds, float SmokeAmount = 1.f);
+	/**
+	 * Every frame of a light sword's blow: quick-fading glows along the blade (Hilt to Tip) and along the way its tip came
+	 * since last frame (LastTip), a swoosh of Tint going white toward the tip.
+	 */
+	void SaberSweep(const FVector& Hilt, const FVector& Tip, const FVector& LastTip, const FLinearColor& Tint);
+	/**
+	 * Every frame two light swords are pressed blade to blade (a robot clash): a white-hot flickering point where they bite in
+	 * a haze of both blades' colors, sparks spraying off and falling, little jagged bolts crackling out of it.
+	 */
+	void SaberClash(const FVector& Where, const FLinearColor& TintA, const FLinearColor& TintB, float DeltaSeconds);
+	/** The blades striking each other: a blinding flash, rings of white and both colors racing out, sparks and stars. */
+	void SaberClashBurst(const FVector& Where, const FLinearColor& TintA, const FLinearColor& TintB);
 	/** A rocket fist landing: a cartoon fireball, shock rings along the surface, star rays, smoke rising, sparks. */
 	void RocketBlast(const FVector& Where, const FVector& Normal, float Size);
 	/** A big foot coming down (the star robot's steps): dust puffing out along the ground and a faint ring. */

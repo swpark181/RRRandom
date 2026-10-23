@@ -1455,7 +1455,7 @@ void ARRRandomEffects::RocketLaunch(const FVector& Where, const FVector& Directi
 	Spray(EShape::Star, Where, 16, -Way, 60.f, FVector2D(400.f, 900.f), FVector2D(3.f, 6.f), FVector2D(0.3f, 0.6f), FireYellow, 8.f, 400.f);
 }
 
-void ARRRandomEffects::RocketExhaust(const FVector& Nozzle, const FVector& Back, float Size, float DeltaSeconds)
+void ARRRandomEffects::RocketExhaust(const FVector& Nozzle, const FVector& Back, float Size, float DeltaSeconds, float SmokeAmount)
 {
 	const FVector Way = Back.IsNearlyZero() ? -FVector::ForwardVector : Back.GetSafeNormal();
 	// The hot core right at the nozzle
@@ -1494,7 +1494,7 @@ void ARRRandomEffects::RocketExhaust(const FVector& Nozzle, const FVector& Back,
 		Spawn(Fire);
 	}
 	// A trail of soft smoke puffs left hanging in the air, swelling as they fade
-	for (int32 Index = CountThisFrame(28.f, DeltaSeconds); Index > 0; --Index)
+	for (int32 Index = CountThisFrame(28.f * SmokeAmount, DeltaSeconds); Index > 0; --Index)
 	{
 		FParticle Puff;
 		Puff.Shape = EShape::Ball;
@@ -1624,4 +1624,146 @@ void ARRRandomEffects::Footstep(const FVector& Where, float Size)
 	Ring.Opacity = 0.55f;
 	Ring.FadeIn = 0.01f;
 	Spawn(Ring);
+}
+
+void ARRRandomEffects::SaberSweep(const FVector& Hilt, const FVector& Tip, const FVector& LastTip, const FLinearColor& Tint)
+{
+	// A long glow laid along From - To (the ball stretched out), fading fast
+	const auto Smear = [this](const FVector& From, const FVector& To, float Thick, const FLinearColor& Color, float Opacity)
+	{
+		const FVector Along = To - From;
+		if (Along.IsNearlyZero())
+		{
+			return;
+		}
+		FParticle Particle;
+		Particle.Shape = EShape::Ball;
+		Particle.Location = (From + To) * 0.5f;
+		Particle.Turn = Along.Rotation();
+		Particle.Life = 0.14f;
+		Particle.StartSize = FVector(Along.Size() / 100.f, Thick, Thick);
+		Particle.EndSize = FVector(Along.Size() / 100.f, Thick * 0.3f, Thick * 0.3f);
+		Particle.Color = Color;
+		Particle.Glow = 4.f;
+		Particle.Opacity = Opacity;
+		Particle.FadeIn = 0.f;
+		Spawn(Particle);
+	};
+	// An afterimage of the blade where it is, and a streak along the way its tip came since last frame (a fast blow goes a
+	// long way in one), unless it jumped (the first frame)
+	Smear(Hilt, Tip, 0.45f, Tint, 0.3f);
+	if (FVector::Dist(LastTip, Tip) < 600.f)
+	{
+		Smear(LastTip, Tip, 0.55f, FMath::Lerp(Tint, FLinearColor::White, 0.4f), 0.45f);
+	}
+}
+
+void ARRRandomEffects::SaberClash(const FVector& Where, const FLinearColor& TintA, const FLinearColor& TintB, float DeltaSeconds)
+{
+	// A long thin glow laid along From - To (the ball stretched out)
+	const auto Streak = [this](const FVector& From, const FVector& To, float Thick, const FLinearColor& Color, float Life)
+	{
+		const FVector Along = To - From;
+		if (Along.IsNearlyZero())
+		{
+			return;
+		}
+		FParticle Particle;
+		Particle.Shape = EShape::Ball;
+		Particle.Location = (From + To) * 0.5f;
+		Particle.Turn = Along.Rotation();
+		Particle.Life = Life;
+		Particle.StartSize = FVector(Along.Size() / 100.f, Thick, Thick);
+		Particle.EndSize = FVector(Along.Size() / 100.f, Thick * 0.3f, Thick * 0.3f);
+		Particle.Color = Color;
+		Particle.Glow = 7.f;
+		Particle.Opacity = 0.9f;
+		Particle.FadeIn = 0.f;
+		Spawn(Particle);
+	};
+	// The white-hot point where the blades bite, flickering, in a haze of both blades' colors
+	FParticle Core;
+	Core.Shape = EShape::Ball;
+	Core.Location = Where;
+	Core.Life = 0.07f;
+	Core.StartSize = FVector(FMath::FRandRange(0.9f, 1.4f));
+	Core.EndSize = FVector(0.4f);
+	Core.Color = FLinearColor::White;
+	Core.Glow = 12.f;
+	Core.Opacity = 1.f;
+	Core.FadeIn = 0.f;
+	Spawn(Core);
+	// A flickering flare streaked out sideways across it, the lens-flare look of crossed light swords
+	const FVector Flare = FVector::CrossProduct(FVector::UpVector, FMath::VRand()).GetSafeNormal() * FMath::FRandRange(160.f, 260.f);
+	Streak(Where - Flare, Where + Flare, 0.1f, FLinearColor::White, 0.05f);
+	Streak(Where - FVector(0.f, 0.f, 90.f), Where + FVector(0.f, 0.f, 90.f), 0.07f, FMath::Lerp(TintA, TintB, 0.5f), 0.05f);
+	for (int32 Index = CountThisFrame(30.f, DeltaSeconds); Index > 0; --Index)
+	{
+		FParticle Haze;
+		Haze.Shape = EShape::Ball;
+		Haze.Location = Where + FMath::VRand() * 20.f;
+		Haze.Life = 0.15f;
+		Haze.StartSize = FVector(FMath::FRandRange(1.f, 1.6f));
+		Haze.EndSize = FVector(0.5f);
+		Haze.Color = FMath::RandBool() ? TintA : TintB;
+		Haze.Glow = 3.f;
+		Haze.Opacity = 0.16f;
+		Haze.FadeIn = 0.f;
+		Spawn(Haze);
+	}
+	// Sparks spraying off every which way (more upward), falling as they cool
+	static const FLinearColor SparkColors[] = { FLinearColor::White, FLinearColor(1.f, 0.85f, 0.35f), FLinearColor(1.f, 0.6f, 0.2f) };
+	for (int32 Index = CountThisFrame(260.f, DeltaSeconds); Index > 0; --Index)
+	{
+		const FVector Way = (FMath::VRand() + FVector(0.f, 0.f, 0.7f)).GetSafeNormal();
+		const FLinearColor& Color = FMath::FRand() < 0.25f ? (FMath::RandBool() ? TintA : TintB) : SparkColors[FMath::RandRange(0, 2)];
+		Spray(EShape::Ball, Where, 1, Way, 10.f, FVector2D(500.f, 1500.f), FVector2D(0.08f, 0.18f), FVector2D(0.25f, 0.6f), Color, 9.f, 1500.f);
+	}
+	// Crackling arcs: little jagged bolts flicking out of it
+	for (int32 Index = CountThisFrame(55.f, DeltaSeconds); Index > 0; --Index)
+	{
+		const FLinearColor Color = FMath::Lerp(FLinearColor::White, FMath::RandBool() ? TintA : TintB, 0.4f);
+		FVector From = Where;
+		for (int32 Kink = 0; Kink < 3; ++Kink)
+		{
+			const FVector To = From + FMath::VRand() * FMath::FRandRange(50.f, 120.f);
+			Streak(From, To, 0.08f, Color, 0.07f);
+			From = To;
+		}
+	}
+}
+
+void ARRRandomEffects::SaberClashBurst(const FVector& Where, const FLinearColor& TintA, const FLinearColor& TintB)
+{
+	// A blinding flash where the blades strike, rings of both colors racing out (turned to the camera), a fountain of
+	// sparks and stars
+	FParticle Flash;
+	Flash.Shape = EShape::Ball;
+	Flash.Location = Where;
+	Flash.Life = 0.2f;
+	Flash.StartSize = FVector(3.5f);
+	Flash.EndSize = FVector(1.f);
+	Flash.Color = FLinearColor::White;
+	Flash.Glow = 10.f;
+	Flash.Opacity = 0.9f;
+	Flash.FadeIn = 0.f;
+	Spawn(Flash);
+	const FLinearColor RingColors[] = { FLinearColor::White, TintA, TintB };
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(RingColors); ++Index)
+	{
+		FParticle Ring;
+		Ring.Shape = EShape::Ring;
+		Ring.Location = Where;
+		Ring.Life = 0.3f + 0.1f * Index;
+		Ring.StartSize = FVector(0.8f, 0.8f, 1.f);
+		Ring.EndSize = FVector(2.f + 0.6f * Index, 2.f + 0.6f * Index, 1.f);
+		Ring.Color = RingColors[Index];
+		Ring.Glow = 7.f;
+		Ring.Opacity = 0.45f;
+		Ring.FadeIn = 0.f;
+		Ring.bFacesCamera = true;
+		Spawn(Ring);
+	}
+	Spray(EShape::Ball, Where, 90, FVector::UpVector, 180.f, FVector2D(800.f, 2200.f), FVector2D(0.09f, 0.2f), FVector2D(0.3f, 0.8f), FLinearColor(1.f, 0.85f, 0.35f), 10.f, 1500.f);
+	Spray(EShape::Star, Where, 18, FVector::UpVector, 180.f, FVector2D(500.f, 1200.f), FVector2D(3.f, 6.f), FVector2D(0.4f, 0.8f), FLinearColor::White, 8.f, 400.f);
 }
