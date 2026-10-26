@@ -299,7 +299,7 @@ void ARRRandomTigerSpirit::Impact()
 	{
 		return;
 	}
-	ARRRandomWreckage::Wreck(this, StrikeSpot, StrikeSpot, AreaRadius * WreckShare, true);
+	ARRRandomWreckage::Wreck(this, StrikeSpot, StrikeSpot, AreaRadius * WreckShare, true, 1);
 	const TArray<ARRRandomCharacter*> Victims = FindEnemiesNear(StrikeSpot, AreaRadius, GiantHeight);
 	for (ARRRandomCharacter* Victim : Victims)
 	{

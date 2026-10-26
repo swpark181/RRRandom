@@ -204,6 +204,8 @@ private:
 	FBox2D MapBounds = FBox2D(ForceInit);
 	TArray<FColor> MapBase;
 	int32 MapCoverCount = INDEX_NONE;
+	/** Dice Town's map version the minimap was last built from (holes, what fell, lava; round 89). */
+	int32 MapTownVersion = 0;
 	float MapRefreshTimer = 0.f;
 	bool bMapExpanded = false;
 	/** Where the corner map was last drawn (the square around its circle). */

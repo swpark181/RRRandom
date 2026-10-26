@@ -52,6 +52,8 @@ namespace
 {
 	// Below this ground speed the character counts as standing still
 	constexpr float WalkAnimationThreshold = 10.f;
+	/** A CANNON's shell smashes the structures this close round where it hits (round 89). */
+	constexpr float CannonWreckRadius = 110.f;
 
 	// The body mesh's place on the capsule: feet at its bottom, turned to face +X
 	const FVector MeshFeet(0.f, 0.f, -96.f);
@@ -2459,6 +2461,12 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 		Projectile->bPoke = Weapon.bFoamFinger;
 		Projectile->HitEffect = Weapon.GetHitEffect();
 		Projectile->Tier = Weapon.bFoamFinger ? ERRWeaponTier::Common : Weapon.Tier;
+		// A CANNON's shell smashes what it hits and digs a cell of ground (round 89); the other guns' shots only stop
+		if (Projectile->HitEffect == ERRHitEffect::Cannon)
+		{
+			Projectile->WreckRadius = CannonWreckRadius;
+			Projectile->WreckDig = 1;
+		}
 		Projectile->FinishSpawning(SpawnTransform);
 	}
 	return true;

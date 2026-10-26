@@ -707,7 +707,7 @@ void ARRRandomVehicle::Explode(const FVector& Where)
 	SetActorLocation(Where);
 	MulticastExplode(Where);
 	// The blocks where it lands are smashed (mended later like any wreck)
-	ARRRandomWreckage::Wreck(this, Where, Where, CrashWreckRadius, false);
+	ARRRandomWreckage::Wreck(this, Where, Where, CrashWreckRadius, false, 2);
 	// The blast hurts the pilot's side round it, for whoever shot it down
 	APawn* KillerPawn = CrashKiller.IsValid() ? CrashKiller->GetPawn() : nullptr;
 	SetInstigator(KillerPawn);

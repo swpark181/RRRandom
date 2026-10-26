@@ -16,6 +16,7 @@
 #include "RRRandomUltimate.h"
 #include "RRRandomVehicle.h"
 #include "RRRandomWreckage.h"
+#include "RRRandomDiceTown.h"
 #include "Camera/CameraActor.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Kismet/GameplayStatics.h"
@@ -762,6 +763,61 @@ void ARRRandomPlayerController::ServerCheatWreck_Implementation(FVector_NetQuant
 #if !UE_BUILD_SHIPPING
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, wrecking round %s."), *Spot.ToCompactString());
 	ARRRandomWreckage::Wreck(this, Spot, Spot, FMath::Clamp(Radius, 50.f, 3000.f), bColumn);
+#endif
+}
+
+FVector ARRRandomPlayerController::GetCheatAimSpot() const
+{
+	FVector ViewFrom;
+	FRotator ViewTurn;
+	GetPlayerViewPoint(ViewFrom, ViewTurn);
+	const FVector ViewTo = ViewFrom + ViewTurn.Vector() * 8000.f;
+	FHitResult Hit;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomCheatAim), false, GetPawn());
+	return GetWorld()->LineTraceSingleByObjectType(Hit, ViewFrom, ViewTo, FCollisionObjectQueryParams(ECC_WorldStatic), Params) ? FVector(Hit.ImpactPoint) : ViewTo;
+}
+
+void ARRRandomPlayerController::RRDig(int32 DigLayers, float Radius)
+{
+	ServerCheatDig(GetCheatAimSpot(), Radius, FMath::Clamp(DigLayers, 1, 3), false);
+}
+
+void ARRRandomPlayerController::RRLava(float Radius)
+{
+	ServerCheatDig(GetCheatAimSpot(), Radius, 3, false);
+}
+
+void ARRRandomPlayerController::RRUndercut(float Radius)
+{
+	ServerCheatDig(GetCheatAimSpot(), Radius, 0, true);
+}
+
+void ARRRandomPlayerController::ServerCheatDig_Implementation(FVector_NetQuantize Spot, float Radius, int32 DigLayers, bool bUndercut)
+{
+#if !UE_BUILD_SHIPPING
+	// Down to the floor under the spot (Dice Town's floor)
+	FVector Floor = Spot;
+	for (TActorIterator<ARRRandomDiceTown> It(GetWorld()); It; ++It)
+	{
+		Floor.Z = It->GetFloorZ();
+		break;
+	}
+	Radius = FMath::Clamp(Radius, 50.f, 3000.f);
+	if (bUndercut)
+	{
+		// Three blocks high over the floor, a square this big round the spot, cut away in rows (capsules along X): the
+		// walls of a building's ground floor, so what stands on them comes down
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, undercutting round %s."), *Floor.ToCompactString());
+		constexpr float Row = 250.f;
+		for (float Across = -Radius; Across <= Radius + 1.f; Across += Row)
+		{
+			const FVector Middle = Floor + FVector(0.f, Across, 150.f);
+			ARRRandomWreckage::Wreck(this, Middle - FVector(Radius, 0.f, 0.f), Middle + FVector(Radius, 0.f, 0.f), 160.f, false, 0);
+		}
+		return;
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, digging %d layers round %s."), DigLayers, *Floor.ToCompactString());
+	ARRRandomWreckage::Wreck(this, Floor, Floor, Radius, false, DigLayers);
 #endif
 }
 

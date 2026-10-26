@@ -1,5 +1,6 @@
 #include "RRRandomOre.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomDiceTown.h"
 #include "RRRandomEffects.h"
 #include "RRRandomGameState.h"
 #include "RRRandomKit.h"
@@ -319,6 +320,15 @@ void ARRRandomOre::Tick(float DeltaSeconds)
 		if (!bResting)
 		{
 			UpdateFlight(DeltaSeconds);
+		}
+		// Into Dice Town's lava: it melts away (round 89; every machine sees it pop as it goes)
+		TActorIterator<ARRRandomDiceTown> Town(GetWorld());
+		float LavaTop = 0.f;
+		if (Town && Town->GetLavaAt(GetActorLocation(), LavaTop) && GetActorLocation().Z < LavaTop + GetHeight(Kind) * 0.5f)
+		{
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s melts in the lava."), *GetName());
+			Destroy();
+			return;
 		}
 		if (Age >= PickupDelay)
 		{

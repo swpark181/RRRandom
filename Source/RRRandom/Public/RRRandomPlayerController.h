@@ -178,6 +178,19 @@ public:
 	void RRWreck(float Radius = 300.f, int32 bColumn = 0);
 
 	/**
+	 * Cheats for round 89 (Dice Town), at the floor where the middle of the view meets something: RRDig digs that many
+	 * layers of ground (a crater 200 round; 3 breaks through to the lava), RRLava digs straight through (lava at once),
+	 * RRUndercut smashes a ball this big low over the floor and nothing under it (a building's ground floor: what stood on
+	 * it comes down). Not in shipping builds.
+	 */
+	UFUNCTION(Exec)
+	void RRDig(int32 DigLayers = 1, float Radius = 200.f);
+	UFUNCTION(Exec)
+	void RRLava(float Radius = 250.f);
+	UFUNCTION(Exec)
+	void RRUndercut(float Radius = 650.f);
+
+	/**
 	 * For animation work (the studio, -RRMap=Studio, though it works anywhere; console only): this screen watches my
 	 * animal friend (the star robot while I'm aboard it) from a fixed side, following it: Yaw round from its front (0
 	 * its face, 90 its right side, 180 its back, -90 its left), this far away and this high over its middle (0: a distance
@@ -398,6 +411,10 @@ private:
 	void ServerCheatPlane(int32 Face);
 	UFUNCTION(Server, Reliable)
 	void ServerCheatWreck(FVector_NetQuantize Spot, float Radius, bool bColumn);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatDig(FVector_NetQuantize Spot, float Radius, int32 DigLayers, bool bUndercut);
+	/** Where the middle of the view first meets something solid (my own animal friend aside), at most 8000 away. */
+	FVector GetCheatAimSpot() const;
 	UFUNCTION(Server, Reliable)
 	void ServerCheatSlomo(float Rate);
 	UFUNCTION(Server, Reliable)

@@ -32,6 +32,14 @@ struct FRRWreck
 	UPROPERTY()
 	bool bColumn = false;
 
+	/**
+	 * Layers of ground it digs where it reaches the floor (round 89): the tiger's paw 1, the robot's slam and a crashing
+	 * plane 2, a cannon shot 1, the rest 0 (they stop at the floor). Wrecks over the same ground add up, so blow after
+	 * blow digs a crater deeper, until it breaks through to the mantle under the island (lava).
+	 */
+	UPROPERTY()
+	uint8 Dig = 0;
+
 	/** How far a spot is from the line (flat for a column), less Radius: negative inside. */
 	float Distance(const FVector& Spot) const;
 	bool Contains(const FVector& Spot, float Margin = 0.f) const { return Distance(Spot) <= Margin; }
@@ -54,6 +62,8 @@ struct FRRRegrow
 	TWeakObjectPtr<UInstancedStaticMeshComponent> Instances;
 	int32 Index = INDEX_NONE;
 	FTransform Target;
+	/** Seconds it waits before it starts growing (a crater fills from the bottom up). */
+	float Delay = 0.f;
 };
 
 /**
@@ -70,6 +80,9 @@ struct FRRRegrow
  * Each wreck mends RestoreSeconds after it was made, as soon as nobody is in it (an animal friend, alive or down, a car
  * with someone in it, the robot while it has crew; parked cars don't count): the blocks grow back into place with a
  * sparkle. Rubble flies when it breaks (each machine its own, from the same list).
+ * Round 89: what the wrecks make between them in Dice Town (a building whose upper floors lost their support coming down,
+ * a crater broken through to the lava) is big: the wrecks that made it wait BigRestoreSeconds from then, and mend only
+ * once nobody is anywhere in it either.
  */
 UCLASS()
 class RRRANDOM_API ARRRandomWreckage : public AActor
@@ -79,14 +92,24 @@ class RRRANDOM_API ARRRandomWreckage : public AActor
 public:
 	ARRRandomWreckage();
 
-	/** Server: smashes what's within Radius of the line From - To (a column through every height, or a ball round the line). */
-	static void Wreck(const UObject* WorldContext, const FVector& From, const FVector& To, float Radius, bool bColumn);
+	/**
+	 * Server: smashes what's within Radius of the line From - To (a column through every height, or a ball round the line),
+	 * digging Dig layers into the ground where it reaches the floor.
+	 */
+	static void Wreck(const UObject* WorldContext, const FVector& From, const FVector& To, float Radius, bool bColumn, int32 Dig = 0);
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** Seconds a wreck stays at least (rr.Wreck.RestoreSeconds); then it mends once its ground is clear. */
 	static float GetRestoreSeconds();
+	/** Seconds a collapse or a lava pool stays at least (rr.Wreck.BigRestoreSeconds), from when it happened. */
+	static float GetBigRestoreSeconds();
+
+	/** This world's wreckage, if anything was ever smashed. */
+	static ARRRandomWreckage* Find(const UObject* WorldContext);
+	/** Flying rubble for what broke, on this machine's screen (a collapse landing throws its own). */
+	void ThrowRubble(const TArray<FRRBrokenBit>& Bits);
 
 protected:
 	virtual void BeginPlay() override;
@@ -139,7 +162,8 @@ private:
 	bool FindPieces();
 	/** Server: true while somebody is in the wreck (with some room round them): an animal friend, a ridden car, the crewed robot. */
 	bool IsOccupied(const FRRWreck& Wreck) const;
-	void ThrowRubble(const TArray<FRRBrokenBit>& Bits);
+	/** Server: the wrecks that made the big things Dice Town reports after an Apply wait longer (and keep its ground). */
+	void MarkBigWrecks();
 	void TickRubble(float DeltaSeconds);
 	void TickGrowing(float DeltaSeconds);
 
@@ -148,12 +172,15 @@ private:
 
 	/** Server: when each wreck (by Id) was made. */
 	TMap<int32, float> MadeAt;
+	/** Server: wrecks that made something big: not mended before this time, nor while anybody is in its box. */
+	TMap<int32, float> BigUntil;
+	TMap<int32, FBox> BigArea;
 	int32 NextId = 1;
 	float CheckTimer = 0.f;
 
 	/** The wrecks this machine has applied (by Id). */
 	TSet<int32> Applied;
-	/** Waiting for the map to be built before applying. */
+	/** To apply at the next tick: wrecks came in (all of a frame's at once), or the map was not built yet. */
 	bool bPending = false;
 
 	TArray<FPiece> Pieces;

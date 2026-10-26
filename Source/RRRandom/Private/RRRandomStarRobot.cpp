@@ -98,6 +98,8 @@ namespace
 	// The sweeps cut this high over its feet (a low cover's height)
 	constexpr float SwordCutHeight = 90.f;
 	constexpr float SlamWreckRadius = 280.f;
+	// Each missile smashes this much of what it hits (round 89); only the slam digs into the ground
+	constexpr float MissileWreckRadius = 110.f;
 	// A bot in the ATTACK seat uses the sword this close and the missiles further off
 	constexpr float BotSwordRange = SwordReach * 1.1f;
 
@@ -1041,6 +1043,8 @@ void ARRRandomStarRobot::CrewAltFire(ARRRandomCharacter* Who, const FVector& Tar
 			Missile->SetSpeedMultiplier(MissileSpeed);
 			Missile->HitEffect = ERRHitEffect::Cannon;
 			Missile->Tier = ERRWeaponTier::Epic;
+			// Each smashes a little of what it hits (round 89)
+			Missile->WreckRadius = MissileWreckRadius;
 			Missile->FinishSpawning(SpawnTransform);
 		}
 	}
@@ -1093,7 +1097,7 @@ void ARRRandomStarRobot::SwingHits()
 	Solid.AddObjectTypesToQuery(ECC_WorldStatic);
 	Solid.AddObjectTypesToQuery(ECC_WorldDynamic);
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRobotSword), false, this);
-	const auto Smash = [&](const FVector& From, const FVector& To, float Radius)
+	const auto Smash = [&](const FVector& From, const FVector& To, float Radius, int32 Dig)
 	{
 		TArray<FHitResult> Hits;
 		World->LineTraceMultiByObjectType(Hits, From, To, Solid, Params);
@@ -1102,7 +1106,7 @@ void ARRRandomStarRobot::SwingHits()
 			const AActor* Struck = Hit.GetActor();
 			if (Hit.bBlockingHit && !Cast<APawn>(Struck) && !Cast<ARRRandomProjectile>(Struck) && !Cast<ARRRandomStarRobot>(Struck))
 			{
-				ARRRandomWreckage::Wreck(this, Hit.ImpactPoint, Hit.ImpactPoint, Radius, false);
+				ARRRandomWreckage::Wreck(this, Hit.ImpactPoint, Hit.ImpactPoint, Radius, false, Dig);
 				return;
 			}
 		}
@@ -1110,13 +1114,13 @@ void ARRRandomStarRobot::SwingHits()
 	if (Index == 2)
 	{
 		const FVector Landing = Feet + FRotator(0.f, Facing, 0.f).Vector() * SwordReach * 0.75f;
-		Smash(Landing + FVector(0.f, 0.f, RobotHeight), Landing + FVector(0.f, 0.f, SwordCutHeight * 0.5f), SlamWreckRadius);
+		Smash(Landing + FVector(0.f, 0.f, RobotHeight), Landing + FVector(0.f, 0.f, SwordCutHeight * 0.5f), SlamWreckRadius, 2);
 		return;
 	}
 	for (float Off = -SwingArc[Index]; Off <= SwingArc[Index] + 1.f; Off += SwingArc[Index] / 3.f)
 	{
 		const FVector Way = FRotator(0.f, Facing + Off, 0.f).Vector();
-		Smash(Feet + Way * HullRadius + FVector(0.f, 0.f, SwordCutHeight), Feet + Way * SwordReach + FVector(0.f, 0.f, SwordCutHeight), SwordWreckRadius);
+		Smash(Feet + Way * HullRadius + FVector(0.f, 0.f, SwordCutHeight), Feet + Way * SwordReach + FVector(0.f, 0.f, SwordCutHeight), SwordWreckRadius, 0);
 	}
 }
 

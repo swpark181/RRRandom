@@ -36,6 +36,9 @@ struct FRRRegrow;
  * on the same level, up and down stairs, up one block (a jump climbs it) and down drops off ledges.
  * What stops things is hidden boxes (world static, block everything), merged from the grid; a tall hidden wall round the
  * rim stops brawlers only. Every machine builds the same town from the same seeds; the game mode spawns it on the host.
+ * Round 89: everything breaks (the giant dice whole), what is no longer held up from the ground comes down as one piece,
+ * the ground digs (three layers, craters as stepped bowls) and a crater dug through all three fills with lava from the
+ * mantle (ARRRandomLava); all of it worked out from the wrecks on every machine alike (ApplyWrecks).
  */
 UCLASS()
 class RRRANDOM_API ARRRandomDiceTown : public AActor
@@ -78,6 +81,23 @@ public:
 	 * shown again (to grow back into place). The bots' routes stay as built.
 	 */
 	void ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<FRRBrokenBit>& OutBroken, TArray<FRRRegrow>& OutRegrow);
+
+	// Round 89: everything breaks, what loses its support falls, the ground digs down to the lava
+	/**
+	 * Server: the boxes of big things the last ApplyWrecks made (a part of a building coming down, a lava pool), once; the
+	 * wreckage keeps the wrecks that made them longer (ARRRandomWreckage::MarkBigWrecks). False when there were none.
+	 */
+	bool ConsumeBigAreas(TArray<FBox>& OutAreas);
+	/** Whether there is lava at a spot (in the world, flat), and how high its top is. */
+	bool GetLavaAt(const FVector& WorldLocation, float& OutTop) const;
+	/** The lava's top: this far under the floor. */
+	static constexpr float LavaBelowFloor = 60.f;
+	/** The grid cell (X, Y) a spot in the world is over. */
+	FIntPoint GetCellAt(const FVector& WorldLocation) const;
+	/** The floor's height (level 0's top). */
+	float GetFloorZ() const { return FloorZ; }
+	/** Changes each time something broken, mended or flooded with lava changes the minimap. */
+	int32 GetMapVersion() const { return MapVersion; }
 
 	/** Placed in a level (/Game/Maps/DiceTown), the editor builds it too, never saved (RF_Transient), to show it and its navmesh. */
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -197,6 +217,8 @@ private:
 	/** Draws the block of a cell (one with a face showing), remembered in CellBlocks. */
 	void AddCellBlock(int32 X, int32 Y, int32 Level);
 	FTransform GetCellTransform(int32 X, int32 Y, int32 Level) const;
+	/** The minimap's color and height for a column, as it stands now (broken blocks gone, lava in a crater). */
+	void RefreshMapColumn(int32 X, int32 Y);
 
 	// Wrecks (round 60)
 	/** Solid and not broken. */
@@ -341,6 +363,64 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> WreckSolid;
 	/** Model instances gone with a wreck (by their instances, then index), and where they stood. */
 	TMap<UInstancedStaticMeshComponent*, TMap<int32, FTransform>> Gone;
+
+	// Round 89
+	/** A giant die (AddDie): its lowest corner cell (level too), size in cells, its instance in DieBlocks and colors. */
+	struct FGiantDie
+	{
+		FIntVector Low;
+		int32 Size;
+		int32 Instance;
+		FColor Body;
+		FColor Pips;
+	};
+	TArray<FGiantDie> GiantDice;
+	/** Cells that were never held up from the ground as built (none may fall), found the first time anything breaks. */
+	TBitArray<> Anchored;
+	bool bFoundAnchored = false;
+	/** Each dug column's depth in layers (by column index), and the columns flooded with lava. */
+	TMap<int32, int32> DugDepth;
+	TSet<int32> LavaColumns;
+	/** Cells that fell (no longer held up) as things stand now. */
+	TBitArray<> Fallen;
+
+	/** A part of a building coming down as one piece (on every machine): its looks as they stood, falling and tipping. */
+	struct FFallingPiece
+	{
+		TWeakObjectPtr<UInstancedStaticMeshComponent> Instances;
+		int32 Index;
+		FTransform Was;
+		/** The cell it is the block of (it stays gone if it still is when the fall ends); INDEX_NONE for a model. */
+		int32 Cell;
+	};
+	struct FFalling
+	{
+		TArray<FFallingPiece> Pieces;
+		/** The cells it covered (flat), to land on whoever is under it. */
+		TArray<FIntPoint> Footprint;
+		FVector Pivot;
+		FVector TipAxis;
+		float Drop;
+		float Duration;
+		float Age = 0.f;
+		/** The floor it lands on (the top of what still stands under it). */
+		float LandZ;
+	};
+	TArray<FFalling> Falling;
+	/** Server: big things the last ApplyWrecks made, for the wreckage (ConsumeBigAreas). */
+	TArray<FBox> NewBigAreas;
+	int32 MapVersion = 0;
+	/** The lava (its looks, its glow and its burns), each machine its own. */
+	UPROPERTY(Transient)
+	TObjectPtr<class ARRRandomLava> Lava;
+
+	/** Cells held up from the ground (or ones never held up as built) given these broken ones. */
+	void FindHeldUp(const TBitArray<>& BrokenNow, TBitArray<>& OutHeld) const;
+	/** Starts the cells that fall just now coming down, a piece for each part that hangs together (looks taken as they stood). */
+	void StartFalling(const TArray<int32>& Cells, const TArray<FFallingPiece>& BlockPieces, const TMap<UInstancedStaticMeshComponent*, TMap<int32, FTransform>>& NewlyGone);
+	void TickFalling(float DeltaSeconds);
+	/** A piece reaches the floor: gone for good (as long as it still is), rubble, dust, CRASH!, and a hit on whoever is under it. */
+	void LandFalling(FFalling& Piece);
 
 	/** The floor's height under the middle; level 0's top. */
 	float FloorZ = 0.f;

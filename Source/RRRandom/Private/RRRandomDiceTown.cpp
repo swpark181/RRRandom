@@ -1,9 +1,16 @@
 #include "RRRandomDiceTown.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomEffects.h"
+#include "RRRandomHUD.h"
+#include "RRRandomLava.h"
 #include "RRRandomMapFloor.h"
+#include "RRRandomUIStyle.h"
 #include "RRRandomWreckage.h"
 #include "EngineUtils.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "NavigationSystem.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -68,6 +75,25 @@ namespace
 	constexpr int32 LayoutSeed = 3602;
 	constexpr int32 SkySeed = 3603;
 
+	// Round 89. The ground is three layers (levels 0 to -2); a crater digging through all three breaks into the mantle
+	// under the island: the bottom layer stays (the lava's bed) and the lava wells up. A dig reaches this far round where a
+	// wreck meets the floor at most, so craters stay craters.
+	constexpr int32 GroundBottom = -2;
+	constexpr int32 BreachDepth = 3;
+	constexpr float DigReachMax = 320.f;
+	constexpr float DigReachMin = 50.f;
+	// A part of a building coming down: falling this fast (a cartoon fall, a little quicker than real), tipping this far by
+	// the time it lands, animating this many looks at most; a hit and a shove on who is under it
+	constexpr float FallGravity = 2600.f;
+	constexpr float FallTipDegrees = 9.f;
+	constexpr int32 FallMaxPieces = 4000;
+	constexpr int32 FallRubble = 90;
+	constexpr float CrashDamage = 30.f;
+	constexpr float CrashShove = 650.f;
+	// What mends grows back from the bottom up: each level up waits this much longer, at most this long
+	constexpr float RegrowStep = 0.07f;
+	constexpr float RegrowMaxDelay = 1.2f;
+
 	TAutoConsoleVariable<float> CVarSaturation(TEXT("rr.DiceTown.Saturation"), 1.f,
 		TEXT("Dice Town's colors: 1 as made, higher deeper, lower paler. Live."));
 	TAutoConsoleVariable<float> CVarBrightness(TEXT("rr.DiceTown.Brightness"), 1.f,
@@ -103,6 +129,7 @@ namespace
 	const FColor TeamTint[] = { FColor(120, 190, 255), FColor(255, 130, 140) };
 	const FColor MapSky(190, 220, 255);
 	const FColor MapWater(90, 170, 240);
+	const FColor MapLava(240, 70, 40);
 
 	/** A building's colors: walls downstairs and upstairs, trim (corners, bands, landings), roof, window frames. */
 	struct FStyle
@@ -820,6 +847,8 @@ void ARRRandomDiceTown::AddDie(const FIntPoint& Cell, int32 Level, int32 Size, i
 	const FVector2D Middle = CellCenter(Cell) + FVector2D((Size - 1) * BlockSize * 0.5f);
 	const FRotator Turn(90.f * (Kind / 6 % 4 == 3 ? 1 : 0), 90.f * (Kind / 6 % 4), 90.f * (Kind / 24 % 2));
 	AddColored(DieBlocks, FTransform(Turn, At(Middle, (Level + Lift - 1) * BlockSize + Size * BlockSize * 0.5f), FVector(Size * 0.98f)), Bodies[Pick], Pips[Pick]);
+	// Remembered: a wreck takes it whole (round 89)
+	GiantDice.Add({ FIntVector(Cell.X, Cell.Y, Level + Lift), Size, DieBlocks->GetInstanceCount() - 1, Bodies[Pick], Pips[Pick] });
 }
 
 void ARRRandomDiceTown::AddHill(const FFrame& Frame, int32 W, int32 D, int32 Levels)
@@ -945,6 +974,13 @@ void ARRRandomDiceTown::BeginPlay()
 		}
 	}
 	Build();
+	// Its lava, each machine its own (round 89)
+	if (GetWorld()->IsGameWorld())
+	{
+		FActorSpawnParameters Params;
+		Params.Owner = this;
+		Lava = GetWorld()->SpawnActor<ARRRandomLava>(ARRRandomLava::StaticClass(), FTransform::Identity, Params);
+	}
 }
 
 void ARRRandomDiceTown::Build()
@@ -971,6 +1007,12 @@ void ARRRandomDiceTown::Build()
 		return;
 	}
 	Floor->SetVisibility(false);
+	// Nor does anything stand on it in play: the town's own ground is solid, and its craters (round 89) go down past the
+	// floor's height
+	if (GetWorld()->IsGameWorld())
+	{
+		Floor->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
 
 	// The dreamier pass (round 47): on unless -RRTownClassic asks for the town as it was (and only with its shapes imported)
 	PuffMesh = LoadMesh(TEXT("SM_BTPuff"));
@@ -1058,6 +1100,11 @@ void ARRRandomDiceTown::Build()
 	}
 
 	Grid.SetNumZeroed(GridCells * GridCells * GridLevels);
+	GiantDice.Reset();
+	bFoundAnchored = false;
+	DugDepth.Reset();
+	LavaColumns.Reset();
+	Falling.Reset();
 	LayOut();
 	MakeBlocks();
 	MakeCollision();
@@ -2736,13 +2783,24 @@ bool ARRRandomDiceTown::FindPath(const FVector& From, const FVector& To, TArray<
 
 FVector ARRRandomDiceTown::GetRandomWalkSpot(FRandomStream& Stream, float Radius) const
 {
-	for (int32 Try = 0; Try < 40 && Roamable.Num() > 0; ++Try)
+	for (int32 Try = 0; Try < 60 && Roamable.Num() > 0; ++Try)
 	{
 		const FWalkNode& Node = Nodes[Roamable[Stream.RandRange(0, Roamable.Num() - 1)]];
-		if (CellCenter(Node.Cell).Size() <= Radius)
+		if (CellCenter(Node.Cell).Size() > Radius)
 		{
-			return At(CellCenter(Node.Cell), Node.Z);
+			continue;
 		}
+		// Not where the ground it stood on is broken, nor in a crater's lava (round 89: meteors, falling stars)
+		const int32 Level = FMath::RoundToInt(Node.Z / BlockSize);
+		if (Node.StairDir == FIntPoint::ZeroValue && !IsFilled(Node.Cell.X, Node.Cell.Y, Level))
+		{
+			continue;
+		}
+		if (LavaColumns.Contains((Node.Cell.Y + HalfCells) * GridCells + (Node.Cell.X + HalfCells)) || DugDepth.Contains((Node.Cell.Y + HalfCells) * GridCells + (Node.Cell.X + HalfCells)))
+		{
+			continue;
+		}
+		return At(CellCenter(Node.Cell), Node.Z);
 	}
 	return At(CellCenter(FIntPoint(0, -12)), 0.f);
 }
@@ -2773,6 +2831,10 @@ void ARRRandomDiceTown::Tick(float DeltaSeconds)
 	if (Floaters.Num() > 0)
 	{
 		AnimateFloaters(GetWorld()->GetTimeSeconds());
+	}
+	if (Falling.Num() > 0)
+	{
+		TickFalling(DeltaSeconds);
 	}
 	// The town's colors (every material's "Saturation" and "Brightness"), when the console values change
 	const float Saturation = CVarSaturation.GetValueOnGameThread();
@@ -2869,8 +2931,9 @@ bool ARRRandomDiceTown::Touches(const FRRWreck& Wreck, const FBox& Box) const
 
 void ARRRandomDiceTown::RefreshCellBlock(int32 X, int32 Y, int32 Level, bool bGrow, TArray<FRRRegrow>& OutRegrow)
 {
-	// (The island's underside keeps its own rule in MakeBlocks; wrecks never come near it)
-	if (!IsInGrid(X, Y, Level) || Level < -1)
+	// Down to the ground's bottom layer (a crater's floor); the island's underside keeps its own rule in MakeBlocks, so the
+	// bottom layer's underneath doesn't count
+	if (!IsInGrid(X, Y, Level) || Level < GroundBottom)
 	{
 		return;
 	}
@@ -2880,8 +2943,9 @@ void ARRRandomDiceTown::RefreshCellBlock(int32 X, int32 Y, int32 Level, bool bGr
 	{
 		return;
 	}
+	const bool bBelowOpen = Level > GroundBottom && !IsFilled(X, Y, Level - 1);
 	const bool bWant = !Broken[Index] && (!IsFilled(X + 1, Y, Level) || !IsFilled(X - 1, Y, Level) || !IsFilled(X, Y + 1, Level) || !IsFilled(X, Y - 1, Level)
-		|| !IsFilled(X, Y, Level + 1) || !IsFilled(X, Y, Level - 1));
+		|| !IsFilled(X, Y, Level + 1) || bBelowOpen);
 	FCellBlock* Block = CellBlocks.Find(Index);
 	if (!Block)
 	{
@@ -2902,7 +2966,7 @@ void ARRRandomDiceTown::RefreshCellBlock(int32 X, int32 Y, int32 Level, bool bGr
 	Instances->UpdateInstanceTransform(Block->Index, bWant ? Where : Shrunk(Where), true, false, false);
 	if (bWant && bGrow)
 	{
-		OutRegrow.Add({ Instances, Block->Index, Where });
+		OutRegrow.Add({ Instances, Block->Index, Where, FMath::Min(RegrowMaxDelay, (Level - GroundBottom) * RegrowStep) });
 	}
 }
 
@@ -2912,6 +2976,7 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 	{
 		return;
 	}
+	const double StartTime = FPlatformTime::Seconds();
 	if (Broken.Num() != Grid.Num())
 	{
 		Broken.Init(false, Grid.Num());
@@ -3033,6 +3098,190 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 			}
 		}
 	}
+	// Round 89. The giant dice: one a wreck reaches goes whole, its cells with it
+	TSet<int32> DiceHit;
+	for (int32 Die = 0; Die < GiantDice.Num(); ++Die)
+	{
+		const FGiantDie& Giant = GiantDice[Die];
+		const FVector Low = At(CellCenter(FIntPoint(Giant.Low.X, Giant.Low.Y)) - FVector2D(BlockSize * 0.5f), (Giant.Low.Z - 1) * BlockSize);
+		if (!IsHit(FBox(Low, Low + FVector(Giant.Size * BlockSize))))
+		{
+			continue;
+		}
+		DiceHit.Add(Die);
+		WantGone.FindOrAdd(DieBlocks).Add(Giant.Instance);
+		for (int32 DX = 0; DX < Giant.Size; ++DX)
+		{
+			for (int32 DY = 0; DY < Giant.Size; ++DY)
+			{
+				for (int32 Level = Giant.Low.Z; Level < Giant.Low.Z + Giant.Size; ++Level)
+				{
+					if (IsInGrid(Giant.Low.X + DX, Giant.Low.Y + DY, Level))
+					{
+						Break(GridIndex(Giant.Low.X + DX, Giant.Low.Y + DY, Level));
+					}
+				}
+			}
+		}
+	}
+
+	// The ground: what each wreck that reaches the floor digs adds up column by column (blow after blow digs deeper), then
+	// no column more than a layer deeper than any beside it (a crater is a bowl of steps a jump climbs out of). Three
+	// layers is all the ground there is: a column dug that deep has broken through to the mantle (its bottom layer stays
+	// as the lava's bed). The same on every machine: whole cells and the same list of wrecks.
+	auto ColumnOf = [](int32 X, int32 Y) { return (Y + HalfCells) * GridCells + (X + HalfCells); };
+	auto ColumnCell = [](int32 Column) { return FIntPoint(Column % GridCells - HalfCells, Column / GridCells - HalfCells); };
+	TMap<int32, int32> Depth;
+	for (const FRRWreck& Wreck : InWrecks)
+	{
+		if (Wreck.Dig == 0)
+		{
+			continue;
+		}
+		// How far round it reaches across the floor: a column all of its width, a ball as wide as it is where it cuts the floor
+		const float Over = Wreck.bColumn ? 0.f : FMath::Min(Wreck.From.Z, Wreck.To.Z) - FloorZ;
+		if (Over > Wreck.Radius)
+		{
+			continue;
+		}
+		const float Reach = FMath::Clamp(Over > 0.f ? FMath::Sqrt(FMath::Square(Wreck.Radius) - FMath::Square(Over)) : Wreck.Radius, DigReachMin, DigReachMax);
+		const FVector A(Wreck.From.X, Wreck.From.Y, 0.f);
+		const FVector B(Wreck.To.X, Wreck.To.Y, 0.f);
+		const FIntVector LowCell = CellAt(A.ComponentMin(B) - FVector(Reach));
+		const FIntVector HighCell = CellAt(A.ComponentMax(B) + FVector(Reach));
+		for (int32 Y = FMath::Max(-HalfCells, LowCell.Y); Y <= FMath::Min(HalfCells - 1, HighCell.Y); ++Y)
+		{
+			for (int32 X = FMath::Max(-HalfCells, LowCell.X); X <= FMath::Min(HalfCells - 1, HighCell.X); ++X)
+			{
+				const FVector2D Spot = FVector2D(Middle) + CellCenter(FIntPoint(X, Y));
+				if (IsOnIsland(X, Y) && FMath::PointDistToSegment(FVector(Spot, 0.f), A, B) <= Reach)
+				{
+					int32& Dug = Depth.FindOrAdd(ColumnOf(X, Y));
+					Dug = FMath::Min(BreachDepth, Dug + Wreck.Dig);
+				}
+			}
+		}
+	}
+	for (bool bLowered = true; bLowered; )
+	{
+		bLowered = false;
+		for (TPair<int32, int32>& Pair : Depth)
+		{
+			const FIntPoint Cell = ColumnCell(Pair.Key);
+			int32 Shallowest = Pair.Value;
+			for (const FIntPoint& Step : { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) })
+			{
+				const int32* Next = Depth.Find(ColumnOf(Cell.X + Step.X, Cell.Y + Step.Y));
+				Shallowest = FMath::Min(Shallowest, Next ? *Next : 0);
+			}
+			if (Pair.Value > Shallowest + 1)
+			{
+				Pair.Value = Shallowest + 1;
+				bLowered = true;
+			}
+		}
+	}
+	for (const TPair<int32, int32>& Pair : Depth)
+	{
+		const FIntPoint Cell = ColumnCell(Pair.Key);
+		for (int32 Level = 0; Level > FMath::Max(GroundBottom, -Pair.Value); --Level)
+		{
+			if (Grid[GridIndex(Cell.X, Cell.Y, Level)] != 0)
+			{
+				Break(GridIndex(Cell.X, Cell.Y, Level));
+			}
+		}
+	}
+	// Lava: every dug column joined (side by side) to one broken through
+	TSet<int32> LavaNow;
+	TArray<int32> LavaQueue;
+	for (const TPair<int32, int32>& Pair : Depth)
+	{
+		if (Pair.Value >= BreachDepth)
+		{
+			LavaNow.Add(Pair.Key);
+			LavaQueue.Add(Pair.Key);
+		}
+	}
+	for (int32 Head = 0; Head < LavaQueue.Num(); ++Head)
+	{
+		const FIntPoint Cell = ColumnCell(LavaQueue[Head]);
+		for (const FIntPoint& Step : { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) })
+		{
+			const int32 Next = ColumnOf(Cell.X + Step.X, Cell.Y + Step.Y);
+			if (Depth.Contains(Next) && !LavaNow.Contains(Next))
+			{
+				LavaNow.Add(Next);
+				LavaQueue.Add(Next);
+			}
+		}
+	}
+
+	// What is no longer held up from the ground falls: everything solid that hangs together with the ground, through
+	// cells side by side or one on another, stands (and whatever stood on nothing as built, the dream sky's pieces);
+	// the rest comes down
+	TBitArray<> Held;
+	if (!bFoundAnchored)
+	{
+		bFoundAnchored = true;
+		const TBitArray<> Nothing(false, Grid.Num());
+		FindHeldUp(Nothing, Held);
+		Anchored.Init(false, Grid.Num());
+		int32 Count = 0;
+		for (int32 Index = 0; Index < Grid.Num(); ++Index)
+		{
+			if (Grid[Index] != 0 && !Held[Index])
+			{
+				Anchored[Index] = true;
+				++Count;
+			}
+		}
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town: %d blocks stand on nothing as built (they never fall)."), Count);
+	}
+	FindHeldUp(Now, Held);
+	TBitArray<> FallenNow(false, Grid.Num());
+	TArray<int32> NewlyFallen;
+	for (int32 Index = (1 - LevelMin) * GridCells * GridCells; Index < Grid.Num(); ++Index)
+	{
+		if (Grid[Index] != 0 && !Now[Index] && !Held[Index])
+		{
+			FallenNow[Index] = true;
+			Break(Index);
+			if (!(Fallen.IsValidIndex(Index) && Fallen[Index]))
+			{
+				NewlyFallen.Add(Index);
+			}
+		}
+	}
+	// The giant dice that fall go whole with their cells
+	TSet<int32> DiceFalling;
+	for (int32 Die = 0; Die < GiantDice.Num(); ++Die)
+	{
+		const FGiantDie& Giant = GiantDice[Die];
+		if (IsInGrid(Giant.Low.X, Giant.Low.Y, Giant.Low.Z) && FallenNow[GridIndex(Giant.Low.X, Giant.Low.Y, Giant.Low.Z)])
+		{
+			WantGone.FindOrAdd(DieBlocks).Add(Giant.Instance);
+			DiceFalling.Add(Giant.Instance);
+		}
+	}
+	// Flights of stairs whose foot stood on something that went
+	for (const FStair& Stair : Stairs)
+	{
+		const int32 Foot = IsInGrid(Stair.Start.X, Stair.Start.Y, Stair.Base) ? GridIndex(Stair.Start.X, Stair.Start.Y, Stair.Base) : INDEX_NONE;
+		if (Foot == INDEX_NONE || Grid[Foot] == 0 || !Now[Foot])
+		{
+			continue;
+		}
+		for (int32 Step = Stair.StepFirst; Step < Stair.StepFirst + Stair.StepCount; ++Step)
+		{
+			WantGone.FindOrAdd(Steps).Add(Step);
+		}
+		for (int32 Slab = Stair.SolidFirst; Slab < Stair.SolidFirst + Stair.SolidCount; ++Slab)
+		{
+			WantGone.FindOrAdd(Solid).Add(Slab);
+		}
+	}
+
 	for (UInstancedStaticMeshComponent* Instances : Owners)
 	{
 		const TSet<int32>* Already = WantGone.Find(Instances);
@@ -3044,7 +3293,30 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 				continue;
 			}
 			bool bOver = false;
-			ForCellsIn(BoundsOf(Instances, Index), [&](int32 Cell) { bOver |= Now[Cell] && IsUnderMesh(Cell); });
+			const FBox Box = BoundsOf(Instances, Index);
+			ForCellsIn(Box, [&](int32 Cell) { bOver |= Now[Cell] && IsUnderMesh(Cell); });
+			// (Round 89) Or what it rests on is mostly gone: a roof whose walls came down, a lamp on dug ground
+			if (!bOver)
+			{
+				int32 Under = 0;
+				int32 UnderGone = 0;
+				const FIntVector Low = CellAt(Box.Min + FVector(10.f));
+				const FIntVector High = CellAt(Box.Max - FVector(10.f));
+				const int32 Level = CellAt(Box.Min + FVector(0.f, 0.f, 20.f)).Z - 1;
+				for (int32 Y = FMath::Max(-HalfCells, Low.Y); Y <= FMath::Min(HalfCells - 1, High.Y) && Level >= LevelMin; ++Y)
+				{
+					for (int32 X = FMath::Max(-HalfCells, Low.X); X <= FMath::Min(HalfCells - 1, High.X); ++X)
+					{
+						const int32 Cell = GridIndex(X, Y, Level);
+						if (Grid[Cell] != 0)
+						{
+							++Under;
+							UnderGone += Now[Cell] ? 1 : 0;
+						}
+					}
+				}
+				bOver = Under > 0 && UnderGone * 2 > Under;
+			}
 			if (bOver)
 			{
 				More.Add(Index);
@@ -3108,13 +3380,30 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 		if (!Broken[Index])
 		{
 			Changed.Add(Index);
+			// What falls breaks up where it lands, a giant die in its own colors
+			if (FallenNow[Index] || Grid[Index] == HiddenSolid)
+			{
+				continue;
+			}
 			const FIntVector Cell = CellOf(Index);
 			const FLook& Look = Looks[Grid[Index] - 1];
 			OutBroken.Add({ GetCellTransform(Cell.X, Cell.Y, Cell.Z).GetLocation(), FLinearColor(Look.Body), FLinearColor(Look.Accent), 1.f });
 		}
 	}
+	// The blocks of what falls just now, as they stand (before they are hidden): they come down as one piece (StartFalling)
+	TArray<FFallingPiece> FallingBlocks;
+	for (const int32 Index : NewlyFallen)
+	{
+		const FCellBlock* Block = CellBlocks.Find(Index);
+		if (Block && Block->bShown)
+		{
+			const FIntVector Cell = CellOf(Index);
+			FallingBlocks.Add({ Block->bDie ? DieBlocks.Get() : Blocks.Get(), Block->Index, GetCellTransform(Cell.X, Cell.Y, Cell.Z), Index });
+		}
+	}
 	Broken = MoveTemp(Now);
 	BrokenCells = MoveTemp(NowCells);
+	Fallen = MoveTemp(FallenNow);
 
 	// The blocks drawn: each changed cell and its neighbors (bared or buried again)
 	TSet<int32> Refresh;
@@ -3251,7 +3540,12 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 		CutBoxes.Add(Box, MoveTemp(Left));
 	}
 
-	// Models gone now, and back once no wreck reaches them
+	// Models gone now, and back once no wreck reaches them (from the bottom up, a little at a time)
+	TMap<int32, int32> DieOfInstance;
+	for (int32 Die = 0; Die < GiantDice.Num(); ++Die)
+	{
+		DieOfInstance.Add(GiantDice[Die].Instance, Die);
+	}
 	TSet<UInstancedStaticMeshComponent*> Touched;
 	for (TPair<UInstancedStaticMeshComponent*, TMap<int32, FTransform>>& Pair : Gone)
 	{
@@ -3264,13 +3558,15 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 				Instances->UpdateInstanceTransform(It.Key(), It.Value(), true, false, true);
 				if (Instances != Solid)
 				{
-					OutRegrow.Add({ Instances, It.Key(), It.Value() });
+					const float Up = (It.Value().GetLocation().Z - FloorZ) / BlockSize - GroundBottom;
+					OutRegrow.Add({ Instances, It.Key(), It.Value(), FMath::Clamp(Up * RegrowStep, 0.f, RegrowMaxDelay) });
 				}
 				Touched.Add(Instances);
 				It.RemoveCurrent();
 			}
 		}
 	}
+	TMap<UInstancedStaticMeshComponent*, TMap<int32, FTransform>> NewlyGone;
 	for (const TPair<UInstancedStaticMeshComponent*, TSet<int32>>& Pair : WantGone)
 	{
 		TMap<int32, FTransform>& Mine = Gone.FindOrAdd(Pair.Key);
@@ -3283,6 +3579,22 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 				Mine.Add(Index, Was);
 				Pair.Key->UpdateInstanceTransform(Index, Pair.Key == Solid ? Stowed(Was) : Shrunk(Was), true, false, true);
 				Touched.Add(Pair.Key);
+				if (Pair.Key != Solid)
+				{
+					NewlyGone.FindOrAdd(Pair.Key).Add(Index, Was);
+				}
+				// A giant die smashed (not one coming down): rubble in its colors from all over it
+				const int32* Die = Pair.Key == DieBlocks ? DieOfInstance.Find(Index) : nullptr;
+				if (Die && !DiceFalling.Contains(Index))
+				{
+					const FGiantDie& Giant = GiantDice[*Die];
+					const float Half = Giant.Size * BlockSize * 0.5f;
+					for (int32 Bit = 0; Bit < 6 + Giant.Size * 3; ++Bit)
+					{
+						OutBroken.Add({ Was.GetLocation() + FVector(FMath::FRandRange(-Half, Half), FMath::FRandRange(-Half, Half), FMath::FRandRange(-Half, Half)),
+							FLinearColor(Giant.Body), FLinearColor(Giant.Pips), 1.3f });
+					}
+				}
 			}
 		}
 	}
@@ -3303,15 +3615,464 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 		WreckSolid->ClearInstances();
 		WreckSolid->AddInstances(All, false, true, false);
 	}
+	// The navmesh is made from these boxes: told afresh, or the tiles under a cut ground box (one runs across several
+	// tiles) come back with nothing in them (round 89: the ground digs)
+	if (GetWorld()->IsGameWorld() && (DirtyBoxes.Num() > 0 || Touched.Contains(Solid.Get())))
+	{
+		UNavigationSystemV1::UpdateComponentInNavOctree(*Solid);
+		if (WreckSolid)
+		{
+			UNavigationSystemV1::UpdateComponentInNavOctree(*WreckSolid);
+		}
+	}
 	for (UInstancedStaticMeshComponent* Instances : Touched)
 	{
 		Instances->MarkRenderStateDirty();
 	}
+	// What falls just now comes down (on every machine; the server's landings hurt)
+	if (NewlyFallen.Num() > 0)
+	{
+		StartFalling(NewlyFallen, FallingBlocks, NewlyGone);
+	}
+
+	// The lava: the columns flooded now, what broke through just now (a fountain for each patch of it); the server
+	// tells the wreckage the pool is big
+	const bool bLavaChanged = LavaNow.Num() != LavaColumns.Num() || LavaNow.Difference(LavaColumns).Num() > 0;
+	bool bDepthChanged = Depth.Num() != DugDepth.Num();
+	for (const TPair<int32, int32>& Pair : Depth)
+	{
+		const int32* Was = DugDepth.Find(Pair.Key);
+		bDepthChanged |= !Was || *Was != Pair.Value;
+	}
+	if (bLavaChanged || (bDepthChanged && LavaNow.Num() > 0))
+	{
+		TArray<FRRLavaColumn> Flooded;
+		FBox Pool(ForceInit);
+		for (const int32 Column : LavaNow)
+		{
+			const FIntPoint Cell = ColumnCell(Column);
+			const FVector Spot = At(CellCenter(Cell), -FMath::Min(Depth[Column], -GroundBottom) * BlockSize);
+			Flooded.Add({ Cell, FVector2D(Spot), float(Spot.Z) });
+			Pool += Spot;
+		}
+		// The breakthroughs new just now: a fountain in the middle of each patch of them
+		TArray<FVector> Breaches;
+		TSet<int32> Seen;
+		for (const int32 Column : LavaNow)
+		{
+			if (Seen.Contains(Column) || Depth[Column] < BreachDepth || LavaColumns.Contains(Column))
+			{
+				continue;
+			}
+			TArray<int32> Patch = { Column };
+			Seen.Add(Column);
+			FVector2D Sum(0.f);
+			for (int32 Head = 0; Head < Patch.Num(); ++Head)
+			{
+				const FIntPoint Cell = ColumnCell(Patch[Head]);
+				Sum += CellCenter(Cell);
+				for (const FIntPoint& Step : { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) })
+				{
+					const int32 Next = ColumnOf(Cell.X + Step.X, Cell.Y + Step.Y);
+					const int32* NextDepth = Depth.Find(Next);
+					if (NextDepth && *NextDepth >= BreachDepth && !Seen.Contains(Next) && !LavaColumns.Contains(Next))
+					{
+						Seen.Add(Next);
+						Patch.Add(Next);
+					}
+				}
+			}
+			Breaches.Add(At(Sum / Patch.Num(), -LavaBelowFloor));
+		}
+		if (Lava)
+		{
+			Lava->SetColumns(Flooded, FloorZ - LavaBelowFloor, Breaches);
+		}
+		if (HasAuthority() && LavaNow.Difference(LavaColumns).Num() > 0)
+		{
+			Pool.Min.Z = FloorZ + GroundBottom * BlockSize - BlockSize;
+			Pool.Max.Z = FloorZ + BlockSize;
+			NewBigAreas.Add(Pool.ExpandBy(FVector(BlockSize * 0.5f, BlockSize * 0.5f, 0.f)));
+		}
+	}
+
+	// The minimap: the columns where anything changed or the lava came or went
+	TSet<int32> MapColumns;
+	for (const int32 Index : Changed)
+	{
+		const FIntVector Cell = CellOf(Index);
+		MapColumns.Add(ColumnOf(Cell.X, Cell.Y));
+	}
+	MapColumns.Append(LavaNow.Difference(LavaColumns));
+	MapColumns.Append(LavaColumns.Difference(LavaNow));
+	DugDepth = MoveTemp(Depth);
+	LavaColumns = MoveTemp(LavaNow);
+	for (const int32 Column : MapColumns)
+	{
+		const FIntPoint Cell = ColumnCell(Column);
+		RefreshMapColumn(Cell.X, Cell.Y);
+	}
+	if (MapColumns.Num() > 0)
+	{
+		++MapVersion;
+	}
+
 	int32 GoneCount = 0;
 	for (const TPair<UInstancedStaticMeshComponent*, TMap<int32, FTransform>>& Pair : Gone)
 	{
 		GoneCount += Pair.Value.Num();
 	}
-	UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town wrecks: %d in force, %d blocks broken (%d just now, %d mended), %d boxes cut into %d, %d models gone."),
-		InWrecks.Num(), BrokenCells.Num(), OutBroken.Num(), Mended.Num(), CutBoxes.Num(), WreckSolid ? WreckSolid->GetInstanceCount() : 0, GoneCount);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town wrecks: %d in force, %d blocks broken (%d just now, %d mended), %d boxes cut into %d, %d models gone, %d giant dice hit, %d dug columns, %d lava, %d falling now (%d fallen), %.1f ms."),
+		InWrecks.Num(), BrokenCells.Num(), OutBroken.Num(), Mended.Num(), CutBoxes.Num(), WreckSolid ? WreckSolid->GetInstanceCount() : 0, GoneCount,
+		DiceHit.Num(), DugDepth.Num(), LavaColumns.Num(), NewlyFallen.Num(), Fallen.CountSetBits(), (FPlatformTime::Seconds() - StartTime) * 1000.0);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Falling, lava and the minimap (round 89)
+
+FIntPoint ARRRandomDiceTown::GetCellAt(const FVector& WorldLocation) const
+{
+	const FVector Middle = GetActorLocation();
+	return FIntPoint(FMath::FloorToInt((WorldLocation.X - Middle.X) / BlockSize), FMath::FloorToInt((WorldLocation.Y - Middle.Y) / BlockSize));
+}
+
+bool ARRRandomDiceTown::GetLavaAt(const FVector& WorldLocation, float& OutTop) const
+{
+	const FIntPoint Cell = GetCellAt(WorldLocation);
+	if (Cell.X < -HalfCells || Cell.X >= HalfCells || Cell.Y < -HalfCells || Cell.Y >= HalfCells
+		|| !LavaColumns.Contains((Cell.Y + HalfCells) * GridCells + (Cell.X + HalfCells)))
+	{
+		return false;
+	}
+	OutTop = FloorZ - LavaBelowFloor;
+	return !Lava || Lava->IsRisenAt(Cell);
+}
+
+bool ARRRandomDiceTown::ConsumeBigAreas(TArray<FBox>& OutAreas)
+{
+	OutAreas = MoveTemp(NewBigAreas);
+	NewBigAreas.Reset();
+	return OutAreas.Num() > 0;
+}
+
+void ARRRandomDiceTown::RefreshMapColumn(int32 X, int32 Y)
+{
+	const int32 Index = (Y + HalfCells) * GridCells + (X + HalfCells);
+	if (!MapColors.IsValidIndex(Index) || !IsOnIsland(X, Y))
+	{
+		return;
+	}
+	if (LavaColumns.Contains(Index))
+	{
+		MapColors[Index] = MapLava;
+		MapLevels[Index] = 0;
+		return;
+	}
+	MapColors[Index] = MapSky;
+	MapLevels[Index] = -1;
+	for (int32 Level = LevelMax; Level >= LevelMin; --Level)
+	{
+		if (!IsFilled(X, Y, Level))
+		{
+			continue;
+		}
+		const uint8 Value = Grid[GridIndex(X, Y, Level)];
+		// (A dug crater shows its earth; a canal its water, as built)
+		MapColors[Index] = Value == HiddenSolid ? White : DugDepth.Contains(Index) ? Looks[Value - 1].Body : Level < 0 ? MapWater : Looks[Value - 1].Accent;
+		MapLevels[Index] = int8(FMath::Clamp(Level, 0, 20));
+		break;
+	}
+	if (StairCells.Contains(FIntPoint(X, Y)) && !DugDepth.Contains(Index))
+	{
+		MapColors[Index] = Cream;
+		MapLevels[Index] = int8(FMath::Max(1, int32(MapLevels[Index])));
+	}
+}
+
+void ARRRandomDiceTown::FindHeldUp(const TBitArray<>& BrokenNow, TBitArray<>& OutHeld) const
+{
+	// A flood out from the ground (and what stood on nothing as built) through solid cells side by side and one on another
+	OutHeld.Init(false, Grid.Num());
+	TArray<int32> Queue;
+	Queue.Reserve(400000);
+	auto IsSolid = [&](int32 Index) { return Grid[Index] != 0 && !BrokenNow[Index]; };
+	const int32 GroundEnd = (1 - LevelMin) * GridCells * GridCells;
+	for (int32 Index = 0; Index < GroundEnd; ++Index)
+	{
+		if (IsSolid(Index))
+		{
+			OutHeld[Index] = true;
+			Queue.Add(Index);
+		}
+	}
+	if (bFoundAnchored)
+	{
+		for (TConstSetBitIterator<> It(Anchored); It; ++It)
+		{
+			if (IsSolid(It.GetIndex()) && !OutHeld[It.GetIndex()])
+			{
+				OutHeld[It.GetIndex()] = true;
+				Queue.Add(It.GetIndex());
+			}
+		}
+	}
+	const int32 Plane = GridCells * GridCells;
+	for (int32 Head = 0; Head < Queue.Num(); ++Head)
+	{
+		const int32 Index = Queue[Head];
+		const int32 X = Index % GridCells;
+		const int32 Y = Index / GridCells % GridCells;
+		const int32 Layer = Index / Plane;
+		auto Visit = [&](int32 Next)
+		{
+			if (!OutHeld[Next] && IsSolid(Next))
+			{
+				OutHeld[Next] = true;
+				Queue.Add(Next);
+			}
+		};
+		if (X > 0) { Visit(Index - 1); }
+		if (X < GridCells - 1) { Visit(Index + 1); }
+		if (Y > 0) { Visit(Index - GridCells); }
+		if (Y < GridCells - 1) { Visit(Index + GridCells); }
+		if (Layer > 0) { Visit(Index - Plane); }
+		if (Layer < GridLevels - 1) { Visit(Index + Plane); }
+	}
+}
+
+void ARRRandomDiceTown::StartFalling(const TArray<int32>& Cells, const TArray<FFallingPiece>& BlockPieces, const TMap<UInstancedStaticMeshComponent*, TMap<int32, FTransform>>& NewlyGone)
+{
+	auto CellOf = [](int32 Index)
+	{
+		return FIntVector(Index % GridCells - HalfCells, Index / GridCells % GridCells - HalfCells, Index / (GridCells * GridCells) + LevelMin);
+	};
+	// The parts that hang together, each a piece of its own
+	TSet<int32> Left(Cells);
+	TMap<int32, int32> PartOf;
+	TArray<TArray<int32>> Parts;
+	for (const int32 Start : Cells)
+	{
+		if (!Left.Contains(Start))
+		{
+			continue;
+		}
+		TArray<int32>& Part = Parts.AddDefaulted_GetRef();
+		Part.Add(Start);
+		Left.Remove(Start);
+		for (int32 Head = 0; Head < Part.Num(); ++Head)
+		{
+			const FIntVector Cell = CellOf(Part[Head]);
+			for (const FIntVector& Step : { FIntVector(1, 0, 0), FIntVector(-1, 0, 0), FIntVector(0, 1, 0), FIntVector(0, -1, 0), FIntVector(0, 0, 1), FIntVector(0, 0, -1) })
+			{
+				const FIntVector Next = Cell + Step;
+				if (IsInGrid(Next.X, Next.Y, Next.Z) && Left.Remove(GridIndex(Next.X, Next.Y, Next.Z)) > 0)
+				{
+					Part.Add(GridIndex(Next.X, Next.Y, Next.Z));
+				}
+			}
+		}
+		for (const int32 Index : Part)
+		{
+			PartOf.Add(Index, Parts.Num() - 1);
+		}
+	}
+	const int32 First = Falling.Num();
+	for (const TArray<int32>& Part : Parts)
+	{
+		FFalling& Piece = Falling.AddDefaulted_GetRef();
+		FIntVector Low(TNumericLimits<int32>::Max());
+		FIntVector High(TNumericLimits<int32>::Min());
+		TSet<FIntPoint> Footprint;
+		for (const int32 Index : Part)
+		{
+			const FIntVector Cell = CellOf(Index);
+			Low = Low.ComponentMin(Cell);
+			High = High.ComponentMax(Cell);
+			Footprint.Add(FIntPoint(Cell.X, Cell.Y));
+		}
+		Piece.Footprint = Footprint.Array();
+		// It lands on the highest thing still standing under it
+		int32 Land = GroundBottom - 1;
+		for (const FIntPoint& Spot : Piece.Footprint)
+		{
+			for (int32 Level = Low.Z - 1; Level > Land; --Level)
+			{
+				if (IsFilled(Spot.X, Spot.Y, Level))
+				{
+					Land = Level;
+					break;
+				}
+			}
+		}
+		const FVector2D Mid2D = (CellCenter(FIntPoint(Low.X, Low.Y)) + CellCenter(FIntPoint(High.X, High.Y))) * 0.5f;
+		Piece.Pivot = At(Mid2D, (Low.Z - 1) * BlockSize);
+		Piece.LandZ = FloorZ + Land * BlockSize;
+		Piece.Drop = FMath::Max(30.f, Piece.Pivot.Z - Piece.LandZ);
+		Piece.Duration = FMath::Clamp(FMath::Sqrt(2.f * Piece.Drop / FallGravity), 0.3f, 1.f);
+		// It tips one way or another as it comes down (the same way on every machine)
+		const float Angle = float(CellHash(Low.X, Low.Y, Low.Z) % 360);
+		Piece.TipAxis = FVector(FMath::Cos(FMath::DegreesToRadians(Angle)), FMath::Sin(FMath::DegreesToRadians(Angle)), 0.f);
+		if (HasAuthority())
+		{
+			const FVector Corner = At(CellCenter(FIntPoint(Low.X, Low.Y)) - FVector2D(BlockSize * 0.5f), Land * BlockSize);
+			NewBigAreas.Add(FBox(Corner, At(CellCenter(FIntPoint(High.X, High.Y)) + FVector2D(BlockSize * 0.5f), High.Z * BlockSize)));
+		}
+	}
+	// Its looks: its blocks, the giant dice and the models standing in it (roofs, trees, lamps)
+	auto Add = [&](int32 Part, const FFallingPiece& Look)
+	{
+		if (Falling[First + Part].Pieces.Num() < FallMaxPieces)
+		{
+			Falling[First + Part].Pieces.Add(Look);
+		}
+	};
+	for (const FFallingPiece& Look : BlockPieces)
+	{
+		if (const int32* Part = PartOf.Find(Look.Cell))
+		{
+			Add(*Part, Look);
+		}
+	}
+	for (const TPair<UInstancedStaticMeshComponent*, TMap<int32, FTransform>>& Pair : NewlyGone)
+	{
+		for (const TPair<int32, FTransform>& Model : Pair.Value)
+		{
+			// The cell its bottom stands in (a die's lowest, a roof's eaves)
+			const FBox Box = Pair.Key->GetStaticMesh() ? Pair.Key->GetStaticMesh()->GetBoundingBox().TransformBy(Model.Value) : FBox(Model.Value.GetLocation(), Model.Value.GetLocation());
+			const FIntPoint Spot = GetCellAt(Box.GetCenter());
+			const int32 Level = FMath::FloorToInt((Box.Min.Z + 20.f - FloorZ) / BlockSize) + 1;
+			for (int32 Try = Level; Try >= Level - 1; --Try)
+			{
+				if (!IsInGrid(Spot.X, Spot.Y, Try))
+				{
+					continue;
+				}
+				if (const int32* Part = PartOf.Find(GridIndex(Spot.X, Spot.Y, Try)))
+				{
+					Add(*Part, { Pair.Key, Model.Key, Model.Value, INDEX_NONE });
+					break;
+				}
+			}
+		}
+	}
+	for (int32 Index = First; Index < Falling.Num(); ++Index)
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town: %d blocks lose their hold and come down %.0f (%d looks)."), Parts[Index - First].Num(), Falling[Index].Drop, Falling[Index].Pieces.Num());
+	}
+}
+
+void ARRRandomDiceTown::TickFalling(float DeltaSeconds)
+{
+	TSet<UInstancedStaticMeshComponent*> Dirty;
+	for (int32 Index = Falling.Num() - 1; Index >= 0; --Index)
+	{
+		FFalling& Piece = Falling[Index];
+		Piece.Age += DeltaSeconds;
+		if (Piece.Age >= Piece.Duration)
+		{
+			LandFalling(Piece);
+			for (const FFallingPiece& Look : Piece.Pieces)
+			{
+				if (UInstancedStaticMeshComponent* Instances = Look.Instances.Get())
+				{
+					Dirty.Add(Instances);
+				}
+			}
+			Falling.RemoveAtSwap(Index);
+			continue;
+		}
+		// Down like a dropped thing, tipping a little more as it goes
+		const float Share = Piece.Age / Piece.Duration;
+		const FQuat Tip(Piece.TipAxis, FMath::DegreesToRadians(FallTipDegrees) * Share);
+		const FVector Down(0.f, 0.f, -Piece.Drop * Share * Share);
+		for (const FFallingPiece& Look : Piece.Pieces)
+		{
+			UInstancedStaticMeshComponent* Instances = Look.Instances.Get();
+			if (!Instances)
+			{
+				continue;
+			}
+			const FTransform Now(Tip * Look.Was.GetRotation(), Piece.Pivot + Tip.RotateVector(Look.Was.GetLocation() - Piece.Pivot) + Down, Look.Was.GetScale3D());
+			Instances->UpdateInstanceTransform(Look.Index, Now, true, false, false);
+			Dirty.Add(Instances);
+		}
+	}
+	for (UInstancedStaticMeshComponent* Instances : Dirty)
+	{
+		Instances->MarkRenderStateDirty();
+	}
+}
+
+void ARRRandomDiceTown::LandFalling(FFalling& Piece)
+{
+	// Gone for good (unless it mended while it fell), the rubble from where its looks hit the floor
+	const FQuat Tip(Piece.TipAxis, FMath::DegreesToRadians(FallTipDegrees));
+	TArray<FRRBrokenBit> Bits;
+	const int32 Every = FMath::Max(1, Piece.Pieces.Num() / FallRubble);
+	for (int32 Look = 0; Look < Piece.Pieces.Num(); ++Look)
+	{
+		const FFallingPiece& Fell = Piece.Pieces[Look];
+		UInstancedStaticMeshComponent* Instances = Fell.Instances.Get();
+		if (!Instances)
+		{
+			continue;
+		}
+		const TMap<int32, FTransform>* Mine = Gone.Find(Instances);
+		const bool bStillGone = Fell.Cell != INDEX_NONE ? Broken.IsValidIndex(Fell.Cell) && Broken[Fell.Cell] : Mine && Mine->Contains(Fell.Index);
+		Instances->UpdateInstanceTransform(Fell.Index, bStillGone ? Shrunk(Fell.Was) : Fell.Was, true, false, false);
+		if (!bStillGone || Look % Every != 0)
+		{
+			continue;
+		}
+		FLinearColor Body(1.f, 0.6f, 0.75f);
+		FLinearColor Accent = FLinearColor::White;
+		const int32 Floats = Instances->NumCustomDataFloats;
+		if (Floats >= 6 && Instances->PerInstanceSMCustomData.IsValidIndex(Fell.Index * Floats + 5))
+		{
+			const float* Data = &Instances->PerInstanceSMCustomData[Fell.Index * Floats];
+			Body = FLinearColor(Data[0], Data[1], Data[2]);
+			Accent = FLinearColor(Data[3], Data[4], Data[5]);
+		}
+		const FVector Landed = Piece.Pivot + Tip.RotateVector(Fell.Was.GetLocation() - Piece.Pivot) - FVector(0.f, 0.f, Piece.Drop);
+		Bits.Add({ Landed, Body, Accent, float(FMath::Clamp(Fell.Was.GetScale3D().GetMax(), 0.8, 2.0)) });
+	}
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		if (ARRRandomWreckage* Wreckage = ARRRandomWreckage::Find(this))
+		{
+			Wreckage->ThrowRubble(Bits);
+		}
+		// Dust bursting out along the floor round it, and the word
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			const int32 Puffs = FMath::Min(6, Piece.Footprint.Num());
+			for (int32 Puff = 0; Puff < Puffs; ++Puff)
+			{
+				const FIntPoint& Spot = Piece.Footprint[(Puff * Piece.Footprint.Num()) / Puffs];
+				Effects->Footstep(At(CellCenter(Spot), Piece.LandZ - FloorZ), 1.6f);
+			}
+			Effects->DiceLandBurst(FVector(Piece.Pivot.X, Piece.Pivot.Y, Piece.LandZ + 60.f), 60.f);
+		}
+		ARRRandomHUD::PopComicWord(this, TEXT("CRASH!"), FVector(Piece.Pivot.X, Piece.Pivot.Y, Piece.LandZ + 380.f), RRUI::Gold, 1.6f);
+	}
+	// Server: whoever is under it is hit and shoved out from under it
+	if (!HasAuthority())
+	{
+		return;
+	}
+	const TSet<FIntPoint> Under(Piece.Footprint);
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		ARRRandomCharacter* Who = *It;
+		const FVector Where = Who->GetActorLocation();
+		const float Feet = Where.Z - Who->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+		if (!Who->IsAlive() || !Under.Contains(GetCellAt(Where)) || Feet < Piece.LandZ - 60.f || Feet > Piece.LandZ + 450.f)
+		{
+			continue;
+		}
+		UGameplayStatics::ApplyDamage(Who, CrashDamage, nullptr, this, UDamageType::StaticClass());
+		const FVector Out = ((Where - Piece.Pivot) * FVector(1.f, 1.f, 0.f)).GetSafeNormal();
+		Who->LaunchCharacter((Out.IsNearlyZero() ? FVector::ForwardVector : Out) * CrashShove + FVector(0.f, 0.f, 350.f), true, true);
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s is under a falling building."), *Who->GetName());
+	}
 }

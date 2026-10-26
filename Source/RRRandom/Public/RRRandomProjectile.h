@@ -82,9 +82,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat")
 	float ImpactImpulse = 300.f;
 
-	/** Above 0: where it lands on anything but an animal friend, the structures this close are smashed (the star robot's fists). */
+	/**
+	 * Above 0: where it lands on anything but an animal friend, the structures this close are smashed (the star robot's
+	 * missiles, a CANNON's shells since round 89), and WreckDig layers of ground dug where it hits the floor.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	float WreckRadius = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	int32 WreckDig = 0;
 
 	/** Color of the viewer's own shots, so they stand out; everyone else's take their team color. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")

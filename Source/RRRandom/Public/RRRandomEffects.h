@@ -119,6 +119,10 @@ public:
 	void RocketBlast(const FVector& Where, const FVector& Normal, float Size);
 	/** A big foot coming down (the star robot's steps): dust puffing out along the ground and a faint ring. */
 	void Footstep(const FVector& Where, float Size);
+	/** Lava breaking through a crater's floor (round 89): a glowing gush, fat blobs flung up and falling back, a ring, sparks. */
+	void LavaFountain(const FVector& Where, float Size);
+	/** A bubble swelling and popping on the lava, a spark drifting up off it. */
+	void LavaBubble(const FVector& Where, float Size);
 
 private:
 	enum class EShape : uint8 { Ball, Ring, Star, Die, Count };

@@ -555,7 +555,7 @@ void ARRRandomProjectile::OnHit(UPrimitiveComponent* HitComponent, AActor* Other
 
 	if (WreckRadius > 0.f && !Cast<APawn>(OtherActor))
 	{
-		ARRRandomWreckage::Wreck(this, Hit.ImpactPoint, Hit.ImpactPoint, WreckRadius, false);
+		ARRRandomWreckage::Wreck(this, Hit.ImpactPoint, Hit.ImpactPoint, WreckRadius, false, WreckDig);
 	}
 
 	// Tell the clients where it landed, then go once they've had time to hear it

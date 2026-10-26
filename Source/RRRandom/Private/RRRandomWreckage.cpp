@@ -19,6 +19,13 @@ namespace
 {
 	TAutoConsoleVariable<float> CVarRestoreSeconds(TEXT("rr.Wreck.RestoreSeconds"), 15.f,
 		TEXT("Seconds a smashed structure stays smashed at least; then it mends as soon as nobody is in it."));
+	TAutoConsoleVariable<float> CVarBigRestoreSeconds(TEXT("rr.Wreck.BigRestoreSeconds"), 45.f,
+		TEXT("Seconds a collapsed building or a lava pool stays at least, from when it happened (Dice Town)."));
+
+	/** Room kept round a big wreck's box (a collapse, a lava pool) before it may mend. */
+	constexpr float BigRoom = 80.f;
+	/** How far round something big a wreck may be and still count as one that made it. */
+	constexpr float BigReach = 150.f;
 
 	/** Room kept round who's in a wreck before it may mend: animal friends (plus their size), cars, the robot. */
 	constexpr float PeopleRoom = 120.f;
@@ -113,13 +120,32 @@ float ARRRandomWreckage::GetRestoreSeconds()
 	return FMath::Max(1.f, CVarRestoreSeconds.GetValueOnGameThread());
 }
 
+float ARRRandomWreckage::GetBigRestoreSeconds()
+{
+	return FMath::Max(1.f, CVarBigRestoreSeconds.GetValueOnGameThread());
+}
+
+ARRRandomWreckage* ARRRandomWreckage::Find(const UObject* WorldContext)
+{
+	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	if (!World)
+	{
+		return nullptr;
+	}
+	for (TActorIterator<ARRRandomWreckage> It(World); It; ++It)
+	{
+		return *It;
+	}
+	return nullptr;
+}
+
 void ARRRandomWreckage::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ARRRandomWreckage, Wrecks);
 }
 
-void ARRRandomWreckage::Wreck(const UObject* WorldContext, const FVector& From, const FVector& To, float Radius, bool bColumn)
+void ARRRandomWreckage::Wreck(const UObject* WorldContext, const FVector& From, const FVector& To, float Radius, bool bColumn, int32 Dig)
 {
 	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
 	if (!World || !World->IsGameWorld() || World->GetNetMode() == NM_Client || Radius <= 0.f)
@@ -146,10 +172,12 @@ void ARRRandomWreckage::Wreck(const UObject* WorldContext, const FVector& From, 
 	Added.To = To;
 	Added.Radius = Radius;
 	Added.bColumn = bColumn;
+	Added.Dig = uint8(FMath::Clamp(Dig, 0, 9));
 	Wreckage->MadeAt.Add(Added.Id, World->GetTimeSeconds());
-	UE_LOG(LogTemp, Log, TEXT("RRRandom: wreck %d, %s from %s to %s, radius %.0f."), Added.Id, bColumn ? TEXT("a column") : TEXT("a ball"),
-		*From.ToCompactString(), *To.ToCompactString(), Radius);
-	Wreckage->Apply();
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: wreck %d, %s from %s to %s, radius %.0f, digging %d."), Added.Id, bColumn ? TEXT("a column") : TEXT("a ball"),
+		*From.ToCompactString(), *To.ToCompactString(), Radius, int32(Added.Dig));
+	// Applied once this frame's wrecks are all in (a volley of missiles is one change), at the next tick
+	Wreckage->bPending = true;
 	Wreckage->ForceNetUpdate();
 }
 
@@ -320,6 +348,10 @@ void ARRRandomWreckage::Apply()
 	if (Town)
 	{
 		Town->ApplyWrecks(Wrecks, BrokenBits, Regrow);
+		if (HasAuthority())
+		{
+			MarkBigWrecks();
+		}
 	}
 	int32 Changed = 0;
 	for (FPiece& Piece : Pieces)
@@ -427,7 +459,7 @@ void ARRRandomWreckage::Apply()
 			{
 				Instances->UpdateInstanceTransform(Grow.Index, Shrunk(Grow.Target), true, false, false);
 				Dirty.Add(Instances);
-				Growing.Add({ Grow, 0.f });
+				Growing.Add({ Grow, -Grow.Delay });
 			}
 		}
 	}
@@ -437,14 +469,53 @@ void ARRRandomWreckage::Apply()
 	}
 }
 
+void ARRRandomWreckage::MarkBigWrecks()
+{
+	ARRRandomDiceTown* Town = nullptr;
+	for (TActorIterator<ARRRandomDiceTown> It(GetWorld()); It; ++It)
+	{
+		Town = *It;
+		break;
+	}
+	TArray<FBox> Areas;
+	if (!Town || !Town->ConsumeBigAreas(Areas))
+	{
+		return;
+	}
+	// Every wreck reaching into it (as a box round the wreck, down to under the floor) made it, the older ones too
+	const float Until = GetWorld()->GetTimeSeconds() + GetBigRestoreSeconds();
+	for (const FBox& Area : Areas)
+	{
+		const FBox Reach = Area.ExpandBy(BigReach);
+		for (const FRRWreck& Wreck : Wrecks)
+		{
+			if (!Wreck.GetBounds(Area.Min.Z - 400.f, Area.Max.Z).Intersect(Reach))
+			{
+				continue;
+			}
+			float& Wait = BigUntil.FindOrAdd(Wreck.Id);
+			Wait = FMath::Max(Wait, Until);
+			FBox& Keep = BigArea.FindOrAdd(Wreck.Id, Area);
+			Keep += Area;
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: wreck %d made something big (%s), it waits %.0f s."), Wreck.Id, *Area.ToString(), GetBigRestoreSeconds());
+		}
+	}
+}
+
 bool ARRRandomWreckage::IsOccupied(const FRRWreck& Wreck) const
 {
 	UWorld* World = GetWorld();
+	const FBox* Big = BigArea.Find(Wreck.Id);
 	for (TActorIterator<ARRRandomCharacter> It(World); It; ++It)
 	{
 		const UCapsuleComponent* Capsule = It->GetCapsuleComponent();
 		const float Room = PeopleRoom + (Capsule ? (Wreck.bColumn ? Capsule->GetScaledCapsuleRadius() : Capsule->GetScaledCapsuleHalfHeight()) : 100.f);
 		if (Wreck.Contains(It->GetActorLocation(), Room))
+		{
+			return true;
+		}
+		// What fell or the lava pool it made: anyone anywhere in it holds it too (it grows back round them otherwise)
+		if (Big && Big->ExpandBy(BigRoom + (Capsule ? Capsule->GetScaledCapsuleRadius() : 50.f)).IsInsideOrOn(It->GetActorLocation()))
 		{
 			return true;
 		}
@@ -500,11 +571,18 @@ void ARRRandomWreckage::Tick(float DeltaSeconds)
 		{
 			continue;
 		}
+		const float* Big = BigUntil.Find(Wreck.Id);
+		if (Big && Now < *Big)
+		{
+			continue;
+		}
 		if (IsOccupied(Wreck))
 		{
 			continue;
 		}
 		MadeAt.Remove(Wreck.Id);
+		BigUntil.Remove(Wreck.Id);
+		BigArea.Remove(Wreck.Id);
 		Wrecks.RemoveAt(Index);
 		++Mended;
 	}

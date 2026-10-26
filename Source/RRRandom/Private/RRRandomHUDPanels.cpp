@@ -448,6 +448,13 @@ void ARRRandomHUD::RefreshMinimap()
 		{
 			BuildMinimapBase();
 		}
+		// Dice Town's holes, what fell and its lava (round 89)
+		TActorIterator<ARRRandomDiceTown> TownIt(GetWorld());
+		if (TownIt && TownIt->IsBuilt() && TownIt->GetMapVersion() != MapTownVersion)
+		{
+			MapTownVersion = TownIt->GetMapVersion();
+			BuildMinimapBase();
+		}
 	}
 
 	// The terrain lightened into the pastel palette; clear where the team sees now, under a light lavender haze where it

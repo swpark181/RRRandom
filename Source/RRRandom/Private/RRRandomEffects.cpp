@@ -1309,6 +1309,81 @@ void ARRRandomEffects::FireBurst(const FVector& Where, float Size)
 		FVector2D(0.6f, 1.f), FireYellow, 7.f, 250.f);
 }
 
+void ARRRandomEffects::LavaFountain(const FVector& Where, float Size)
+{
+	// A gush of candy-jam lava: a glowing column shooting up, fat blobs flung up and out that fall back (heavy), a ring
+	// running out over the crater, sparks
+	const FLinearColor Jam[] = { FLinearColor(1.f, 0.18f, 0.36f), FireOrange, FLinearColor(1.f, 0.86f, 0.32f) };
+	FParticle Column;
+	Column.Shape = EShape::Ball;
+	Column.Location = Where + FVector(0.f, 0.f, 120.f * Size);
+	Column.Velocity = FVector(0.f, 0.f, 500.f * Size);
+	Column.Drag = 3.f;
+	Column.Life = 0.55f;
+	Column.StartSize = FVector(0.8f * Size, 0.8f * Size, 2.5f * Size);
+	Column.EndSize = FVector(1.6f * Size, 1.6f * Size, 4.f * Size);
+	Column.Color = FireOrange;
+	Column.Glow = 5.f;
+	Column.Opacity = 0.8f;
+	Spawn(Column);
+	FParticle Ring;
+	Ring.Shape = EShape::Ring;
+	Ring.Location = Where + FVector(0.f, 0.f, 6.f);
+	Ring.Life = 0.6f;
+	Ring.StartSize = FVector(0.6f * Size, 0.6f * Size, 1.f);
+	Ring.EndSize = FVector(5.f * Size, 5.f * Size, 1.f);
+	Ring.Color = Jam[0];
+	Ring.Glow = 4.f;
+	Spawn(Ring);
+	for (int32 Index = FMath::RoundToInt(30.f * Size); Index > 0; --Index)
+	{
+		FParticle Blob;
+		Blob.Shape = EShape::Ball;
+		Blob.Location = Where + FVector(FMath::RandPointInCircle(40.f * Size), 20.f);
+		Blob.Velocity = FMath::VRandCone(FVector::UpVector, FMath::DegreesToRadians(38.f)) * FMath::FRandRange(600.f, 1150.f) * Size;
+		Blob.Gravity = 2200.f;
+		Blob.Life = FMath::FRandRange(0.8f, 1.2f);
+		const float Fat = FMath::FRandRange(0.35f, 0.75f) * Size;
+		Blob.StartSize = FVector(Fat, Fat, Fat * 1.3f);
+		Blob.EndSize = FVector(Fat * 0.5f);
+		Blob.Color = Jam[FMath::RandRange(0, UE_ARRAY_COUNT(Jam) - 1)];
+		Blob.Glow = 3.5f;
+		Blob.Spin = FRotator(FMath::FRandRange(-300.f, 300.f), FMath::FRandRange(-300.f, 300.f), 0.f);
+		Spawn(Blob);
+	}
+	Spray(EShape::Star, Where + FVector(0.f, 0.f, 60.f), FMath::RoundToInt(20.f * Size), FVector::UpVector, 60.f, FVector2D(400.f, 900.f) * Size,
+		FVector2D(5.f, 9.f), FVector2D(0.6f, 1.f), FireYellow, 7.f, 600.f);
+}
+
+void ARRRandomEffects::LavaBubble(const FVector& Where, float Size)
+{
+	// A bubble swelling on the lava and popping: a dome, a thin ring, a couple of drops and a spark drifting up
+	FParticle Dome;
+	Dome.Shape = EShape::Ball;
+	Dome.Location = Where;
+	Dome.Life = 0.45f;
+	Dome.FadeIn = 0.3f;
+	Dome.StartSize = FVector(0.15f * Size, 0.15f * Size, 0.08f * Size);
+	Dome.EndSize = FVector(0.45f * Size, 0.45f * Size, 0.3f * Size);
+	Dome.Color = FLinearColor(1.f, 0.62f, 0.2f);
+	Dome.Glow = 3.f;
+	Dome.Opacity = 0.9f;
+	Spawn(Dome);
+	FParticle Pop;
+	Pop.Shape = EShape::Ring;
+	Pop.Location = Where + FVector(0.f, 0.f, 2.f);
+	Pop.Life = 0.35f;
+	Pop.StartSize = FVector(0.2f * Size, 0.2f * Size, 1.f);
+	Pop.EndSize = FVector(0.8f * Size, 0.8f * Size, 1.f);
+	Pop.Color = FLinearColor(1.f, 0.86f, 0.32f);
+	Pop.Glow = 3.f;
+	Spawn(Pop);
+	Spray(EShape::Ball, Where + FVector(0.f, 0.f, 10.f), 2, FVector::UpVector, 30.f, FVector2D(150.f, 320.f) * Size, FVector2D(0.06f, 0.12f) * Size,
+		FVector2D(0.4f, 0.6f), FireOrange, 3.f, 900.f);
+	Spray(EShape::Star, Where + FVector(0.f, 0.f, 20.f), 1, FVector::UpVector, 20.f, FVector2D(60.f, 140.f), FVector2D(3.f, 5.f),
+		FVector2D(0.8f, 1.3f), FireYellow, 6.f, -40.f);
+}
+
 void ARRRandomEffects::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
