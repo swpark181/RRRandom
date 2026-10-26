@@ -124,6 +124,18 @@ protected:
 	FString ArenaMap = TEXT("/Engine/Maps/Templates/Template_Default");
 
 	/**
+	 * The third person maps' levels (char-pipeline/scripts/ue_make_tps_levels.py): each has its map actor placed and a
+	 * NavMeshBoundsVolume for the bots' routes. One that doesn't exist falls back to ArenaMap, where the game mode builds the
+	 * map in code as before.
+	 */
+	UPROPERTY(Config)
+	FString DiceTownMap = TEXT("/Game/Maps/DiceTown");
+	UPROPERTY(Config)
+	FString DiceLandMap = TEXT("/Game/Maps/DiceLand");
+	UPROPERTY(Config)
+	FString StudioMap = TEXT("/Game/Maps/Studio");
+
+	/**
 	 * EOS login: "developer" uses the EOS Dev Auth Tool (DevAuthHost + DevAuthCredential),
 	 * "accountportal" opens the Epic account login, "persistentauth" reuses a saved login.
 	 */
@@ -195,8 +207,10 @@ private:
 	/** Opens (or reloads) the arena map, as a listen server when hosting. */
 	void OpenArena(bool bListen);
 	void OpenTitle();
-	/** The arena currently loaded, or ArenaMap when on the title. */
+	/** The arena currently loaded, or when on the title the one picked there (GetStartMap). */
 	FString GetArenaMap() const;
+	/** The level a game started from the title opens: the picked third person map's level, else ArenaMap. */
+	FString GetStartMap() const;
 
 	EPendingAction Pending = EPendingAction::None;
 	/** Set by PlaySolo/ReturnToTitle while the session is being destroyed. */

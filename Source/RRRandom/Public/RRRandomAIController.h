@@ -15,8 +15,10 @@ class ARRRandomVehicle;
  * and only shoots when no cover is in the way. Ducks behind cover to reload or heal, reloads early while
  * nobody is in sight, and rolls its stored dice when a fight starts. Out of a fight it rides vehicles for long trips
  * and hops in the back of a teammate's stopped car (RideTripDistance).
- * Steers directly (sliding around cover) instead of pathfinding, so it needs no navmesh; on a map with walking routes
- * (Dice Town: houses, stairs, canals) it follows the map's routes instead whenever it isn't fighting up close.
+ * Steers directly (sliding around cover); on a map with walking routes it follows them instead whenever it isn't fighting
+ * up close: the navmesh of the third person maps' levels (/Game/Maps, made at runtime as the map is built and mended as it
+ * is smashed), else Dice Town's own walking graph (ARRRandomDiceTown::FindPath, also while the navmesh is still being made).
+ * The top view's arena has no navmesh: the bots steer straight there.
  */
 UCLASS()
 class RRRANDOM_API ARRRandomAIController : public AAIController
@@ -156,6 +158,10 @@ private:
 	 * and then or when the goal moves; jumps when it stops moving against a ledge (a jump climbs it).
 	 */
 	FVector FollowRoute(ARRRandomCharacter* Self, const FVector& Goal, float DeltaSeconds);
+	/** This map has walking routes: a navmesh, or Dice Town's walking graph. */
+	bool HasRoutes() const;
+	/** A route on the navmesh from Feet toward Goal (its corners after the start; partway when Goal can't be reached), or false. */
+	bool FindNavRoute(const FVector& Feet, const FVector& Goal, TArray<FVector>& OutPoints) const;
 
 public:
 	/** The vehicle this bot is walking over to, so teammates don't all head for the same one. */
@@ -212,6 +218,8 @@ private:
 	float RouteTimer = 0.f;
 	/** Seconds following a route without moving. */
 	float RouteStuckTimer = 0.f;
+	/** The route came from the navmesh (else Dice Town's walking graph). */
+	bool bNavRoute = false;
 
 	/**
 	 * Stalls (wanting to move but getting nowhere): where the bot was at the start of the current window and how long the

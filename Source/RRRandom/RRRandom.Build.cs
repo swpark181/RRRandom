@@ -17,6 +17,8 @@ public class RRRandom : ModuleRules
 			"EnhancedInput",
 			"AIModule",
 			"GameplayTasks",
+			// The third person maps' navmesh: the bots' routes (RRRandomAIController)
+			"NavigationSystem",
 			"Niagara",
 			"OnlineSubsystem",
 			"OnlineSubsystemUtils",

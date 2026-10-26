@@ -1,5 +1,6 @@
 #include "RRRandomDiceLand.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomMapFloor.h"
 #include "EngineUtils.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -229,12 +230,14 @@ bool ARRRandomDiceLand::IsClear(const FVector2D& Local, float Radius) const
 
 UInstancedStaticMeshComponent* ARRRandomDiceLand::MakeInstances(UStaticMesh* Mesh, bool bSolid, int32 CustomFloats)
 {
-	UInstancedStaticMeshComponent* Instances = NewObject<UInstancedStaticMeshComponent>(this);
+	// Never saved: the level's editor preview is built again on load, the game's at BeginPlay
+	UInstancedStaticMeshComponent* Instances = NewObject<UInstancedStaticMeshComponent>(this, NAME_None, RF_Transient);
 	Instances->SetStaticMesh(Mesh);
 	Instances->NumCustomDataFloats = CustomFloats;
 	Instances->SetCollisionProfileName(bSolid ? UCollisionProfile::BlockAll_ProfileName : UCollisionProfile::NoCollision_ProfileName);
 	Instances->SetGenerateOverlapEvents(false);
-	Instances->SetCanEverAffectNavigation(false);
+	// The navmesh (the bots' routes) is made from what stops things
+	Instances->SetCanEverAffectNavigation(bSolid);
 	Instances->SetupAttachment(RootComponent);
 	// Instances are placed in world space
 	Instances->SetUsingAbsoluteLocation(true);
@@ -515,9 +518,29 @@ void ARRRandomDiceLand::AddCloud(const FVector& Middle, float Size, float Flatte
 	}
 }
 
+void ARRRandomDiceLand::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	// Placed in a level (/Game/Maps/DiceLand): the editor shows the land, and its navmesh, as the game will build it
+	if (!bBuilt && GetWorld() && GetWorld()->WorldType == EWorldType::Editor)
+	{
+		Build();
+		bBuilt = true;
+	}
+}
+
 void ARRRandomDiceLand::BeginPlay()
 {
 	Super::BeginPlay();
+	// Nothing of an editor preview comes along into play; built afresh
+	TInlineComponentArray<UActorComponent*> Preview(this);
+	for (UActorComponent* Component : Preview)
+	{
+		if (Component != RootComponent)
+		{
+			Component->DestroyComponent();
+		}
+	}
 	Build();
 	bBuilt = true;
 }
@@ -545,16 +568,13 @@ void ARRRandomDiceLand::Build()
 	}
 
 	// The floor under the actor: the land stands on it, and hides it (the tiles are the ground's looks; it stays solid)
-	FHitResult Hit;
-	const FVector Start = GetActorLocation() + FVector(0.f, 0.f, FloorSearchUp);
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomDiceLand), false, this);
-	if (!World->LineTraceSingleByChannel(Hit, Start, Start - FVector(0.f, 0.f, FloorSearchUp + FloorSearchDown), ECC_Visibility, Params) || !Hit.GetComponent())
+	UPrimitiveComponent* Floor = RRMapFloor::Find(this, FloorSearchUp, FloorSearchDown, FloorZ);
+	if (!Floor)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("RRRandom: no floor under the dice land at %s."), *GetActorLocation().ToString());
 		return;
 	}
-	FloorZ = Hit.ImpactPoint.Z;
-	Hit.GetComponent()->SetVisibility(false);
+	Floor->SetVisibility(false);
 	const FVector2D Center(GetActorLocation().X, GetActorLocation().Y);
 
 	Dice = MakeInstances(Die, false, 6);
@@ -587,7 +607,8 @@ void ARRRandomDiceLand::Build()
 	RimWalls->SetCollisionObjectType(ECC_WorldDynamic);
 	RimWalls->SetCollisionResponseToAllChannels(ECR_Ignore);
 	RimWalls->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
-	Floaters = RainbowDie ? MakeInstances(RainbowDie, false, 0) : nullptr;
+	RimWalls->SetCanEverAffectNavigation(true);
+	Floaters =RainbowDie ? MakeInstances(RainbowDie, false, 0) : nullptr;
 
 	// Ground: a cushion tile per cell on the island (checkered, now and then a lime, lemon or pink one on the grass), and
 	// a darker slab under each so the seams between the puffy tiles read as grout and not as holes; flowers on the grass
@@ -655,7 +676,7 @@ void ARRRandomDiceLand::Build()
 	const float PedestalTop = 195.f;
 	if (RainbowDie)
 	{
-		Centerpiece = NewObject<UStaticMeshComponent>(this);
+		Centerpiece = NewObject<UStaticMeshComponent>(this, NAME_None, RF_Transient);
 		Centerpiece->SetStaticMesh(RainbowDie);
 		Centerpiece->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Centerpiece->SetMobility(EComponentMobility::Movable);
@@ -669,7 +690,7 @@ void ARRRandomDiceLand::Build()
 		const FColor HaloColors[] = { FColor::White, FColor(226, 194, 255) };
 		for (int32 Index = 0; Index < 2; ++Index)
 		{
-			UStaticMeshComponent* Halo = NewObject<UStaticMeshComponent>(this);
+			UStaticMeshComponent* Halo = NewObject<UStaticMeshComponent>(this, NAME_None, RF_Transient);
 			Halo->SetStaticMesh(Ring);
 			Halo->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 			Halo->SetMobility(EComponentMobility::Movable);

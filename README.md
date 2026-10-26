@@ -29,12 +29,14 @@
 | 1 ~ 7 | `RRGun <이름 또는 번호>` | 총 바로 받기: 1 PISTOL, 2 MINIGUN, 3 SMG, 4 RIFLE, 5 BLASTER, 6 CANNON, 7 FINGER(폼 핑거) (무기 주사위 6 품질, 랜덤 편차 없음, 탄창 가득) |
 | (콘솔만) | `RROwnDie [눈] [1]` | 내 전용 주사위가 그 눈으로 바로 착지(기본 6). 뒤에 `1` 을 붙이면 봇까지 모든 캐릭터 |
 | (콘솔만) | `RRRoll` | E 처럼 모아 둔 주사위 하나 굴리기(스크립트 테스트용, `RRUltimate` 다음에 쓰면 궁극기) |
+| (콘솔만) | `RRTeamUltimate` | 우리 팀 모두(봇 포함)가 궁극기 주사위 하나씩 받음. 봇은 평소처럼 알아서 굴려 적이 많은 곳에 씀(영상 촬영용) |
 | (콘솔만) | `RRStudioCam [각도] [거리] [높이]` | 내 동물친구(로봇에 타면 로봇)를 고정 각도로 따라가며 봄: 0 정면, 90 오른쪽 옆, 180 뒤, -90 왼쪽 옆. 거리·높이 0 이면 알맞게(로봇 2100·120, 동물친구 620·40). `RRStudioCamOff` 로 원래 시점 |
 | (콘솔만) | `RRSlomo [배속]` | 게임 전체 속도(기본 0.25, 1 이면 원래대로) |
 | (콘솔만) | `RRRobotFire [거리]` | 내가 탄 별 팀 로봇이 위쪽 몸 앞 그 거리로 로켓 주먹 발사(공격석에 누가 타 있어야 함) |
 | (콘솔만) | `RRWreck [반지름] [1]` | 화면 가운데(조준점)가 가리키는 곳의 구조물 부수기(기본 반지름 300 공 모양, 뒤에 `1` 이면 위아래 전체 기둥 모양). 복구 대기는 `rr.Wreck.RestoreSeconds`(기본 15초) |
 
 - 서버에서 처리하므로 온라인 게임 중에도 내 캐릭터에만 적용됩니다. 시간은 플레이어 컨트롤러의 `CheatSeconds`, 총 품질은 `CheatGunQuality`.
+- 실행 인자 `-RRNoOnlinePanel`: 미니맵 아래 연결 상태·키 안내·치트 줄을 숨김(영상 녹화용).
 - F5 는 엔진 디버그 키(셰이더 복잡도 화면)라 피했습니다. 화면 왼쪽 위에 치트 키 안내가 나옵니다.
 
 ## 타이틀 화면
@@ -51,7 +53,7 @@
 W/S 또는 화살표로 고르고 Enter/Space로 누릅니다. 마우스를 올리면 선택되고 클릭하면 눌립니다.
 Esc는 NETWORK 화면에서 뒤로 가기, 참가/열기 진행 중에는 취소입니다. 진행 상황과 실패 이유(`No game found...`, `Disconnected...`)는 버튼 아래 분홍 줄에 나옵니다.
 
-- 타이틀 맵은 엔진의 빈 맵 `/Engine/Maps/Entry` 이고, `DefaultEngine.ini` 의 `GameModeMapPrefixes` 가 이름이 `Entry` 로 시작하는 맵에 `RRRandomTitleGameMode` 를 씁니다. 플레이 맵은 `DefaultGame.ini` 의 `ArenaMap`(지금은 `Template_Default`) 입니다. 우리 맵을 만들면 `ArenaMap` 을 바꿉니다.
+- 타이틀 맵은 엔진의 빈 맵 `/Engine/Maps/Entry` 이고, `DefaultEngine.ini` 의 `GameModeMapPrefixes` 가 이름이 `Entry` 로 시작하는 맵에 `RRRandomTitleGameMode` 를 씁니다. 플레이 맵은 탑뷰면 `DefaultGame.ini` 의 `ArenaMap`(지금은 `Template_Default`), 3인칭이면 고른 맵의 레벨(`DiceTownMap`/`DiceLandMap`/`StudioMap`, 아래 [3인칭 맵 레벨](#3인칭-맵-레벨과-내비메시-87차)) 입니다.
 - 에디터에서 Alt+P(PIE)는 지금 열린 레벨에서 바로 플레이하므로 타이틀을 거치지 않습니다. 또 PIE에서는 Esc가 플레이 종료라서 타이틀로 가려면 콘솔 명령 `RRTitle` 을 씁니다.
 - 실행 옵션 `-RRSolo`, `-RRHost`, `-RRJoin` 을 붙이면 타이틀을 건너뜁니다.
 
@@ -212,12 +214,21 @@ Esc는 NETWORK 화면에서 뒤로 가기, 참가/열기 진행 중에는 취소
 - 같이 쓰는 콘솔(치트 표): `RRStudioCam 90`(옆에서 따라가며 보기), `RRSlomo 0.25`(느리게), `RRRobotFire`(로봇 로켓 발사), `RRStarCars` + F(합체).
 - 예: `UnrealEditor.exe RRRandom.uproject -game -RRMap=Studio -RRSpecies=Tiger` → `RRStudioCam 90` → WASD 로 걷기.
 
+### 3인칭 맵 레벨과 내비메시 (87차)
+
+- 3인칭 맵은 레벨이 따로 있습니다: `/Game/Maps/DiceTown`, `/Game/Maps/DiceLand`, `/Game/Maps/Studio`. 엔진 `Template_Default`(하늘·해·바닥·플레이어 스타트)에 맵 액터(`RRRandomDiceTown` 등)와 맵을 덮는 `NavMeshBoundsVolume` 을 놓은 것입니다. 타이틀에서 3인칭 맵을 고르면(또는 `-RRThirdPerson -RRMap=...`) 그 레벨을 엽니다. 레벨이 없으면 예전처럼 `ArenaMap` 위에 코드로 세움.
+- 에디터에서 레벨을 열면 맵이 보입니다(맵 액터가 에디터에서도 스스로 지어짐, 저장은 안 됨). **P** 키로 내비메시를 볼 수 있고, 그대로 Alt+P 하면 3인칭으로 시작합니다(맵 액터가 놓인 레벨은 항상 3인칭).
+- 내비메시는 게임이 시작해 맵이 지어질 때 만들어지고(주사위 마을 약 3초, 카운트다운 안), 구조물이 부서지거나 복구되면 그 자리만 다시 만듭니다(`RuntimeGeneration=Dynamic`). 설정은 `DefaultEngine.ini` 의 `NavigationSystemV1`(에이전트 "Brawler": 반지름 42, 키 192)과 `RecastNavMesh`(한 블록 100 은 계단처럼 오름, 경사 46°, 타일 2000).
+- 맵이 막는 것(숨은 충돌 상자 `Solid`, 테두리 벽)만 내비메시에 들어갑니다. 봇은 길을 따라가다 턱 앞에서 멈추면 점프로 오릅니다(예전 그대로).
+- 레벨을 다시 만들려면: `UnrealEditor-Cmd RRRandom.uproject -run=pythonscript "-script=C:\work\char-pipeline\scripts\ue_make_tps_levels.py --force"`.
+- 확인: 콘솔 `show navigation`, `rr.Bot.LogStalls 1`(막힌 봇 로그에 경로가 `navmesh` 인지 `walking graph` 인지 나옴).
+
 ### 구조물 파괴와 복구 (60차)
 
 - **부수는 것**: 호랑이 궁극기(발 내려치기마다 범위의 0.8 반지름, 위아래 전체), 드래곤 궁극기(브레스가 지나가는 길을 따라 450 마다 한 토막씩, 브레스 폭의 0.85), 합체 로봇의 로켓 주먹(동물친구가 아닌 곳에 맞으면 반지름 250 공 모양). 부서질 때 그 블록 색의 파편이 튀고 바닥에서 튕김.
 - **맵마다**: 주사위 마을은 바닥 위 블록을 **한 칸씩** 깎아 냄(벽에 구멍, 집이 잘려 속이 보임). 지붕·Tripo 나무·덤불·가로등·차양·계단은 닿으면 통째로 사라짐. 거대 주사위와 바닥(레벨 0 이하)은 안 부서짐. 주사위 랜드는 엄폐물(주사위 벽·덤불·블록·나무) 하나하나가 통째로, 가운데 받침대는 그대로. 탑뷰 섬은 엄폐 블록(`ARRRandomCover`)이 통째로, 언덕·절벽은 그대로.
 - **복구**: 부서지고 `rr.Wreck.RestoreSeconds`(기본 15초)가 지난 뒤, 그 자리에 **아무도 없을 때**(동물친구 — 쓰러진 상태 포함, 사람이 탄 탈것, 승무원이 있는 로봇; 세워 둔 빈 차는 안 막음) 블록이 통통 튀며 자라서 원래대로 + 반짝임. 드래곤 길은 토막마다 따로 복구.
-- 봇의 길 찾기(주사위 마을)와 미니맵은 부서진 걸 모름(원래 모양 기준).
+- 봇의 내비메시는 부서지고 복구될 때마다 그 자리만 다시 만들어 따라감(87차). 미니맵과 주사위 마을의 예전 걷기 그래프(내비메시가 만들어지기 전에만 씀)는 부서진 걸 모름(원래 모양 기준).
 
 ### 머리 위 표시 (모든 캐릭터)
 
@@ -331,7 +342,7 @@ EOS는 P2P 연결을 중계해 주므로 포트 포워딩이 필요 없습니다
 - `ARRRandomTitleGameMode` / `ARRRandomTitlePlayerController` / `ARRRandomTitleHUD` — 타이틀 화면. 폰 없음. 컨트롤러가 메뉴 상태(메인/NETWORK, 선택된 버튼)와 키/클릭을 처리하고 세션 서브시스템을 부름. HUD가 캔버스에 배경 그림(화면을 덮게 잘라 맞춤)과 그 위 연출(주사위 스프라이트 시트, 더하기 블렌드 빛·반짝임, 연기 퍼프), 버튼과 상태를 그리고 마우스가 올라간 버튼을 선택함. 그림 속 주사위·총구 위치는 그림 픽셀 좌표(`DieSpot`, `MuzzleSpot`)라 그림을 바꾸면 같이 고쳐야 함. 그림이 없으면 예전 어두운 배경
 - `URRRandomMovementComponent` — 캐릭터 이동 + 비행 중 글라이드(뗀 뒤 상승 제동, 느린 하강, 낙하 속도 제한)
 - `ARRRandomCharacter` — 플레이어와 봇이 같이 쓰는 탑뷰 여우 캐릭터. 팀, 체력/회복, 점프/엄폐물 오르기(`TryClimb`), 엄폐물 위에서만 가장자리로 걸어 내려가기, 15발 탄창/자동 연사/재장전(`StartReload`), `FireAt` 으로 투사체 발사, 쓰러짐(쓰러짐 애니메이션, 없으면 래그돌)과 시작 위치 부활. 애니메이션은 움직이면 걷기, 서서 쏘는 중이면 사격(`ShotCount` 복제로 모든 기기에서), 아니면 대기. 체력/탄약/무기/생존 여부를 복제하고, 참가자는 `Server...` RPC로 발사/재장전/주사위/오르기를 요청
-- `ARRRandomAIController` — 봇. 전장의 안개를 따름: 팀 시야(`ARRRandomCharacter::IsSeenByTeam`) 안의 적만 알고, 놓치면 마지막으로 본 곳을 4초 찾다가 아레나 가운데 주변을 랜덤 지점으로 순찰. 보이는 적을 우선으로 가장 가까운 적을 쫓아 자기 선호 거리를 유지하며 좌우로 움직임. 엄폐물에 가리지 않을 때만 반응 시간 뒤 짧게 끊어 쏘고, 재장전 중이거나 체력 45% 아래, 또는 맞고 있는데 체력 70% 아래면 적 반대편 엄폐물 뒤로 숨음. 적이 안 보이면 미리 재장전. 싸움이 시작되면 주사위를 굴림. 내비메시 없이 직접 이동하고 앞에 엄폐물이 있으면 옆으로 비켜 감(앞 탐지는 무릎 높이부터 머리까지 몸통 캡슐, 투명 테두리 벽 포함). 걸으려는데 0.6초 못 움직이면 막은 면을 따라 잠깐 우회, 세 번이면 그 목표(엄폐 위치·순찰 지점·경로)를 버리고, 3초 넘게 제자리면 다른 방향으로 빠져나감(62차). 콘솔 `rr.Bot.LogStalls 1` 이면 3초 넘게 제자리인 봇을 로그로 남김(어디서, 무엇에 막혔는지)
+- `ARRRandomAIController` — 봇. 전장의 안개를 따름: 팀 시야(`ARRRandomCharacter::IsSeenByTeam`) 안의 적만 알고, 놓치면 마지막으로 본 곳을 4초 찾다가 아레나 가운데 주변을 랜덤 지점으로 순찰. 보이는 적을 우선으로 가장 가까운 적을 쫓아 자기 선호 거리를 유지하며 좌우로 움직임. 엄폐물에 가리지 않을 때만 반응 시간 뒤 짧게 끊어 쏘고, 재장전 중이거나 체력 45% 아래, 또는 맞고 있는데 체력 70% 아래면 적 반대편 엄폐물 뒤로 숨음. 적이 안 보이면 미리 재장전. 싸움이 시작되면 주사위를 굴림. 3인칭 맵 레벨에선 가까운 싸움이 아닐 때 내비메시 경로(`FindNavRoute`, 아직 안 만들어졌으면 주사위 마을의 걷기 그래프)를 따라가고, 그 밖(탑뷰 섬)에선 직접 이동하며 앞에 엄폐물이 있으면 옆으로 비켜 감(앞 탐지는 무릎 높이부터 머리까지 몸통 캡슐, 투명 테두리 벽 포함). 걸으려는데 0.6초 못 움직이면 막은 면을 따라 잠깐 우회, 세 번이면 그 목표(엄폐 위치·순찰 지점·경로)를 버리고, 3초 넘게 제자리면 다른 방향으로 빠져나감(62차). 콘솔 `rr.Bot.LogStalls 1` 이면 3초 넘게 제자리인 봇을 로그로 남김(어디서, 무엇에 막혔는지)
 - `ARRRandomVehicle` — 탈것(킥보드/오토바이/자동차, Tripo 모델). 서 있을 땐 충돌 없는 장식, 타면 탄 캐릭터의 캡슐에 붙어 같이 움직이고 캐릭터 이동에 종류별 핸들링(`FRRVehicleHandling`: 속도 배율, 가속, 접지력, 회전 속도, 감속, 드리프트 기울기)을 줌. 탑승자/종류 복제. 게임 모드가 시작할 때 6대 배치(`bSpawnVehicles`). 메시는 `C:\work\char-pipeline\scripts\blender_vehicles.py` → `ue_import_props.py` → `/Game/Vehicles/SM_*` 별 팀 차 3대(`StarChest/StarArms/StarLegs`, 좌석 나란히/앞뒤 `DriverSeatY`/`RearSeatY`, `bRams`)는 합체 로봇(`ARRRandomStarRobot`) 부품
 - `ARRRandomStarRobot` — 별 팀 합체 로봇. 세 별 차(`ERRVehicleKind::StarChest/StarArms/StarLegs`)가 `GatherRadius` 800 안에 모이면(`FindGathered`) F(`CanStartCombine`/`StartCombine`)로 스폰, 차들은 `SetCombined` 로 숨김. 10초 합체 연출은 모든 머신이 복제된 시작 시각·차 시작 위치로 직접 그림(`PoseCombining`, 비트마다 `PlayBeat` 이펙트), 쓰러지면 `BreakApart(true)` 로 취소. 완성 후 좌석 3개(`ERRRobotSeat` Move/Attack/Defend): 이동 담당 캡슐에 로봇이 붙어 다니고(탈것처럼), 나머지는 로봇에 붙어 숨겨짐(캐릭터 `SetRobotSeat`/`ApplyRobotSeat`). 사격 버튼은 `CrewFire` 로(로켓 주먹 = `ARRRandomProjectile` Legendary 3.5배, 방어막 유지), 맞는 건 `Hull` 캡슐과 첫 탑승자(`IsDamageProxy`)가 로봇 `TakeDamage` 로 넘김. 메시는 Tripo 로봇을 `blender_robot_parts.py` 로 다리·몸통·머리·양팔 다섯 조각(`/Game/Vehicles/SM_StarRobot*`)
 - `ARRRandomWreckage` — 구조물 파괴와 복구(60차). 서버가 `Wreck(From, To, Radius, bColumn)` 로 파괴 목록(`FRRWreck`: 선분 + 반지름, 기둥이면 높이 무시)을 늘리고 복제, 모든 머신이 목록에 맞춰 자기 맵을 깎고 되돌림(`Apply`). 주사위 마을은 `ARRRandomDiceTown::ApplyWrecks`(칸별 `Broken` 비트, 드러난 속 블록은 `CellBlocks` 에 새로 그림, 병합 충돌 상자 `GridBoxes` 는 깨진 칸을 빼고 다시 병합해 `WreckSolid` 로, 지붕·나무·계단 등 모델은 `Gone` 에 원래 자리 보관), 주사위 랜드는 숨은 상자 + 그 위 모습(주사위·공·줄기) 묶음, 섬은 `ARRRandomCover` 액터째. 서버 Tick 이 `rr.Wreck.RestoreSeconds` 지난 것 중 사람이 없는 것(`IsOccupied`)을 지움. 파편은 `SM_BTBlock` 풀(420), 복구는 0.4초 통통 자라기

@@ -52,6 +52,9 @@ public:
 	UInstancedStaticMeshComponent* GetWreckSolid() const { return Solid; }
 	void GetWreckLooks(TArray<UInstancedStaticMeshComponent*>& OutLooks) const { OutLooks = { Dice.Get(), BlankDice.Get(), Balls.Get(), Trunks.Get() }; }
 
+	/** Placed in a level (/Game/Maps/DiceLand), the editor builds it too, never saved (RF_Transient), to show it and its navmesh. */
+	virtual void OnConstruction(const FTransform& Transform) override;
+
 protected:
 	virtual void BeginPlay() override;
 

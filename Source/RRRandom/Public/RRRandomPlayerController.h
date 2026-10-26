@@ -104,6 +104,10 @@ public:
 	UFUNCTION(Exec)
 	void RRUltimate();
 
+	/** Cheat for scripted captures: every brawler on my team, bots too, stores an ultimate die (bots roll theirs as usual; console only). Not in shipping builds. */
+	UFUNCTION(Exec)
+	void RRTeamUltimate();
+
 	/** Cheat: a dice meteor comes down 700 in front of my brawler, after its usual warning (console only). Not in shipping builds. */
 	UFUNCTION(Exec)
 	void RRMeteor();
@@ -350,6 +354,8 @@ private:
 	void ServerCheatGod();
 	UFUNCTION(Server, Reliable)
 	void ServerCheatUltimate();
+	UFUNCTION(Server, Reliable)
+	void ServerCheatTeamUltimate();
 	UFUNCTION(Server, Reliable)
 	void ServerCheatMeteor();
 	UFUNCTION(Server, Reliable)
