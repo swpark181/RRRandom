@@ -8,6 +8,7 @@
 #include "Interfaces/OnlineIdentityInterface.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
+#include "Misc/PackageName.h"
 #include "Misc/Parse.h"
 #include "Online/OnlineSessionNames.h"
 #include "OnlineSessionSettings.h"
@@ -486,7 +487,22 @@ void URRRandomSessionSubsystem::OnTravelFailure(UWorld* World, ETravelFailure::T
 FString URRRandomSessionSubsystem::GetArenaMap() const
 {
 	const UWorld* World = GetGameInstance()->GetWorld();
-	return World && !IsOnTitle() ? UWorld::RemovePIEPrefix(World->GetOutermost()->GetName()) : ArenaMap;
+	return World && !IsOnTitle() ? UWorld::RemovePIEPrefix(World->GetOutermost()->GetName()) : GetStartMap();
+}
+
+FString URRRandomSessionSubsystem::GetStartMap() const
+{
+	if (bThirdPersonMode)
+	{
+		const FString& Level = ThirdPersonMap == ERRThirdPersonMap::DiceLand ? DiceLandMap
+			: ThirdPersonMap == ERRThirdPersonMap::Studio ? StudioMap : DiceTownMap;
+		if (!Level.IsEmpty() && FPackageName::DoesPackageExist(Level))
+		{
+			return Level;
+		}
+		UE_LOG(LogTemp, Warning, TEXT("RRRandom: no level %s, the map is built on %s instead."), *Level, *ArenaMap);
+	}
+	return ArenaMap;
 }
 
 void URRRandomSessionSubsystem::OpenTitle()

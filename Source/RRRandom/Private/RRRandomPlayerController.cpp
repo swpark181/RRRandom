@@ -674,6 +674,30 @@ void ARRRandomPlayerController::RRUltimate()
 	ServerCheatUltimate();
 }
 
+void ARRRandomPlayerController::RRTeamUltimate()
+{
+	ServerCheatTeamUltimate();
+}
+
+void ARRRandomPlayerController::ServerCheatTeamUltimate_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+	const ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	if (!RandomCharacter)
+	{
+		return;
+	}
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		if (It->GetTeam() == RandomCharacter->GetTeam() && It->IsAlive() && !It->IsDecoy())
+		{
+			It->GetDiceBuffs()->GiveUltimateDie();
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, %s gets an ultimate die (team)."), *It->GetName());
+		}
+	}
+#endif
+}
+
 void ARRRandomPlayerController::RRMeteor()
 {
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, asking for a meteor."));

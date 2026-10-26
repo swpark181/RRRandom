@@ -66,12 +66,19 @@ void ARRRandomGameMode::InitGame(const FString& MapName, const FString& Options,
 	// Dice Town (the third person map picked on the title) is big: the teams start far apart, at their bases. Set before
 	// anyone logs in, since the host's own brawler is placed as it does (on the level's floor, level with the town's)
 	const URRRandomSessionSubsystem* Sessions = GetGameInstance() ? GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>() : nullptr;
-	bDiceTown = bSpawnDiceLand && Sessions && Sessions->IsThirdPersonMode() && Sessions->GetThirdPersonMap() == ERRThirdPersonMap::DiceTown;
+	// A third person map's level (/Game/Maps, URRRandomSessionSubsystem::GetStartMap) has its map actor placed: that map,
+	// played third person whatever was picked (so the level also plays straight from the editor)
+	UWorld* World = GetWorld();
+	const bool bPlacedTown = static_cast<bool>(TActorIterator<ARRRandomDiceTown>(World));
+	const bool bPlacedStudio = static_cast<bool>(TActorIterator<ARRRandomStudio>(World));
+	bPlacedThirdPersonMap = bPlacedTown || bPlacedStudio || static_cast<bool>(TActorIterator<ARRRandomDiceLand>(World));
+	const bool bPicked = !bPlacedThirdPersonMap && bSpawnDiceLand && Sessions && Sessions->IsThirdPersonMode();
+	bDiceTown = bPlacedTown || (bPicked && Sessions->GetThirdPersonMap() == ERRThirdPersonMap::DiceTown);
 	if (bDiceTown)
 	{
 		TeamSpawnDistance = ARRRandomDiceTown::TeamSpawnDistance;
 	}
-	bStudio = bSpawnDiceLand && Sessions && Sessions->IsThirdPersonMode() && Sessions->GetThirdPersonMap() == ERRThirdPersonMap::Studio;
+	bStudio = bPlacedStudio || (bPicked && Sessions->GetThirdPersonMap() == ERRThirdPersonMap::Studio);
 	if (bStudio)
 	{
 		TeamSpawnDistance = ARRRandomStudio::TeamSpawnDistance;
@@ -102,8 +109,9 @@ void ARRRandomGameMode::StartPlay()
 	if (ARRRandomGameState* State = GetGameState<ARRRandomGameState>())
 	{
 		State->SetScoreToWin(ScoreToWin);
-		// Third person or the top view, as picked on this machine's title (or -RRThirdPerson)
-		State->SetThirdPersonMode(Sessions && Sessions->IsThirdPersonMode());
+		// Third person or the top view, as picked on this machine's title (or -RRThirdPerson); a third person map's level is
+		// always third person
+		State->SetThirdPersonMode(bPlacedThirdPersonMap || (Sessions && Sessions->IsThirdPersonMode()));
 		const float PlayStart = GetWorld()->GetTimeSeconds() + StartCountdown;
 		State->SetPlayStartTime(PlayStart);
 		if (bMeteorRush)
@@ -121,7 +129,7 @@ void ARRRandomGameMode::StartPlay()
 
 	// Found on the bare level, before anything is built on its floor
 	GetArenaCenter();
-	if (bSpawnDiceLand && ARRRandomGameState::IsThirdPersonMode(this))
+	if ((bSpawnDiceLand || bPlacedThirdPersonMap) && ARRRandomGameState::IsThirdPersonMode(this))
 	{
 		// The third person map brings its own ground and cover; it goes up before the bots, whose floor traces land on it
 		if (bStudio)

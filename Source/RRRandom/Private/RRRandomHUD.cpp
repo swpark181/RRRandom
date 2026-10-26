@@ -987,8 +987,18 @@ void ARRRandomHUD::DrawOreFeedback(const ARRRandomCharacter* Viewer)
 void ARRRandomHUD::DrawOnlinePanel()
 {
 	// Top left under the minimap: how this game is connected, the keys, and the last thing the online code did
+	// (none with -RRNoOnlinePanel, for recording videos)
+	static const bool bNoOnlinePanel = []
+	{
+		const bool bOff = FParse::Param(FCommandLine::Get(), TEXT("RRNoOnlinePanel"));
+		if (bOff)
+		{
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: online panel hidden for recording (-RRNoOnlinePanel)."));
+		}
+		return bOff;
+	}();
 	const URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>();
-	if (!Sessions)
+	if (bNoOnlinePanel || !Sessions)
 	{
 		return;
 	}

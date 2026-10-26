@@ -1,5 +1,6 @@
 #include "RRRandomDiceTown.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomMapFloor.h"
 #include "RRRandomWreckage.h"
 #include "EngineUtils.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -358,7 +359,8 @@ void ARRRandomDiceTown::Both(const FFrame& Frame, TFunctionRef<void(const FFrame
 
 UInstancedStaticMeshComponent* ARRRandomDiceTown::MakeInstances(UStaticMesh* Mesh, UMaterialInterface* Material, bool bSolid, int32 CustomFloats)
 {
-	UInstancedStaticMeshComponent* Instances = NewObject<UInstancedStaticMeshComponent>(this);
+	// Never saved: the level's editor preview is built again on load, the game's at BeginPlay
+	UInstancedStaticMeshComponent* Instances = NewObject<UInstancedStaticMeshComponent>(this, NAME_None, RF_Transient);
 	Instances->SetStaticMesh(Mesh);
 	if (Material)
 	{
@@ -370,7 +372,8 @@ UInstancedStaticMeshComponent* ARRRandomDiceTown::MakeInstances(UStaticMesh* Mes
 	Instances->NumCustomDataFloats = CustomFloats;
 	Instances->SetCollisionProfileName(bSolid ? UCollisionProfile::BlockAll_ProfileName : UCollisionProfile::NoCollision_ProfileName);
 	Instances->SetGenerateOverlapEvents(false);
-	Instances->SetCanEverAffectNavigation(false);
+	// The navmesh (the bots' routes) is made from what stops things
+	Instances->SetCanEverAffectNavigation(bSolid);
 	Instances->SetupAttachment(RootComponent);
 	// Instances are placed in world space
 	Instances->SetUsingAbsoluteLocation(true);
@@ -919,9 +922,28 @@ void ARRRandomDiceTown::AddCloud(const FVector& Middle, float Size, FRandomStrea
 // ---------------------------------------------------------------------------------------------------------------------
 // Building the town
 
+void ARRRandomDiceTown::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	// Placed in a level (/Game/Maps/DiceTown): the editor shows the town, and its navmesh, as the game will build it
+	if (!bBuilt && GetWorld() && GetWorld()->WorldType == EWorldType::Editor)
+	{
+		Build();
+	}
+}
+
 void ARRRandomDiceTown::BeginPlay()
 {
 	Super::BeginPlay();
+	// Nothing of an editor preview comes along into play; built afresh
+	TInlineComponentArray<UActorComponent*> Preview(this);
+	for (UActorComponent* Component : Preview)
+	{
+		if (Component != RootComponent)
+		{
+			Component->DestroyComponent();
+		}
+	}
 	Build();
 }
 
@@ -942,16 +964,13 @@ void ARRRandomDiceTown::Build()
 	}
 
 	// The floor under the actor: the town stands on it and hides it (its own ground blocks are solid too)
-	FHitResult Hit;
-	const FVector Start = GetActorLocation() + FVector(0.f, 0.f, FloorSearchUp);
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomDiceTown), false, this);
-	if (!World->LineTraceSingleByChannel(Hit, Start, Start - FVector(0.f, 0.f, FloorSearchUp + FloorSearchDown), ECC_Visibility, Params) || !Hit.GetComponent())
+	UPrimitiveComponent* Floor = RRMapFloor::Find(this, FloorSearchUp, FloorSearchDown, FloorZ);
+	if (!Floor)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("RRRandom: no floor under the dice town at %s."), *GetActorLocation().ToString());
 		return;
 	}
-	FloorZ = Hit.ImpactPoint.Z;
-	Hit.GetComponent()->SetVisibility(false);
+	Floor->SetVisibility(false);
 
 	// The dreamier pass (round 47): on unless -RRTownClassic asks for the town as it was (and only with its shapes imported)
 	PuffMesh = LoadMesh(TEXT("SM_BTPuff"));
@@ -1026,6 +1045,7 @@ void ARRRandomDiceTown::Build()
 	RimWalls->SetCollisionObjectType(ECC_WorldDynamic);
 	RimWalls->SetCollisionResponseToAllChannels(ECR_Ignore);
 	RimWalls->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	RimWalls->SetCanEverAffectNavigation(true);
 	const FVector2D Center(GetActorLocation().X, GetActorLocation().Y);
 	for (int32 Segment = 0; Segment < RimWallSegments; ++Segment)
 	{

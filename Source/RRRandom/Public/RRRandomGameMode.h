@@ -169,8 +169,10 @@ private:
 	void SpawnDiceLandIfNoneExists();
 	void SpawnDiceTownIfNoneExists();
 	void SpawnStudioIfNoneExists();
-	/** This game is on Dice Town (decided in InitGame, from this machine's title picks). */
+	/** This game is on Dice Town (decided in InitGame: its level, or this machine's title picks). */
 	bool bDiceTown = false;
+	/** The level has a third person map placed in it (Dice Town, Dice Land or the studio): one of the /Game/Maps levels. */
+	bool bPlacedThirdPersonMap = false;
 	/** This game is on the studio (-RRMap=Studio). */
 	bool bStudio = false;
 	/** This game is played by Meteor Rush's rule (ERRMatchRule, picked on this machine's title). */

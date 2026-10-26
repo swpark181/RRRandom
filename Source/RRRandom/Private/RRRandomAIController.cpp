@@ -15,6 +15,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "HAL/IConsoleManager.h"
+#include "NavigationSystem.h"
 
 namespace
 {
@@ -53,6 +54,9 @@ namespace
 	constexpr float RouteRefreshDistance = 300.f;
 	constexpr float RouteArriveRadius = 35.f;
 	constexpr float RouteStuckJumpTime = 0.5f;
+	// Onto the navmesh: the bot's feet from this close; a goal (maybe up in the air: a flyer, a jump) from this far round it
+	const FVector NavFeetExtent(200.f, 200.f, 400.f);
+	const FVector NavGoalExtent(400.f, 400.f, 1500.f);
 	// Between bursts with this few rounds left, the bot reloads instead of running dry mid-fight
 	constexpr int32 LowAmmo = 3;
 	// BurstSize is meant for a magazine this big; other guns scale it
@@ -229,6 +233,7 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		bLookedForTown = Town.IsValid() || !It;
 	}
 	const ARRRandomDiceTown* Map = Town.Get();
+	const bool bRoutes = HasRoutes();
 
 	// Nobody in sight and no trail to follow: roam the middle until someone shows up (on a map with routes, anywhere on
 	// its ground, upstairs and rooftops included)
@@ -236,10 +241,17 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	if (!Opponent.IsValid() && LastSeenTimer <= 0.f && bHasArenaCenter
 		&& (PatrolTimer <= 0.f || FVector::Dist2D(Self->GetActorLocation(), PatrolGoal) <= ArenaCenterArriveRadius))
 	{
+		FNavLocation NavSpot;
+		const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
 		if (Map)
 		{
 			PatrolGoal = Map->GetRandomWalkSpot(Stream, RoutePatrolRadius);
 			PatrolTimer = RoutePatrolTime;
+		}
+		else if (bRoutes && Nav && Nav->GetRandomPointInNavigableRadius(ArenaCenter, PatrolRadiusMax, NavSpot))
+		{
+			PatrolGoal = NavSpot.Location;
+			PatrolTimer = Stream.FRandRange(PatrolTimeMin, PatrolTimeMax) * 2.f;
 		}
 		else
 		{
@@ -325,7 +337,7 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	}
 	// Meteor Rush: the ore (or home with it) unless an opponent is in sight and in range
 	const bool bRushing = bHasRushGoal && !bWantsCover && !(Target && bCanSee && Distance <= Self->GetAttackRange() * ShootRangeShare);
-	if (bRushing && !Map)
+	if (bRushing && !bRoutes)
 	{
 		const FVector ToGoal = RushGoal - (SelfLocation - FVector(0.f, 0.f, Self->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
 		Wanted = ToGoal.Size2D() > CoverArriveRadius ? ToGoal.GetSafeNormal2D() : FVector::ZeroVector;
@@ -333,7 +345,7 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	// On a map with routes, out of a close fight: along the route to the opponent, where it was last seen, or the roaming
 	// spot (feet heights)
 	bool bOnRoute = false;
-	if (Map && !bWantsCover && (bRushing || !(Target && bCanSee && Distance <= Self->GetAttackRange() * PreferredShare + DistanceSlack)))
+	if (bRoutes && !bWantsCover && (bRushing ||!(Target && bCanSee && Distance <= Self->GetAttackRange() * PreferredShare + DistanceSlack)))
 	{
 		const FVector Goal = bRushing ? RushGoal
 			: Target ? Target->GetActorLocation() - FVector(0.f, 0.f, Target->GetCapsuleComponent()->GetScaledCapsuleHalfHeight())
@@ -489,12 +501,14 @@ FVector ARRRandomAIController::FollowRoute(ARRRandomCharacter* Self, const FVect
 	const ARRRandomDiceTown* Map = Town.Get();
 	const FVector Feet = Self->GetActorLocation() - FVector(0.f, 0.f, Self->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 	RouteTimer -= DeltaSeconds;
-	if (Map && (RouteTimer <= 0.f || RouteIndex >= Route.Num() || FVector::Dist(Goal, RouteGoal) > RouteRefreshDistance))
+	if (HasRoutes() && (RouteTimer <= 0.f || RouteIndex >= Route.Num() || FVector::Dist(Goal, RouteGoal) > RouteRefreshDistance))
 	{
 		RouteTimer = RouteRefreshTime;
 		RouteGoal = Goal;
 		RouteIndex = 0;
-		if (!Map->FindPath(Feet, Goal, Route))
+		// The navmesh first (it knows what's smashed); Dice Town's walking graph while the navmesh is still being made
+		bNavRoute = FindNavRoute(Feet, Goal, Route);
+		if (!bNavRoute && !(Map && Map->FindPath(Feet, Goal, Route)))
 		{
 			Route.Reset();
 		}
@@ -521,6 +535,42 @@ FVector ARRRandomAIController::FollowRoute(ARRRandomCharacter* Self, const FVect
 		RouteTimer = FMath::Min(RouteTimer, 0.5f);
 	}
 	return Toward.GetSafeNormal2D();
+}
+
+bool ARRRandomAIController::HasRoutes() const
+{
+	if (Town.IsValid())
+	{
+		return true;
+	}
+	const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+	return Nav && Nav->GetDefaultNavDataInstance() != nullptr;
+}
+
+bool ARRRandomAIController::FindNavRoute(const FVector& Feet, const FVector& Goal, TArray<FVector>& OutPoints) const
+{
+	UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+	const ANavigationData* Data = Nav ? Nav->GetDefaultNavDataInstance(FNavigationSystem::DontCreate) : nullptr;
+	FNavLocation Start;
+	FNavLocation End;
+	if (!Data || !Nav->ProjectPointToNavigation(Feet, Start, NavFeetExtent, Data) || !Nav->ProjectPointToNavigation(Goal, End, NavGoalExtent, Data))
+	{
+		return false;
+	}
+	FPathFindingQuery Query(this, *Data, Start.Location, End.Location);
+	Query.SetAllowPartialPaths(true);
+	const FPathFindingResult Result = Nav->FindPathSync(Query);
+	if (!Result.IsSuccessful() || !Result.Path.IsValid())
+	{
+		return false;
+	}
+	const TArray<FNavPathPoint>& Points = Result.Path->GetPathPoints();
+	OutPoints.Reset(Points.Num());
+	for (int32 Index = 1; Index < Points.Num(); ++Index)
+	{
+		OutPoints.Add(Points[Index].Location);
+	}
+	return OutPoints.Num() > 0;
 }
 
 bool ARRRandomAIController::IsStillWorthRiding(const ARRRandomCharacter* Self, const ARRRandomVehicle* Ride) const
@@ -597,7 +647,7 @@ bool ARRRandomAIController::UpdateStarRobot(ARRRandomCharacter* Self, bool bInFi
 		if (Rival && ToRival.Size() <= RobotRivalSearchRadius)
 		{
 			const FVector Toward = ToRival.GetSafeNormal();
-			if (Town.IsValid() && ToRival.Size() > RobotDuelDistance * 3.f)
+			if (HasRoutes() && ToRival.Size() > RobotDuelDistance * 3.f)
 			{
 				Wanted = FollowRoute(Self, Rival->GetActorLocation(), DeltaSeconds);
 				bOnRoute = true;
@@ -633,7 +683,7 @@ bool ARRRandomAIController::UpdateStarRobot(ARRRandomCharacter* Self, bool bInFi
 		const FVector ToCars = (Gathered - Self->GetActorLocation()) * FVector(1.f, 1.f, 0.f);
 		if (ToCars.Size() <= RobotCrewSearchRadius && ToCars.Size() > ARRRandomStarRobot::CombineReach * 0.6f)
 		{
-			if (Town.IsValid())
+			if (HasRoutes())
 			{
 				Wanted = FollowRoute(Self, Gathered, DeltaSeconds);
 				bOnRoute = true;
@@ -665,7 +715,7 @@ bool ARRRandomAIController::UpdateStarRobot(ARRRandomCharacter* Self, bool bInFi
 		return true;
 	}
 	// A map with walking routes: along them, round the walls (to its feet), the last stretch straight at it
-	if (Town.IsValid() && Distance > ARRRandomStarRobot::BoardReach * 1.6f)
+	if (HasRoutes() && Distance > ARRRandomStarRobot::BoardReach * 1.6f)
 	{
 		Wanted = FollowRoute(Self, Robot->GetActorLocation(), DeltaSeconds);
 		bOnRoute = true;
@@ -1057,9 +1107,10 @@ void ARRRandomAIController::WatchProgress(const ARRRandomCharacter* Self, const 
 		}
 	}
 	const FVector Next = Route.IsValidIndex(RouteIndex) ? Route[RouteIndex] : FVector::ZeroVector;
-	UE_LOG(LogTemp, Log, TEXT("RRRandom: bot stall: %s (%s) at %s for %.1f s, wants %s, speed %.0f (max %.0f), %s, route %d/%d next %s, blocked by %s (%s) normal %s, nearest %s %.0f away (team %d)."),
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: bot stall: %s (%s) at %s for %.1f s, wants %s, speed %.0f (max %.0f), %s, route %d/%d (%s) next %s, blocked by %s (%s) normal %s, nearest %s %.0f away (team %d)."),
 		*Self->GetName(), Mode, *Location.ToCompactString(), ProgressTimer, *Way.ToCompactString(), Self->GetVelocity().Size2D(), Self->GetCharacterMovement()->MaxWalkSpeed,
-		Self->GetCharacterMovement()->IsMovingOnGround() ? TEXT("on ground") : TEXT("in the air"), RouteIndex, Route.Num(), *Next.ToCompactString(),
+		Self->GetCharacterMovement()->IsMovingOnGround() ? TEXT("on ground") : TEXT("in the air"), RouteIndex, Route.Num(),
+		bNavRoute ? TEXT("navmesh") : TEXT("walking graph"), *Next.ToCompactString(),
 		Hit.bBlockingHit ? *GetNameSafe(Hit.GetActor()) : TEXT("nothing"), Hit.bBlockingHit ? *GetNameSafe(Hit.GetComponent()) : TEXT(""),
 		*Hit.ImpactNormal.ToCompactString(), *GetNameSafe(Nearest), NearestDistance, Nearest ? Nearest->GetTeam() : -1);
 }

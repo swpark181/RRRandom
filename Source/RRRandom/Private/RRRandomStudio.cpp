@@ -1,4 +1,5 @@
 #include "RRRandomStudio.h"
+#include "RRRandomMapFloor.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
@@ -45,9 +46,28 @@ FBox ARRRandomStudio::GetFlightArea() const
 		FVector(Middle.X + GridHalf + 2000.f, Middle.Y + GridHalf + 2000.f, FloorZ + 3000.f));
 }
 
+void ARRRandomStudio::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	// Placed in a level (/Game/Maps/Studio): the editor shows the floor as the game will build it
+	if (!bBuilt && GetWorld() && GetWorld()->WorldType == EWorldType::Editor)
+	{
+		Build();
+	}
+}
+
 void ARRRandomStudio::BeginPlay()
 {
 	Super::BeginPlay();
+	// Nothing of an editor preview comes along into play; built afresh
+	TInlineComponentArray<UActorComponent*> Preview(this);
+	for (UActorComponent* Component : Preview)
+	{
+		if (Component != RootComponent)
+		{
+			Component->DestroyComponent();
+		}
+	}
 	Build();
 }
 
@@ -62,13 +82,9 @@ void ARRRandomStudio::Build()
 	}
 	// The level's floor under it: the studio's floor goes on top and hides it
 	FloorZ = GetActorLocation().Z;
-	FHitResult Hit;
-	const FVector Start = GetActorLocation() + FVector(0.f, 0.f, FloorSearchUp);
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomStudio), false, this);
-	if (World->LineTraceSingleByChannel(Hit, Start, Start - FVector(0.f, 0.f, FloorSearchUp + FloorSearchDown), ECC_Visibility, Params) && Hit.GetComponent())
+	if (UPrimitiveComponent* LevelFloor = RRMapFloor::Find(this, FloorSearchUp, FloorSearchDown, FloorZ))
 	{
-		FloorZ = Hit.ImpactPoint.Z;
-		Hit.GetComponent()->SetVisibility(false);
+		LevelFloor->SetVisibility(false);
 	}
 	auto Tinted = [&](UMeshComponent* Mesh, const FLinearColor& Color)
 	{
@@ -80,7 +96,8 @@ void ARRRandomStudio::Build()
 	};
 
 	// A wide slab, its top on the floor: stops everything like the ground does
-	Floor = NewObject<UStaticMeshComponent>(this);
+	// Never saved (nor the lines): the level's editor preview is built again on load, the game's at BeginPlay
+	Floor = NewObject<UStaticMeshComponent>(this, NAME_None, RF_Transient);
 	Floor->SetStaticMesh(Cube);
 	Floor->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
 	Floor->SetupAttachment(RootComponent);
@@ -91,7 +108,7 @@ void ARRRandomStudio::Build()
 
 	auto MakeLines = [&](const FLinearColor& Color)
 	{
-		UInstancedStaticMeshComponent* Lines = NewObject<UInstancedStaticMeshComponent>(this);
+		UInstancedStaticMeshComponent* Lines = NewObject<UInstancedStaticMeshComponent>(this, NAME_None, RF_Transient);
 		Lines->SetStaticMesh(Cube);
 		Lines->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
 		Lines->SetGenerateOverlapEvents(false);

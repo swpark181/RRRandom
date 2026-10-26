@@ -80,6 +80,20 @@ Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMem
 - (72차) 호랑이를 여우들처럼 털이 복슬거리게 다시 만들어(시안 A-2, 3D 재시도, 귀 뒷면 흰 반점 없음) 리깅하고 게임의 호랑이와 교체.
 - (73차) 캐릭터 선택이나 UI 에 나오는 사진은 컨셉아트 정면 사진으로.
 
+## 87차 — 3인칭 맵을 레벨로 + 내비메시 길찾기 (사용자: "봇들이 길을 잘 못찾는데 레벨에 navmesh가 없나?" → "이제 tps 맵은 레벨로 만들고 네비매쉬 깔아서 길찾기 되도록 해줘")
+
+- 레벨 `/Game/Maps/DiceTown`·`DiceLand`·`Studio`(`C:\work\char-pipeline\scripts\ue_make_tps_levels.py`, 사본 `Tools\char-pipeline\scripts\`): Template_Default + 맵 액터(게임 모드가 세우던 자리, `GetArenaCenter`) + `NavMeshBoundsVolume`(마을 18000 사방·바닥 -500~3500, 랜드 7400, 스튜디오 13000). `URRRandomSessionSubsystem::GetStartMap` 이 3인칭 선택에 맞는 레벨을 엶(`DiceTownMap` 등, 없으면 `ArenaMap`). 게임 모드는 레벨에 놓인 맵 액터로 맵과 3인칭을 정함(`bPlacedThirdPersonMap`).
+- 맵 액터 3종: `OnConstruction` 에서 에디터 월드면 미리보기로 `Build()`(컴포넌트 `RF_Transient` → 레벨 57KB), `BeginPlay` 는 남은 컴포넌트를 지우고 새로 지음. 레벨을 막 연 에디터엔 물리가 없어 바닥 트레이스가 실패 → `RRMapFloor::Find`(트레이스, 안 되면 넓은 충돌체 바운드). 막는 것(`Solid`, `WreckSolid`, `RimWalls`, 스튜디오 바닥)만 `CanEverAffectNavigation`.
+- `DefaultEngine.ini`: `SupportedAgents` "Brawler"(42/192/스텝 105 — 안 넣으면 엔진 기본 35/144 로 만들어짐), `RecastNavMesh` Dynamic·타일 2000·셀 25·경사 46. Build.cs 에 `NavigationSystem`.
+- 봇: `HasRoutes()`(내비메시 또는 마을 그래프), `FindNavRoute`(발/목표를 내비메시에 투영, 부분 경로 허용) → 실패하면 마을 `FindPath`. 주사위 랜드도 이제 경로를 따라감(순찰 지점도 내비메시에서). 막힘 로그에 경로 출처.
+- 확인(창 1280x720, 실시간): 마을 경로 6명 모두 완전 경로(직선 8000 → 8060~8163), 90초·70초 판 `bot stall` 0회(에이전트 35 로 만들어졌던 첫 판엔 3회, 걷기 그래프로 빠짐), 랜드 6명 완전 경로·35초 막힘 0, `RRWreck` 뒤 그 타일만 빨갛게 다시 만들어지고 0.5초 안에 복구, 탑뷰는 그대로 Template_Default + 섬. 에디터 커맨드릿으로 레벨 열면 마을 65,870 인스턴스·랜드 5,404·스튜디오 242 미리보기. 확인 못 함: 에디터 안 PIE(Alt+P), 온라인 참가자, 여러 번 부서진 뒤 장시간.
+
+## 86차 — 30초 하이라이트 영상 (사용자: "게임에서 tps, dice town 기준으로 캐릭터별 필살기나 로봇 합체 같은 하이라이트로 느껴지는 영상을 30초 짜리 하나 만들어줘")
+
+- 결과 `C:\work\char-pipeline\output\video\RRRandom_highlight_30s.mp4`(1080p60, 소리 없음), 스크립트 `output\video\scripts\`(경로가 세션 스크래치패드를 가리킴 — 다시 쓰려면 고칠 것).
+- 프레임 덤프(`-benchmark -fps -dumpmovie`)는 초당 약 3장이라 너무 느려 → 휴대용 ffmpeg gdigrab 실시간 녹화. 화면 150% 배율이라 `-ResX=1280 -ResY=720` 이 실제 1920x1080 창.
+- 새 치트: 실행 인자 `-RRNoOnlinePanel`(미니맵 아래 연결·치트 줄 숨김), 콘솔 `RRTeamUltimate`(우리 팀 봇까지 궁극기 주사위). 내 궁극기는 위에서 내려보는 고르기 카메라가 되므로 아군 봇이 쓰게 하고 Python 으로 스튜디오 카메라 액터를 옮겨 찍음.
+
 ## 85차 — 호랑이를 Mixamo 리그로 다시 (사용자: "호랑이 리깅 엉망인데 믹사모에서 내가 직접 리깅 선택할 수 있게 파일 준비해줘" → "믹사모 리깅 끝났어 이어서 진행해줘")
 
 - 77차 호랑이는 Mixamo 가 6번 거절해서 `blender_fit_rig.py` 로 맞춘 리그였음 → 사용자가 직접 마커를 찍어 Mixamo 리깅 성공. 올린 파일 = 꼬리 뗀 몸 `C:\Users\user\Downloads\tiger_mixamo\tiger_body_mixamo.zip`(= `input\tiger_film\tiger_film_mixamo.zip`, 77차 B 메시), 안내 그림 `tiger_marker_guide.png`. Mixamo 는 이제 `tiger_body_mixamo`(41뼈) 보관 — 용 리그는 지워짐.

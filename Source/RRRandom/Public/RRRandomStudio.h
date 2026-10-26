@@ -31,6 +31,9 @@ public:
 	/** Where flying is allowed (round 65): over the grid (X, Y) with the feet up to Max.Z. */
 	FBox GetFlightArea() const;
 
+	/** Placed in a level (/Game/Maps/Studio), the editor builds it too, never saved (RF_Transient), to show it. */
+	virtual void OnConstruction(const FTransform& Transform) override;
+
 protected:
 	virtual void BeginPlay() override;
 
