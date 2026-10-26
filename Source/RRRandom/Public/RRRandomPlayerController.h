@@ -139,6 +139,26 @@ public:
 	UFUNCTION(Exec)
 	void RRRide();
 
+	/**
+	 * Runs a console command on the next tick, '+' standing for a space (RRDefer RRCannon+0). For scripted tests driven from
+	 * Python: a command run straight from Python runs a joined client's requests to the host on the client itself (Python
+	 * calls run as editor script, which takes every RPC as local), and one asking again in turn never ends.
+	 */
+	UFUNCTION(Exec)
+	void RRDefer(const FString& Command);
+
+	/** Next to a human cannon (round 88), its number Index (as spawned; RRCannon lists them in the log), ready to press F. */
+	UFUNCTION(Exec)
+	void RRCannon(int32 Index = 0);
+
+	/** A plane for that die face (1-2 wooden, 3-4 fighter, 5-6 spaceship) popped in under me, boarded, no station needed. */
+	UFUNCTION(Exec)
+	void RRPlane(int32 Face = 3);
+
+	/** Holds (1) or lets go of (0) Ctrl for my plane: down (scripted tests). */
+	UFUNCTION(Exec)
+	void RRPlaneDown(int32 bHold = 1);
+
 	/** Fires once at the nearest opponent, or straight ahead with none about (console only, for scripted tests). */
 	UFUNCTION(Exec)
 	void RRShoot();
@@ -312,6 +332,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> SprintAction;
 
+	/** Held (Ctrl): flying a plane, down (jump is up). */
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> DescendAction;
+
 	/** Third person: held, the cursor comes back and the mouse stops turning the camera. */
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> FreeCursorAction;
@@ -368,6 +392,10 @@ private:
 	void ServerCheatOwnDie(int32 Face, bool bEveryone);
 	UFUNCTION(Server, Reliable)
 	void ServerCheatStarCars();
+	UFUNCTION(Server, Reliable)
+	void ServerCheatCannon(int32 Index);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatPlane(int32 Face);
 	UFUNCTION(Server, Reliable)
 	void ServerCheatWreck(FVector_NetQuantize Spot, float Radius, bool bColumn);
 	UFUNCTION(Server, Reliable)
@@ -436,6 +464,8 @@ private:
 	void OnAimStop();
 	/** The right button held: in the star robot's ATTACK seat, its missiles at the aim. */
 	void OnAimHeld();
+	void OnDescendStart();
+	void OnDescendStop();
 	void OnSprintStart() { bSprintHeld = true; }
 	void OnSprintStop() { bSprintHeld = false; }
 	bool bSprintHeld = false;

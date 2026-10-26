@@ -59,7 +59,33 @@ public:
 	/** The enabled results or pause menu button under a screen point (None when there is none). */
 	ERRResultsButton GetResultsButtonAt(const FVector2D& ScreenPoint) const;
 
+	/**
+	 * A comic word popping up over a spot in the world on this machine's screen (BOOM!, THUD!, POOF!), drawn like the
+	 * meteor's: big, settling, drifting up and fading in a white starburst. Cosmetic: every machine pops its own.
+	 */
+	static void PopComicWord(const UObject* WorldContext, const FString& Text, const FVector& Where, const FLinearColor& Color, float Size = 1.f);
+
 private:
+	/** One comic word: on its burst at the time it popped (this machine's clock), its color, size and the burst's tilt. */
+	void DrawComicWord(const FString& Text, const FVector& Where, float Start, const FLinearColor& Color, float Size, float Tilt);
+	struct FComicWord
+	{
+		FString Text;
+		FVector Where = FVector::ZeroVector;
+		float Start = 0.f;
+		FLinearColor Color = FLinearColor::White;
+		float Size = 1.f;
+		float Tilt = 0.f;
+	};
+	TArray<FComicWord> ComicWords;
+	void DrawComicWords();
+	/**
+	 * The human cannons and plane stations (round 88): a pulsing ring round each cannon's pad where it can be seen, and the
+	 * station's state over it (charging up, its plane out).
+	 */
+	void DrawCannonsAndStations(const ARRRandomCharacter* Viewer);
+	/** Flying a plane: its name and hull over the ammo panel, and the keys for up, down and out. */
+	void DrawPlanePanel(const ARRRandomCharacter& Viewer);
 	void DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer);
 	void DrawAmmoBar(const ARRRandomCharacter& Brawler, float Left, float Top, float Width, float Height);
 	/** Draws the buff chips ending just above Bottom and returns the new top edge. */

@@ -1,5 +1,6 @@
 // ARRRandomHUD, continued: the start countdown, the teammates' cards and the minimap.
 #include "RRRandomHUD.h"
+#include "RRRandomCannon.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomCover.h"
 #include "RRRandomDiceBuffComponent.h"
@@ -10,6 +11,7 @@
 #include "RRRandomIsland.h"
 #include "RRRandomMeteor.h"
 #include "RRRandomOre.h"
+#include "RRRandomPlaneStation.h"
 #include "RRRandomPlayerController.h"
 #include "RRRandomStarRobot.h"
 #include "RRRandomUIStyle.h"
@@ -591,6 +593,55 @@ void ARRRandomHUD::DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* 
 				}
 			}
 		}
+	}
+	// The human cannons (round 88): each a gold dot with a dashed line out to its pad, a gold ring
+	for (TActorIterator<ARRRandomCannon> It(GetWorld()); It; ++It)
+	{
+		const FVector2D From = ToScreen(It->GetActorLocation());
+		const FVector2D To = ToScreen(It->GetPadLocation());
+		const FVector2D Way = To - From;
+		const float Length = Way.Size();
+		const float Dash = 4.f * Scale;
+		for (float Along = Dash; Along + Dash < Length; Along += Dash * 2.f)
+		{
+			const FVector2D A = From + Way * (Along / Length);
+			const FVector2D B = From + Way * ((Along + Dash) / Length);
+			DrawLine(A.X, A.Y, B.X, B.Y, RRUI::WithAlpha(RRUI::Gold, 0.8f), 1.5f * Scale);
+		}
+		RRUI::DrawRing(Canvas, To, 4.5f * Scale, 2.f * Scale, RRUI::Gold);
+		RRUI::DrawDisc(Canvas, From, 4.f * Scale, RRUI::White);
+		RRUI::DrawDisc(Canvas, From, 2.8f * Scale, RRUI::Gold);
+	}
+	// The plane stations: a sky square with a white rim (faded while charging or its plane is out)
+	for (TActorIterator<ARRRandomPlaneStation> It(GetWorld()); It; ++It)
+	{
+		const FVector2D Point = ToScreen(It->GetActorLocation());
+		const float Half = 4.5f * Scale;
+		const float Alpha = It->GetPlane() || It->GetRechargeRemaining() > 0.f ? 0.45f : 1.f;
+		RRUI::DrawRounded(Canvas, FBox2D(Point - FVector2D(Half + 1.5f * Scale), Point + FVector2D(Half + 1.5f * Scale)), 2.f * Scale, RRUI::WithAlpha(RRUI::White, Alpha));
+		RRUI::DrawRounded(Canvas, FBox2D(Point - FVector2D(Half), Point + FVector2D(Half)), 1.5f * Scale, RRUI::WithAlpha(RRUI::SkyDeep, Alpha));
+	}
+	// The planes in the air: a little arrowhead the way it flies, in its pilot's team color (opponents' only as their
+	// pilots would be shown)
+	for (TActorIterator<ARRRandomVehicle> It(GetWorld()); It; ++It)
+	{
+		const ARRRandomCharacter* Pilot = It->GetRider();
+		if (!It->IsPlane() || !Pilot || Pilot == Viewer)
+		{
+			continue;
+		}
+		const bool bAlly = Pilot->GetTeam() == Team;
+		if (!bAlly && (bThirdPersonGame || !Pilot->IsNoticedByTeam(Team)))
+		{
+			continue;
+		}
+		const FVector2D Point = ToScreen(It->GetActorLocation());
+		const float Yaw = FMath::DegreesToRadians(It->GetActorRotation().Yaw);
+		const FVector2D Ahead(FMath::Sin(Yaw), -FMath::Cos(Yaw));
+		const FVector2D Side(-Ahead.Y, Ahead.X);
+		const float Length = Radius * 2.2f;
+		RRUI::DrawTriangle(Canvas, Point + Ahead * (Length + 2.f * Scale), Point - Ahead * Length * 0.7f + Side * (Length + 2.f * Scale), Point - Ahead * Length * 0.7f - Side * (Length + 2.f * Scale), RRUI::White);
+		RRUI::DrawTriangle(Canvas, Point + Ahead * Length, Point - Ahead * Length * 0.6f + Side * Length, Point - Ahead * Length * 0.6f - Side * Length, bAlly ? RRUI::SkyDeep : RRUI::PinkDeep);
 	}
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{

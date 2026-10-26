@@ -1,4 +1,5 @@
 #include "RRRandomHUD.h"
+#include "RRRandomCannon.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomGameState.h"
@@ -6,6 +7,7 @@
 #include "RRRandomMeteor.h"
 #include "RRRandomOre.h"
 #include "RRRandomOverheadDieComponent.h"
+#include "RRRandomPlaneStation.h"
 #include "RRRandomPlayerController.h"
 #include "RRRandomProjectile.h"
 #include "RRRandomSessionSubsystem.h"
@@ -22,6 +24,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerState.h"
+#include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
 
 using RRUI::EWeight;
@@ -138,6 +141,8 @@ void ARRRandomHUD::DrawHUD()
 	DrawMeteorCartoons();
 	DrawMeteorWarnings();
 	DrawStarRobots(Viewer);
+	DrawCannonsAndStations(Viewer);
+	DrawComicWords();
 	DrawScore();
 	DrawOnlinePanel();
 	if (Viewer)
@@ -147,6 +152,10 @@ void ARRRandomHUD::DrawHUD()
 		if (Viewer->IsAlive())
 		{
 			DrawAmmoPanel(*Viewer);
+			if (Viewer->IsPiloting())
+			{
+				DrawPlanePanel(*Viewer);
+			}
 			DrawRidePrompt(*Viewer);
 			DrawCrosshair(*Viewer);
 		}
@@ -292,6 +301,16 @@ void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRand
 		PowerColors.Add(OwnColor);
 		PowerRemaining.Add(Kit.GetShieldRemaining());
 	}
+	// Flying a plane: its hull (sky, gold as the wooden one, lavender as the spaceship)
+	if (Brawler.IsPiloting())
+	{
+		const ARRRandomVehicle* Plane = Brawler.GetVehicle();
+		const ERRVehicleKind Kind = Plane->GetKind();
+		PowerLabels.Add(FString::Printf(TEXT("%s %d"), Plane->GetHandling().Name, FMath::CeilToInt(Plane->GetPlaneHealth())));
+		PowerColors.Add(Kind == ERRVehicleKind::PlaneWood ? RRUI::Gold : (Kind == ERRVehicleKind::PlaneFighter ? RRUI::SkyDeep : RRUI::LavenderDeep));
+		// Blinking once a third is left
+		PowerRemaining.Add(Plane->GetPlaneHealth() * 3.f < Plane->GetPlaneMaxHealth() ? 0.f : UE_BIG_NUMBER);
+	}
 	if (Brawler.IsInvincible())
 	{
 		// The cheat: never runs out, so it never blinks
@@ -390,15 +409,60 @@ void ARRRandomHUD::DrawRidePrompt(const ARRRandomCharacter& Brawler)
 	{
 		return;
 	}
-	const ARRRandomVehicle* Ridden = Brawler.GetVehicle();
-	// Giants and flyers can't get on, so no offer
-	const ARRRandomVehicle* Near = Ridden || Brawler.IsGiant() || Brawler.CanFly() ? nullptr : Brawler.FindVehicleInReach();
-	if (!Ridden && !Near)
+	// In a cannon's arc there is nothing to press; flying a plane, its panel shows the keys (DrawPlanePanel)
+	if (Brawler.IsRidingCannon() || Brawler.IsPiloting())
 	{
 		return;
 	}
-	const FString Text = Ridden ? TEXT("GET OFF")
-		: FString::Printf(TEXT("RIDE %s%s"), Near->GetHandling().Name, Near->IsNextSeatRear() ? TEXT(" (BACK SEAT)") : TEXT(""));
+	const ARRRandomVehicle* Ridden = Brawler.GetVehicle();
+	// Giants and flyers can't get on, so no offer; a cannon or a plane station in reach comes first (as F takes them first)
+	const bool bFree = !Ridden && !Brawler.IsGiant() && !Brawler.CanFly();
+	const ARRRandomCannon* Cannon = bFree ? ARRRandomCannon::FindInReach(&Brawler) : nullptr;
+	const ARRRandomPlaneStation* Station = bFree ? ARRRandomPlaneStation::FindNear(&Brawler) : nullptr;
+	// Both in reach: the nearer (as F takes it)
+	if (Cannon && Station)
+	{
+		const FVector Here = Brawler.GetActorLocation();
+		if (FVector::Dist2D(Cannon->GetActorLocation(), Here) < FVector::Dist2D(Station->GetActorLocation(), Here))
+		{
+			Station = nullptr;
+		}
+		else
+		{
+			Cannon = nullptr;
+		}
+	}
+	const ARRRandomVehicle* Near = bFree && !Cannon && !Station ? Brawler.FindVehicleInReach() : nullptr;
+	if (!Ridden && !Near && !Cannon && !Station)
+	{
+		return;
+	}
+	FString Text;
+	// Something that can't be done yet: the words faded
+	bool bWaiting = false;
+	if (Ridden)
+	{
+		Text = TEXT("GET OFF");
+	}
+	else if (Cannon)
+	{
+		Text = TEXT("CANNON");
+	}
+	else if (Station)
+	{
+		if (Station->IsRolling())
+		{
+			return;
+		}
+		bWaiting = !Station->CanRoll(&Brawler);
+		Text = !bWaiting ? TEXT("ROLL FOR A PLANE")
+			: Station->GetPlane() ? TEXT("PLANE IS OUT")
+			: FString::Printf(TEXT("NEXT PLANE IN %d"), FMath::CeilToInt(Station->GetRechargeRemaining()));
+	}
+	else
+	{
+		Text = FString::Printf(TEXT("RIDE %s%s"), Near->GetHandling().Name, Near->IsNextSeatRear() ? TEXT(" (BACK SEAT)") : TEXT(""));
+	}
 	const FVector Feet = Brawler.GetActorLocation() - FVector(0.f, 0.f, Brawler.GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 	const FVector Screen = Project(Feet);
 	if (Screen.Z <= 0.f)
@@ -414,8 +478,8 @@ void ARRRandomHUD::DrawRidePrompt(const ARRRandomCharacter& Brawler)
 	const float KeyWidth = FMath::Max(KeyHeight, RRUI::MeasureText(TEXT("F"), KeyHeight * 0.62f, EWeight::Black).X + KeyHeight * 0.5f);
 	const float X = Screen.X - (KeyWidth + Gap + Label.X) * 0.5f;
 	const float Y = Screen.Y + 8.f * S;
-	RRUI::DrawKey(Canvas, TEXT("F"), FVector2D(X, Y), KeyHeight);
-	RRUI::DrawGlowText(Canvas, Text, FVector2D(X + KeyWidth + Gap, Y + (KeyHeight - Label.Y) * 0.5f), Size, EWeight::ExtraBold, Ridden ? RRUI::InkSoft : RRUI::Ink, Size * 0.06f);
+	RRUI::DrawKey(Canvas, TEXT("F"), FVector2D(X, Y), KeyHeight, bWaiting ? 0.45f : 1.f);
+	RRUI::DrawGlowText(Canvas, Text, FVector2D(X + KeyWidth + Gap, Y + (KeyHeight - Label.Y) * 0.5f), Size, EWeight::ExtraBold, Ridden || bWaiting ? RRUI::InkSoft : RRUI::Ink, Size * 0.06f);
 }
 
 void ARRRandomHUD::DrawAmmoPanel(const ARRRandomCharacter& Brawler)
@@ -1229,23 +1293,137 @@ void ARRRandomHUD::DrawMeteorCartoons()
 		// Comic words: popping in big, settling, drifting up and fading, each in a white starburst with an ink edge
 		for (const FRRComicPop& Pop : Meteor->GetComicPops())
 		{
-			const float Age = Now - Pop.Start;
-			const FVector OnScreen = Project(Pop.Where);
-			if (Age < 0.f || Age > ComicWordLife || OnScreen.Z <= 0.f)
-			{
-				continue;
-			}
-			const float Scale = Age < 0.12f ? FMath::Lerp(0.25f, 1.25f, Age / 0.12f) : Age < 0.24f ? FMath::Lerp(1.25f, 1.f, (Age - 0.12f) / 0.12f) : 1.f;
-			const float Alpha = 1.f - FMath::Clamp((Age - (ComicWordLife - 0.25f)) / 0.25f, 0.f, 1.f);
-			const FVector2D Center(OnScreen.X, OnScreen.Y - Age * 45.f * S);
-			const float Size = 22.f * S * Pop.Size * Scale;
-			const FVector2D Box = RRUI::MeasureText(Pop.Text, Size, EWeight::Black);
-			const FVector2D Burst(Box.X * 0.78f + 14.f * S * Scale, Box.Y * 0.95f + 12.f * S * Scale);
-			DrawStarburst(Canvas, Center, Burst + FVector2D(3.f * S), 11, 0.74f, Pop.Tilt, RRUI::WithAlpha(RRUI::Ink, Alpha));
-			DrawStarburst(Canvas, Center, Burst, 11, 0.74f, Pop.Tilt, RRUI::WithAlpha(RRUI::White, Alpha));
-			DrawEdgedText(Canvas, Pop.Text, Center - Box * 0.5f, Size, RRUI::WithAlpha(Pop.Color, Alpha), RRUI::WithAlpha(RRUI::Ink, Alpha));
+			DrawComicWord(Pop.Text, Pop.Where, Pop.Start, Pop.Color, Pop.Size, Pop.Tilt);
 		}
 	}
+}
+
+void ARRRandomHUD::DrawComicWord(const FString& Text, const FVector& Where, float Start, const FLinearColor& Color, float Size, float Tilt)
+{
+	const float S = UIScale;
+	const float Age = GetWorld()->GetTimeSeconds() - Start;
+	const FVector OnScreen = Project(Where);
+	if (Age < 0.f || Age > ComicWordLife || OnScreen.Z <= 0.f)
+	{
+		return;
+	}
+	const float Scale = Age < 0.12f ? FMath::Lerp(0.25f, 1.25f, Age / 0.12f) : Age < 0.24f ? FMath::Lerp(1.25f, 1.f, (Age - 0.12f) / 0.12f) : 1.f;
+	const float Alpha = 1.f - FMath::Clamp((Age - (ComicWordLife - 0.25f)) / 0.25f, 0.f, 1.f);
+	const FVector2D Center(OnScreen.X, OnScreen.Y - Age * 45.f * S);
+	const float TextSize = 22.f * S * Size * Scale;
+	const FVector2D Box = RRUI::MeasureText(Text, TextSize, EWeight::Black);
+	const FVector2D Burst(Box.X * 0.78f + 14.f * S * Scale, Box.Y * 0.95f + 12.f * S * Scale);
+	DrawStarburst(Canvas, Center, Burst + FVector2D(3.f * S), 11, 0.74f, Tilt, RRUI::WithAlpha(RRUI::Ink, Alpha));
+	DrawStarburst(Canvas, Center, Burst, 11, 0.74f, Tilt, RRUI::WithAlpha(RRUI::White, Alpha));
+	DrawEdgedText(Canvas, Text, Center - Box * 0.5f, TextSize, RRUI::WithAlpha(Color, Alpha), RRUI::WithAlpha(RRUI::Ink, Alpha));
+}
+
+void ARRRandomHUD::PopComicWord(const UObject* WorldContext, const FString& Text, const FVector& Where, const FLinearColor& Color, float Size)
+{
+	// This machine's own screen (none on a dedicated server)
+	const APlayerController* Local = UGameplayStatics::GetPlayerController(WorldContext, 0);
+	ARRRandomHUD* Hud = Local ? Cast<ARRRandomHUD>(Local->GetHUD()) : nullptr;
+	if (!Hud)
+	{
+		return;
+	}
+	FComicWord& Word = Hud->ComicWords.AddDefaulted_GetRef();
+	Word.Text = Text;
+	Word.Where = Where;
+	Word.Start = Hud->GetWorld()->GetTimeSeconds();
+	Word.Color = Color;
+	Word.Size = Size;
+	Word.Tilt = FMath::FRandRange(-12.f, 12.f);
+}
+
+void ARRRandomHUD::DrawComicWords()
+{
+	const float Now = GetWorld()->GetTimeSeconds();
+	ComicWords.RemoveAll([Now](const FComicWord& Word) { return Now - Word.Start > ComicWordLife; });
+	for (const FComicWord& Word : ComicWords)
+	{
+		DrawComicWord(Word.Text, Word.Where, Word.Start, Word.Color, Word.Size, Word.Tilt);
+	}
+}
+
+void ARRRandomHUD::DrawCannonsAndStations(const ARRRandomCharacter* Viewer)
+{
+	const float S = UIScale;
+	const float Now = GetWorld()->GetTimeSeconds();
+	// Each pad: a ring on the floor pulsing gold (seen from anywhere it is on screen), so a flier knows where it comes down
+	// and anyone can see where the cannon goes
+	constexpr int32 RingPoints = 28;
+	constexpr float PadRingRadius = 230.f;
+	for (TActorIterator<ARRRandomCannon> It(GetWorld()); It; ++It)
+	{
+		const FVector Pad = It->GetPadLocation() + FVector(0.f, 0.f, 12.f);
+		if (Project(Pad).Z <= 0.f)
+		{
+			continue;
+		}
+		const float Pulse = 0.5f + 0.5f * FMath::Sin(Now * 4.f + It->GetIndex());
+		for (int32 Ring = 0; Ring < 2; ++Ring)
+		{
+			const float Radius = PadRingRadius * (Ring == 0 ? 1.f : 0.55f + 0.1f * Pulse);
+			const FLinearColor Color = RRUI::WithAlpha(Ring == 0 ? RRUI::Gold : RRUI::Butter, 0.55f + 0.45f * Pulse);
+			FVector Last = Project(Pad + FVector(Radius, 0.f, 0.f));
+			for (int32 Point = 1; Point <= RingPoints; ++Point)
+			{
+				const float Angle = 2.f * PI * Point / RingPoints;
+				const FVector Next = Project(Pad + FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 0.f));
+				if (Last.Z > 0.f && Next.Z > 0.f)
+				{
+					DrawLine(Last.X, Last.Y, Next.X, Next.Y, Color, (Ring == 0 ? 3.f : 2.f) * S);
+				}
+				Last = Next;
+			}
+		}
+	}
+	// A station busy or charging: its state over it
+	for (TActorIterator<ARRRandomPlaneStation> It(GetWorld()); It; ++It)
+	{
+		const FVector Over = Project(It->GetActorLocation() + FVector(0.f, 0.f, It->GetDeckHeight() + 140.f));
+		if (Over.Z <= 0.f || It->IsRolling())
+		{
+			continue;
+		}
+		const float Remaining = It->GetRechargeRemaining();
+		const FString Text = It->GetPlane() ? TEXT("PLANE OUT") : (Remaining > 0.f ? FString::Printf(TEXT("PLANE IN %d"), FMath::CeilToInt(Remaining)) : TEXT("PLANE READY"));
+		const float Size = 12.f * S;
+		const FVector2D Box = RRUI::MeasureText(Text, Size, EWeight::ExtraBold, Size * 0.1f);
+		RRUI::DrawGlowText(Canvas, Text, FVector2D(Over.X - Box.X * 0.5f, Over.Y - Box.Y * 0.5f), Size, EWeight::ExtraBold,
+			Remaining > 0.f || It->GetPlane() ? RRUI::InkSoft : RRUI::SkyDeep, Size * 0.1f);
+	}
+}
+
+void ARRRandomHUD::DrawPlanePanel(const ARRRandomCharacter& Viewer)
+{
+	// Bottom middle, clear of the dice on the left and the ammo and team cards on the right: "FIGHTER  240" over its
+	// hull's bar, then the keys
+	const ARRRandomVehicle* Plane = Viewer.GetVehicle();
+	if (!Plane)
+	{
+		return;
+	}
+	const float S = UIScale;
+	const float NameSize = 13.f * S;
+	const float KeySize = 10.f * S;
+	const ERRVehicleKind Kind = Plane->GetKind();
+	const FLinearColor Color = Kind == ERRVehicleKind::PlaneWood ? RRUI::Gold : (Kind == ERRVehicleKind::PlaneFighter ? RRUI::SkyDeep : RRUI::LavenderDeep);
+	const float Share = FMath::Clamp(Plane->GetPlaneHealth() / FMath::Max(1.f, Plane->GetPlaneMaxHealth()), 0.f, 1.f);
+	const FString Keys = Viewer.IsPlaneLanded() ? TEXT("SPACE UP · F PUT DOWN") : TEXT("SPACE UP · CTRL DOWN · F BAIL OUT");
+	const FString Name = FString::Printf(TEXT("%s  %d"), Plane->GetHandling().Name, FMath::CeilToInt(Plane->GetPlaneHealth()));
+	const float Width = FMath::Max3(220.f * S, float(RRUI::MeasureText(Keys, KeySize, EWeight::ExtraBold, KeySize * 0.1f).X),
+		float(RRUI::MeasureText(Name, NameSize, EWeight::Black, NameSize * 0.1f).X));
+	const float Left = (Canvas->ClipX - Width) * 0.5f;
+	const float Right = Left + Width;
+	const float Bottom = Canvas->ClipY - Margin * S;
+	const FBox2D Plate(FVector2D(Left, Bottom - 44.f * S), FVector2D(Right, Bottom + 2.f * S));
+	RRUI::DrawPlate(Canvas, Plate, 18.f * S);
+	RRUI::DrawText(Canvas, Name, FVector2D(Plate.Min.X, Plate.Min.Y), NameSize, EWeight::Black, Share * 3.f < 1.f ? WithAlpha(RRUI::PinkDeep, Blink(GetWorld())) : RRUI::Ink, NameSize * 0.1f);
+	const FBox2D Bar(FVector2D(Plate.Min.X, Plate.Min.Y + NameSize * 1.45f), FVector2D(Right, Plate.Min.Y + NameSize * 1.45f + 6.f * S));
+	RRUI::DrawBar(Canvas, Bar, Share, WithAlpha(RRUI::Ink, 0.12f), Color);
+	RRUI::DrawText(Canvas, Keys, FVector2D(Plate.Min.X, Bar.Max.Y + 4.f * S), KeySize, EWeight::ExtraBold, RRUI::InkSoft, KeySize * 0.1f);
 }
 
 void ARRRandomHUD::DrawMeteorWarnings()

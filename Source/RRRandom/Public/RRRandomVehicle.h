@@ -18,6 +18,24 @@ enum class ERRVehicleKind : uint8
 	StarChest,
 	StarArms,
 	StarLegs,
+	/**
+	 * The planes (round 88), given by a plane station's die (ARRRandomPlaneStation): one seat, flown and fought from, the
+	 * plane taking the hits. Never parked: put down, a plane is gone; shot down, it falls and blows up.
+	 */
+	PlaneWood,
+	PlaneFighter,
+	PlaneSpaceship,
+};
+
+/** What a plane shoots when its pilot fires: the pilot's own gun, or the plane's. */
+enum class ERRPlaneGun : uint8
+{
+	/** The wooden plane: the pilot leans out with its own gun. */
+	Pilot,
+	/** The fighter: twin machine guns in the nose, fast and light. */
+	Guns,
+	/** The spaceship: heavy laser bolts from its wing tips, slow. */
+	Laser,
 };
 
 /** How a kind of vehicle rides: the brawler's movement while on it, and where it stands or sits. */
@@ -65,6 +83,10 @@ struct FRRVehicleHandling
 	bool bRams = false;
 	/** The top of the rear seat's cushion, like SeatHeight. */
 	float RearSeatHeight = 0.f;
+	/** A plane: flies (its rider's movement in flying mode), takes hits on its hull for its pilot, and shoots Gun. */
+	bool bFlies = false;
+	float MaxHealth = 0.f;
+	ERRPlaneGun Gun = ERRPlaneGun::Pilot;
 };
 
 /**
@@ -106,10 +128,34 @@ public:
 	/** How tall it is (the star team's cars stand tall round their seats: the camera rises over them). */
 	float GetHeight() const;
 	/** A seat free: the driver's, or the rear one with a driver in front. None while it is part of the robot. */
-	bool HasRoom() const { return !bCombined && (!Rider || (GetHandling().bRearSeat && !Passenger)); }
+	bool HasRoom() const { return !bCombined && !IsPlane() && (!Rider || (GetHandling().bRearSeat && !Passenger)); }
 
 	/** One of the star team's three cars, and which (0 chest, 1 arms, 2 legs), or -1. */
-	int32 GetStarPart() const { return Kind >= ERRVehicleKind::StarChest ? static_cast<int32>(Kind) - static_cast<int32>(ERRVehicleKind::StarChest) : -1; }
+	int32 GetStarPart() const { return Kind >= ERRVehicleKind::StarChest && Kind <= ERRVehicleKind::StarLegs ? static_cast<int32>(Kind) - static_cast<int32>(ERRVehicleKind::StarChest) : -1; }
+
+	/**
+	 * A plane (round 88): boarded only where it pops in (ARRRandomPlaneStation, ARRRandomCharacter::BoardPlane), flown and
+	 * fought from by its one pilot. Its hull takes the hits meant for the pilot (TakeDamage, from shots on the hull or on the
+	 * pilot): at 0 the pilot is thrown out to glide down, and the plane drops straight down, spinning and smoking, and blows
+	 * up where it lands, smashing the blocks there (ARRRandomWreckage) and hurting the pilot's opponents round it. Put down
+	 * on the ground, it is gone in a puff. Either way its station is told (SetStation).
+	 */
+	bool IsPlane() const { return GetHandling().bFlies; }
+	float GetPlaneHealth() const { return PlaneHealth; }
+	float GetPlaneMaxHealth() const { return GetHandling().MaxHealth; }
+	bool IsCrashing() const { return bCrashing; }
+	/** Server, before it finishes spawning: the station it came from (told when it is gone). */
+	void SetStation(class ARRRandomPlaneStation* NewStation);
+	/** Server: the hits on the hull (or passed on by its pilot); shots from the pilot's own team do nothing. */
+	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
+	/** Server: down it goes (the pilot thrown out first); Killer gets the credit for what its blast does. */
+	void ShootDown(AController* Killer);
+	/**
+	 * A plane's own gun (ERRPlaneGun): the spots its shots come out of, in the world, this frame; seconds between shots, and
+	 * the shot's damage (a share of a pistol's), size and speed (shares too) and look.
+	 */
+	void GetGunMuzzles(TArray<FVector>& OutMuzzles) const;
+	static void GetGunStats(ERRPlaneGun Gun, float& OutInterval, float& OutDamage, float& OutScale, float& OutSpeed, uint8& OutTier);
 	/** Which team's star cars these are (each team has its own three; only that team can combine them). Set before it
 	 * finishes spawning. */
 	void SetStarTeam(int32 NewTeam) { StarTeam = NewTeam; }
@@ -148,9 +194,49 @@ public:
 
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
 	void ApplyKind();
+
+	/** A plane, every frame on every machine: banking into turns and nosing up or down with the climb, the propeller turning; shot down, spinning down with a trail of smoke (the server moving it and blowing it up where it lands). */
+	void UpdatePlane(float DeltaSeconds);
+	/** Server: the shot-down plane hits the ground at Where. */
+	void Explode(const FVector& Where);
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastExplode(const FVector_NetQuantize& Where);
+
+	/** A plane's hull (replicated: its pilot's HUD shows it). */
+	UPROPERTY(Replicated)
+	float PlaneHealth = 0.f;
+
+	/** Shot down and falling (replicated: every machine spins it and trails smoke). */
+	UPROPERTY(Replicated)
+	bool bCrashing = false;
+
+	/** Blown up: no puff as it goes (each machine). */
+	bool bExploded = false;
+	/** Server: its station, who shot it down, and how fast it falls. */
+	TWeakObjectPtr<class ARRRandomPlaneStation> Station;
+	TWeakObjectPtr<AController> CrashKiller;
+	float CrashFallSpeed = 0.f;
+	/** Server: the pilot's team when it was shot down (its side is hurt by the blast). */
+	int32 CrashTeam = INDEX_NONE;
+	/** Each machine: how far it has spun going down, its bank and pitch now, and the way it flew last frame. */
+	float CrashSpin = 0.f;
+	float PlaneBank = 0.f;
+	float PlanePitch = 0.f;
+	float LastPlaneYaw = 0.f;
+
+	/** The wooden plane's propeller: a thin blade turning in front of its nose (engine cube). */
+	UPROPERTY(VisibleAnywhere, Category = "Vehicle")
+	TObjectPtr<UStaticMeshComponent> Propeller;
+	float PropellerTurn = 0.f;
+	/** The engine cube: the propeller, and a plane's stand-in while its model is missing. */
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> Cube;
 
 	UFUNCTION()
 	void OnRep_Kind();

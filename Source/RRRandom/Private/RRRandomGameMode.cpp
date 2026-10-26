@@ -4,7 +4,9 @@
 #include "RRRandomAIController.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomDiceLand.h"
+#include "RRRandomCannon.h"
 #include "RRRandomDiceTown.h"
+#include "RRRandomPlaneStation.h"
 #include "RRRandomDummy.h"
 #include "RRRandomGrassFloor.h"
 #include "RRRandomIsland.h"
@@ -161,6 +163,15 @@ void ARRRandomGameMode::StartPlay()
 	if (bSpawnVehicles)
 	{
 		SpawnVehiclesIfNoneExist();
+	}
+	// Dice Town's human cannons and plane stations (round 88), on open ground by each team's base and out on the flanks
+	if (bDiceTown)
+	{
+		if (const ARRRandomDiceTown* Town = TActorIterator<ARRRandomDiceTown>(GetWorld()) ? *TActorIterator<ARRRandomDiceTown>(GetWorld()) : nullptr; Town && Town->IsBuilt())
+		{
+			ARRRandomCannon::SpawnDiceTownSets(GetWorld(), Town);
+			ARRRandomPlaneStation::SpawnDiceTownStations(GetWorld(), Town);
+		}
 	}
 	// The host's own brawler may already hold a spot; bots take the rest
 	FillEmptySlotsWithBots();

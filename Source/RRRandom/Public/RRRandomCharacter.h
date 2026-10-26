@@ -155,8 +155,34 @@ public:
 	void ToggleRide();
 	/** The vehicle being ridden, if any (replicated). */
 	ARRRandomVehicle* GetVehicle() const { return Vehicle; }
-	/** At the wheel (not in the rear seat): both hands on it, so no shooting, and the gun is put away. */
-	bool IsDriving() const { return Vehicle && !bPassenger; }
+	/** At the wheel (not in the rear seat): both hands on it, so no shooting, and the gun is put away. Not a plane's pilot. */
+	bool IsDriving() const;
+	/**
+	 * Flying a plane (round 88, ARRRandomVehicle::IsPlane): the movement in flying mode (WASD across, jump up, Ctrl down,
+	 * hovering with no input), the body sitting with the arms free, and the fire button shooting (the plane's own gun, or the
+	 * pilot's); the plane takes the hits. F on the ground puts it down; in the air it bails out and glides down.
+	 */
+	bool IsPiloting() const;
+	/** On its own feet and free to take a plane now (not riding, in the robot, giant, flying, in a cannon or an ultimate). */
+	bool CanBoardPlane() const;
+	/** Server: into the pilot's seat of a plane just popped in under it (ARRRandomPlaneStation). False if it can't. */
+	bool BoardPlane(ARRRandomVehicle* Plane);
+	/** Server: out of the plane in mid-air (or shot down): thrown up and out, gliding down till it lands. */
+	void BailOut();
+	/** A plane's bottom near enough the ground under it to count as landed (F puts it down then, instead of bailing out). */
+	bool IsPlaneLanded() const;
+	/** This machine's Ctrl: held, a plane goes down. */
+	void SetPlaneDescend(bool bHeld) { bPlaneDescendHeld = bHeld; }
+	/**
+	 * In a human cannon (round 88, ARRRandomCannon): hidden in the barrel while it loads, then flying its arc to the pad (it
+	 * may shoot meanwhile, nothing else). The controlling machine moves it along the arc; the server trusts that client
+	 * meanwhile, as in a climb.
+	 */
+	bool IsRidingCannon() const { return CannonRide != nullptr || CannonTime >= 0.f; }
+	/** Out of the barrel and on the way to the pad. */
+	bool IsCannonFlying() const;
+	/** Server, by the cannon: into it and off to its pad. */
+	void StartCannonRide(class ARRRandomCannon* Cannon);
 	/**
 	 * The star robot this animal friend is combining (standing still till it is done) or sitting in, and how
 	 * (replicated). F does the robot's things first: starts combining the gathered cars, gets in, gets out.
@@ -747,6 +773,41 @@ private:
 
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastDamagePopup(float Amount, ERRHitEffect Effect, bool bBackstab);
+	/** A plane shows the hits on its hull over its pilot (MulticastDamagePopup) and throws it out (BailOut). */
+	friend class ARRRandomVehicle;
+
+	/** The human cannon this one is in (replicated), and this machine's seconds since it climbed in (-1: not in one). */
+	UPROPERTY(ReplicatedUsing = OnRep_CannonRide)
+	TObjectPtr<class ARRRandomCannon> CannonRide;
+	float CannonTime = -1.f;
+	/** This machine: out of the barrel yet, and knocked off the arc (into a wall) and falling. */
+	bool bCannonFired = false;
+	bool bCannonOffArc = false;
+	/** Server: seconds since the ride began (it ends a little after the flight is over, for a remote flier). */
+	float CannonServerTime = 0.f;
+	UFUNCTION()
+	void OnRep_CannonRide();
+	/** Every machine: into the barrel (hidden; where it is controlled, held at the muzzle with movement off). */
+	void BeginCannonRide();
+	/** Every machine, every frame of the ride: the load, the shot, the arc (moved where it is controlled), the landing. */
+	void UpdateCannonRide(float DeltaSeconds);
+	/** Every machine: the ride is over (landed on the pad: the thud). */
+	void EndCannonRide(bool bLanded);
+
+	/** Bailed out of a plane: gliding down till it lands (replicated, so the client's movement glides too). */
+	UPROPERTY(Replicated)
+	bool bBailedOut = false;
+	/** This machine, piloting: jump (up) and Ctrl (down) held, and when it took off (it climbs by itself at first). */
+	bool bPlaneRiseHeld = false;
+	bool bPlaneDescendHeld = false;
+	float PlaneBoardTime = -100.f;
+	/** The plane last seen flown (a new one restarts the take-off). */
+	TWeakObjectPtr<ARRRandomVehicle> PilotedPlane;
+	/** Piloting, every frame: up and down, facing the way it flies, kept in the flight area (where it is controlled). */
+	void UpdatePlaneFlight(float DeltaSeconds);
+	/** Server: the plane's own gun at the target, if its cooldown allows; which of its two muzzles goes next. */
+	bool ShootPlaneGun(const FVector& TargetLocation, float CooldownSlack);
+	int32 PlaneGunSide = 0;
 
 	UFUNCTION()
 	void OnRep_Team();

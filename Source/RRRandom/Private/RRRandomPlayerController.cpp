@@ -1,5 +1,6 @@
 #include "RRRandomPlayerController.h"
 #include "RRRandomFogOfWar.h"
+#include "RRRandomCannon.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomGameMode.h"
@@ -8,6 +9,7 @@
 #include "RRRandomMeteor.h"
 #include "RRRandomMovementComponent.h"
 #include "RRRandomOre.h"
+#include "RRRandomPlaneStation.h"
 #include "RRRandomResultsDirector.h"
 #include "RRRandomSessionSubsystem.h"
 #include "RRRandomStarRobot.h"
@@ -180,6 +182,11 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 		SprintAction = NewObject<UInputAction>(this, TEXT("IA_Sprint"));
 		SprintAction->ValueType = EInputActionValueType::Boolean;
 	}
+	if (!DescendAction)
+	{
+		DescendAction = NewObject<UInputAction>(this, TEXT("IA_Descend"));
+		DescendAction->ValueType = EInputActionValueType::Boolean;
+	}
 	if (CheatGunActions.IsEmpty())
 	{
 		for (int32 Type = 0; Type < FRRWeapon::GetTypeCount(); ++Type)
@@ -213,6 +220,8 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 	MappingContext->MapKey(MapAction, EKeys::M);
 	MappingContext->MapKey(SprintAction, EKeys::LeftShift);
 	MappingContext->MapKey(SprintAction, EKeys::RightShift);
+	MappingContext->MapKey(DescendAction, EKeys::LeftControl);
+	MappingContext->MapKey(DescendAction, EKeys::RightControl);
 	// Third person: the mouse looks, the right button aims down the sights
 	MappingContext->MapKey(LookAction, EKeys::Mouse2D);
 	MappingContext->MapKey(AimAction, EKeys::RightMouseButton);
@@ -337,6 +346,8 @@ void ARRRandomPlayerController::SetupInputComponent()
 	EnhancedInput->BindAction(AimAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnAimStop);
 	EnhancedInput->BindAction(SprintAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnSprintStart);
 	EnhancedInput->BindAction(SprintAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnSprintStop);
+	EnhancedInput->BindAction(DescendAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnDescendStart);
+	EnhancedInput->BindAction(DescendAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnDescendStop);
 	EnhancedInput->BindAction(FreeCursorAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnFreeCursorStart);
 	EnhancedInput->BindAction(FreeCursorAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnFreeCursorStop);
 	EnhancedInput->BindAction(CheatFlyAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRFly);
@@ -1742,5 +1753,90 @@ void ARRRandomPlayerController::CenterMouse()
 	{
 		// (the camera turns by the raw mouse movement, so the jump back doesn't turn it)
 		Viewport->SetMouse(Middle.X, Middle.Y);
+	}
+}
+
+void ARRRandomPlayerController::OnDescendStart()
+{
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		RandomCharacter->SetPlaneDescend(!IsGameplayInputBlocked());
+	}
+}
+
+void ARRRandomPlayerController::OnDescendStop()
+{
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		RandomCharacter->SetPlaneDescend(false);
+	}
+}
+
+void ARRRandomPlayerController::RRCannon(int32 Index)
+{
+	ServerCheatCannon(Index);
+}
+
+void ARRRandomPlayerController::ServerCheatCannon_Implementation(int32 Index)
+{
+#if !UE_BUILD_SHIPPING
+	ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	if (!RandomCharacter || !RandomCharacter->IsAlive() || RandomCharacter->IsRidingCannon())
+	{
+		return;
+	}
+	for (TActorIterator<ARRRandomCannon> It(GetWorld()); It; ++It)
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: cannon %d at %s, pad at %s."), It->GetIndex(), *It->GetActorLocation().ToString(), *It->GetPadLocation().ToString());
+		if (It->GetIndex() != Index)
+		{
+			continue;
+		}
+		// Off whatever it rides, just behind the cannon (away from its pad), facing it
+		RandomCharacter->LeaveVehicle();
+		const FVector Back = -It->GetActorForwardVector();
+		const FVector Spot = It->GetActorLocation() + Back * 200.f + FVector(0.f, 0.f, RandomCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 5.f);
+		RandomCharacter->TeleportTo(Spot, FRotator(0.f, It->GetActorRotation().Yaw, 0.f));
+		ClientMessage(FString::Printf(TEXT("Cheat: cannon %d (press F)"), Index));
+	}
+#endif
+}
+
+void ARRRandomPlayerController::RRPlane(int32 Face)
+{
+	ServerCheatPlane(FMath::Clamp(Face, 1, 6));
+}
+
+void ARRRandomPlayerController::ServerCheatPlane_Implementation(int32 Face)
+{
+#if !UE_BUILD_SHIPPING
+	ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	if (!RandomCharacter)
+	{
+		return;
+	}
+	// Off whatever it rides first
+	RandomCharacter->LeaveVehicle();
+	if (const ARRRandomVehicle* Plane = ARRRandomPlaneStation::SpawnPlaneFor(RandomCharacter, Face, nullptr))
+	{
+		ClientMessage(FString::Printf(TEXT("Cheat: %s"), Plane->GetHandling().Name));
+	}
+#endif
+}
+
+void ARRRandomPlayerController::RRDefer(const FString& Command)
+{
+	const FString Line = Command.Replace(TEXT("+"), TEXT(" "));
+	GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this, Line]()
+	{
+		ConsoleCommand(Line);
+	}));
+}
+
+void ARRRandomPlayerController::RRPlaneDown(int32 bHold)
+{
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		RandomCharacter->SetPlaneDescend(bHold != 0);
 	}
 }

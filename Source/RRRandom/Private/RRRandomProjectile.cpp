@@ -2,6 +2,7 @@
 #include "RRRandomCharacter.h"
 #include "RRRandomEffects.h"
 #include "RRRandomStarRobot.h"
+#include "RRRandomVehicle.h"
 #include "RRRandomWreckage.h"
 #include "Components/PointLightComponent.h"
 #include "Components/SphereComponent.h"
@@ -254,6 +255,14 @@ void ARRRandomProjectile::BeginPlay()
 				for (TActorIterator<ARRRandomStarRobot> It(GetWorld()); It; ++It)
 				{
 					if (It->GetTeam() == Brawler->GetTeam())
+					{
+						PassThrough(*It);
+					}
+				}
+				// And the team's planes (a pilot's own shots start inside its plane)
+				for (TActorIterator<ARRRandomVehicle> It(GetWorld()); It; ++It)
+				{
+					if (It->IsPlane() && It->GetRider() && It->GetRider()->GetTeam() == Brawler->GetTeam())
 					{
 						PassThrough(*It);
 					}
