@@ -1,6 +1,26 @@
 - [Tripo objects: cartoon style](tripo-cartoon-style.md) — RRRandom props from Tripo always cute cartoon, puffy/balloon-like, bold colors
 - [Dice Land art direction](dice-land-art-direction.md) — TPS map: vivid candy colors, lots of cover; v2 = 10x size, MapleStory2 block style, enterable buildings; Tripo web
 - [Mixamo keeps one character](mixamo-one-character.md) — uploading replaces the rig; auto-rigger fails on floor-touching tails → rig the body without the tail
-- [Smart App Control blocks DLL](smart-app-control-dll.md) — RRRandom "module could not be loaded" (4551): rebuild with a real code change
+- [Smart App Control blocks DLL](smart-app-control-dll.md) — RRRandom 4551 / hang after module load / dialog 0xc0e90002: rebuild with a real code change; if many fail, rebuild the last loading source (identical DLL loads)
 - [Tripo prompt filter](tripo-prompt-filter.md) — "no clothes" in a prompt gets a misleading "image does not meet guidelines" error
+- [Chrome needs restart](chrome-needs-restart.md) — /chrome mid-chat adds no tools; restart with `claude --chrome --continue`
 - [Pastel UI direction](pastel-ui-direction.md) — RRRandom UI combo picked 2026-10-16: air-line HUD, card brawler pick, results w/o shading; mock up first
+- [Answer in Korean](answer-in-korean.md) — reply in Korean even after English skill/tool text (user asked 2026-10-19)
+- [Call them animal friends](call-them-animal-friends.md) — RRRandom characters are "동물친구" / ANIMAL FRIEND, never 브롤러/brawler (2026-10-20)
+- [Fox girl animal friend](fox-girl-animal-friend.md) — red fennec fox, later gumiho; model = v3 Tripo Retry; in game as RedFox with the fox kit (2026-10-21); game model = Midjourney C-3 (crimson fluffy, fur rim glow) since 2026-10-22 round 75
+- [Animation studio map](animation-studio-map.md) — check RRRandom motions on -RRMap=Studio with RRStudioCam side views (2026-10-20)
+- [Characters in 8 directions](character-eight-directions.md) — every character turnaround is 8 views (+top), not 4 (2026-10-21)
+- [Fox v3 remake](fox-v3-remake.md) — fox, rabbit, squirrel, tiger remade (r69-70) and Mixamo-rigged; rabbit A-3 in game r76; fox/squirrel/tiger/dragon film-style remakes all in game (round 77); dragon A-pose remake in game r85 (arms glued to body broke Mixamo; Mixamo holds dragon_apose_body_mixamo)
+- [Don't assume a tool is broken](feedback-dont-assume-broken.md) — test the cause before a workaround; say plainly which method was used
+- [Tiger fluffy concepts](tiger-fluffy-concepts.md) — fluffy tiger r72; film tiger B re-rigged in Mixamo by the user's own markers, in game r85 (hips 25.6); tiger rig is in input/tiger_film
+- [Fix textures in Tripo](feedback-fix-textures-in-tripo.md) — texture fixes via Tripo image edit + multiview retexture, not Blender paint (2026-10-21)
+- [UI portraits from concept art](ui-portraits-from-concept.md) — title/HUD character pictures are crops of the front concept, not 3D renders (2026-10-21)
+- [Star robot MJ concepts](star-robot-mj-concepts.md) — Star Team robot redesign: white + red/black ANGULAR robot (navy and general armor rejected 2026-10-23); old rounds discarded 2026-10-23; now a haetae (해태) combining robot; back to C-1 haetae-mouth helmet, glowing eyes only inside the mouth (G-1 recommended); superseded 2026-10-23 by the haetae combining robot in haetae-mj-concepts
+- [Comparison page every time](feedback-comparison-page.md) — character comparisons also get a published Artifact comparison page, not just a PNG (2026-10-22)
+- [Haetae MJ concepts](haetae-mj-concepts.md) — haetae = combining robot, in game r79; r80 sword/missiles/shield; r81 one robot per team + duel rules + WASD sword clash
+- [Tripo 403 project banned](tripo-project-banned-403.md) — Generate silently ignored = gen_image_v2 403 code 2032 "project banned"; was per-request (next prompt worked); log fetch body, reword once, else stop
+- [Highlight video recording](highlight-video-recording.md) — 30s trailer 2026-10-26: real-time ffmpeg gdigrab, bots' ultimates via RRTeamUltimate, 1280x720 = 1920 physical at 150% DPI
+- [Cannon + planes scope](cannon-plane-design.md) — r88: only one-way cannon/pad sets (shoot while flying) + dice-rolled 1-seat planes with own weapons; no destruction/lava
+- [Perl rep $1 trap](feedback-perl-rep-dollar1.md) — scripted C++ edits: $1 passed into a sub is empty and deletes the anchor; use Edit or direct s///, check git diff
+- [Defense mode plan](defense-mode-plan.md) — r90 spec + built 2026-10-27: TPS/Dice Town only, 7 waves, rat A-3/cat A-2, 3 growing stages, unlocks, room list; my interpretations to confirm
+- [First concepts in Midjourney only](feedback-first-concepts-midjourney.md) — from 2026-10-27 every first 시안 is Midjourney; Tripo only for 3D

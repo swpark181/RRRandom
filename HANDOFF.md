@@ -1,8 +1,35 @@
 # 작업 이어하기 메모 — 팀전 프로토타입 (FPS식 사격 + 엄폐물)
 
-최종 업데이트: 2026-10-27 (91차)
+최종 업데이트: 2026-10-27 (토끼 스마트메쉬 비교 페이지 완성)
 
 Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMemory/` 에 복사해 둠 — 다른 PC 세션은 먼저 읽기.
+
+## 토끼 Smart Mesh 후보와 동기화 영상 비교 (2026-10-27)
+
+- **T포즈 재생성 및 Mixamo 업로드 완료:** 사용자 보고로 A포즈의 손/몸통 리깅이 붙어 움직여, 팔을 수평으로 벌린 T포즈로 새로 생성. `input/rabbit_smart_tpose/concept_tpose.png`는 동일한 기존 시안을 built-in ImageGen으로 자세만 바꾼 정면 컨셉. Tripo P2.0 새 작업 `3dd7c056-ec88-488e-9394-92c91435c6c3`, 요청 Quad 8천 면 → 9,340면/8,457점(7,325 Quad + 2,015 Triangle = 렌더 16,665 삼각형). 원본 FBX·2K 텍스처 `input/rabbit_smart_tpose/tripo/`, 정규화 미리깅 OBJ `rabbit_tpose.obj`, 업로드 ZIP `rabbit_tpose_mixamo.zip`. 수평 팔·손과 몸통 사이가 떨어진 상태를 3D 및 Mixamo에서 확인했다. **Mixamo의 Orient 화면에서 NEXT를 누르지 않고 멈췄으며, 리깅은 사용자가 직접 한다.** Chrome 탭 `1934279207`을 handoff로 유지. 최신 업로드 증빙 `output/rabbit_smart_compare/mixamo_tpose_uploaded.png`. 이후 작업에는 아래 이전 A포즈 업로드 대신 이 T포즈와 사용자가 새로 완료한 리깅 결과를 사용해야 한다.
+
+- **최신 사용자 지시:** Smart Mesh 토끼를 Mixamo에 업로드까지만 한다. **Mixamo 리깅은 사용자가 직접 수행**하고, 리깅 완료를 알린 뒤부터 에이전트가 후속 모션/게임 작업을 이어간다. 자동 리깅 실행이나 마커 배치를 대신 진행하지 말 것. 원본 미리깅 OBJ+MTL+2K 텍스처 ZIP `Tools/char-pipeline/input/rabbit_smart/rabbit_smart_p2_mixamo.zip` 준비. 이전 마커 배치 화면을 닫고 교체하는 것은 사용자가 명시적으로 승인함.
+- **Mixamo 업로드 완료:** 사용자가 Adobe 재로그인을 완료한 후 위 ZIP을 다시 업로드. Processing upload가 끝나고 **Orient 화면에 새 P2.0 토끼와 텍스처가 정상 표시됨**을 확인했다. 방향은 정면이다. **NEXT를 누르지 않고 사용자 리깅을 기다리는 상태.** Chrome Mixamo 탭 `1934279207`, URL https://www.mixamo.com/#/ 를 handoff로 유지. 증빙 `Tools/char-pipeline/output/rabbit_smart_compare/mixamo_smart_uploaded.png`. 배경의 RAT_BODY_MIXAMO 제목은 이전 선택 캐릭터이며, 새 토끼 업로드는 열린 Auto-Rigger 모달 안에 있다. 사용자가 리깅 완료를 알리기 전에는 마커/LOD/리깅 시작을 조작하지 말 것.
+
+- 요청: 같은 정면 시안으로 Tripo Smart Mesh P2.0 Quad 약 8천 면 후보를 만들고, 현재 HD 토끼와 영상을 양옆에 두는 비교 페이지 완성.
+- **완료 / 비공개 게시:** https://rrrandom-rabbit-smartmesh-compare.pluckycat22.chatgpt.site . Site ID `appgprj_6ae08bfab6d8819199eb3acd71434024`, 배포 `appgdep_6ae093dff588819192d28702f248916a` succeeded. 최종 Site 소스 커밋 `da205d88d9de20a98312c3cb89336d061ab627f4`. 별도 Sites Git 저장소는 `Sites/rabbit-smartmesh-compare/`에 helper가 준비했으며 `.openai/hosting.json`의 기존 ID를 재사용할 것.
+- Tripo Chrome에서 생성과 텍스처 작업, FBX/2K 내보내기 완료. 작업 `ca3ef39c-dd07-4dd2-af33-2f845518e71d`. 실제 8,940면 = Quad 6,920개 + Triangle 2,020개(Quad 약 77%). 렌더 삼각형 15,860으로 현재 5,930의 약 2.67배. 원본/OBJ/텍스처/리그는 `Tools/char-pipeline/input/rabbit_smart/`. 내보내기는 서버 변환 후 Downloads에 ZIP이 생기므로 탭 제어 시간 초과를 다운로드 실패로 단정하지 말 것.
+- `blender_transfer_rig.py`로 현재 토끼의 뼈대와 근접 표면 가중치를 전이. `ue_import_rabbit_smart.py`가 `/Game/Developers/RabbitSmartCompare/`에 후보와 기존 토끼 재질 복제본을 준비. 현재 `/Game/Characters/Rabbit` 게임 모델은 후보로 교체하지 않음. 같은 기존 스켈레톤과 참조 관절 위치를 유지함을 임포트에서 확인.
+- `ue_rabbit_compare_capture.py`는 저장하지 않는 게임 세션에서 HD(왼쪽)/P2.0(오른쪽)를 같은 무대·정사영 카메라로 함께 촬영. 24fps 480개, 1920×960 PNG에서 좌우를 잘라 각각 **960×960 / 20초 / H.264 MP4** 제작. 0초 정면, 2초 회전, 6초 걷기, 9초 달리기, 12초 사격, 14초 점프·착지, 17초 뒷면. 정면·회전·뒷면은 기준 자세, 나머지는 같은 게임 모션 시점. 텍스처와 형태·가중치도 달라지는 실제 결과 비교이며 토폴로지만 분리한 실험이 아님.
+- 사이트 `dist/assets/hd.mp4`, `smart.mp4` 및 포스터. 동시 재생·정지·구간 이동·0.25/0.5/1배속·한 프레임 이동·확대·반복·다운로드 구현. 크롬에서 20초/24fps/해상도, 두 영상 재생 오차 약 0.00005초, 6초+1프레임=6.041666초, 배속과 반복 확인. FFmpeg로 두 파일 모두 전체 디코드 통과. `node --check` 통과. 브라우저 증빙 `output/rabbit_smart_compare/comparison_page.png`.
+- 얼굴/귀와 표면 디테일은 P2.0이 더 정돈됐지만, 어깨·바지의 움직임 변형은 별도 스킨 가중치 보정이 필요함. 비교 후보를 곧바로 게임 적용 완료라고 표현하지 말 것.
+- 로컬 미리보기: `node Sites/rabbit-smartmesh-compare/preview.mjs` → http://127.0.0.1:8769/ . MP4 구간 이동에는 HTTP Range 지원이 필요해서 전용 간단 서버를 둠. Python 기본 http.server는 이 PC 크롬에서 seekable=[0,0]이 나왔으므로 사용하지 말 것. 촬영 PNG/로그 및 UE 비교 임시 에셋은 gitignore, 소스 FBX·텍스처와 스크립트는 보존.
+
+## 토끼 리디자인 — 크롬 연결 복구 후 Tripo 모델 교체 (2026-10-27)
+
+- 요청: 기존 토끼가 쥬토피아 쥬디처럼 보여서, 다른 동물친구와 어울리는 스타일을 유지하며 개선. **Tripo API 키는 없으며 브라우저로 작업**한다.
+- 브라우저: Windows 화면 제어는 현재 Chrome URL을 확인하지 못해 차단되었음. 브라우저 목록에 나타난 **Chrome 확장 연결**로 전환하니 로그인된 Tripo와 기존 작업을 읽고 생성·내보내기가 정상 작동. 사용자가 ChatGPT 확장의 `파일 URL에 대한 액세스 허용`을 켠 뒤 로컬 ZIP의 Mixamo 업로드도 성공. 이 설정 변경 때 연결 ID가 바뀌므로 목록에서 새 Chrome 연결을 확인해야 함. 인증이나 보안 설정을 우회한 것이 아님.
+- 디자인: 따뜻한 크림색 털, 둥근 볼, 한쪽 귀 끝이 접힌 비대칭 실루엣, 자두색 초승달 티셔츠, 황토색 반바지, 기존 캐릭터들과 같은 갈색 주머니 벨트. Nano Banana Pro 정면 시안 → 복슬한 3D 영화 질감 편집 → Tripo H3.1 모델. 작업 `44266f0b-6394-4f1b-8d42-bbe3e1a07fca`, 5,930 삼각면, 2K 텍스처. 기존 모델과 새 원본은 보존.
+- 소스: 저장소 `Tools/char-pipeline/input/rabbit_redesign/`에 컨셉·Tripo FBX·OBJ·텍스처·관절 좌표·게임용 최종 `rabbit_rig.fbx`. 캡처와 로그는 `Tools/char-pipeline/output/rabbit_redesign/`. 원본 게임 에셋 백업 `input/rabbit_redesign/backup/Rabbit/` 및 `T_RabbitPortrait.uasset`(로컬 백업 폴더는 gitignore).
+- 리깅: Mixamo 업로드·마커 배치 후 41뼈/25뼈 두 설정이 모두 완료되지 않고 배치 화면으로 돌아옴. 기존 `rabbit_mjc/rig_mx/rabbit_rig.fbx`의 뼈 축을 유지하면서 `blender_fit_rig.py`와 `joints.txt`로 관절을 새 체형에 맞춤. `blender_rabbit_skin.py`로 넓어진 팔·손의 몸통 가중치 혼입을 제거하고, 작은 솜꼬리의 반바지색 번짐을 UV 아틀라스에 크림색으로 보정. 최종 43뼈, 단일 머티리얼 슬롯.
+- 게임: `/Game/Characters/Rabbit` 메시·스켈레톤·기존 23개 모션을 새 뼈 길이에 맞춰 교체. 새 초상화 `/Game/UI/T_RabbitPortrait`. `RRRandomSpecies.cpp`: 크기 2.0, 엉덩이 높이 24, 기존 손뼈 축·총 보정 유지. 머티리얼은 기존 파스텔·피격 플래시·털 가장자리 효과를 재적용.
+- 재현: `ue_import_rabbit_redesign.py`는 기존 토끼 폴더를 교체하는 임포트 스크립트이므로 먼저 백업하고 에디터를 닫은 상태에서 사용. 기존 CDO가 참조하는 폴더가 있으면 삭제 실패하므로 **엔진 실행 전에** 해당 폴더를 작업 백업으로 옮겨야 함. UE 시작 후에도 `Interchange.FeatureFlags.Import.FBX 0`을 실행하여 레거시 FBX 임포터를 확실히 선택. `--validate-only`로 재임포트 없이 에셋 검증 가능. 애니메이션 원본은 이 PC의 `C:/work/char-pipeline/input/rabbit_mjc/`, 공유 달리기는 `input/shared_anims/dragon_rifle_run.fbx` 사용.
+- 검증: RRRandomEditor Win64 Development 빌드 성공. `ue_rabbit_smoke.py`에서 모션 23개가 같은 새 스켈레톤을 쓰고 길이가 양수인지, 엉덩이 높이 24, 초상화 256px인지 확인. 게임 Studio에서 앞·옆·뒤, 걷기·달리기·사격·점프 캡처 확인, 오류 없이 종료. `Saved/Logs/rabbit_redesign_showcase.log`, 캡처 `HighresScreenshot01861`~`01867`. 온라인·탈것별 자세·달토끼 궁극기 전체 연출은 이번에 별도로 검증하지 않음.
 
 ## 요청 내용
 
