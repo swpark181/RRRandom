@@ -28,6 +28,24 @@ enum class ERRMatchRule : uint8
 	Knockout,
 	/** Meteors drop dice ore; a team holding 30 points of it for 12 seconds wins (ARRRandomMeteorRushDirector). */
 	MeteorRush,
+	/**
+	 * Round 90: everyone on one team holds the giant dice tower against 7 waves of rats (and cat bosses) on a defense stage
+	 * (ARRRandomDefenseDirector); the tower falling loses.
+	 */
+	Defense,
+};
+
+/** A game found online, for the title's room list (URRRandomSessionSubsystem::FindRooms). */
+struct FRRRoomInfo
+{
+	FString HostName;
+	int32 Players = 0;
+	int32 MaxPlayers = 0;
+	ERRMatchRule Rule = ERRMatchRule::Knockout;
+	/** The defense stage (1..3), or 0 for a battle. */
+	int32 Stage = 0;
+	/** Its index in the search's results. */
+	int32 SearchIndex = INDEX_NONE;
 };
 
 /**
@@ -57,6 +75,17 @@ public:
 
 	/** Logs in if needed, finds a game and joins the first one. Retries a few times when nothing is found yet. */
 	void JoinGame(int32 Retries = 0);
+
+	/**
+	 * The title's room list (round 90): logs in if needed and looks for games without joining any; GetRooms has them once
+	 * IsBusy is over. JoinRoom joins one of them.
+	 */
+	void FindRooms();
+	const TArray<FRRRoomInfo>& GetRooms() const { return Rooms; }
+	/** A search for the room list has come back at least once since FindRooms. */
+	bool HasRoomResults() const { return bRoomsFound; }
+	/** Joins the room at this place in GetRooms. */
+	void JoinRoom(int32 Index);
 
 	/** Ends or leaves any online game and plays alone in the arena (the title's SINGLE PLAY, F3 in the arena). */
 	void PlaySolo();
@@ -103,6 +132,29 @@ public:
 	 */
 	void SetMatchRule(ERRMatchRule InRule) { MatchRule = InRule; }
 	ERRMatchRule GetMatchRule() const { return MatchRule; }
+
+	/**
+	 * The defense stage (1..3) the next defense game this machine starts is played on, picked on the title. -RRStage=N on the
+	 * command line sets it too (locked or not, for tests). Joiners play the host's (ARRRandomGameState::GetDefenseStage).
+	 */
+	void SetDefenseStage(int32 InStage) { DefenseStage = FMath::Clamp(InStage, 1, DefenseStageCount); }
+	int32 GetDefenseStage() const { return DefenseStage; }
+	static constexpr int32 DefenseStageCount = 3;
+	/**
+	 * This PC's defense progress (saved locally, URRRandomSaveGame): the highest stage cleared (0 for none). A stage is open
+	 * once the one before it is cleared; hosting offers only open stages.
+	 */
+	int32 GetClearedStage() const;
+	bool IsStageUnlocked(int32 Stage) const { return Stage >= 1 && Stage <= FMath::Min(GetClearedStage() + 1, DefenseStageCount); }
+	/**
+	 * A defense stage was just cleared with this machine's player in it (the host's game says so, ARRRandomPlayerController):
+	 * counts only if this PC had that stage open (cleared the one before it); then saved. Returns whether a new stage opened.
+	 */
+	bool RecordStageCleared(int32 Stage);
+	/** Cheat (RRUnlockStages): every stage open, saved. */
+	void UnlockAllStages();
+	/** Players in a game of this rule, the host included: 5 holding the tower together, 6 in a battle. */
+	int32 GetMaxPlayersFor(ERRMatchRule Rule) const { return Rule == ERRMatchRule::Defense ? DefenseMaxPlayers : MaxPlayers; }
 
 	/**
 	 * The brawler this machine's player plays (RRSpecies: fox, rabbit, squirrel, tiger), picked on the title and kept across
@@ -153,6 +205,10 @@ protected:
 	UPROPERTY(Config)
 	int32 MaxPlayers = 6;
 
+	/** Players in a defense game, the host included (the user's rule: up to 5 online). */
+	UPROPERTY(Config)
+	int32 DefenseMaxPlayers = 5;
+
 	/** How many times -RRJoin looks again when no game is found yet (the host may still be starting). */
 	UPROPERTY(Config)
 	int32 StartupJoinRetries = 10;
@@ -167,6 +223,8 @@ private:
 		None,
 		Host,
 		Join,
+		/** Looking for games for the room list, joining none. */
+		ListRooms,
 	};
 
 	/** Where to go once the current session is gone. */
@@ -221,10 +279,21 @@ private:
 	ERRThirdPersonMap ThirdPersonMap = ERRThirdPersonMap::DiceTown;
 	ERRMatchRule MatchRule = ERRMatchRule::Knockout;
 	int32 Species = 0;
+	int32 DefenseStage = 1;
+	/** The saved progress, read the first time it is asked for (INDEX_NONE until then). */
+	mutable int32 ClearedStage = INDEX_NONE;
+	void SaveProgress() const;
 	int32 JoinRetriesLeft = 0;
 	FString Status;
 	TSharedPtr<FOnlineSessionSearch> Search;
 	FTimerHandle RetryTimer;
+	/** The room list's games, from the last search (Search keeps what joining one needs). */
+	TArray<FRRRoomInfo> Rooms;
+	bool bRoomsFound = false;
+	/** The game JoinRoom is joining (in Search), or INDEX_NONE to join the first open one. */
+	int32 RoomToJoin = INDEX_NONE;
+	/** A room list search found (JoinRoom then joins from it without searching again). */
+	bool bJoinFromRooms = false;
 
 	FDelegateHandle LoginHandle;
 	FDelegateHandle CreateHandle;

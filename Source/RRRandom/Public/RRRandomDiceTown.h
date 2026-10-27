@@ -99,6 +99,22 @@ public:
 	/** Changes each time something broken, mended or flooded with lava changes the minimap. */
 	int32 GetMapVersion() const { return MapVersion; }
 
+	/**
+	 * A defense stage (round 90, 1..3; 0 for the town itself): set before it finishes spawning, replicated so every machine
+	 * builds the same. A stage is the town's look laid out round the giant dice tower in its middle (ARRRandomDiceTower): a
+	 * paved plaza inside the wall ring, a ring road round it, eight roads out to the villains' gates near the rim, and between
+	 * the roads houses, towers, trees and cover. Stage 1 is half the town's width, stage 2 two thirds, stage 3 the whole
+	 * town; the bigger, the more there is between the roads.
+	 */
+	void SetDefenseStage(int32 InStage) { DefenseStage = InStage; }
+	int32 GetDefenseStage() const { return DefenseStage; }
+	/** The villains' gates (feet on the road just inside each), in the order they open (RRDefense::MaxGates). */
+	void GetDefenseGates(TArray<FVector>& OutGates) const;
+	/** How far the wall ring and the island's rim (on average) are from the middle. */
+	float GetDefenseRingRadius() const;
+	float GetDefenseRimRadius() const;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
 	/** Placed in a level (/Game/Maps/DiceTown), the editor builds it too, never saved (RF_Transient), to show it and its navmesh. */
 	virtual void OnConstruction(const FTransform& Transform) override;
 
@@ -114,6 +130,8 @@ private:
 		bool bDie;
 		/** Solid but drawn by something else (a roof or tree mesh); its color still goes on the minimap. */
 		bool bUnderMesh;
+		/** Round 91: polished (GlossBlocks, the sky and the town show in it): the plaza's tiles. */
+		bool bGloss = false;
 	};
 
 	/** Where a structure stands: a cell and a quarter turn, mapping its own (U, V) cells onto the grid. */
@@ -159,6 +177,19 @@ private:
 	void Build();
 	/** Every district on the grid: ground, roads, plaza, bases, hills, downtown, canals, woods, cover. */
 	void LayOut();
+	/** A defense stage's layout (round 90) instead of LayOut. */
+	void LayOutDefense();
+	bool IsDefenseRoad(int32 X, int32 Y) const;
+	/** A defense stage's castle (its wall, the plaza inside, the stairs): nothing breaks or digs there. */
+	bool IsCastle(int32 X, int32 Y) const;
+	/** A defense stage's road out to gate Lane: which way it runs. */
+	static FVector2D GetLaneWay(int32 Lane);
+	UPROPERTY(Replicated)
+	int32 DefenseStage = 0;
+	/** The island's size: 1 for the town, less for the smaller defense stages. */
+	float RimScale = 1.f;
+	/** The defense gates, relative to the middle. */
+	TArray<FVector2D> DefenseGates;
 	UInstancedStaticMeshComponent* MakeInstances(UStaticMesh* Mesh, UMaterialInterface* Material, bool bSolid, int32 CustomFloats);
 
 	// The grid
@@ -168,7 +199,7 @@ private:
 	void Set(int32 X, int32 Y, int32 Level, uint8 Value);
 	/** Fills a box of cells (corners included, in either order) and levels with a look, or clears it with 0. */
 	void Fill(const FFrame& Frame, int32 U0, int32 V0, int32 U1, int32 V1, int32 L0, int32 L1, uint8 Value);
-	uint8 MakeLook(const FColor& Body, const FColor& Accent, bool bDie = false, bool bUnderMesh = false);
+	uint8 MakeLook(const FColor& Body, const FColor& Accent, bool bDie = false, bool bUnderMesh = false, bool bGloss = false);
 	uint8 HiddenLook(const FColor& Color) { return MakeLook(Color, Color, false, true); }
 	uint8 Plain(const FColor& Color) { return MakeLook(Color, Color); }
 	bool IsOnIsland(int32 X, int32 Y) const;
@@ -270,6 +301,15 @@ private:
 	void AddAwning(const FFrame& Frame, int32 Start, int32 Width, const FColor& Color);
 	/** Candy striped lamp posts with a turning star on top along both main roads. */
 	void AddStarLamps();
+	/**
+	 * Round 91: rain puddles here and there on the roads (round flat discs, two or three overlapping, mirror smooth: the sky,
+	 * the buildings and passing friends show in them). Gone while the road under them is dug out (RefreshMapColumn).
+	 */
+	void AddPuddles();
+	/** Round 91: the sun's light shafts and the sky light's reflections, on the level's own lights (BeginPlay). */
+	void SetUpLightEffects();
+	/** The draw set a cell's block is in. */
+	UInstancedStaticMeshComponent* GetBlockSet(bool bDie, bool bGloss) const;
 	/** Floating islands near the rim joined by a rainbow of dice, moons, floating dice and stars over the town. */
 	void MakeDreamSky();
 	void AddFloater(UInstancedStaticMeshComponent* Instances, const FVector& Base, const FRotator& Turn, float Scale, const FColor& Body, const FColor& Accent,
@@ -287,6 +327,14 @@ private:
 
 	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> Blocks;
 	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> DieBlocks;
+	/** Round 91: polished blocks (FLook::bGloss), and the puddles' discs (the engine cylinder) with their cells. */
+	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> GlossBlocks;
+	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> Puddles;
+	/** Round 91: neon tubes along the shop awnings (glowing M_BTBlock). */
+	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> Neon;
+	TMap<FIntPoint, TArray<TPair<int32, FTransform>>> PuddleDiscs;
+	/** Round 91: the star lamps' light (warm points, no shadows). */
+	UPROPERTY(Transient) TArray<TObjectPtr<class UPointLightComponent>> LampLights;
 	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> Steps;
 	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> Water;
 	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> Clouds;
@@ -342,6 +390,7 @@ private:
 		bool bDie;
 		int32 Index;
 		bool bShown;
+		bool bGloss = false;
 	};
 	TMap<int32, FCellBlock> CellBlocks;
 

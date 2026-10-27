@@ -1,4 +1,5 @@
 #include "RRRandomSessionSubsystem.h"
+#include "RRRandomSaveGame.h"
 #include "RRRandomSpecies.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -22,6 +23,9 @@ namespace
 	// Advertised with every session and searched for, so only RRRandom games show up
 	const FName GameKey(TEXT("RRGAME"));
 	const FString GameValue(TEXT("RRRandom"));
+	// What the room list shows of a game: its rule (ERRMatchRule) and defense stage
+	const FName RuleKey(TEXT("RRRULE"));
+	const FName StageKey(TEXT("RRSTAGE"));
 	constexpr int32 MaxSearchResults = 20;
 	constexpr int32 LocalUser = 0;
 }
@@ -156,8 +160,17 @@ void URRRandomSessionSubsystem::RunStartupCommand()
 	FString RuleName;
 	if (FParse::Value(FCommandLine::Get(), TEXT("RRRule="), RuleName))
 	{
-		MatchRule = RuleName.Equals(TEXT("MeteorRush"), ESearchCase::IgnoreCase) ? ERRMatchRule::MeteorRush : ERRMatchRule::Knockout;
+		MatchRule = RuleName.Equals(TEXT("MeteorRush"), ESearchCase::IgnoreCase) ? ERRMatchRule::MeteorRush
+			: RuleName.Equals(TEXT("Defense"), ESearchCase::IgnoreCase) ? ERRMatchRule::Defense : ERRMatchRule::Knockout;
 	}
+	// -RRStage=N: that defense stage, open or not (tests)
+	int32 StageNumber = 0;
+	if (FParse::Value(FCommandLine::Get(), TEXT("RRStage="), StageNumber))
+	{
+		SetDefenseStage(StageNumber);
+	}
+	// Defense is played third person, on its own stages
+	bThirdPersonMode |= MatchRule == ERRMatchRule::Defense;
 	FString SpeciesName;
 	if (FParse::Value(FCommandLine::Get(), TEXT("RRSpecies="), SpeciesName) && RRSpecies::FromName(SpeciesName) != INDEX_NONE)
 	{
@@ -202,7 +215,71 @@ void URRRandomSessionSubsystem::JoinGame(int32 Retries)
 	}
 	Pending = EPendingAction::Join;
 	JoinRetriesLeft = Retries;
+	RoomToJoin = INDEX_NONE;
+	bJoinFromRooms = false;
 	Continue();
+}
+
+void URRRandomSessionSubsystem::FindRooms()
+{
+	if (IsBusy())
+	{
+		return;
+	}
+	Pending = EPendingAction::ListRooms;
+	bRoomsFound = false;
+	Continue();
+}
+
+void URRRandomSessionSubsystem::JoinRoom(int32 Index)
+{
+	if (IsBusy() || !Rooms.IsValidIndex(Index) || !Search.IsValid() || !Search->SearchResults.IsValidIndex(Rooms[Index].SearchIndex))
+	{
+		Fail(TEXT("That game is gone. Refresh the list."));
+		return;
+	}
+	Pending = EPendingAction::Join;
+	JoinRetriesLeft = 0;
+	RoomToJoin = Rooms[Index].SearchIndex;
+	bJoinFromRooms = true;
+	Continue();
+}
+
+int32 URRRandomSessionSubsystem::GetClearedStage() const
+{
+	if (ClearedStage == INDEX_NONE)
+	{
+		const URRRandomSaveGame* Saved = Cast<URRRandomSaveGame>(UGameplayStatics::LoadGameFromSlot(URRRandomSaveGame::SlotName, 0));
+		ClearedStage = Saved ? FMath::Clamp(Saved->ClearedStage, 0, DefenseStageCount) : 0;
+	}
+	return ClearedStage;
+}
+
+bool URRRandomSessionSubsystem::RecordStageCleared(int32 Stage)
+{
+	// Joining someone's game, a stage counts only when this PC had it open (it cleared the one before)
+	if (!IsStageUnlocked(Stage) || Stage <= GetClearedStage())
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: defense stage %d cleared; progress stays at %d."), Stage, GetClearedStage());
+		return false;
+	}
+	ClearedStage = Stage;
+	SaveProgress();
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: defense stage %d cleared and saved; stage %d is open."), Stage, FMath::Min(Stage + 1, DefenseStageCount));
+	return Stage < DefenseStageCount;
+}
+
+void URRRandomSessionSubsystem::UnlockAllStages()
+{
+	ClearedStage = DefenseStageCount;
+	SaveProgress();
+}
+
+void URRRandomSessionSubsystem::SaveProgress() const
+{
+	URRRandomSaveGame* Save = Cast<URRRandomSaveGame>(UGameplayStatics::CreateSaveGameObject(URRRandomSaveGame::StaticClass()));
+	Save->ClearedStage = GetClearedStage();
+	UGameplayStatics::SaveGameToSlot(Save, URRRandomSaveGame::SlotName, 0);
 }
 
 void URRRandomSessionSubsystem::PlaySolo()
@@ -298,7 +375,14 @@ void URRRandomSessionSubsystem::Continue()
 	{
 		CreateSession();
 	}
-	else if (Pending == EPendingAction::Join)
+	else if (Pending == EPendingAction::Join && bJoinFromRooms)
+	{
+		// A game picked from the room list: straight in
+		const FOnlineSessionSearchResult& Result = Search->SearchResults[RoomToJoin];
+		SetStatus(FString::Printf(TEXT("Joining %s's game..."), *Result.Session.OwningUserName));
+		GetSessions()->JoinSession(LocalUser, NAME_GameSession, Result);
+	}
+	else if (Pending == EPendingAction::Join || Pending == EPendingAction::ListRooms)
 	{
 		FindSessions();
 	}
@@ -347,7 +431,7 @@ void URRRandomSessionSubsystem::OnLoginComplete(int32 LocalUserNum, bool bWasSuc
 void URRRandomSessionSubsystem::CreateSession()
 {
 	FOnlineSessionSettings Settings;
-	Settings.NumPublicConnections = MaxPlayers;
+	Settings.NumPublicConnections = GetMaxPlayersFor(MatchRule);
 	Settings.bShouldAdvertise = true;
 	Settings.bAllowJoinInProgress = true;
 	Settings.bIsLANMatch = !IsUsingEOS();
@@ -357,6 +441,8 @@ void URRRandomSessionSubsystem::CreateSession()
 	Settings.bAllowJoinViaPresence = false;
 	Settings.Set(SETTING_MAPNAME, GetArenaMap(), EOnlineDataAdvertisementType::ViaOnlineService);
 	Settings.Set(GameKey, GameValue, EOnlineDataAdvertisementType::ViaOnlineService);
+	Settings.Set(RuleKey, static_cast<int32>(MatchRule), EOnlineDataAdvertisementType::ViaOnlineService);
+	Settings.Set(StageKey, MatchRule == ERRMatchRule::Defense ? DefenseStage : 0, EOnlineDataAdvertisementType::ViaOnlineService);
 
 	SetStatus(TEXT("Creating a game..."));
 	if (!GetSessions()->CreateSession(LocalUser, NAME_GameSession, Settings))
@@ -397,6 +483,33 @@ void URRRandomSessionSubsystem::FindSessions()
 
 void URRRandomSessionSubsystem::OnFindSessionsComplete(bool bWasSuccessful)
 {
+	if (Pending == EPendingAction::ListRooms && Search.IsValid())
+	{
+		// The room list: every RRRandom game found, open or full, with what it plays
+		Rooms.Reset();
+		for (int32 Index = 0; Index < Search->SearchResults.Num(); ++Index)
+		{
+			const FOnlineSessionSearchResult& Result = Search->SearchResults[Index];
+			if (!Result.IsValid())
+			{
+				continue;
+			}
+			FRRRoomInfo& Room = Rooms.AddDefaulted_GetRef();
+			Room.HostName = Result.Session.OwningUserName;
+			Room.MaxPlayers = Result.Session.SessionSettings.NumPublicConnections;
+			Room.Players = FMath::Max(1, Room.MaxPlayers - Result.Session.NumOpenPublicConnections);
+			int32 Rule = 0;
+			Result.Session.SessionSettings.Get(RuleKey, Rule);
+			Room.Rule = static_cast<ERRMatchRule>(FMath::Clamp(Rule, 0, static_cast<int32>(ERRMatchRule::Defense)));
+			Result.Session.SessionSettings.Get(StageKey, Room.Stage);
+			Room.SearchIndex = Index;
+		}
+		Pending = EPendingAction::None;
+		bRoomsFound = true;
+		SetStatus(Rooms.Num() > 0 ? FString::Printf(TEXT("%d game%s found"), Rooms.Num(), Rooms.Num() == 1 ? TEXT("") : TEXT("s"))
+			: bWasSuccessful ? TEXT("No game found. Has someone hosted one?") : TEXT("Searching for games failed"));
+		return;
+	}
 	if (Pending != EPendingAction::Join || !Search.IsValid())
 	{
 		return;
@@ -492,6 +605,11 @@ FString URRRandomSessionSubsystem::GetArenaMap() const
 
 FString URRRandomSessionSubsystem::GetStartMap() const
 {
+	// A defense stage is built in code on the bare arena (ARRRandomDiceTown with its stage, from the game mode)
+	if (MatchRule == ERRMatchRule::Defense)
+	{
+		return ArenaMap;
+	}
 	if (bThirdPersonMode)
 	{
 		const FString& Level = ThirdPersonMap == ERRThirdPersonMap::DiceLand ? DiceLandMap

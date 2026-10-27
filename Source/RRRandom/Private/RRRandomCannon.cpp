@@ -428,3 +428,33 @@ void ARRRandomCannon::SpawnDiceTownSets(UWorld* World, const ARRRandomDiceTown* 
 		}
 	}
 }
+
+void ARRRandomCannon::SpawnDefenseSets(UWorld* World, const ARRRandomDiceTown* Town, const FVector& Center)
+{
+	if (!World || !Town || TActorIterator<ARRRandomCannon>(World))
+	{
+		return;
+	}
+	// A defense stage (round 90): four cannons inside the wall ring on the diagonals, each shooting out over the walls to a
+	// pad halfway to the rim, between the roads the villains come in by
+	const FVector2D Middle(Center.X, Center.Y);
+	const float CannonOut = Town->GetDefenseRingRadius() * 0.75f;
+	const float PadOut = FMath::Max(Town->GetDefenseRimRadius() * 0.55f, Town->GetDefenseRingRadius() + 1200.f);
+	int32 Count = 0;
+	for (int32 Corner = 0; Corner < 4; ++Corner)
+	{
+		const FVector2D Way = FVector2D(FRotator(0.f, 45.f + 90.f * Corner, 0.f).Vector());
+		FVector From;
+		FVector To;
+		if (!FindOpenGround(World, Town, Middle + Way * PadOut, PadClear, To)
+			|| !FindOpenGround(World, Town, Middle + Way * CannonOut, CannonClear, From, [World, &To](const FVector& Spot) { return IsArcClear(World, Spot, To); }, 600.f))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("RRRandom: no open ground for a defense cannon set on corner %d."), Corner);
+			continue;
+		}
+		SpawnSet(World, From, To, Count);
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: defense cannon %d at %s, its pad at %s (%.0f apart)."), Count, *(FVector2D(From) - Middle).ToString(),
+			*(FVector2D(To) - Middle).ToString(), FVector::Dist2D(From, To));
+		++Count;
+	}
+}

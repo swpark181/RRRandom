@@ -2,6 +2,7 @@
 #include "RRRandomFogOfWar.h"
 #include "RRRandomCannon.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomDefense.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomGameMode.h"
 #include "RRRandomGameState.h"
@@ -482,6 +483,13 @@ void ARRRandomPlayerController::RRNewGame()
 	// The game mode exists only on the host (or in a solo game)
 	if (ARRRandomGameMode* GameMode = GetWorld()->GetAuthGameMode<ARRRandomGameMode>())
 	{
+		// Defense won: on to the next stage (NEXT STAGE), else the same again
+		const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
+		URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>();
+		if (State && Sessions && State->IsDefense() && State->GetWinningTeam() == 0 && State->GetDefenseStage() < URRRandomSessionSubsystem::DefenseStageCount)
+		{
+			Sessions->SetDefenseStage(State->GetDefenseStage() + 1);
+		}
 		GameMode->RestartMatch();
 	}
 	else
@@ -1895,4 +1903,57 @@ void ARRRandomPlayerController::RRPlaneDown(int32 bHold)
 	{
 		RandomCharacter->SetPlaneDescend(bHold != 0);
 	}
+}
+
+void ARRRandomPlayerController::ClientDefenseCleared_Implementation(int32 Stage)
+{
+	StageOpened = 0;
+	if (URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>())
+	{
+		if (Sessions->RecordStageCleared(Stage))
+		{
+			StageOpened = Stage + 1;
+		}
+	}
+}
+
+void ARRRandomPlayerController::RRWave(int32 Wave)
+{
+	ServerCheatWave(Wave);
+}
+
+void ARRRandomPlayerController::ServerCheatWave_Implementation(int32 Wave)
+{
+#if !UE_BUILD_SHIPPING
+	if (ARRRandomDefenseDirector* Director = ARRRandomDefenseDirector::Get(this))
+	{
+		Director->CheatSkipToWave(Wave);
+	}
+#endif
+}
+
+void ARRRandomPlayerController::RRClearWave()
+{
+	ServerCheatClearWave();
+}
+
+void ARRRandomPlayerController::ServerCheatClearWave_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+	if (ARRRandomDefenseDirector* Director = ARRRandomDefenseDirector::Get(this))
+	{
+		Director->CheatClearWave();
+	}
+#endif
+}
+
+void ARRRandomPlayerController::RRUnlockStages()
+{
+#if !UE_BUILD_SHIPPING
+	if (URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>())
+	{
+		Sessions->UnlockAllStages();
+		ClientMessage(TEXT("Every defense stage is open."));
+	}
+#endif
 }

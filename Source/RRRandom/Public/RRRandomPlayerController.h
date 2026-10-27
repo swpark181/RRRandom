@@ -198,6 +198,23 @@ public:
 	 */
 	UFUNCTION(Exec)
 	void RRStudioCam(float Yaw = 90.f, float Distance = 0.f, float Height = 0.f);
+
+	/**
+	 * Defense (round 90): the host tells every player's machine the stage was cleared; this PC counts it for itself
+	 * (URRRandomSessionSubsystem::RecordStageCleared: only if it had that stage open) and the results say what opened.
+	 */
+	UFUNCTION(Client, Reliable)
+	void ClientDefenseCleared(int32 Stage);
+	/** The stage this PC's progress opened with the last clear (0 for none), for the results screen. */
+	int32 GetStageOpened() const { return StageOpened; }
+
+	/** Defense cheats (console; not in shipping builds): the break before this wave now, every villain out down, every stage open. */
+	UFUNCTION(Exec)
+	void RRWave(int32 Wave = 4);
+	UFUNCTION(Exec)
+	void RRClearWave();
+	UFUNCTION(Exec)
+	void RRUnlockStages();
 	UFUNCTION(Exec)
 	void RRStudioCamOff();
 
@@ -405,6 +422,11 @@ private:
 	void ServerCheatOwnDie(int32 Face, bool bEveryone);
 	UFUNCTION(Server, Reliable)
 	void ServerCheatStarCars();
+	UFUNCTION(Server, Reliable)
+	void ServerCheatWave(int32 Wave);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatClearWave();
+	int32 StageOpened = 0;
 	UFUNCTION(Server, Reliable)
 	void ServerCheatCannon(int32 Index);
 	UFUNCTION(Server, Reliable)

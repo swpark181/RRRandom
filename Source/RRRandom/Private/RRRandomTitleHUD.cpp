@@ -410,9 +410,17 @@ void ARRRandomTitleHUD::DrawHUD()
 	{
 		DrawCenteredText(TEXT("PICK A MAP"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
 	}
+	else if (Menu->IsOnStagePage())
+	{
+		DrawCenteredText(TEXT("PICK A DEFENSE STAGE"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
+	}
+	else if (Menu->IsOnRoomPage())
+	{
+		DrawCenteredText(TEXT("PICK A GAME TO JOIN"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
+	}
 	else if (Menu->IsOnViewPage())
 	{
-		DrawCenteredText(TEXT("HOW DO YOU WANT TO PLAY?"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
+		DrawCenteredText(TEXT("WHAT DO YOU WANT TO PLAY?"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
 	}
 	// Which online service a network game would use
 	else if (Menu->IsOnNetworkPage() && Sessions)
@@ -447,7 +455,9 @@ void ARRRandomTitleHUD::DrawHUD()
 			NextTop = Top + CardHeight * S + DescriptionRoom;
 			continue;
 		}
-		const FVector2D Size = bCards ? FVector2D(SmallButtonWidth, SmallButtonHeight) * S : FVector2D(ButtonWidth, ButtonHeight) * S;
+		// (the room list's games are wide: who hosts, what it plays, how full)
+		const bool bRoom = Menu->GetRoomOf(Index) != INDEX_NONE;
+		const FVector2D Size = bCards ? FVector2D(SmallButtonWidth, SmallButtonHeight) * S : FVector2D(ButtonWidth * (bRoom ? 1.9f : 1.f), ButtonHeight) * S;
 		const FVector2D Min(ColumnX - Size.X * 0.5f, NextTop);
 		ButtonRects.Add(FBox2D(Min, Min + Size));
 		NextTop += Size.Y + ButtonGap * S;
@@ -475,7 +485,9 @@ void ARRRandomTitleHUD::DrawHUD()
 	for (int32 Index = 0; Index < Choices.Num(); ++Index)
 	{
 		const bool bSelected = Index == Menu->GetSelected();
-		const FString Label = ARRRandomTitlePlayerController::GetLabel(Choices[Index]);
+		const FString Label = Menu->GetButtonLabel(Index);
+		// A locked stage or a full room: faded
+		const float ButtonAlpha = Menu->IsButtonEnabled(Index) ? Alpha : Alpha * 0.45f;
 		if (Index < CardCount)
 		{
 			// A see-through card; the picked one turns white, rises, and gets a pink ring and a line under its name
@@ -520,18 +532,18 @@ void ARRRandomTitleHUD::DrawHUD()
 		const float Radius = Rect.GetSize().Y * 0.5f;
 		if (bSelected)
 		{
-			RRUI::DrawSoftShadow(Canvas, Rect, Radius, 12.f * S, 4.f * S, RRUI::WithAlpha(RRUI::Shadow, Alpha));
-			RRUI::DrawRounded(Canvas, Rect.ExpandBy(2.f * S), Radius + 2.f * S, RRUI::WithAlpha(RRUI::Pink, Alpha));
-			RRUI::DrawRounded(Canvas, Rect, Radius, RRUI::WithAlpha(FLinearColor(1.f, 1.f, 1.f, 0.96f), Alpha));
+			RRUI::DrawSoftShadow(Canvas, Rect, Radius, 12.f * S, 4.f * S, RRUI::WithAlpha(RRUI::Shadow, ButtonAlpha));
+			RRUI::DrawRounded(Canvas, Rect.ExpandBy(2.f * S), Radius + 2.f * S, RRUI::WithAlpha(RRUI::Pink, ButtonAlpha));
+			RRUI::DrawRounded(Canvas, Rect, Radius, RRUI::WithAlpha(FLinearColor(1.f, 1.f, 1.f, 0.96f), ButtonAlpha));
 		}
 		else
 		{
-			RRUI::DrawRounded(Canvas, Rect, Radius, RRUI::WithAlpha(FLinearColor(1.f, 1.f, 1.f, 0.55f), Alpha));
+			RRUI::DrawRounded(Canvas, Rect, Radius, RRUI::WithAlpha(FLinearColor(1.f, 1.f, 1.f, 0.55f), ButtonAlpha));
 		}
-		const float Size = (bCards ? 14.f : 17.f) * S;
+		const float Size = (bCards ? 14.f : Menu->GetRoomOf(Index) != INDEX_NONE ? 13.f : 17.f) * S;
 		const float Tracking = Size * 0.06f;
 		const FVector2D Box = RRUI::MeasureText(Label, Size, RRUI::EWeight::Black, Tracking);
-		RRUI::DrawText(Canvas, Label, Rect.GetCenter() - Box * 0.5f, Size, RRUI::EWeight::Black, RRUI::WithAlpha(bSelected ? RRUI::Ink : RRUI::InkSoft, Alpha), Tracking);
+		RRUI::DrawText(Canvas, Label, Rect.GetCenter() - Box * 0.5f, Size, RRUI::EWeight::Black, RRUI::WithAlpha(bSelected ? RRUI::Ink : RRUI::InkSoft, ButtonAlpha), Tracking);
 	}
 
 	// What the selected button does: under the cards on the brawler page, under the buttons elsewhere; a pink mark then
@@ -539,7 +551,7 @@ void ARRRandomTitleHUD::DrawHUD()
 	const float DescriptionY = CardCount > 0 ? Top + CardHeight * S + 18.f * S : (ButtonRects.Num() > 0 ? ButtonRects.Last().Max.Y : Top) + 20.f * S;
 	if (Choices.IsValidIndex(Menu->GetSelected()) && !bBusy)
 	{
-		const FString Description = ARRRandomTitlePlayerController::GetDescription(Choices[Menu->GetSelected()]);
+		const FString Description = Menu->GetButtonDescription(Menu->GetSelected());
 		const float Size = 15.f * S;
 		const FVector2D Box = RRUI::MeasureText(Description, Size, RRUI::EWeight::SemiBold);
 		const float Mark = 3.f * S;
@@ -576,7 +588,8 @@ void ARRRandomTitleHUD::DrawHUD()
 		DrawCenteredText(TEXT("ESC  CANCEL"), RRUI::InkSoft, ColumnX, Y, 11.f * S, ExtraBold, 11.f * S * 0.12f);
 	}
 
-	const bool bCanGoBack = Menu->IsOnNetworkPage() || Menu->IsOnViewPage() || Menu->IsOnSpeciesPage() || Menu->IsOnMapPage() || Menu->IsOnRulePage();
+	const bool bCanGoBack = Menu->IsOnNetworkPage() || Menu->IsOnViewPage() || Menu->IsOnSpeciesPage() || Menu->IsOnMapPage() || Menu->IsOnRulePage()
+		|| Menu->IsOnStagePage() || Menu->IsOnRoomPage();
 	const FString Select = bCards ? TEXT("A/D  SELECT") : TEXT("W/S  SELECT");
 	const FString Keys = bCanGoBack ? Select + TEXT("   ·   ENTER  OK   ·   ESC  BACK") : Select + TEXT("   ·   ENTER  OK");
 	DrawCenteredText(Keys, RRUI::InkSoft, ColumnX, ScreenH - 40.f * S, 11.f * S, ExtraBold, 11.f * S * 0.1f);

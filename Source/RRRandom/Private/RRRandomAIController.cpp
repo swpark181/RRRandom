@@ -163,6 +163,12 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	{
 		return;
 	}
+	// (-RRIdleBots: every bot, my team's too, e.g. filming my animal friend alone, char-pipeline/scripts/rec_grip.ps1)
+	static const bool bIdleBots = FParse::Param(FCommandLine::Get(), TEXT("RRIdleBots"));
+	if (bIdleBots)
+	{
+		return;
+	}
 #endif
 	// The studio (a test floor for animation work): the other team's bots stand still there too
 	const ARRRandomGameMode* Mode = GetWorld()->GetAuthGameMode<ARRRandomGameMode>();
@@ -729,6 +735,12 @@ bool ARRRandomAIController::UpdateStarRobot(ARRRandomCharacter* Self, bool bInFi
 bool ARRRandomAIController::UpdateVehicles(ARRRandomCharacter* Self, const ARRRandomCharacter* Target, bool bInFight, FVector& Wanted, float DeltaSeconds)
 {
 	const FVector Location = Self->GetActorLocation();
+	// Defense (round 90): villains are about all the time, so the bots stay on foot by the tower (the rides are the players')
+	if (ARRRandomGameState::IsDefense(this) && !Self->GetVehicle())
+	{
+		VehicleTarget = nullptr;
+		return false;
+	}
 	if (const ARRRandomVehicle* Ridden = Self->GetVehicle())
 	{
 		VehicleTarget = nullptr;

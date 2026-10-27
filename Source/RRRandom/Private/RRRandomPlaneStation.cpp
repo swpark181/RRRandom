@@ -1,4 +1,5 @@
 #include "RRRandomPlaneStation.h"
+#include "RRRandomDefense.h"
 #include "RRRandomCannon.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomDiceTown.h"
@@ -325,5 +326,29 @@ void ARRRandomPlaneStation::SpawnDiceTownStations(UWorld* World, const ARRRandom
 		World->SpawnActor<ARRRandomPlaneStation>(ARRRandomPlaneStation::StaticClass(), Transform);
 		Want = FVector2D(Spot);
 		UE_LOG(LogTemp, Log, TEXT("RRRandom: plane station at %s."), *(FVector2D(Spot) - Middle).ToString());
+	}
+}
+
+void ARRRandomPlaneStation::SpawnDefenseStations(UWorld* World, const ARRRandomDiceTown* Town, const FVector& Center)
+{
+	if (!World || !Town || TActorIterator<ARRRandomPlaneStation>(World))
+	{
+		return;
+	}
+	// A defense stage (round 90): one inside the castle south of the tower (the north is the inner jump ramp's), the planes
+	// flying out over the wall, and one outside on the south side (room kept for it, mirroring the outer jump ramp)
+	const FVector2D Middle(Center.X, Center.Y);
+	const FVector2D Wants[] = { FVector2D(0.f, -Town->GetDefenseRingRadius() * 0.7f), FVector2D(RRDefense::OuterRampX, -RRDefense::OuterRampFootY) };
+	for (const FVector2D& Want : Wants)
+	{
+		const float Side = -1.f;
+		FVector Spot;
+		if (!ARRRandomCannon::FindOpenGround(World, Town, Middle + Want, StationClear, Spot, [](const FVector&) { return true; }, 500.f))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("RRRandom: no open ground for a defense plane station (side %.0f)."), Side);
+			continue;
+		}
+		World->SpawnActor<ARRRandomPlaneStation>(ARRRandomPlaneStation::StaticClass(), FTransform(FRotator(0.f, Side > 0.f ? 90.f : -90.f, 0.f), Spot));
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: defense plane station at %s."), *(FVector2D(Spot) - Middle).ToString());
 	}
 }

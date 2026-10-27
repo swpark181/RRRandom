@@ -53,6 +53,13 @@ public:
 	/** Cheat: the team wins now with a full score (straight to the results screen). */
 	void CheatWin(int32 Team);
 
+	/**
+	 * Defense (round 90, ERRMatchRule::Defense): this game is played by the defense rule on a defense stage. EndDefense ends it:
+	 * won (the seventh wave beaten: the winners dance, every player's PC opens the next stage) or lost (the tower fell).
+	 */
+	bool IsDefense() const { return bDefense; }
+	void EndDefense(bool bWon);
+
 protected:
 	/** Seconds of countdown once the arena has loaded before anybody can move or shoot. */
 	UPROPERTY(EditAnywhere, Category = "Match", meta = (ClampMin = "0"))
@@ -177,6 +184,16 @@ private:
 	bool bStudio = false;
 	/** This game is played by Meteor Rush's rule (ERRMatchRule, picked on this machine's title). */
 	bool bMeteorRush = false;
+	/** Defense (decided in InitGame): its stage, and the spots on the animal friends' team (players up to 5, bots fill up to 3). */
+	bool bDefense = false;
+	int32 DefenseStage = 1;
+	static constexpr int32 DefenseTeamSize = 5;
+	static constexpr int32 DefenseBotFill = 3;
+	/** The spots a team has: TeamSize each, or in defense the friends' DefenseTeamSize and none for the villains (the director's). */
+	int32 GetTeamSize(int32 InTeam) const;
+	/** Defense: the tower, the wall ring and the director round the stage's middle, and the stage's rides. */
+	void SetUpDefense();
+	void SpawnDefenseRides(const class ARRRandomDiceTown* Town);
 	FVector GetPlayerStartLocation() const;
 
 	/** Places a point on the floor beneath it, or returns false if there is no floor there. */

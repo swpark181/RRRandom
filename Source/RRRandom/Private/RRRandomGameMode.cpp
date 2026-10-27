@@ -6,6 +6,7 @@
 #include "RRRandomDiceLand.h"
 #include "RRRandomCannon.h"
 #include "RRRandomDiceTown.h"
+#include "RRRandomDefense.h"
 #include "RRRandomPlaneStation.h"
 #include "RRRandomDummy.h"
 #include "RRRandomGrassFloor.h"
@@ -85,6 +86,17 @@ void ARRRandomGameMode::InitGame(const FString& MapName, const FString& Options,
 	{
 		TeamSpawnDistance = ARRRandomStudio::TeamSpawnDistance;
 	}
+	// Defense (round 90): a defense stage, built in code on the bare arena (URRRandomSessionSubsystem::GetStartMap), the animal
+	// friends all on blue round the tower in its middle
+	bDefense = !bPlacedThirdPersonMap && Sessions && Sessions->GetMatchRule() == ERRMatchRule::Defense;
+	if (bDefense)
+	{
+		DefenseStage = Sessions->GetDefenseStage();
+		bDiceTown = true;
+		bStudio = false;
+		bSplitPlayersAcrossTeams = false;
+		TeamSpawnDistance = RRDefense::FriendStartOut * 2.f;
+	}
 }
 
 void ARRRandomGameMode::StartPlay()
@@ -113,7 +125,11 @@ void ARRRandomGameMode::StartPlay()
 		State->SetScoreToWin(ScoreToWin);
 		// Third person or the top view, as picked on this machine's title (or -RRThirdPerson); a third person map's level is
 		// always third person
-		State->SetThirdPersonMode(bPlacedThirdPersonMap || (Sessions && Sessions->IsThirdPersonMode()));
+		State->SetThirdPersonMode(bPlacedThirdPersonMap || bDefense || (Sessions && Sessions->IsThirdPersonMode()));
+		if (bDefense)
+		{
+			State->SetDefense(DefenseStage);
+		}
 		const float PlayStart = GetWorld()->GetTimeSeconds() + StartCountdown;
 		State->SetPlayStartTime(PlayStart);
 		if (bMeteorRush)
@@ -160,18 +176,23 @@ void ARRRandomGameMode::StartPlay()
 			SpawnCoverIfNoneExists();
 		}
 	}
-	if (bSpawnVehicles)
+	if (bSpawnVehicles && !bDefense)
 	{
 		SpawnVehiclesIfNoneExist();
 	}
 	// Dice Town's human cannons and plane stations (round 88), on open ground by each team's base and out on the flanks
-	if (bDiceTown)
+	if (bDiceTown && !bDefense)
 	{
 		if (const ARRRandomDiceTown* Town = TActorIterator<ARRRandomDiceTown>(GetWorld()) ? *TActorIterator<ARRRandomDiceTown>(GetWorld()) : nullptr; Town && Town->IsBuilt())
 		{
 			ARRRandomCannon::SpawnDiceTownSets(GetWorld(), Town);
 			ARRRandomPlaneStation::SpawnDiceTownStations(GetWorld(), Town);
 		}
+	}
+	// Defense: the tower, the walls, the waves and the stage's rides
+	if (bDefense)
+	{
+		SetUpDefense();
 	}
 	// The host's own brawler may already hold a spot; bots take the rest
 	FillEmptySlotsWithBots();
@@ -186,6 +207,22 @@ void ARRRandomGameMode::OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRando
 	ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
 	if (State && State->IsMatchOver())
 	{
+		return;
+	}
+	// Defense: no score; a villain down is the director's (its killer's knockout, a die maybe), a friend just gets back up
+	if (bDefense)
+	{
+		if (Victim->IsVillain())
+		{
+			if (ARRRandomDefenseDirector* Director = ARRRandomDefenseDirector::Get(this))
+			{
+				Director->OnVillainDown(Victim, Attacker);
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s knocked out by %s; back up in a moment."), *Victim->GetName(), Attacker ? *Attacker->GetName() : TEXT("a fall"));
+		}
 		return;
 	}
 	if (bMeteorRush)
@@ -461,12 +498,193 @@ bool ARRRandomGameMode::FindDanceSpot(const FVector& Wanted, float GroundZ, cons
 void ARRRandomGameMode::CheatWin(int32 Team)
 {
 	ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
+	// Defense: the friends' cheat clears the stage
+	if (bDefense)
+	{
+		EndDefense(Team == 0);
+		return;
+	}
 	if (State && !State->IsMatchOver() && (Team == 0 || Team == 1))
 	{
 		State->SetTeamScore(Team, FMath::Max(State->GetTeamScore(Team), ScoreToWin));
 		UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, team %d wins."), Team);
 		EndMatch(Team);
 	}
+}
+
+void ARRRandomGameMode::EndDefense(bool bWon)
+{
+	ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
+	if (!State || State->IsMatchOver())
+	{
+		return;
+	}
+	// The MVP: the animal friend with the most villains down (won, it leads the dance; lost, nobody dances)
+	ARRRandomCharacter* MVP = nullptr;
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		if (!It->IsDecoy() && !It->IsVillain() && It->GetTeam() == 0 && (!MVP || It->GetKills() > MVP->GetKills()))
+		{
+			MVP = *It;
+		}
+	}
+	if (bWon && MVP)
+	{
+		MVP->ReviveNow();
+		ArrangeVictoryFormation(MVP, 0);
+	}
+	State->EndMatch(bWon ? 0 : 1, MVP);
+	// Every player's own PC keeps its progress: told here, each counts it only if it had the stage open
+	if (bWon)
+	{
+		for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (ARRRandomPlayerController* Player = Cast<ARRRandomPlayerController>(It->Get()))
+			{
+				Player->ClientDefenseCleared(DefenseStage);
+			}
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: defense stage %d %s; MVP %s with %d villains down."), DefenseStage, bWon ? TEXT("cleared") : TEXT("lost (the tower fell)"),
+		MVP ? *MVP->GetName() : TEXT("nobody"), MVP ? MVP->GetKills() : 0);
+}
+
+void ARRRandomGameMode::SetUpDefense()
+{
+	UWorld* World = GetWorld();
+	TActorIterator<ARRRandomDiceTown> TownIt(World);
+	ARRRandomDiceTown* Town = TownIt ? *TownIt : nullptr;
+	if (!Town || !Town->IsBuilt())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("RRRandom: no defense stage built; no waves."));
+		return;
+	}
+	// The tower on the floor in the middle, tougher on later stages
+	const FVector Center = GetArenaCenter();
+	const FVector Floor(Center.X, Center.Y, Town->GetFloorZ());
+	const float Toughness = 1.f + 0.25f * (DefenseStage - 1);
+	const FTransform TowerAt(Floor);
+	ARRRandomDiceTower* Tower = World->SpawnActorDeferred<ARRRandomDiceTower>(ARRRandomDiceTower::StaticClass(), TowerAt, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (Tower)
+	{
+		Tower->SetMaxHealth(3000.f * Toughness);
+		Tower->FinishSpawning(TowerAt);
+	}
+	// The castle's two gate doors (the wall itself is the stage's, unbreakable): at the outer mouth of the east and west
+	// gateways, the width of the road, facing out, so the villains biting them stand in the open under the battlements
+	TArray<ARRRandomDefenseWall*> Walls;
+	const float Out = (RRDefense::WallRingCells + RRDefense::WallThickCells) * 100.f - 70.f;
+	for (const float Yaw : { 0.f, 180.f })
+	{
+		const FTransform DoorAt(FRotator(0.f, Yaw, 0.f), Floor + FRotator(0.f, Yaw, 0.f).Vector() * Out);
+		if (ARRRandomDefenseWall* Door = World->SpawnActorDeferred<ARRRandomDefenseWall>(ARRRandomDefenseWall::StaticClass(), DoorAt, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+		{
+			Door->Setup(RRDefense::GateHalfCells * 2 * 100.f, 3000.f * Toughness, FColor(255, 196, 40));
+			Door->FinishSpawning(DoorAt);
+			Walls.Add(Door);
+		}
+	}
+	SpawnDefenseRides(Town);
+	if (ARRRandomDefenseDirector* Director = World->SpawnActor<ARRRandomDefenseDirector>())
+	{
+		Director->Begin(DefenseStage, Town, Tower, Walls);
+	}
+}
+
+void ARRRandomGameMode::SpawnDefenseRides(const ARRRandomDiceTown* Town)
+{
+	// One more kind of ride each stage (round 90): stage 1 the kickboards and motorbikes, stage 2 the cars and human cannons
+	// too, stage 3 the plane stations as well. The star robot only comes for the boss waves (ARRRandomDefenseDirector). All
+	// just outside the wall ring, between the roads, so riders head straight out to meet the villains.
+	UWorld* World = GetWorld();
+	const FVector Center = GetArenaCenter();
+	struct FParking
+	{
+		ERRVehicleKind Kind;
+		float Angle;
+		int32 FromStage;
+	};
+	const FParking Rides[] =
+	{
+		{ ERRVehicleKind::Kickboard, 22.5f, 1 },
+		{ ERRVehicleKind::Motorbike, 112.5f, 1 },
+		{ ERRVehicleKind::Kickboard, 202.5f, 1 },
+		{ ERRVehicleKind::Motorbike, 292.5f, 1 },
+		{ ERRVehicleKind::Car, 67.5f, 2 },
+		{ ERRVehicleKind::Car, 247.5f, 2 },
+	};
+	// (on the ring road outside the castle wall)
+	const float Out = (RRDefense::WallRingCells + RRDefense::WallThickCells + 2.5f) * 100.f;
+	for (const FParking& Ride : Rides)
+	{
+		if (DefenseStage < Ride.FromStage)
+		{
+			continue;
+		}
+		const FVector Way = FRotator(0.f, Ride.Angle, 0.f).Vector();
+		FVector Location;
+		if (!FindFloorSpot(Center + Way * Out, 0.f, Location))
+		{
+			continue;
+		}
+		const FTransform SpawnTransform(FRotator(0.f, Ride.Angle, 0.f), Location);
+		if (ARRRandomVehicle* Vehicle = World->SpawnActorDeferred<ARRRandomVehicle>(ARRRandomVehicle::StaticClass(), SpawnTransform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+		{
+			Vehicle->SetKind(Ride.Kind);
+			Vehicle->FinishSpawning(SpawnTransform);
+		}
+	}
+	// The jump ramps on the north side, each with a motorbike lined up behind it: outside leaping in over the wall onto the
+	// plaza, inside leaping out onto the north road
+	struct FRamp
+	{
+		float X;
+		float FootY;
+		float LipY;
+	};
+	const FRamp Ramps[] = { { RRDefense::OuterRampX, RRDefense::OuterRampFootY, RRDefense::OuterRampLipY }, { RRDefense::InnerRampX, RRDefense::InnerRampFootY, RRDefense::InnerRampLipY } };
+	for (const FRamp& Ramp : Ramps)
+	{
+		const float Way = FMath::Sign(Ramp.LipY - Ramp.FootY);
+		FVector Foot;
+		if (!FindFloorSpot(Center + FVector(Ramp.X, Ramp.FootY, 0.f), 0.f, Foot))
+		{
+			continue;
+		}
+		const FTransform RampAt(FRotator(0.f, Way > 0.f ? 90.f : -90.f, 0.f), Foot);
+		if (ARRRandomJumpRamp* JumpRamp = World->SpawnActorDeferred<ARRRandomJumpRamp>(ARRRandomJumpRamp::StaticClass(), RampAt, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+		{
+			JumpRamp->Setup(FMath::Abs(Ramp.LipY - Ramp.FootY), RRDefense::RampLandDistance);
+			JumpRamp->FinishSpawning(RampAt);
+		}
+		FVector Bike;
+		if (FindFloorSpot(Center + FVector(Ramp.X, Ramp.FootY - Way * 280.f, 0.f), 0.f, Bike))
+		{
+			const FTransform BikeAt(RampAt.GetRotation(), Bike);
+			if (ARRRandomVehicle* Vehicle = World->SpawnActorDeferred<ARRRandomVehicle>(ARRRandomVehicle::StaticClass(), BikeAt, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+			{
+				Vehicle->SetKind(ERRVehicleKind::Motorbike);
+				Vehicle->FinishSpawning(BikeAt);
+			}
+		}
+	}
+	if (Town && DefenseStage >= 2)
+	{
+		ARRRandomCannon::SpawnDefenseSets(World, Town, Center);
+	}
+	if (Town && DefenseStage >= 3)
+	{
+		ARRRandomPlaneStation::SpawnDefenseStations(World, Town, Center);
+	}
+}
+
+int32 ARRRandomGameMode::GetTeamSize(int32 InTeam) const
+{
+	if (bDefense)
+	{
+		return InTeam == 0 ? DefenseTeamSize : 0;
+	}
+	return TeamSize;
 }
 
 void ARRRandomGameMode::RestartMatch()
@@ -478,11 +696,11 @@ void ARRRandomGameMode::RestartMatch()
 
 void ARRRandomGameMode::EnsureSlots()
 {
-	for (TArray<FTeamSlot>& Slots : TeamSlots)
+	for (int32 Team = 0; Team < 2; ++Team)
 	{
-		if (Slots.Num() < TeamSize)
+		if (TeamSlots[Team].Num() < GetTeamSize(Team))
 		{
-			Slots.SetNum(TeamSize);
+			TeamSlots[Team].SetNum(GetTeamSize(Team));
 		}
 	}
 }
@@ -539,7 +757,8 @@ bool ARRRandomGameMode::GetSlotTransform(int32 Team, int32 Slot, float HalfHeigh
 			}
 		}
 	}
-	OutTransform = FTransform(FRotator(0.f, Team == 1 ? 180.f : 0.f, 0.f), Location);
+	// (defense: the friends start by the tower facing out, the way the villains come)
+	OutTransform = FTransform(FRotator(0.f, Team == 1 || bDefense ? 180.f : 0.f, 0.f), Location);
 	return true;
 }
 
@@ -687,6 +906,11 @@ void ARRRandomGameMode::FillEmptySlotsWithBots()
 		for (int32 Slot = 0; Slot < TeamSlots[Team].Num(); ++Slot)
 		{
 			if (TeamSlots[Team][Slot].Brawler.IsValid() || TeamSlots[Team][Slot].Player.IsValid())
+			{
+				continue;
+			}
+			// Defense: bots make the team up to 3 (solo, you and two bots); players beyond that bring their own spots
+			if (bDefense && Slot >= DefenseBotFill)
 			{
 				continue;
 			}
@@ -884,8 +1108,14 @@ void ARRRandomGameMode::SpawnDiceTownIfNoneExists()
 	{
 		return;
 	}
-	// Around the arena's center, halfway between the teams; each team starts at its base on the main road
-	World->SpawnActor<ARRRandomDiceTown>(ARRRandomDiceTown::StaticClass(), FTransform(GetArenaCenter()));
+	// Around the arena's center, halfway between the teams; each team starts at its base on the main road. A defense stage
+	// is laid out round the tower in its middle instead (its stage replicates, so every machine builds the same)
+	const FTransform Where(GetArenaCenter());
+	if (ARRRandomDiceTown* Town = World->SpawnActorDeferred<ARRRandomDiceTown>(ARRRandomDiceTown::StaticClass(), Where))
+	{
+		Town->SetDefenseStage(bDefense ? DefenseStage : 0);
+		Town->FinishSpawning(Where);
+	}
 }
 
 void ARRRandomGameMode::SpawnStudioIfNoneExists()

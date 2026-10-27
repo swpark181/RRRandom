@@ -35,10 +35,19 @@ namespace
 
 	/** The rubble: the town's block, lit like it (custom data: body color, then the top's). */
 	const TCHAR* const RubbleMesh = TEXT("/Game/Environment/DiceTown/SM_BTBlock.SM_BTBlock");
-	constexpr int32 RubblePool = 420;
+	constexpr int32 RubblePool = 520;
 	constexpr int32 RubblePerBurst = 110;
 	constexpr float RubbleGravity = 1900.f;
 	constexpr float RubbleShrink = 0.35f;
+	/**
+	 * Round 91, big chunks (ThrowRubble): broken blocks grouped in cubes this big (2 blocks a side), each group one chunk
+	 * of about its blocks' volume (times ChunkFill, at most ChunkMaxSize blocks across); small bits besides, this many per
+	 * broken block.
+	 */
+	constexpr float ChunkCell = 200.f;
+	constexpr float ChunkFill = 0.92f;
+	constexpr float ChunkMaxSize = 2.2f;
+	constexpr float SmallBitShare = 0.5f;
 	/** Seconds a piece takes to grow back into place, and sparkles where things grow back (at most). */
 	constexpr float GrowSeconds = 0.4f;
 	constexpr int32 GrowSparkles = 8;
@@ -609,26 +618,71 @@ void ARRRandomWreckage::ThrowRubble(const TArray<FRRBrokenBit>& Bits)
 		Middle += Bit.Where;
 	}
 	Middle /= Bits.Num();
-	const int32 Count = FMath::Min(RubblePerBurst, Bits.Num() * 2);
+	// Out from the middle of what broke (and a little to the side by chance)
+	const auto Outward = [&Middle](const FVector& Where, float Jitter)
+	{
+		const FVector Out = ((Where - Middle) * FVector(1.f, 1.f, 0.f)).GetSafeNormal();
+		return (Out.IsNearlyZero() ? FMath::VRand() * FVector(1.f, 1.f, 0.f) : Out + FMath::VRand() * FVector(Jitter, Jitter, 0.f)).GetSafeNormal();
+	};
+	const auto Paint = [this](int32 Slot, const FRRBrokenBit& Bit)
+	{
+		const float Shade = FMath::FRandRange(0.88f, 1.08f);
+		const float Data[6] = { Bit.Body.R * Shade, Bit.Body.G * Shade, Bit.Body.B * Shade, Bit.Accent.R * Shade, Bit.Accent.G * Shade, Bit.Accent.B * Shade };
+		Rubble->SetCustomData(Slot, MakeArrayView(Data, 6));
+	};
+	// Round 91 (the user: "부서질 때 부피가 줄어든 느낌 … 큰 덩어리가 떨어지면 좋을 듯"): what broke comes down as big chunks,
+	// the blocks grouped ChunkCell a side and each group one chunk about as big as its blocks together (n blocks of size s:
+	// the cube root of n times s, a little under), tumbling slowly and falling heavily; then only a sprinkle of small bits
+	TMap<FIntVector, TArray<int32>> Groups;
+	for (int32 Index = 0; Index < Bits.Num(); ++Index)
+	{
+		const FVector& Where = Bits[Index].Where;
+		Groups.FindOrAdd(FIntVector(FMath::FloorToInt(Where.X / ChunkCell), FMath::FloorToInt(Where.Y / ChunkCell), FMath::FloorToInt(Where.Z / ChunkCell))).Add(Index);
+	}
+	for (const TPair<FIntVector, TArray<int32>>& Group : Groups)
+	{
+		if (FreeSlots.Num() == 0)
+		{
+			break;
+		}
+		FVector Center = FVector::ZeroVector;
+		float Volume = 0.f;
+		for (const int32 Index : Group.Value)
+		{
+			Center += Bits[Index].Where;
+			Volume += FMath::Cube(Bits[Index].Size);
+		}
+		Center /= Group.Value.Num();
+		const FRRBrokenBit& Bit = Bits[Group.Value[FMath::RandRange(0, Group.Value.Num() - 1)]];
+		FChunk Chunk;
+		Chunk.Slot = FreeSlots.Pop(EAllowShrinking::No);
+		Chunk.Location = Center;
+		Chunk.Velocity = Outward(Center, 0.4f) * FMath::FRandRange(80.f, 300.f) + FVector(0.f, 0.f, FMath::FRandRange(120.f, 380.f));
+		// Breaking off the way it stood, a little askew, then tumbling over slowly
+		Chunk.Turn = FRotator(FMath::FRandRange(-12.f, 12.f), FMath::FRandRange(-20.f, 20.f), FMath::FRandRange(-12.f, 12.f));
+		Chunk.Spin = FRotator(FMath::FRandRange(-180.f, 180.f), FMath::FRandRange(-90.f, 90.f), FMath::FRandRange(-180.f, 180.f));
+		Chunk.Size = FMath::Min(FMath::Pow(Volume, 1.f / 3.f) * ChunkFill, ChunkMaxSize);
+		Chunk.Age = 0.f;
+		Chunk.Life = FMath::FRandRange(2.2f, 3.2f);
+		Chunk.FloorZ = FloorZ;
+		Paint(Chunk.Slot, Bit);
+		Chunks.Add(Chunk);
+	}
+	const int32 Count = FMath::Min(RubblePerBurst, FMath::CeilToInt(Bits.Num() * SmallBitShare));
 	for (int32 Index = 0; Index < Count && FreeSlots.Num() > 0; ++Index)
 	{
-		const FRRBrokenBit& Bit = Bits[Bits.Num() <= Count ? Index % Bits.Num() : FMath::RandRange(0, Bits.Num() - 1)];
+		const FRRBrokenBit& Bit = Bits[FMath::RandRange(0, Bits.Num() - 1)];
 		FChunk Chunk;
 		Chunk.Slot = FreeSlots.Pop(EAllowShrinking::No);
 		Chunk.Location = Bit.Where + FMath::VRand() * 25.f * Bit.Size;
-		// Out from the middle of what broke, and up
-		const FVector Out = ((Bit.Where - Middle) * FVector(1.f, 1.f, 0.f)).GetSafeNormal();
-		const FVector Way = (Out.IsNearlyZero() ? FMath::VRand() * FVector(1.f, 1.f, 0.f) : Out + FMath::VRand() * FVector(0.6f, 0.6f, 0.f)).GetSafeNormal();
-		Chunk.Velocity = Way * FMath::FRandRange(180.f, 620.f) + FVector(0.f, 0.f, FMath::FRandRange(250.f, 820.f));
+		Chunk.Velocity = Outward(Bit.Where, 0.6f) * FMath::FRandRange(180.f, 620.f) + FVector(0.f, 0.f, FMath::FRandRange(250.f, 820.f));
 		Chunk.Turn = FRotator(FMath::FRandRange(0.f, 360.f), FMath::FRandRange(0.f, 360.f), FMath::FRandRange(0.f, 360.f));
 		Chunk.Spin = FRotator(FMath::FRandRange(-540.f, 540.f), FMath::FRandRange(-540.f, 540.f), FMath::FRandRange(-540.f, 540.f));
-		Chunk.Size = Bit.Size * FMath::FRandRange(0.26f, 0.5f);
+		Chunk.Size = Bit.Size * FMath::FRandRange(0.2f, 0.38f);
 		Chunk.Age = 0.f;
 		Chunk.Life = FMath::FRandRange(1.3f, 2.2f);
 		Chunk.FloorZ = FloorZ;
-		const float Shade = FMath::FRandRange(0.88f, 1.08f);
-		const float Data[6] = { Bit.Body.R * Shade, Bit.Body.G * Shade, Bit.Body.B * Shade, Bit.Accent.R * Shade, Bit.Accent.G * Shade, Bit.Accent.B * Shade };
-		Rubble->SetCustomData(Chunk.Slot, MakeArrayView(Data, 6));
+		Paint(Chunk.Slot, Bit);
 		Chunks.Add(Chunk);
 	}
 }

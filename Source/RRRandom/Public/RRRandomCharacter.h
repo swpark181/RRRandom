@@ -99,6 +99,33 @@ public:
 	URRRandomOverheadDieComponent* GetOverheadDie() const { return OverheadDie; }
 
 	/**
+	 * A defense mode villain (round 90, RRSpecies::Rat or Cat on the villains' team): run by ARRRandomVillainAI, it bites
+	 * and claws instead of shooting (VillainStrike, the cat also slams the ground round it), holds no gun, rolls no dice,
+	 * doesn't heal and never gets back up (ARRRandomDefenseDirector clears it away).
+	 */
+	bool IsVillain() const { return RRSpecies::IsVillain(Species); }
+	/** The cat of a boss wave: bigger, tougher, with its slam (the HUD names it). */
+	bool IsVillainBoss() const { return bVillainBoss; }
+	/**
+	 * Server, before it finishes spawning: a villain this much tougher and harder hitting than its kind's base, drawn this
+	 * much bigger and in this color (each wave's are bigger, stronger and differently colored).
+	 */
+	void SetupVillain(float HealthScale, float Damage, float BodyScale, const FLinearColor& Tint, bool bBoss);
+	/** How far a villain's bite or claw reaches past its capsule (bigger, further). */
+	float GetVillainReach() const;
+	/** The villain's size (1 as its kind is drawn). */
+	float GetVillainBodyScale() const { return VillainBodyScale; }
+	/**
+	 * Server: a villain's bite or claw at a brawler, a wall or the tower within reach, if its pace allows (the attack
+	 * animation on every machine, the hit a moment later if it's still in reach). Returns whether it struck.
+	 */
+	bool VillainStrike(AActor* Target);
+	/** Server: the cat boss's slam (round it, a ring of damage and a push), if its pace allows. Returns whether it slammed. */
+	bool VillainSlam();
+	/** Seconds until the cat can slam again. */
+	float GetSlamCooldown() const;
+
+	/**
 	 * Turns toward a target and shoots a projectile at it if the magazine has a round and the fire cooldown allows.
 	 * TargetLocation is where the target's capsule center is (or would be), so shots stay level between brawlers on
 	 * the same floor and angle up or down at ones on another level. Returns whether it fired.
@@ -204,6 +231,8 @@ public:
 	float GetSprintShare() const;
 	/** The made-up "gun held low" pose's share: the sprint's, unless the species' own run (rifle already down) plays. */
 	float GetSprintPoseShare() const { return RunAnimation && CurrentAnimation == RunAnimation ? 0.f : GetSprintShare(); }
+	/** 1 while the walk plays (round 90: its arms carry the gun under the big head, URRRandomBodyAnimInstance lowers them). */
+	float GetWalkPoseShare() const { return WalkAnimation && CurrentAnimation == WalkAnimation ? 1.f : 0.f; }
 	/** Server, by the robot: combining it, in a seat, or done with it (null). */
 	void SetRobotSeat(ARRRandomStarRobot* NewRobot, ERRRobotSeat NewSeat);
 	/** Server: off the vehicle ridden, if any (the driver getting off lets the one behind out too). */
@@ -333,6 +362,11 @@ public:
 	/** Every push goes through here; the species' kit scales it (the tiger is pushed half as far). */
 	virtual void LaunchCharacter(FVector LaunchVelocity, bool bXYOverride, bool bZOverride) override;
 	virtual void Landed(const FHitResult& Hit) override;
+	/**
+	 * Round 91: thrown off a jump ramp, falling this many times heavier until it lands (Landed), so the leap is low and
+	 * fast rather than floating. Each machine that throws it (the server, the driver's own) does the same.
+	 */
+	void StartRampLeap(float GravityMultiplier);
 	/** A jump taken on the run carries on a little faster (JumpCarryShare), so it goes further. */
 	virtual void OnJumped_Implementation() override;
 	const TArray<FRRDamagePopup>& GetDamagePopups() const { return DamagePopups; }
@@ -783,6 +817,8 @@ private:
 	/** This machine: out of the barrel yet, and knocked off the arc (into a wall) and falling. */
 	bool bCannonFired = false;
 	bool bCannonOffArc = false;
+	/** Where the flier was last frame, for its contrail (ARRRandomEffects::CannonTrail). */
+	FVector CannonTrailLast = FVector::ZeroVector;
 	/** Server: seconds since the ride began (it ends a little after the flight is over, for a remote flier). */
 	float CannonServerTime = 0.f;
 	UFUNCTION()
@@ -853,6 +889,27 @@ private:
 	/** Counts shots so every machine can play the firing animation; only the change matters. */
 	UPROPERTY(ReplicatedUsing = OnRep_ShotCount)
 	uint8 ShotCount = 0;
+
+	// A defense villain's (round 90): its toughness, size and color, replicated with it (set before it spawns)
+	UPROPERTY(Replicated)
+	float VillainHealthScale = 1.f;
+	UPROPERTY(Replicated)
+	float VillainBodyScale = 1.f;
+	UPROPERTY(Replicated)
+	FLinearColor VillainTint = FLinearColor::White;
+	UPROPERTY(Replicated)
+	bool bVillainBoss = false;
+	/** Server: a bite's or claw's damage, when the next may come, and the one under way (lands after VillainStrikeDelay). */
+	float VillainDamage = 8.f;
+	float NextStrikeTime = 0.f;
+	float NextSlamTime = 0.f;
+	TWeakObjectPtr<AActor> StrikeTarget;
+	FTimerHandle StrikeTimer;
+	FTimerHandle SlamTimer;
+	void LandVillainStrike();
+	void LandVillainSlam();
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastVillainSlam(FVector_NetQuantize Where, float Radius);
 
 	/** When this machine last saw the brawler shoot. */
 	float LastShotTime = -UE_BIG_NUMBER;
@@ -1075,6 +1132,10 @@ private:
 	float FlightCameraPull = 0.f;
 	/** 0..1, eased: my own sprint, for the over-the-shoulder camera's pull back. */
 	float SprintCameraBlend = 0.f;
+	/** 0..1, eased: rushing through the air (cannon, ramp leap), for the over-the-shoulder camera's wider view. */
+	float RushCameraBlend = 0.f;
+	/** A jump ramp's heavier fall while its leap lasts (StartRampLeap); 0 when not leaping. */
+	float RampLeapGravity = 0.f;
 	float BaseCameraArmLength = 0.f;
 	FName MeshCollisionProfile;
 };

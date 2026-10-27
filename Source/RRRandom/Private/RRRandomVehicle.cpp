@@ -12,6 +12,9 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/PointLightComponent.h"
+#include "Components/SpotLightComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -32,8 +35,10 @@ namespace
 		// Kickboard: twice the walk, otherwise like walking; standing on the deck (53 high, -45 .. 30), the bar's stem at 35
 		{ 2.f, 2600.f, 8.f, 720.f, 2200.f, false, 53.f, 0.f, 0.f, TEXT("KICKBOARD"), -8.f },
 		// Motorbike: faster, slides out in tight turns and leans into them; one rear wheel's mark. The saddle runs from
-		// -75 to -5, sloping from 93 down to 86 toward the tank (0 .. 40, 100 .. 109 high)
-		{ 2.7f, 2400.f, 1.6f, 560.f, 1100.f, true, 86.f, 0.7f, 28.f, TEXT("MOTORBIKE"), -22.f, false, 0.f, 16.f, 0.65f, 0.f },
+		// -75 to -5, sloping from 93 down to 86 toward the tank (0 .. 40, 100 .. 109 high). Round 90: four times the walk,
+		// winding up to it like a real bike over about 2.6 seconds (SpeedUpTime)
+		{ 4.f, 2400.f, 1.6f, 560.f, 1100.f, true, 86.f, 0.7f, 28.f, TEXT("MOTORBIKE"), -22.f, false, 0.f, 16.f, 0.65f, 0.f,
+			0.f, 0.f, false, 0.f, false, 0.f, ERRPlaneGun::Pilot, 2.6f },
 		// Car: fastest, slides the most, rolls a little; a tandem two-seater, the rear seat right behind the driver's;
 		// two rear wheels' marks. Driver's cushion -20 .. 20 at 52 (backrest at -40 .. -30), the rear one -115 .. -55 at 62
 		// (backrest -135 .. -120)
@@ -143,6 +148,59 @@ namespace
 	constexpr float RamRepeatTime = 0.8f;
 	constexpr float RamReach = 15.f;
 	const FVector2D RamKnock(500.f, 250.f);
+
+	/**
+	 * Round 91, the lights (PlaceLights): by ERRVehicleKind, where its front lamps and back lamps sit on its model (forward,
+	 * right, up; a Y over 0 is a pair, mirrored across), how big a lamp bead is, and the neon under it. On the meshes' boxes
+	 * (Kickboard 140 x 96 x 115, Motorbike 220 x 120 x 140, Car 360 x 162 x 114, star cars 300-420 long, planes 360-420 long and
+	 * 380-460 across). A plane's "front" pair is its wing tips (red left, green right) and its "back" its white tail light.
+	 */
+	struct FRRVehicleLamps
+	{
+		FVector Front;
+		FVector Back;
+		float Size;
+		FLinearColor Neon;
+	};
+	const FRRVehicleLamps VehicleLamps[] =
+	{
+		// Kickboard: a lamp on the handlebar stem, a tail light at the back of the deck; mint neon
+		{ FVector(52.f, 0.f, 70.f), FVector(-70.f, 0.f, 16.f), 9.f, FLinearColor(0.25f, 1.f, 0.75f) },
+		// Motorbike: the headlamp at the front of the tank, the tail light behind the saddle; hot pink
+		{ FVector(104.f, 0.f, 88.f), FVector(-104.f, 0.f, 78.f), 12.f, FLinearColor(1.f, 0.3f, 0.75f) },
+		// Car: two headlights in the bumper, two tail lights; sky blue
+		{ FVector(176.f, 52.f, 52.f), FVector(-177.f, 56.f, 58.f), 14.f, FLinearColor(0.3f, 0.75f, 1.f) },
+		// The star cars: gold, like the star team
+		{ FVector(146.f, 62.f, 62.f), FVector(-147.f, 66.f, 72.f), 11.f, FLinearColor(1.f, 0.78f, 0.3f) },
+		{ FVector(158.f, 44.f, 48.f), FVector(-158.f, 48.f, 60.f), 11.f, FLinearColor(1.f, 0.78f, 0.3f) },
+		{ FVector(204.f, 58.f, 62.f), FVector(-202.f, 80.f, 98.f), 12.f, FLinearColor(1.f, 0.78f, 0.3f) },
+		// The planes: wing tips and tail, from the models' vertices (the farthest point out to the side and the tail's top, the bead half out of it; no neon: they fly)
+		{ FVector(36.f, 188.f, 95.f), FVector(-154.f, 0.f, 203.f), 22.f, FLinearColor::Black },
+		{ FVector(-22.f, 228.f, 63.f), FVector(-179.f, 0.f, 122.f), 22.f, FLinearColor::Black },
+		{ FVector(30.f, 192.f, 79.f), FVector(-174.f, 0.f, 177.f), 22.f, FLinearColor::Black },
+	};
+	const FLinearColor HeadLampColor(1.f, 0.93f, 0.78f);
+	const FLinearColor TailLampColor(1.f, 0.12f, 0.18f);
+	const FLinearColor WingLeftColor(1.f, 0.1f, 0.12f);
+	const FLinearColor WingRightColor(0.15f, 1.f, 0.3f);
+	// Lamp beads' glow (M_FXCloak "Glow") parked and ridden; the neon under it (candelas) parked and ridden, reaching this
+	// far past the model's half length; the headlight beam (candelas), its reach and cones, tipped down this much
+	constexpr float LampGlowParked = 4.f;
+	constexpr float LampGlowRidden = 10.f;
+	constexpr float ColoredLampShare = 0.3f;
+	// In the air faster than this (a jump ramp's leap): the rush trail (ARRRandomEffects::RushTrail)
+	constexpr float RushMinSpeed = 900.f;
+	constexpr float NeonParked = 6.f;
+	constexpr float NeonRidden = 14.f;
+	constexpr float NeonReach = 1.5f;
+	constexpr float HeadLightIntensity = 220.f;
+	constexpr float HeadLightReach = 1400.f;
+	constexpr float HeadLightInnerCone = 14.f;
+	constexpr float HeadLightOuterCone = 30.f;
+	constexpr float HeadLightDip = 7.f;
+	// A plane's lights blink this many times a second, on for this share of each
+	constexpr float BlinkRate = 1.2f;
+	constexpr float BlinkOn = 0.35f;
 }
 
 ARRRandomVehicle::ARRRandomVehicle()
@@ -179,6 +237,113 @@ ARRRandomVehicle::ARRRandomVehicle()
 	Propeller->SetStaticMesh(Cube);
 	Propeller->SetRelativeScale3D(PropellerScale);
 	Propeller->SetVisibility(false);
+
+	// Round 91: its lights (PlaceLights puts them on the kind's model)
+	UnderGlow = CreateDefaultSubobject<UPointLightComponent>(TEXT("UnderGlow"));
+	UnderGlow->SetupAttachment(Body);
+	UnderGlow->SetIntensityUnits(ELightUnits::Candelas);
+	UnderGlow->SetCastShadows(false);
+	HeadLight = CreateDefaultSubobject<USpotLightComponent>(TEXT("HeadLight"));
+	HeadLight->SetupAttachment(Body);
+	HeadLight->SetIntensityUnits(ELightUnits::Candelas);
+	HeadLight->SetLightColor(HeadLampColor);
+	HeadLight->SetAttenuationRadius(HeadLightReach);
+	HeadLight->SetInnerConeAngle(HeadLightInnerCone);
+	HeadLight->SetOuterConeAngle(HeadLightOuterCone);
+	HeadLight->SetCastShadows(false);
+	HeadLight->SetVisibility(false);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Glow(TEXT("/Game/Effects/DiceFX/M_FXCloak.M_FXCloak"));
+	for (int32 i = 0; i < 4; ++i)
+	{
+		UStaticMeshComponent* Lamp = CreateDefaultSubobject<UStaticMeshComponent>(*FString::Printf(TEXT("Lamp%d"), i));
+		Lamp->SetupAttachment(Body);
+		Lamp->SetStaticMesh(SphereMesh.Succeeded() ? SphereMesh.Object : nullptr);
+		if (Glow.Succeeded())
+		{
+			Lamp->SetMaterial(0, Glow.Object);
+		}
+		Lamp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Lamp->SetCanEverAffectNavigation(false);
+		Lamp->SetCastShadow(false);
+		Lamp->SetReceivesDecals(false);
+		Lamps.Add(Lamp);
+	}
+}
+
+void ARRRandomVehicle::PlaceLights()
+{
+	const FRRVehicleLamps& Spots = VehicleLamps[FMath::Clamp(static_cast<int32>(Kind), 0, UE_ARRAY_COUNT(VehicleLamps) - 1)];
+	const bool bPlane = IsPlane();
+	const bool bModel = Body->GetStaticMesh() && Body->GetStaticMesh() != Cube;
+	if (LampMaterials.Num() != Lamps.Num())
+	{
+		LampMaterials.Reset();
+		for (UStaticMeshComponent* Lamp : Lamps)
+		{
+			LampMaterials.Add(Lamp->CreateDynamicMaterialInstance(0, Lamp->GetMaterial(0)));
+		}
+	}
+	for (int32 i = 0; i < Lamps.Num(); ++i)
+	{
+		const bool bBack = i >= 2;
+		const bool bMirror = (i % 2) == 1;
+		FVector Spot = bBack ? Spots.Back : Spots.Front;
+		// A single lamp (on the middle line) has no mirror
+		const bool bShown = bModel && (!bMirror || Spot.Y > 0.f);
+		Spot.Y *= bMirror ? -1.f : 1.f;
+		Lamps[i]->SetVisibility(bShown);
+		Lamps[i]->SetRelativeLocation(Spot);
+		Lamps[i]->SetRelativeScale3D(FVector(Spots.Size / 100.f));
+		if (UMaterialInstanceDynamic* Material = LampMaterials[i])
+		{
+			// A plane's wing tips: red on the left (-Y), green on the right; its tail white. A car's front white, back red
+			const FLinearColor Color = bPlane ? (bBack ? FLinearColor::White : (bMirror ? WingLeftColor : WingRightColor))
+				: (bBack ? TailLampColor : HeadLampColor);
+			Material->SetVectorParameterValue(TEXT("Color"), Color);
+			Material->SetScalarParameterValue(TEXT("Glow"), LampGlowParked);
+			Material->SetScalarParameterValue(TEXT("Fill"), 1.f);
+			Material->SetScalarParameterValue(TEXT("Opacity"), 1.f);
+		}
+	}
+	// The neon under it, a little above the floor, reaching just past its sides
+	const FBox Box = bModel ? Body->GetStaticMesh()->GetBoundingBox() : FBox(FVector(-100.f), FVector(100.f));
+	UnderGlow->SetVisibility(bModel && !bPlane);
+	UnderGlow->SetRelativeLocation(FVector(Box.GetCenter().X, 0.f, 12.f));
+	UnderGlow->SetLightColor(Spots.Neon);
+	UnderGlow->SetAttenuationRadius(Box.GetExtent().X * NeonReach + 60.f);
+	UnderGlow->SetIntensity(NeonParked);
+	HeadLight->SetRelativeLocation(FVector(Spots.Front.X, 0.f, Spots.Front.Z));
+	HeadLight->SetRelativeRotation(FRotator(-HeadLightDip, 0.f, 0.f));
+}
+
+void ARRRandomVehicle::UpdateLights(float DeltaSeconds, float Speed)
+{
+	LightTime += DeltaSeconds;
+	const bool bRidden = Rider != nullptr;
+	const bool bPlane = IsPlane();
+	// A plane blinks; a ridden car's lamps shine brighter, and its headlight comes on
+	const bool bBlinkOn = FMath::Fmod(LightTime * BlinkRate, 1.f) < BlinkOn;
+	for (int32 i = 0; i < LampMaterials.Num(); ++i)
+	{
+		if (UMaterialInstanceDynamic* Material = LampMaterials[i])
+		{
+			// A plane's wing tips steady, its tail blinking; colored lamps (red, green) less bright, or they bloom to white
+			const bool bColored = bPlane ? i < 2 : i >= 2;
+			const float Glow = bPlane ? (bBlinkOn || i < 2 ? LampGlowRidden : 0.6f) : (bRidden ? LampGlowRidden : LampGlowParked);
+			Material->SetScalarParameterValue(TEXT("Glow"), Glow * (bColored ? ColoredLampShare : 1.f));
+		}
+	}
+	if (!bPlane)
+	{
+		UnderGlow->SetIntensity(bRidden ? NeonRidden : NeonParked);
+		const bool bBeam = bRidden && Body->GetStaticMesh() && Body->GetStaticMesh() != Cube;
+		if (HeadLight->IsVisible() != bBeam)
+		{
+			HeadLight->SetVisibility(bBeam);
+		}
+		HeadLight->SetIntensity(HeadLightIntensity);
+	}
 }
 
 void ARRRandomVehicle::BeginPlay()
@@ -310,6 +475,7 @@ void ARRRandomVehicle::ApplyKind()
 		Propeller->SetRelativeLocation(FVector(Box.Max.X + 3.f / BodyScale.X, 0.f, Box.GetCenter().Z));
 		Propeller->SetRelativeScale3D(PropellerScale / BodyScale);
 	}
+	PlaceLights();
 }
 
 UStaticMesh* ARRRandomVehicle::GetKindMesh(ERRVehicleKind InKind) const
@@ -422,6 +588,7 @@ void ARRRandomVehicle::Tick(float DeltaSeconds)
 	{
 		return;
 	}
+	UpdateLights(DeltaSeconds, Rider ? Rider->GetVelocity().Size2D() : 0.f);
 	if (IsPlane())
 	{
 		UpdatePlane(DeltaSeconds);
@@ -451,6 +618,25 @@ void ARRRandomVehicle::Tick(float DeltaSeconds)
 	Lean = FMath::FInterpConstantTo(Lean, Wanted, DeltaSeconds, LeanRate);
 	Body->SetRelativeRotation(FRotator(0.f, 0.f, Lean));
 	UpdateSkidMarks(bDrifting, Speed);
+	// Round 91: leaping off a jump ramp (in the air and fast), a contrail and rushing wind, like a human cannon shot
+	const bool bRushing = Rider && Rider->GetCharacterMovement()->IsFalling() && Rider->GetVelocity().Size2D() > RushMinSpeed;
+	if (bRushing && bWasRushing)
+	{
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			Effects->RushTrail(LastRushSpot, GetActorLocation() + FVector(0.f, 0.f, 60.f), Rider->GetVelocity(), DeltaSeconds);
+		}
+	}
+	bWasRushing = bRushing;
+	LastRushSpot = GetActorLocation() + FVector(0.f, 0.f, 60.f);
+	// An engine that pulls (round 90): wound up near its top speed, streaks of light stream off it
+	if (Rider && Handling.SpeedUpTime > 0.f && Speed > Rider->GetCharacterMovement()->MaxWalkSpeed * 0.8f)
+	{
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			Effects->SpeedTrail(GetActorLocation() + FVector(0.f, 0.f, 70.f), GetActorLocation(), Rider->GetVelocity(), FLinearColor(1.f, 0.75f, 0.35f), DeltaSeconds);
+		}
+	}
 	// The star legs car's four rocket nozzles at its tail (two big over two small) burn while it's going
 	if (Kind == ERRVehicleKind::StarLegs && Rider && Speed > LegsRocketMinSpeed)
 	{

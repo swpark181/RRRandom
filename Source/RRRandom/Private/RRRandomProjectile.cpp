@@ -1,6 +1,7 @@
 #include "RRRandomProjectile.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomEffects.h"
+#include "RRRandomHUD.h"
 #include "RRRandomStarRobot.h"
 #include "RRRandomVehicle.h"
 #include "RRRandomWreckage.h"
@@ -15,6 +16,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/PackageName.h"
 #include "Net/UnrealNetwork.h"
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
@@ -62,6 +64,19 @@ namespace
 	constexpr float MissileTurnGrowth = 500.f;
 	constexpr float MissileArrive = 60.f;
 	constexpr float MissileBlast = 0.45f;
+	// Round 90: a CANNON's shell blows up this far round where it lands, hurting this share of its hit at the middle; a
+	// BLASTER's plasma bursts, smaller; how big their blasts look
+	// (sized to catch three to five animal friends or villains at once, the user's ask)
+	constexpr float CannonSplashRadius = 180.f;
+	constexpr float CannonSplashShare = 0.7f;
+	constexpr float PlasmaSplashRadius = 150.f;
+	constexpr float PlasmaSplashShare = 0.5f;
+	// Round 91 (the user: the blasts looked huge; keep them to three or four friends across): a blast as wide as its splash,
+	// whatever the shell's size: ARRRandomEffects::RocketBlast's shock ring and smoke reach about this far at size 1
+	constexpr float BlastReachPerSize = 350.f;
+	constexpr float CannonBlastSize = CannonSplashRadius / BlastReachPerSize;
+	constexpr float PlasmaBlastSize = 0.3f;
+	constexpr float PlasmaRingPerSize = 40.f;
 
 	// Templates may loop for previewing, so one-shot effects stop spawning after this and let their particles finish
 	constexpr float OneShotSpawnTime = 0.25f;
@@ -159,6 +174,7 @@ void ARRRandomProjectile::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ARRRandomProjectile, Tier);
+	DOREPLIFETIME(ARRRandomProjectile, HitEffect);
 	DOREPLIFETIME(ARRRandomProjectile, bPoke);
 	DOREPLIFETIME(ARRRandomProjectile, RocketArm);
 	DOREPLIFETIME(ARRRandomProjectile, bMissile);
@@ -225,6 +241,20 @@ void ARRRandomProjectile::BeginPlay()
 		Visual->SetRelativeScale3D(MissileLook);
 		Glow->SetLightColor(FLinearColor(1.f, 0.55f, 0.15f));
 		SetActorTickEnabled(true);
+	}
+	// The gun's own shot (round 90): its Tripo model, when imported, instead of the ball (nose along +X, fitted to its length)
+	if (!bPoke && !bRocket && !bMissile)
+	{
+		if (UStaticMesh* Model = LoadShotModel(HitEffect))
+		{
+			const FBoxSphereBounds Bounds = Model->GetBounds();
+			const float Fit = GetShotLength(HitEffect) / FMath::Max(1.f, Bounds.BoxExtent.GetMax() * 2.f);
+			Visual->SetStaticMesh(Model);
+			Visual->EmptyOverrideMaterials();
+			Visual->SetRelativeScale3D(FVector(Fit));
+			Visual->SetRelativeLocation(-Bounds.Origin * Fit);
+			bOwnModel = true;
+		}
 	}
 	if (!bPoke && !bRocket && !bMissile)
 	{
@@ -297,7 +327,8 @@ void ARRRandomProjectile::BeginPlay()
 		Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 
-	if (bRocket)
+	// (a gun's own model keeps its own colors)
+	if (bRocket || bOwnModel)
 	{
 		return;
 	}
@@ -428,6 +459,8 @@ void ARRRandomProjectile::RunOutOfRange()
 	bOutOfRange = true;
 	ImpactLocation = GetActorLocation();
 	ImpactNormal = -GetActorForwardVector();
+	// (a shell or plasma at the end of its range bursts there, hurting what is round it)
+	Splash(ImpactLocation, nullptr, FMath::RandRange(MinDamage, MaxDamage) * DamageMultiplier);
 	ForceNetUpdate();
 	SpawnImpactEffects(ImpactLocation, ImpactNormal);
 	HideAfterImpact();
@@ -456,6 +489,28 @@ void ARRRandomProjectile::SpawnImpactEffects(const FVector& Location, const FVec
 		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
 		{
 			Effects->RocketBlast(Location, Normal, 1.5f);
+		}
+		return;
+	}
+	// A CANNON's shell blows up, a BLASTER's plasma bursts in a ring as wide as its splash (round 90), out of range too
+	float SplashRadius = 0.f;
+	float SplashShare = 0.f;
+	GetSplash(HitEffect, SplashRadius, SplashShare);
+	if (SplashRadius > 0.f && !bPoke)
+	{
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			if (HitEffect == ERRHitEffect::Cannon)
+			{
+				Effects->RocketBlast(Location, Normal, CannonBlastSize);
+				ARRRandomHUD::PopComicWord(this, TEXT("BOOM!"), Location + FVector(0.f, 0.f, 120.f), FLinearColor(1.f, 0.55f, 0.2f), 1.1f);
+			}
+			else
+			{
+				// (a ring of its color and a small blast: no stars, the user wants few)
+				Effects->ShotSplat(Location, Normal, SplashRadius / PlasmaRingPerSize, ShotColor);
+				Effects->RocketBlast(Location, Normal, PlasmaBlastSize);
+			}
 		}
 		return;
 	}
@@ -530,10 +585,11 @@ void ARRRandomProjectile::OnHit(UPrimitiveComponent* HitComponent, AActor* Other
 		return;
 	}
 
+	const float BaseDamage = FMath::RandRange(MinDamage, MaxDamage) * DamageMultiplier;
 	if (OtherActor && OtherActor != GetInstigator())
 	{
 		const FVector ShotDirection = GetActorForwardVector();
-		float Damage = FMath::RandRange(MinDamage, MaxDamage) * DamageMultiplier;
+		float Damage = BaseDamage;
 		if (bPoke)
 		{
 			Damage = PokeDamage;
@@ -558,6 +614,9 @@ void ARRRandomProjectile::OnHit(UPrimitiveComponent* HitComponent, AActor* Other
 		ARRRandomWreckage::Wreck(this, Hit.ImpactPoint, Hit.ImpactPoint, WreckRadius, false, WreckDig);
 	}
 
+	// A CANNON's shell or a BLASTER's plasma (round 90): everything else round where it lands takes a share of the hit too
+	Splash(Hit.ImpactPoint + Hit.ImpactNormal * 25.f, OtherActor, BaseDamage);
+
 	// Tell the clients where it landed, then go once they've had time to hear it
 	bImpacted = true;
 	bHitBrawler = Cast<ARRRandomCharacter>(OtherActor) != nullptr;
@@ -567,4 +626,81 @@ void ARRRandomProjectile::OnHit(UPrimitiveComponent* HitComponent, AActor* Other
 	SpawnImpactEffects(Hit.ImpactPoint, Hit.ImpactNormal);
 	HideAfterImpact();
 	SetLifeSpan(ImpactLingerTime);
+}
+
+void ARRRandomProjectile::GetSplash(ERRHitEffect Effect, float& OutRadius, float& OutShare)
+{
+	OutRadius = Effect == ERRHitEffect::Cannon ? CannonSplashRadius : Effect == ERRHitEffect::Blaster ? PlasmaSplashRadius : 0.f;
+	OutShare = Effect == ERRHitEffect::Cannon ? CannonSplashShare : Effect == ERRHitEffect::Blaster ? PlasmaSplashShare : 0.f;
+}
+
+void ARRRandomProjectile::Splash(const FVector& Where, AActor* Hit, float BaseDamage)
+{
+	float Radius = 0.f;
+	float Share = 0.f;
+	GetSplash(HitEffect, Radius, Share);
+	if (!HasAuthority() || Radius <= 0.f || bPoke)
+	{
+		return;
+	}
+	// Everything round it but the shooter and what the shot hit (hurt in full already), less toward the edge; the shooter's
+	// team is spared as ever (ARRRandomCharacter::TakeDamage), the gates and the tower only take the villains' bites
+	TArray<AActor*> Spared = { GetInstigator() };
+	if (Hit)
+	{
+		Spared.Add(Hit);
+	}
+	const float Full = BaseDamage * Share;
+	UGameplayStatics::ApplyRadialDamageWithFalloff(this, Full, Full * 0.5f, Where, Radius * 0.3f, Radius, 1.f, UDamageType::StaticClass(), Spared, this,
+		GetInstigatorController(), ECC_Visibility);
+}
+
+UStaticMesh* ARRRandomProjectile::LoadShotModel(ERRHitEffect Effect)
+{
+	// /Game/Props/Projectiles/SM_Shot_<Gun> (round 90, char-pipeline/input/projectiles), looked up once each
+	static TMap<ERRHitEffect, TWeakObjectPtr<UStaticMesh>> Found;
+	static TSet<ERRHitEffect> Missing;
+	if (const TWeakObjectPtr<UStaticMesh>* Known = Found.Find(Effect); Known && Known->IsValid())
+	{
+		return Known->Get();
+	}
+	if (Missing.Contains(Effect))
+	{
+		return nullptr;
+	}
+	const TCHAR* Names[] = { TEXT("Pistol"), TEXT("Smg"), TEXT("Minigun"), TEXT("Rifle"), TEXT("Blaster"), TEXT("Cannon") };
+	const int32 Index = static_cast<int32>(Effect);
+	UStaticMesh* Model = nullptr;
+	if (Index < UE_ARRAY_COUNT(Names))
+	{
+		const FString Package = FString::Printf(TEXT("/Game/Props/Projectiles/SM_Shot_%s"), Names[Index]);
+		if (FPackageName::DoesPackageExist(Package))
+		{
+			Model = LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("%s.SM_Shot_%s"), *Package, Names[Index]));
+		}
+	}
+	if (Model)
+	{
+		Found.Add(Effect, Model);
+	}
+	else
+	{
+		Missing.Add(Effect);
+	}
+	return Model;
+}
+
+float ARRRandomProjectile::GetShotLength(ERRHitEffect Effect)
+{
+	// Longest side of each gun's shot at its gun's size 1 (the ball was 25 across): the heavy ones bigger
+	switch (Effect)
+	{
+	// (the gun's own shot size multiplies these: a legendary cannon's rocket comes out twice as big)
+	case ERRHitEffect::Minigun: return 24.f;
+	case ERRHitEffect::Smg: return 26.f;
+	case ERRHitEffect::Rifle: return 40.f;
+	case ERRHitEffect::Blaster: return 30.f;
+	case ERRHitEffect::Cannon: return 36.f;
+	default: return 30.f;
+	}
 }

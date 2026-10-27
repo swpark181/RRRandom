@@ -65,6 +65,8 @@ public:
 	static ARRRandomCannon* FindInReach(const ARRRandomCharacter* Who);
 	/** Server: Dice Town's four sets, on open ground near the spots they are meant for. */
 	static void SpawnDiceTownSets(UWorld* World, const ARRRandomDiceTown* Town);
+	/** Server: a defense stage's four sets (round 90), inside the wall ring shooting out over it. */
+	static void SpawnDefenseSets(UWorld* World, const ARRRandomDiceTown* Town, const FVector& Center);
 	/** Server: a set whose cannon stands at From, aimed at a pad at To (both on the floor). */
 	static ARRRandomCannon* SpawnSet(UWorld* World, const FVector& From, const FVector& To, int32 InIndex);
 	/**

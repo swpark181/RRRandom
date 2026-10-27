@@ -87,6 +87,11 @@ struct FRRVehicleHandling
 	bool bFlies = false;
 	float MaxHealth = 0.f;
 	ERRPlaneGun Gun = ERRPlaneGun::Pilot;
+	/**
+	 * Round 90: an engine that pulls (the motorbike): instead of Acceleration at once, about this many seconds from standing
+	 * to top speed, pulling hardest off the line and less the faster it goes (0: Acceleration as it is).
+	 */
+	float SpeedUpTime = 0.f;
 };
 
 /**
@@ -237,6 +242,27 @@ private:
 	/** The engine cube: the propeller, and a plane's stand-in while its model is missing. */
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> Cube;
+
+	/**
+	 * Round 91, its lights (each machine, cosmetic): a neon glow on the floor under it in its kind's color (always on,
+	 * brighter ridden), a headlight beam ahead while ridden, and glowing lamp beads on its body: white at the front, red at
+	 * the back (a plane: red and green wing tips and a white tail, blinking). Placed by PlaceLights from the kind's spots.
+	 */
+	UPROPERTY(VisibleAnywhere, Category = "Vehicle")
+	TObjectPtr<class UPointLightComponent> UnderGlow;
+	UPROPERTY(VisibleAnywhere, Category = "Vehicle")
+	TObjectPtr<class USpotLightComponent> HeadLight;
+	/** Front left, front right, back left, back right (a single lamp's mirror stays hidden). */
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> Lamps;
+	UPROPERTY()
+	TArray<TObjectPtr<class UMaterialInstanceDynamic>> LampMaterials;
+	void PlaceLights();
+	void UpdateLights(float DeltaSeconds, float Speed);
+	float LightTime = 0.f;
+	/** Leaping off a jump ramp last frame, and where it was (its rush trail runs from there). */
+	bool bWasRushing = false;
+	FVector LastRushSpot = FVector::ZeroVector;
 
 	UFUNCTION()
 	void OnRep_Kind();

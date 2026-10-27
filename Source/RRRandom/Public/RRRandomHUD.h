@@ -128,6 +128,8 @@ private:
 	/** Draws the gun's name chip ending at Right; nothing for the starting pistol. */
 	void DrawWeaponChip(const struct FRRWeapon& Weapon, float Right, float CenterY);
 	void DrawScore();
+	/** Defense (round 90): the stage, the wave and what is left of it (or the break's countdown), the tower's health, a boss warning. */
+	void DrawDefenseStatus(const ARRRandomGameState& State);
 	/**
 	 * Meteor Rush: over each meteor's landing spot a marker counting down (an arrow at the screen's edge pointing to it when
 	 * it is off the screen), then ORE! while it throws its ore.

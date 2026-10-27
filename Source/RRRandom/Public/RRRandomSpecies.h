@@ -25,7 +25,17 @@ namespace RRSpecies
 	constexpr int32 Dragon = 4;
 	/** The red fennec fox girl (round 68): her own look, the fox's kit and ultimate (GetKitSpecies). */
 	constexpr int32 RedFox = 5;
+	/** The animal friends to pick (and the bots' random pick): the ones above. */
 	constexpr int32 Count = 6;
+	/**
+	 * The defense mode's villains (round 90), never picked: the rat (every wave) and the cat (the bosses). Without their own
+	 * assets yet they are drawn as a stand-in (the squirrel, the tiger) tinted in the villains' colors (FRRSpeciesLook::bStandIn).
+	 */
+	constexpr int32 Rat = 6;
+	constexpr int32 Cat = 7;
+	/** Every species with a look and a kit: the animal friends and the villains. */
+	constexpr int32 AllCount = 8;
+	inline bool IsVillain(int32 Species) { return Species == Rat || Species == Cat; }
 
 	/** The species whose passive, own die and ultimate it has: the red fox has the fox's; the others their own. */
 	int32 GetKitSpecies(int32 Species);
@@ -108,8 +118,23 @@ struct FRRSpeciesLook
 	UPROPERTY()
 	FVector RideFit = FVector::ZeroVector;
 
+	/**
+	 * Holding a gun (round 90): this body's own fix on the fist every gun sits in (URRRandomGunComponent: GunLooks' grips),
+	 * for its hand's size and shape: moved along the fist's hold (forward = the muzzle's way, right, up; cm at normal size)
+	 * and turned in it. Tuned live with the console's RRGunHand.
+	 */
+	UPROPERTY()
+	FVector GunHandOffset = FVector::ZeroVector;
+
+	UPROPERTY()
+	FRotator GunHandTurn = FRotator::ZeroRotator;
+
 	UPROPERTY()
 	TObjectPtr<UTexture2D> Portrait;
+
+	/** A villain's stand-in: another species' look until its own assets are imported. */
+	UPROPERTY()
+	bool bStandIn = false;
 
 	bool IsUsable() const { return Mesh && Material && Idle && Walk; }
 

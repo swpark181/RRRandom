@@ -75,12 +75,19 @@ namespace
 			Kit.DieLine = TEXT("only the dragon flies, twice as often");
 			Kit.DieColor = FLinearColor(1.f, 0.5f, 0.85f);
 			break;
+		case RRSpecies::Rat:
+		case RRSpecies::Cat:
+			// The defense mode's villains roll nothing; the cat (a boss) is pushed about much less
+			Kit.KnockbackScale = Species == RRSpecies::Cat ? 0.3f : 1.f;
+			Kit.PassiveName = TEXT("VILLAIN");
+			break;
 		}
 		return Kit;
 	}
 
 	// The red fox's is the fox's (RRSpecies::GetKitSpecies)
-	const FRRKit Kits[RRSpecies::Count] = { MakeKits(0), MakeKits(1), MakeKits(2), MakeKits(3), MakeKits(4), MakeKits(RRSpecies::Fox) };
+	const FRRKit Kits[RRSpecies::AllCount] = { MakeKits(0), MakeKits(1), MakeKits(2), MakeKits(3), MakeKits(4), MakeKits(RRSpecies::Fox),
+		MakeKits(RRSpecies::Rat), MakeKits(RRSpecies::Cat) };
 
 	// The invisible look (M_FXCloak): on the brawler's own screen and its teammates' a see-through body (outline plus some
 	// fill), on its opponents' just the outline, fainter standing still than at full run; a hit flashes it up for
@@ -101,7 +108,7 @@ namespace
 
 const FRRKit& RRKit::Get(int32 Species)
 {
-	return Kits[FMath::Clamp(Species, 0, RRSpecies::Count - 1)];
+	return Kits[FMath::Clamp(Species, 0, RRSpecies::AllCount - 1)];
 }
 
 URRRandomKitComponent::URRRandomKitComponent()

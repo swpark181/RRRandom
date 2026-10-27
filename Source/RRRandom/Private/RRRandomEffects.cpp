@@ -34,6 +34,13 @@ namespace
 
 	const FLinearColor Cream(1.f, 0.93f, 0.82f);
 	const FLinearColor Gold(1.f, 0.78f, 0.3f);
+
+	// The human cannon's contrail (RushTrail): this wide, lasting this long, starting this far behind the flier's middle;
+	// wind streaks a second
+	constexpr float CannonTrailWidth = 42.f;
+	constexpr float CannonTrailLife = 0.7f;
+	constexpr float CannonTrailBehind = 45.f;
+	constexpr float CannonWindRate = 60.f;
 	// Fire, hottest first
 	const FLinearColor FireYellow(1.f, 0.82f, 0.25f);
 	const FLinearColor FireOrange(1.f, 0.42f, 0.05f);
@@ -373,6 +380,74 @@ void ARRRandomEffects::FlightTrail(const FVector& Back, const FVector& Velocity,
 		Glow.Glow = 3.f;
 		Glow.Opacity = 0.6f;
 		Spawn(Glow);
+	}
+}
+
+void ARRRandomEffects::RushTrail(const FVector& From, const FVector& Head, const FVector& Velocity, float DeltaSeconds)
+{
+	const float Speed = Velocity.Size();
+	if (Speed < 1.f || DeltaSeconds <= 0.f)
+	{
+		return;
+	}
+	const FVector Way = Velocity / Speed;
+	const FRotator Along = Way.Rotation();
+	const FLinearColor Air(0.86f, 0.94f, 1.f);
+	// The contrail: soft pale ovals laid end to end along the way since last frame, starting a little behind the body,
+	// thinning to nothing as they age, so it trails off smoothly behind the flier
+	const FVector Tail = Way * CannonTrailBehind;
+	const FVector Path = Head - From;
+	const float Moved = Path.Size();
+	const int32 Pieces = FMath::Clamp(FMath::CeilToInt(Moved / 14.f), 1, 24);
+	const float Step = Moved / Pieces;
+	for (int32 Index = 0; Index < Pieces; ++Index)
+	{
+		const float Share = (Index + 0.5f) / Pieces;
+		FParticle Piece;
+		Piece.Shape = EShape::Ball;
+		Piece.Location = From + Path * Share - Tail;
+		Piece.Age = (1.f - Share) * DeltaSeconds;
+		Piece.Turn = Along;
+		Piece.FadeIn = 0.f;
+		const float Long = FMath::Max(Step * 2.6f, 20.f) / 100.f;
+		// A wide faint veil...
+		Piece.Life = CannonTrailLife;
+		Piece.StartSize = FVector(Long, CannonTrailWidth / 100.f, CannonTrailWidth / 100.f);
+		Piece.EndSize = FVector(Long, 0.02f, 0.02f);
+		Piece.Color = Air;
+		Piece.Glow = 0.9f;
+		Piece.Opacity = 0.32f;
+		Spawn(Piece);
+		// ...round a brighter thin core that goes sooner
+		Piece.Life = CannonTrailLife * 0.6f;
+		Piece.StartSize = FVector(Long, CannonTrailWidth * 0.3f / 100.f, CannonTrailWidth * 0.3f / 100.f);
+		Piece.EndSize = FVector(Long, 0.01f, 0.01f);
+		Piece.Color = FLinearColor::White;
+		Piece.Glow = 1.6f;
+		Piece.Opacity = 0.55f;
+		Spawn(Piece);
+	}
+	// Wind rushing past: thin short streaks round the body along the way, swept back
+	const FVector Side = FVector::CrossProduct(Way, FVector::UpVector).GetSafeNormal();
+	const FVector Over = FVector::CrossProduct(Side, Way);
+	for (int32 Index = CountThisFrame(CannonWindRate, DeltaSeconds); Index > 0; --Index)
+	{
+		const float Angle = FMath::FRandRange(0.f, UE_TWO_PI);
+		const float Out = FMath::FRandRange(35.f, 85.f);
+		FParticle Streak;
+		Streak.Shape = EShape::Ball;
+		Streak.Location = Head + (Side * FMath::Cos(Angle) + Over * FMath::Sin(Angle)) * Out + Way * FMath::FRandRange(-30.f, 50.f);
+		Streak.Velocity = -Way * Speed * 0.35f;
+		Streak.Life = FMath::FRandRange(0.1f, 0.18f);
+		const float Length = FMath::Clamp(Speed * 0.09f, 60.f, 230.f) / 100.f;
+		Streak.StartSize = FVector(Length, 0.03f, 0.03f);
+		Streak.EndSize = FVector(Length * 1.3f, 0.008f, 0.008f);
+		Streak.Turn = Along;
+		Streak.Color = Air;
+		Streak.Glow = 1.5f;
+		Streak.Opacity = 0.75f;
+		Streak.FadeIn = 0.02f;
+		Spawn(Streak);
 	}
 }
 

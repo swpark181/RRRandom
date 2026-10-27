@@ -3,6 +3,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/PackageName.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -19,30 +20,44 @@ namespace
 		float HipsHeight;
 		/** FRRSpeciesLook::RideFit: forward, right, up, on the brawler. */
 		FVector RideFit;
+		/**
+		 * FRRSpeciesLook::GunHandOffset and GunHandTurn: the fist every gun sits in, for this body's hand (round 90). The turn
+		 * was measured on each rig (rr.Gun.Debug logs the right hand bone's axes, char-pipeline/scripts/gun_hand_turn.pl turns
+		 * them into this): the average of the hold that points a gun from the right hand to the left with its top up in the
+		 * rifle walk, and in the settled aiming pose. Each Mixamo rig rolls its hand bone its own way, so each has its own.
+		 */
+		FVector GunHandOffset = FVector::ZeroVector;
+		FRotator GunHandTurn = FRotator::ZeroRotator;
 	};
 
-	const FSpeciesTuning Tunings[RRSpecies::Count] = {
+	const FSpeciesTuning Tunings[RRSpecies::AllCount] = {
 		// The fox, rabbit, squirrel and tiger remade in rounds 69-70 and rigged in Mixamo (hips heights of those rigs,
 		// blender_rig_measure.py). The fox is still 100 units to its ear tips, so the same 1.8; the squirrel's longer legs
 		// bring it down to between the fox's hips and head heights
 		// Round 77 (film-style remakes of the fox, squirrel and tiger): still 100 units to the ear tips, same sizes; the hips
 		// are the new rigs'
-		{ TEXT("Fox"), 1.8f, 19.8f, FVector::ZeroVector },
+		{ TEXT("Fox"), 1.8f, 19.8f, FVector::ZeroVector, FVector::ZeroVector, FRotator(14.3f, -77.5f, 137.7f) },
 		// (Riding, the rabbit's long body sits 6 lower, so it shows no more above the sides than the others.) The round-76
 		// remake (A-3 moon rabbit) is still 100 units to its ear tips; its own Mixamo rig's hips stand at 18.5
-		{ TEXT("Rabbit"), 2.45f, 18.5f, FVector(0.f, 0.f, -6.f) },
-		{ TEXT("Squirrel"), 1.93f, 21.5f, FVector::ZeroVector },
+		{ TEXT("Rabbit"), 2.45f, 18.5f, FVector(0.f, 0.f, -6.f), FVector::ZeroVector, FRotator(27.f, -79.3f, 115.2f) },
+		{ TEXT("Squirrel"), 1.93f, 21.5f, FVector::ZeroVector, FVector::ZeroVector, FRotator(22.5f, -73.1f, 130.1f) },
 		// The fluffy tiger (round 72) kept the round-70 tiger's size, and so does the round-77 one. Round 85: re-rigged in
 		// Mixamo (the user placed the markers by hand), hips at 25.6
-		{ TEXT("Tiger"), 1.75f, 25.6f, FVector::ZeroVector },
+		{ TEXT("Tiger"), 1.75f, 25.6f, FVector::ZeroVector, FVector::ZeroVector, FRotator(25.2f, -70.5f, 137.8f) },
 		// Its horns stand tall: between the fox's hips height (2.43) and head height (1.8), a little toward the hips
 		// Round 77 film-style dragon: same size; its rig (Mixamo body, arm joints refitted, tail and wing chains) has hips at 16.1
 		// Round 85: remodeled with its arms held away from the body (the old arms were fused to its sides, so Mixamo's weights
 		// smeared) and rigged in Mixamo by the user's own markers (body without tail and wings), hips at 22.0
-		{ TEXT("Dragon"), 2.15f, 22.0f, FVector::ZeroVector },
+		{ TEXT("Dragon"), 2.15f, 22.0f, FVector::ZeroVector, FVector::ZeroVector, FRotator(27.7f, -84.8f, 109.9f) },
 		// Her ears and head are big: between the fox's hips and head heights. The round-74 remake (Midjourney C-3, fluffy
 		// crimson fur) is still 100 units to her ear tips; its own Mixamo rig's hips stand at 22.4
-		{ TEXT("RedFox"), 1.95f, 22.4f, FVector::ZeroVector },
+		{ TEXT("RedFox"), 1.95f, 22.4f, FVector::ZeroVector, FVector::ZeroVector, FRotator(35.2f, -96.9f, 82.9f) },
+		// The defense mode's villains (round 90): the rat a little smaller than the animal friends, the cat a head taller
+		// (each wave sizes them further, ARRRandomCharacter::SetupVillain)
+		// Round 90 Midjourney A-3 rat and A-2 cat (Tripo, Mixamo rigs: hips 19.7 and 18.4); at these scales the rat stands
+		// a little under the fox, the cat a little over it
+		{ TEXT("Rat"), 2.4f, 19.7f, FVector::ZeroVector },
+		{ TEXT("Cat"), 2.6f, 18.4f, FVector::ZeroVector },
 	};
 	// The speeds below were measured on the first fox's rig (round 9), whose hips stood this high at scale 1; every species'
 	// copy of a motion strides in proportion to its own hips height against it
@@ -60,6 +75,12 @@ namespace
 	template <typename T>
 	T* Find(const FString& Path)
 	{
+		// An asset not imported yet (the villains' before round 90's import) is just missing, without the finder's error
+		FString Package;
+		if (!Path.Split(TEXT("."), &Package, nullptr) || !FPackageName::DoesPackageExist(Package))
+		{
+			return nullptr;
+		}
 		ConstructorHelpers::FObjectFinderOptional<T> Finder(*Path);
 		return Finder.Succeeded() ? Finder.Get() : nullptr;
 	}
@@ -67,7 +88,7 @@ namespace
 
 const TCHAR* RRSpecies::GetAssetName(int32 Species)
 {
-	return Tunings[FMath::Clamp(Species, 0, Count - 1)].Name;
+	return Tunings[FMath::Clamp(Species, 0, AllCount - 1)].Name;
 }
 
 int32 RRSpecies::GetKitSpecies(int32 Species)
@@ -120,7 +141,7 @@ const TArray<FRRSpeciesLook>& FRRSpeciesLook::GetAll()
 	{
 		return Looks;
 	}
-	for (int32 Species = 0; Species < RRSpecies::Count; ++Species)
+	for (int32 Species = 0; Species < RRSpecies::AllCount; ++Species)
 	{
 		const FSpeciesTuning& Tuning = Tunings[Species];
 		const FString Name = Tuning.Name;
@@ -166,6 +187,8 @@ const TArray<FRRSpeciesLook>& FRRSpeciesLook::GetAll()
 		Look.MeshScale = Tuning.MeshScale;
 		Look.HipsHeight = Tuning.HipsHeight * Tuning.MeshScale;
 		Look.RideFit = Tuning.RideFit;
+		Look.GunHandOffset = Tuning.GunHandOffset;
+		Look.GunHandTurn = Tuning.GunHandTurn;
 		const float Stride = Tuning.HipsHeight / SpeedHipsHeight * Tuning.MeshScale;
 		Look.WalkSpeed = FoxWalkSpeed * Stride;
 		Look.RunSpeed = FoxRunSpeed * Stride;
@@ -174,6 +197,19 @@ const TArray<FRRSpeciesLook>& FRRSpeciesLook::GetAll()
 			Look.Aim.MoveSpeed[Direction] = FoxAimRunSpeeds[Direction] * Stride;
 		}
 		Look.Portrait = Find<UTexture2D>(FString::Printf(TEXT("/Game/UI/T_%sPortrait.T_%sPortrait"), *Name, *Name));
+		// A villain without its own assets yet: a stand-in's look (the squirrel for the rat, the tiger for the cat), tinted
+		if (!Look.IsUsable() && RRSpecies::IsVillain(Species))
+		{
+			const int32 StandIn = Species == RRSpecies::Rat ? RRSpecies::Squirrel : RRSpecies::Tiger;
+			if (Looks[StandIn].IsUsable())
+			{
+				Look = Looks[StandIn];
+				Look.bStandIn = true;
+				Look.Portrait = nullptr;
+				UE_LOG(LogTemp, Log, TEXT("RRRandom: no %s assets yet: drawn as the %s, tinted."), *Name, Tunings[StandIn].Name);
+				continue;
+			}
+		}
 		UE_CLOG(!Look.IsUsable(), LogTemp, Warning, TEXT("RRRandom: the %s's assets are missing: it is drawn as the fox."), *Name);
 	}
 	return Looks;

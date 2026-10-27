@@ -32,6 +32,15 @@ enum class ERRTitleChoice : uint8
 	/** The rules (ERRMatchRule), picked after the view (and map), before the brawler. */
 	Knockout,
 	MeteorRush,
+	/** Round 90: what to play (in place of the view page: the top view and Dice Land are put away), the defense stages, the room list. */
+	Battle,
+	Defense,
+	Stage1,
+	Stage2,
+	Stage3,
+	/** One of the games found (the room list: GetRoomOf), and searching again. */
+	Room,
+	Refresh,
 };
 
 /**
@@ -61,6 +70,17 @@ public:
 	bool IsOnSpeciesPage() const { return bSpeciesPage; }
 	bool IsOnMapPage() const { return bMapPage; }
 	bool IsOnRulePage() const { return bRulePage; }
+	bool IsOnStagePage() const { return bStagePage; }
+	bool IsOnRoomPage() const { return bRoomPage; }
+	/** A button's words and its line under the buttons, as they stand (the rooms found, a locked stage). */
+	FString GetButtonLabel(int32 Index) const;
+	FString GetButtonDescription(int32 Index) const;
+	/** A button that does nothing now (a locked stage, a full room). */
+	bool IsButtonEnabled(int32 Index) const;
+	/** The room (URRRandomSessionSubsystem::GetRooms) a button joins, or INDEX_NONE. */
+	int32 GetRoomOf(int32 Index) const;
+	/** The defense stage (1..3) a button picks, or 0. */
+	static int32 GetStageOf(ERRTitleChoice Choice);
 	/** The species a button picks (RRSpecies), or INDEX_NONE for the other buttons. */
 	static int32 GetSpeciesOf(ERRTitleChoice Choice);
 
@@ -117,6 +137,12 @@ private:
 	bool bRulePage = false;
 	/** Opens the rule page with the last pick selected. */
 	void OpenRulePage();
+	/** Round 90: the defense stage page (after DEFENSE) and the room list (after JOIN GAME), and the room picked there. */
+	bool bStagePage = false;
+	bool bRoomPage = false;
+	int32 PickedRoom = INDEX_NONE;
+	void OpenStagePage();
+	void OpenRoomPage();
 	enum class EStart : uint8 { Solo, Host, Join } Start = EStart::Solo;
 	/** Opens the brawler page with the last pick selected. */
 	void OpenSpeciesPage(EStart InStart);

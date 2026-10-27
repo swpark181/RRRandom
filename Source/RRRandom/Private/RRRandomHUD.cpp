@@ -1,6 +1,7 @@
 #include "RRRandomHUD.h"
 #include "RRRandomCannon.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomDefense.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomGameState.h"
 #include "RRRandomKit.h"
@@ -233,6 +234,20 @@ void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRand
 	const FVector2D HealthSize = RRUI::MeasureText(HealthText, NumberSize, EWeight::Black);
 	const float HealthTextY = Top - HealthSize.Y + 1.f * S;
 	RRUI::DrawGlowText(Canvas, HealthText, FVector2D(Head.X - HealthSize.X * 0.5f, HealthTextY), NumberSize, EWeight::Black, RRUI::Ink);
+
+	// A defense villain: only its health (a boss's name over it) and the foe marker; it has no gun or dice
+	if (Brawler.IsVillain())
+	{
+		if (Brawler.IsVillainBoss())
+		{
+			const float TagSize = 12.f * S;
+			const FString Tag = TEXT("BOSS CAT");
+			const FVector2D TagBox = RRUI::MeasureText(Tag, TagSize, EWeight::Black, TagSize * 0.16f);
+			RRUI::DrawGlowText(Canvas, Tag, FVector2D(Head.X - TagBox.X * 0.5f, HealthTextY - TagBox.Y - 1.f * S), TagSize, EWeight::Black, RRUI::LavenderDeep, TagSize * 0.16f);
+		}
+		DrawFriendOrFoeMarker(Head.X, BarRect.Max.Y + 4.f * S, RRUI::PinkDeep);
+		return;
+	}
 
 	// Stored dice: a small diamond and the count, right of the health bar (gold while one is the ultimate die)
 	const URRRandomDiceBuffComponent* Dice = Brawler.GetDiceBuffs();
@@ -1108,6 +1123,12 @@ void ARRRandomHUD::DrawScore()
 	{
 		return;
 	}
+	// Defense: the waves and the tower instead
+	if (State->IsDefense())
+	{
+		DrawDefenseStatus(*State);
+		return;
+	}
 
 	// "BLUE  3 · 2  RED" centered at the top, a thin line filling from both ends toward the goal, and what wins under
 	// it, all on one soft white plate
@@ -1194,6 +1215,94 @@ void ARRRandomHUD::DrawScore()
 				}
 			}
 		}
+	}
+}
+
+void ARRRandomHUD::DrawDefenseStatus(const ARRRandomGameState& State)
+{
+	// Top center on one plate: the stage and wave, a line of the wave's villains still to beat (or the seconds to the next
+	// wave), and the tower's health; a blinking BOSS pill under it while a boss is out
+	const float S = UIScale;
+	const float CenterX = Canvas->ClipX * 0.5f;
+	const float Top = 14.f * S;
+	const float TitleSize = 22.f * S;
+	const float SmallSize = 9.f * S;
+	const float LineWidth = 220.f * S;
+	const int32 Wave = State.GetWave();
+	const FString Title = Wave > 0 ? FString::Printf(TEXT("WAVE %d / %d"), Wave, ARRRandomGameState::WaveCount) : FString(TEXT("GET READY"));
+	const FString Stage = FString::Printf(TEXT("DEFENSE STAGE %d"), State.GetDefenseStage());
+	const FVector2D TitleBox = RRUI::MeasureText(Title, TitleSize, EWeight::Black, TitleSize * 0.08f);
+	const FVector2D StageBox = RRUI::MeasureText(Stage, SmallSize, EWeight::ExtraBold, SmallSize * 0.22f);
+
+	const float StageY = Top + 6.f * S;
+	const float TitleY = StageY + StageBox.Y;
+	const float WaveLineY = TitleY + TitleBox.Y + 4.f * S;
+	const float WaveTextY = WaveLineY + 7.f * S;
+	const float TowerLineY = WaveTextY + SmallSize * 1.3f + 6.f * S;
+	const float TowerTextY = TowerLineY + 9.f * S;
+	const float GateTextY = TowerTextY + SmallSize * 1.3f + 3.f * S;
+	const float Bottom = GateTextY + SmallSize * 1.3f + 4.f * S;
+	RRUI::DrawPlate(Canvas, FBox2D(FVector2D(CenterX - LineWidth * 0.5f - 22.f * S, Top), FVector2D(CenterX + LineWidth * 0.5f + 22.f * S, Bottom)), 18.f * S);
+	RRUI::DrawText(Canvas, Stage, FVector2D(CenterX - StageBox.X * 0.5f, StageY), SmallSize, EWeight::ExtraBold, RRUI::LavenderDeep, SmallSize * 0.22f);
+	RRUI::DrawText(Canvas, Title, FVector2D(CenterX - TitleBox.X * 0.5f, TitleY), TitleSize, EWeight::Black, RRUI::Ink, TitleSize * 0.08f);
+
+	// The wave: beaten share filling pink, or the break's countdown
+	const FBox2D WaveLine(FVector2D(CenterX - LineWidth * 0.5f, WaveLineY), FVector2D(CenterX + LineWidth * 0.5f, WaveLineY + 4.f * S));
+	FString WaveText;
+	if (State.IsWaveBreak())
+	{
+		const int32 Seconds = FMath::Max(0, FMath::CeilToInt(State.HasPlayStarted() ? State.GetWaveCountdown() : State.GetWaveCountdown() - State.GetCountdownRemaining()));
+		WaveText = Wave > 0 ? FString::Printf(TEXT("WAVE %d CLEAR!  NEXT IN %d"), Wave, Seconds) : FString::Printf(TEXT("THE RATS COME IN %d"), Seconds);
+		RRUI::DrawPill(Canvas, WaveLine, WithAlpha(RRUI::Ink, 0.12f));
+		const float Share = FMath::Clamp(1.f - State.GetWaveCountdown() / (Wave > 0 ? ARRRandomDefenseDirector::BreakSeconds : ARRRandomDefenseDirector::FirstWaveDelay), 0.f, 1.f);
+		RRUI::DrawBar(Canvas, WaveLine, Share, Track, RRUI::Mint);
+	}
+	else
+	{
+		const int32 Left = State.GetVillainsLeft();
+		WaveText = FString::Printf(TEXT("%d VILLAIN%s LEFT"), Left, Left == 1 ? TEXT("") : TEXT("S"));
+		const float Share = State.GetWaveVillains() > 0 ? 1.f - float(Left) / State.GetWaveVillains() : 0.f;
+		RRUI::DrawBar(Canvas, WaveLine, FMath::Clamp(Share, 0.f, 1.f), Track, RRUI::Pink);
+	}
+	const float WaveTextWidth = RRUI::MeasureText(WaveText, SmallSize, EWeight::ExtraBold, SmallSize * 0.22f).X;
+	RRUI::DrawText(Canvas, WaveText, FVector2D(CenterX - WaveTextWidth * 0.5f, WaveTextY), SmallSize, EWeight::ExtraBold, State.IsWaveBreak() ? RRUI::MintDeep : RRUI::InkSoft, SmallSize * 0.22f);
+
+	// The tower: its health, sky, blinking pink once a third is left
+	if (const ARRRandomDiceTower* Tower = ARRRandomDiceTower::Get(this))
+	{
+		const float Share = FMath::Clamp(Tower->GetHealth() / FMath::Max(1.f, Tower->GetMaxHealth()), 0.f, 1.f);
+		const bool bLow = Share < 1.f / 3.f;
+		const FBox2D TowerLine(FVector2D(CenterX - LineWidth * 0.5f, TowerLineY), FVector2D(CenterX + LineWidth * 0.5f, TowerLineY + 6.f * S));
+		RRUI::DrawPill(Canvas, TowerLine.ExpandBy(1.5f * S), bLow ? WithAlpha(RRUI::PinkDeep, Blink(GetWorld())) : WithAlpha(RRUI::Ink, 0.15f));
+		RRUI::DrawBar(Canvas, TowerLine, Share, Track, bLow ? RRUI::PinkDeep : RRUI::SkyDeep);
+		const FString TowerText = FString::Printf(TEXT("DICE TOWER  %d / %d"), FMath::CeilToInt(Tower->GetHealth()), FMath::RoundToInt(Tower->GetMaxHealth()));
+		const float TowerWidth = RRUI::MeasureText(TowerText, SmallSize, EWeight::ExtraBold, SmallSize * 0.22f).X;
+		RRUI::DrawText(Canvas, TowerText, FVector2D(CenterX - TowerWidth * 0.5f, TowerTextY), SmallSize, EWeight::ExtraBold, bLow ? RRUI::PinkDeep : RRUI::InkSoft, SmallSize * 0.22f);
+
+		// The castle's gates: each one's health, BROKEN once the villains are through (pink)
+		FString Gates;
+		bool bAnyDown = false;
+		for (TActorIterator<ARRRandomDefenseWall> It(GetWorld()); It; ++It)
+		{
+			const bool bEast = It->GetActorLocation().X > Tower->GetActorLocation().X;
+			const FString Shape = It->IsOpen() ? FString(TEXT("OPEN")) : It->IsBroken() ? FString(TEXT("BROKEN")) : FString::Printf(TEXT("%d%%"), FMath::CeilToInt(100.f * It->GetHealth() / FMath::Max(1.f, It->GetMaxHealth())));
+			const FString Entry = FString::Printf(TEXT("%s GATE %s"), bEast ? TEXT("EAST") : TEXT("WEST"), *Shape);
+			Gates = Gates.IsEmpty() ? Entry : bEast ? Entry + TEXT("   ·   ") + Gates : Gates + TEXT("   ·   ") + Entry;
+			bAnyDown |= It->IsBroken();
+		}
+		const float GateWidth = RRUI::MeasureText(Gates, SmallSize, EWeight::ExtraBold, SmallSize * 0.22f).X;
+		RRUI::DrawText(Canvas, Gates, FVector2D(CenterX - GateWidth * 0.5f, GateTextY), SmallSize, EWeight::ExtraBold, bAnyDown ? RRUI::PinkDeep : RRUI::InkSoft, SmallSize * 0.22f);
+	}
+
+	if (State.IsBossOut())
+	{
+		const FString Warning = TEXT("THE CAT BOSS IS HERE!");
+		const float WarnSize = 15.f * S;
+		const FVector2D WarnBox = RRUI::MeasureText(Warning, WarnSize, EWeight::Black, WarnSize * 0.16f);
+		const FBox2D Pill(FVector2D(CenterX - WarnBox.X * 0.5f - 16.f * S, Bottom + 8.f * S), FVector2D(CenterX + WarnBox.X * 0.5f + 16.f * S, Bottom + 14.f * S + WarnBox.Y));
+		RRUI::DrawPill(Canvas, Pill.ExpandBy(2.5f * S), WithAlpha(RRUI::LavenderDeep, Blink(GetWorld())));
+		RRUI::DrawPill(Canvas, Pill, RRUI::White);
+		RRUI::DrawText(Canvas, Warning, FVector2D(CenterX - WarnBox.X * 0.5f, Pill.Min.Y + 3.f * S), WarnSize, EWeight::Black, RRUI::LavenderDeep, WarnSize * 0.16f);
 	}
 }
 
@@ -1683,7 +1792,11 @@ void ARRRandomHUD::DrawResults(const ARRRandomGameState& State, const ARRRandomC
 
 	// The score in a frosted pill
 	const float ResultSize = 13.f * S;
-	const FString Result = FString::Printf(TEXT("%s WINS · %d : %d"), Winner == 0 ? TEXT("BLUE") : TEXT("RED"), State.GetTeamScore(0), State.GetTeamScore(1));
+	// (defense: the stage cleared, or the wave the tower fell in)
+	const FString Result = State.IsDefense()
+		? (Winner == 0 ? FString::Printf(TEXT("DEFENSE STAGE %d CLEARED · ALL %d WAVES"), State.GetDefenseStage(), ARRRandomGameState::WaveCount)
+			: FString::Printf(TEXT("THE DICE TOWER FELL · WAVE %d / %d"), FMath::Max(1, State.GetWave()), ARRRandomGameState::WaveCount))
+		: FString::Printf(TEXT("%s WINS · %d : %d"), Winner == 0 ? TEXT("BLUE") : TEXT("RED"), State.GetTeamScore(0), State.GetTeamScore(1));
 	const FVector2D ResultBox = RRUI::MeasureText(Result, ResultSize, EWeight::ExtraBold, ResultSize * 0.24f);
 	const float PillTop = HeadTop + HeadBox.Y + 4.f * S;
 	const FBox2D Pill(FVector2D(CenterX - ResultBox.X * 0.5f - 20.f * S, PillTop), FVector2D(CenterX + ResultBox.X * 0.5f + 20.f * S, PillTop + ResultBox.Y + 8.f * S));
@@ -1694,7 +1807,18 @@ void ARRRandomHUD::DrawResults(const ARRRandomGameState& State, const ARRRandomC
 	const ARRRandomCharacter* MVP = State.GetMVP();
 	const float BoardTop = 210.f * S;
 	DrawTeamBoard(0, Viewer, MVP, 50.f * S, BoardTop, BoardWidth * S, Fade, S);
-	DrawTeamBoard(1, Viewer, MVP, ScreenW - (50.f + BoardWidth) * S, BoardTop, BoardWidth * S, Fade, S);
+	// (defense: no villains' board; the next stage opened, if this PC's progress did)
+	if (!State.IsDefense())
+	{
+		DrawTeamBoard(1, Viewer, MVP, ScreenW - (50.f + BoardWidth) * S, BoardTop, BoardWidth * S, Fade, S);
+	}
+	else if (const ARRRandomPlayerController* Player = Cast<ARRRandomPlayerController>(PlayerOwner); Player && Player->GetStageOpened() > 0)
+	{
+		const float OpenSize = 18.f * S;
+		const FString Opened = FString::Printf(TEXT("STAGE %d OPEN!"), Player->GetStageOpened());
+		const FVector2D OpenBox = RRUI::MeasureText(Opened, OpenSize, EWeight::Black, OpenSize * 0.14f);
+		RRUI::DrawGlowText(Canvas, Opened, FVector2D(CenterX - OpenBox.X * 0.5f, Pill.Max.Y + 12.f * S), OpenSize, EWeight::Black, WithAlpha(RRUI::Gold, Fade), OpenSize * 0.14f);
+	}
 
 	// MVP pill under the hero: round portrait in a butter ring, MVP, the name and its knockouts
 	if (MVP)
@@ -1743,14 +1867,17 @@ void ARRRandomHUD::DrawResults(const ARRRandomGameState& State, const ARRRandomC
 	ResultsButtons.Add({ ERRResultsButton::NewGame, FBox2D(FVector2D(Left, Top), FVector2D(Left + ButtonW, Top + ButtonH)), bCanRestart });
 	const float Right = Left + ButtonW + ResultsButtonGap * S;
 	ResultsButtons.Add({ ERRResultsButton::Title, FBox2D(FVector2D(Right, Top), FVector2D(Right + ButtonW, Top + ButtonH)), true });
+	// (defense: on to the next stage after a clear, or try the stage again)
+	const FString Again = !State.IsDefense() ? TEXT("NEW GAME") : Winner != 0 ? TEXT("RETRY")
+		: State.GetDefenseStage() < URRRandomSessionSubsystem::DefenseStageCount ? TEXT("NEXT STAGE") : TEXT("PLAY AGAIN");
 	for (const FResultsButtonRect& Button : ResultsButtons)
 	{
 		const bool bNewGame = Button.Button == ERRResultsButton::NewGame;
-		DrawMenuButton(Button, bNewGame ? (bCanRestart ? TEXT("NEW GAME") : TEXT("WAITING FOR HOST")) : TEXT("TITLE"), bNewGame, Fade, S);
+		DrawMenuButton(Button, bNewGame ? (bCanRestart ? Again : FString(TEXT("WAITING FOR HOST"))) : FString(TEXT("TITLE")), bNewGame, Fade, S);
 	}
 
 	const float KeySize = 10.f * S;
-	DrawCentered(Canvas, bCanRestart ? TEXT("ENTER  NEW GAME   ·   ESC  TITLE") : TEXT("ESC  TITLE"), CenterX, ScreenH - 30.f * S, KeySize, EWeight::ExtraBold,
+	DrawCentered(Canvas, bCanRestart ? FString::Printf(TEXT("ENTER  %s   ·   ESC  TITLE"), *Again) : FString(TEXT("ESC  TITLE")), CenterX, ScreenH - 30.f * S, KeySize, EWeight::ExtraBold,
 		WithAlpha(RRUI::InkSoft, Fade), KeySize * 0.16f, true);
 }
 

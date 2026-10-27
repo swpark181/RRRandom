@@ -62,6 +62,8 @@ public:
 	static ARRRandomPlaneStation* FindNear(const ARRRandomCharacter* Who);
 	/** Server: Dice Town's two stations, one by each team's base. */
 	static void SpawnDiceTownStations(UWorld* World, const ARRRandomDiceTown* Town);
+	/** Server: a defense stage's two stations (round 90), inside the wall ring. */
+	static void SpawnDefenseStations(UWorld* World, const ARRRandomDiceTown* Town, const FVector& Center);
 	/**
 	 * Server: the plane for Face, popped in under Who and boarded (Station: whose it is, told when it is gone; null for the
 	 * cheat). Null if Who can't board one now.
