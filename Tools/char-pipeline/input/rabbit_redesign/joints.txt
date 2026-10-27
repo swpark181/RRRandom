@@ -1,0 +1,29 @@
+# Cream moon rabbit, metres in Blender: faces -Y, +X is character left.
+# Rest joints read from the front and side turnaround of the Tripo model.
+MIRROR 0
+Hips 0 0.03 0.24
+Spine 0 0.03 0.29
+Spine1 0 0.03 0.34
+Spine2 0 0.03 0.39
+Neck 0 0.03 0.445
+Head 0 0.035 0.48
+HeadTop_End 0 0.06 0.73
+RightShoulder -0.045 0.03 0.425
+RightArm -0.145 0.025 0.398
+RightForeArm -0.217 0.015 0.32
+RightHand -0.266 0.005 0.265
+RightHandIndex1 -0.277 0.005 0.25
+RightHandIndex2 -0.285 0.004 0.24
+RightHandIndex3 -0.289 0.003 0.232
+RightHandIndex4 -0.292 0.002 0.225
+RightHandThumb1 -0.257 -0.01 0.254
+RightHandThumb2 -0.255 -0.02 0.248
+RightHandThumb3 -0.25 -0.025 0.24
+RightHandThumb4 -0.252 -0.03 0.232
+RightUpLeg -0.085 0.03 0.21
+RightLeg -0.088 0.03 0.105
+RightFoot -0.09 0.035 0.05
+RightToeBase -0.115 -0.07 0.02
+RightToe_End -0.13 -0.115 0.012
+Tail1 0 0.135 0.24
+Tail2 0 0.185 0.24

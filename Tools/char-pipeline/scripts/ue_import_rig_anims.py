@@ -72,6 +72,9 @@ for suffix, (what, in_place) in FILES.items():
     ui.import_textures = False
     ui.skeleton = skeleton
     ui.mesh_type_to_import = unreal.FBXImportType.FBXIT_ANIMATION
+    # The source is 30 fps. Auto-detect can choose 1110 fps for irregular FBX
+    # key times, multiplying raw keys and asset size without useful motion data.
+    ui.anim_sequence_import_data.set_editor_property("use_default_sample_rate", True)
     ui.anim_sequence_import_data.set_editor_property(
         "animation_length", unreal.FBXAnimationLengthImportType.FBXALIT_EXPORTED_TIME)
     task = unreal.AssetImportTask()
@@ -99,20 +102,27 @@ for suffix, (what, in_place) in FILES.items():
     n = AL.get_num_keys(anim)
     tracks = [str(t) for t in AL.get_animation_track_names(anim)]
     line = f"{asset}: {AL.get_sequence_length(anim):.2f} s, {n} keys, {len(tracks)} tracks"
-    for bone in tracks:
-        keys = [AL.get_bone_pose_for_frame(anim, bone, i, False) for i in range(n)]
-        if bone.lower() == "hips":
-            pos = [k.translation * ratio for k in keys]
-            if in_place and n > 1:
-                dx, dy = pos[-1].x - pos[0].x, pos[-1].y - pos[0].y
-                pos = [unreal.Vector(p.x - dx * i / (n - 1), p.y - dy * i / (n - 1), p.z) for i, p in enumerate(pos)]
-                line += f", drift ({dx:.1f},{dy:.1f}) taken out"
-            line += f", hips z {min(p.z for p in pos):.1f}..{max(p.z for p in pos):.1f}"
-        elif bone.lower() in ref:
-            pos = [ref[bone.lower()].translation] * n
-        else:
-            continue
-        anim.controller.set_bone_track_keys(bone, pos, [k.rotation for k in keys], [k.scale3d for k in keys], False)
+    # Read all local poses before modifying the sequence. A read after each
+    # changed track otherwise rebuilds compressed data for every bone in UE 5.8.
+    keys_by_bone = {bone: [AL.get_bone_pose_for_frame(anim, bone, i, False) for i in range(n)] for bone in tracks}
+    anim.controller.open_bracket("Retarget animal motion", False)
+    try:
+        for bone in tracks:
+            keys = keys_by_bone[bone]
+            if bone.lower() == "hips":
+                pos = [k.translation * ratio for k in keys]
+                if in_place and n > 1:
+                    dx, dy = pos[-1].x - pos[0].x, pos[-1].y - pos[0].y
+                    pos = [unreal.Vector(p.x - dx * i / (n - 1), p.y - dy * i / (n - 1), p.z) for i, p in enumerate(pos)]
+                    line += f", drift ({dx:.1f},{dy:.1f}) taken out"
+                line += f", hips z {min(p.z for p in pos):.1f}..{max(p.z for p in pos):.1f}"
+            elif bone.lower() in ref:
+                pos = [ref[bone.lower()].translation] * n
+            else:
+                continue
+            anim.controller.set_bone_track_keys(bone, pos, [k.rotation for k in keys], [k.scale3d for k in keys], False)
+    finally:
+        anim.controller.close_bracket(False)
     eal.save_asset(anim.get_path_name().split(".")[0])
     log(line)
 for a in eal.list_assets(f"{dest}/Anims", recursive=False):

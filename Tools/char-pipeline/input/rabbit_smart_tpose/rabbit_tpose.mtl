@@ -1,0 +1,3 @@
+newmtl rabbit_tpose
+Kd 1 1 1
+map_Kd rabbit_tpose_basecolor.png

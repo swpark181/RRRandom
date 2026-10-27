@@ -1,8 +1,18 @@
 # 작업 이어하기 메모 — 팀전 프로토타입 (FPS식 사격 + 엄폐물)
 
-최종 업데이트: 2026-10-27 (토끼 스마트메쉬 비교 페이지 완성)
+최종 업데이트: 2026-10-27 (T포즈 토끼 Mixamo 리깅 게임 적용·등판 수정 완료)
 
 Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMemory/` 에 복사해 둠 — 다른 PC 세션은 먼저 읽기.
+
+## T포즈 토끼 게임 적용 및 등판 수정 완료 (2026-10-27)
+
+- **현재 게임 토끼는 새 T포즈 Smart Mesh + 사용자가 직접 완료한 Mixamo 리깅이다.** 사용자 지시로 Mixamo Review의 NEXT와 새 캐릭터 확인을 완료하고 T-pose FBX를 다운로드했다. 원본 `Tools/char-pipeline/input/rabbit_smart_tpose/mixamo/rabbit_mixamo_original.fbx`(57뼈, 높이 100cm, Hips 26.671639cm). 이전 A포즈의 근접 가중치 전이본이 아니다. 양손 끝 정점의 몸통뼈 가중치는 0임을 확인.
+- 등판의 크게 뒤틀린 V자 직조 무늬를 built-in ImageGen으로 리터치한 뒤 `blender_rabbit_back_patch.py`로 원래 UV에 재투영. 원본/수정 렌더 비율로 조명 성분을 상쇄하고, **보이는 등판의 보라색 원단만 96,722 texel 수정**. 목둘레·소매 봉제선·앞면 달 프린트·털·벨트·반바지는 보존(마스크 밖 데이터 차이 0). 수정 아틀라스 `rabbit_tpose_basecolor_clean.png`, 편집 원화 `shirt_back_edit.png`, 게임용 스킨 FBX `mixamo/rabbit_SK.fbx`. 사용자의 뼈와 스킨 가중치를 그대로 유지했다.
+- `/Game/Characters/Rabbit` 메시·스켈레톤·재질·텍스처·23개 게임 모션을 교체. `RRRandomSpecies.cpp` Rabbit: scale 1.9, hips 26.6716, 기존 RideFit/손 총 보정 유지. 기존 초상화는 같은 크림 토끼여서 유지. 이전 실제 게임 폴더는 `input/rabbit_smart_tpose/backup/pre_mixamo_tpose/Rabbit/`에 보존(백업 gitignore).
+- 새 래퍼 `ue_import_rabbit_tpose_game.py`가 기존 Mixamo 모션을 새 뼈 길이/골반 높이에 맞춰 연결한다. `--animations-only`는 메시·재질을 유지하고 모션만 재생성, `--validate-only`는 검사만 한다. 전체 교체 전에는 Unreal을 닫고 기존 토끼 폴더를 백업으로 이동할 것(CDO 참조 중 폴더 삭제 실패 예방). 파이썬 시작 후 `Interchange.FeatureFlags.Import.FBX 0`을 실행한다.
+- UE 5.8 임포트 병목도 수정: `ue_import_rig_anims.py` / `ue_import_shared_anim.py`는 **모든 원본 로컬 포즈를 먼저 읽고 controller bracket으로 한 번에 수정**하여 뼈마다 재압축하지 않는다. `use_default_sample_rate=True`로 30fps 사용. 자동 샘플링이 일부 6초 모션을 약 1110fps로 만들던 것을 방지했다. Victory 44.9MB→2.69MB, Dance2 41.0MB→1.05MB. 소스 모션과 재생 길이는 유지.
+- 검증: RRRandomEditor Win64 Development 빌드 통과. `ue_rabbit_tpose_smoke.py`로 57뼈·23개 모션·동일 스켈레톤·양수 길이·30fps 이하·골반 높이·수정 2K 텍스처를 실제 게임 세션에서 확인. Studio에서 전면/후면/측면, 걷기·달리기·사격·점프·착지·나무 비행기 탑승을 촬영하여 확인했다. `Tools/char-pipeline/output/rabbit_tpose_game/game_verified.log`, `game_front.png`, `game_back.png`, `game_walk.png`, `game_run.png`, `game_fire.png`, `game_jump.png`, `game_landing.png`, `game_ride.png`. 파이썬/에셋 검사 오류 없이 종료. 소로 검사이며, 기존 EOS 미설정 로그는 그대로여서 온라인은 이번 작업에서 검증하지 않음.
+- 재현/증빙: `blender_rabbit_inspect.py`의 `before/`·`after/` 렌더, `back_patch.json`, `rig_measure.json`, 원본/프롬프트 기록은 `input/rabbit_smart_tpose/README.md`. 이전 비교 Site는 이전 HD/A포즈 후보의 기록용 영상이며, 이번 게임 교체에 맞춰 다시 생성한 페이지가 아니다.
 
 ## 토끼 Smart Mesh 후보와 동기화 영상 비교 (2026-10-27)
 

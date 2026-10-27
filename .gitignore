@@ -37,3 +37,12 @@ Plugins/*/Intermediate/
 # Cooked / packaged output
 Packaged/
 Releases/
+
+# Local backups and captures for the rabbit redesign (source assets remain tracked).
+Tools/char-pipeline/input/rabbit_redesign/backup/
+Tools/char-pipeline/output/rabbit_redesign/
+Tools/char-pipeline/scripts/__pycache__/
+Tools/char-pipeline/output/rabbit_smart_compare/
+Content/Developers/RabbitSmartCompare/
+Tools/char-pipeline/input/rabbit_smart_tpose/backup/
+Tools/char-pipeline/output/rabbit_tpose_game/

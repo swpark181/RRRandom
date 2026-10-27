@@ -37,9 +37,9 @@ namespace
 		// Round 77 (film-style remakes of the fox, squirrel and tiger): still 100 units to the ear tips, same sizes; the hips
 		// are the new rigs'
 		{ TEXT("Fox"), 1.8f, 19.8f, FVector::ZeroVector, FVector::ZeroVector, FRotator(14.3f, -77.5f, 137.7f) },
-		// (Riding, the rabbit's long body sits 6 lower, so it shows no more above the sides than the others.) The round-76
-		// remake (A-3 moon rabbit) is still 100 units to its ear tips; its own Mixamo rig's hips stand at 18.5
-		{ TEXT("Rabbit"), 2.45f, 18.5f, FVector(0.f, 0.f, -6.f), FVector::ZeroVector, FRotator(27.f, -79.3f, 115.2f) },
+		// T-pose Smart Mesh rabbit, rigged by the user in Mixamo: 100 units to the ear, hips 26.6716.
+		// Its longer legs put the hips alongside the other animal friends at scale 1.9.
+		{ TEXT("Rabbit"), 1.9f, 26.6716f, FVector(0.f, 0.f, -6.f), FVector::ZeroVector, FRotator(27.f, -79.3f, 115.2f) },
 		{ TEXT("Squirrel"), 1.93f, 21.5f, FVector::ZeroVector, FVector::ZeroVector, FRotator(22.5f, -73.1f, 130.1f) },
 		// The fluffy tiger (round 72) kept the round-70 tiger's size, and so does the round-77 one. Round 85: re-rigged in
 		// Mixamo (the user placed the markers by hand), hips at 25.6
