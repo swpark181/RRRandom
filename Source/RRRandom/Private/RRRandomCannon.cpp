@@ -1,4 +1,5 @@
 #include "RRRandomCannon.h"
+#include "RRRandomBattleRoyale.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomDiceTown.h"
 #include "RRRandomEffects.h"
@@ -66,10 +67,16 @@ bool ARRRandomCannon::FindOpenGround(UWorld* World, const ARRRandomDiceTown* Tow
 	const FBox Area = Town->GetFlightArea();
 	// GetFlightArea's floor is 1000 under level 0's top
 	const float FloorZ = Area.Min.Z + 1000.f;
-	auto IsGround = [Town](const FVector2D& Spot)
+	// (the battle map: each spot on its own tile)
+	const ARRRandomBattleMap* Battle = Town->IsBattleTile() ? ARRRandomBattleMap::Get(World) : nullptr;
+	auto IsGround = [Town, Battle](const FVector2D& Spot)
 	{
+		const ARRRandomDiceTown* Tile = Battle ? Battle->GetTileAt(Spot) : Town;
 		int32 Levels = -1;
-		Town->GetMapColor(Spot, Levels);
+		if (Tile)
+		{
+			Tile->GetMapColor(Spot, Levels);
+		}
 		return Levels == 0;
 	};
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRCannonSpot), false);
@@ -457,4 +464,26 @@ void ARRRandomCannon::SpawnDefenseSets(UWorld* World, const ARRRandomDiceTown* T
 			*(FVector2D(To) - Middle).ToString(), FVector::Dist2D(From, To));
 		++Count;
 	}
+}
+
+bool ARRRandomCannon::SpawnBattleSet(UWorld* World, const ARRRandomBattleMap* Map, const FVector2D& WantCannon, const FVector2D& WantPad, int32 InIndex)
+{
+	const ARRRandomDiceTown* PadTile = Map ? Map->GetTileAt(WantPad) : nullptr;
+	const ARRRandomDiceTown* CannonTile = Map ? Map->GetTileAt(WantCannon) : nullptr;
+	if (!World || !PadTile || !CannonTile)
+	{
+		return false;
+	}
+	// The pad first, then a cannon near its spot whose arc out to the pad is clear of the buildings
+	FVector From;
+	FVector To;
+	if (!FindOpenGround(World, PadTile, WantPad, PadClear, To, [](const FVector&) { return true; }, 2500.f)
+		|| !FindOpenGround(World, CannonTile, WantCannon, CannonClear, From, [World, &To](const FVector& Spot) { return IsArcClear(World, Spot, To); }, CannonReach))
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: no room for a battle map cannon set near %s -> %s."), *WantCannon.ToString(), *WantPad.ToString());
+		return false;
+	}
+	SpawnSet(World, From, To, InIndex);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: battle map cannon %d at %s, its pad at %s (%.0f apart)."), InIndex, *FVector2D(From).ToString(), *FVector2D(To).ToString(), FVector::Dist2D(From, To));
+	return true;
 }

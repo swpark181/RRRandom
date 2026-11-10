@@ -4,6 +4,7 @@
 #include "GameFramework/PlayerController.h"
 #include "RRRandomPlayerController.generated.h"
 
+class ARRRandomCharacter;
 class ARRRandomFogOfWar;
 class ARRRandomResultsDirector;
 class UInputAction;
@@ -207,6 +208,53 @@ public:
 	void ClientDefenseCleared(int32 Stage);
 	/** The stage this PC's progress opened with the last clear (0 for none), for the results screen. */
 	int32 GetStageOpened() const { return StageOpened; }
+
+	/**
+	 * The battle royale (round 92): the host tells a player its team is out and its place (of how many teams). Out, this
+	 * screen watches a teammate still standing (then whoever is left near), until the end.
+	 */
+	UFUNCTION(Client, Reliable)
+	void ClientTeamOut(int32 Place, int32 Teams);
+	int32 GetTeamOutPlace() const { return TeamOutPlace; }
+	int32 GetTeamOutOf() const { return TeamOutOf; }
+	/** The one this screen watches while out (null while playing). */
+	const ARRRandomCharacter* GetWatched() const { return Watched.Get(); }
+	/** Battle royale cheats (console; not in shipping builds): the ring skips ahead; my animal friend to the middle of tile (X, Y). */
+	UFUNCTION(Exec)
+	void RRZone();
+	UFUNCTION(Exec)
+	void RRGoTile(int32 X = 0, int32 Y = 0);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatZone();
+	/** Battle royale cheat (round 93): the oracle dice roll now (the next storm, on the ring as it stands; RROracle 1: on my animal friend). */
+	UFUNCTION(Exec)
+	void RROracle(int32 bOnMe = 0);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatOracle(bool bOnMe);
+	/** Battle royale cheat (round 93): my animal friend just inside the ring's edge (Inside that far in), facing out at the cloud bank. */
+	UFUNCTION(Exec)
+	void RRRingEdge(float Inside = 1500.f);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatRingEdge(float Inside);
+	/** Battle royale cheat (round 94): my animal friend inside big building Index (of all the map's), on Floor (0 the ground), facing Yaw (if 0 or more). */
+	UFUNCTION(Exec)
+	void RRGoBuilding(int32 Index = 0, int32 Floor = 0, float Yaw = -1.f);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatGoBuilding(int32 Index, int32 Floor, float Yaw);
+	/** Round 94 cheat: my animal friend 3.5 m in front of the first cover model of kind Model (ECoverModel number), looking at it. */
+	UFUNCTION(Exec)
+	void RRGoCover(int32 Model = 1);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatGoCover(int32 Model);
+	/**
+	 * Round 94 size check (alone/standalone; console only): on a bare floor high over the map, my animal friend with cover
+	 * model Model beside it twice — as the game sizes it (instance Instance's own scale, of all the map's) and at its own
+	 * proportions at the same height — seen from the front; logs every instance's size ("PROPSIZE"). RRStudioCamOff ends it.
+	 */
+	UFUNCTION(Exec)
+	void RRPropBeside(int32 Model = 1, int32 Instance = 0);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatGoTile(int32 X, int32 Y);
 
 	/** Defense cheats (console; not in shipping builds): the break before this wave now, every villain out down, every stage open. */
 	UFUNCTION(Exec)
@@ -427,6 +475,13 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerCheatClearWave();
 	int32 StageOpened = 0;
+	// Round 92: the battle royale
+	int32 TeamOutPlace = 0;
+	int32 TeamOutOf = 0;
+	TWeakObjectPtr<ARRRandomCharacter> Watched;
+	float WatchTimer = 0.f;
+	/** Out (knocked out for good) in a battle royale: watch a teammate standing, or the nearest one standing. */
+	void UpdateWatching(float DeltaTime);
 	UFUNCTION(Server, Reliable)
 	void ServerCheatCannon(int32 Index);
 	UFUNCTION(Server, Reliable)
@@ -459,6 +514,10 @@ private:
 	float StudioDistance = 0.f;
 	float StudioHeight = 0.f;
 	float StudioFacing = 0.f;
+	/** RRPropBeside: its floor, the two models and its camera (gone with RRStudioCamOff or the next RRPropBeside). */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<AActor>> PropBesideActors;
+	void ClearPropBeside();
 
 	/** My tiger's spirit strikes at this spot (if it's ready for one). */
 	UFUNCTION(Server, Reliable)

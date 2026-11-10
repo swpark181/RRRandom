@@ -41,6 +41,10 @@ enum class ERRTitleChoice : uint8
 	/** One of the games found (the room list: GetRoomOf), and searching again. */
 	Room,
 	Refresh,
+	/** Round 92: the battle royale, then which map: the full one (ten teams) or the test map (four teams, quicker ring). */
+	BattleRoyale,
+	BRFull,
+	BRTest,
 };
 
 /**
@@ -72,6 +76,7 @@ public:
 	bool IsOnRulePage() const { return bRulePage; }
 	bool IsOnStagePage() const { return bStagePage; }
 	bool IsOnRoomPage() const { return bRoomPage; }
+	bool IsOnBattleRoyalePage() const { return bBRPage; }
 	/** A button's words and its line under the buttons, as they stand (the rooms found, a locked stage). */
 	FString GetButtonLabel(int32 Index) const;
 	FString GetButtonDescription(int32 Index) const;
@@ -139,6 +144,8 @@ private:
 	void OpenRulePage();
 	/** Round 90: the defense stage page (after DEFENSE) and the room list (after JOIN GAME), and the room picked there. */
 	bool bStagePage = false;
+	/** Round 92: the battle royale's map page (full or test). */
+	bool bBRPage = false;
 	bool bRoomPage = false;
 	int32 PickedRoom = INDEX_NONE;
 	void OpenStagePage();

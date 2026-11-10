@@ -1,9 +1,11 @@
 #include "RRRandomHUD.h"
+#include "RRRandomBattleRoyale.h"
 #include "RRRandomCannon.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomDefense.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomGameState.h"
+#include "RRRandomOracle.h"
 #include "RRRandomKit.h"
 #include "RRRandomMeteor.h"
 #include "RRRandomOre.h"
@@ -134,6 +136,10 @@ void ARRRandomHUD::DrawHUD()
 	ResultsShownAt = -1.f;
 	ResultsButtons.Reset();
 
+	if (State && State->IsBattleRoyale())
+	{
+		DrawCottonCloud();
+	}
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{
 		DrawOverhead(**It, Viewer);
@@ -145,6 +151,10 @@ void ARRRandomHUD::DrawHUD()
 	DrawCannonsAndStations(Viewer);
 	DrawComicWords();
 	DrawScore();
+	if (State && State->IsBattleRoyale())
+	{
+		DrawOracle(Viewer);
+	}
 	DrawOnlinePanel();
 	if (Viewer)
 	{
@@ -159,6 +169,10 @@ void ARRRandomHUD::DrawHUD()
 			}
 			DrawRidePrompt(*Viewer);
 			DrawCrosshair(*Viewer);
+		}
+		else if (State && State->IsBattleRoyale())
+		{
+			DrawBattleOut(*Viewer);
 		}
 		else
 		{
@@ -1129,6 +1143,12 @@ void ARRRandomHUD::DrawScore()
 		DrawDefenseStatus(*State);
 		return;
 	}
+	// The battle royale: who is standing and the ring instead (round 92)
+	if (State->IsBattleRoyale())
+	{
+		DrawBattleStatus(*State, Cast<ARRRandomCharacter>(GetOwningPawn()));
+		return;
+	}
 
 	// "BLUE  3 · 2  RED" centered at the top, a thin line filling from both ends toward the goal, and what wins under
 	// it, all on one soft white plate
@@ -1718,8 +1738,11 @@ float ARRRandomHUD::DrawTeamBoard(int32 Team, const ARRRandomCharacter* Viewer, 
 	const float HeaderSize = 12.f * Scale;
 	float Y = Top + PadY;
 	const float TextY = (Row - RRUI::MeasureText(TEXT("0"), HeaderSize, EWeight::Black).Y) * 0.5f;
-	RRUI::DrawText(Canvas, Team == 0 ? TEXT("BLUE") : TEXT("RED"), FVector2D(Left, Y + TextY), HeaderSize, EWeight::Black, WithAlpha(RRUI::Ink, Alpha), HeaderSize * 0.16f);
-	const FString Score = FString::FromInt(State ? State->GetTeamScore(Team) : 0);
+	// (the battle royale: TEAM n and its place)
+	const bool bBattle = State && State->IsBattleRoyale();
+	const FString TeamName = bBattle ? FString::Printf(TEXT("TEAM %d"), Team + 1) : FString(Team == 0 ? TEXT("BLUE") : TEXT("RED"));
+	RRUI::DrawText(Canvas, TeamName, FVector2D(Left, Y + TextY), HeaderSize, EWeight::Black, WithAlpha(RRUI::Ink, Alpha), HeaderSize * 0.16f);
+	const FString Score = bBattle ? FString::Printf(TEXT("#%d"), FMath::Max(1, State->GetTeamPlace(Team))) : FString::FromInt(State ? State->GetTeamScore(Team) : 0);
 	const float ScoreWidth = RRUI::MeasureText(Score, HeaderSize, EWeight::Black).X;
 	RRUI::DrawText(Canvas, Score, FVector2D(Right - ScoreWidth, Y + TextY), HeaderSize, EWeight::Black, WithAlpha(RRUI::Ink, Alpha));
 	Y += Row;
@@ -1777,7 +1800,10 @@ void ARRRandomHUD::DrawResults(const ARRRandomGameState& State, const ARRRandomC
 	// along a gradient: lavender, pink and gold for a win, sky to lavender for a loss
 	const int32 Winner = State.GetWinningTeam();
 	const bool bWon = Viewer && Viewer->GetTeam() == Winner;
-	const FString Headline = Viewer ? (bWon ? TEXT("VICTORY") : TEXT("DEFEAT")) : (Winner == 0 ? TEXT("BLUE WINS") : TEXT("RED WINS"));
+	// (the battle royale: the team's place, #1 a victory)
+	const int32 Place = State.IsBattleRoyale() && Viewer ? State.GetTeamPlace(Viewer->GetTeam()) : 0;
+	const FString Headline = Viewer ? (bWon ? FString(TEXT("VICTORY")) : Place > 1 ? FString::Printf(TEXT("#%d"), Place) : FString(TEXT("DEFEAT")))
+		: State.IsBattleRoyale() ? FString::Printf(TEXT("TEAM %d WINS"), Winner + 1) : FString(Winner == 0 ? TEXT("BLUE WINS") : TEXT("RED WINS"));
 	const float Pop = 1.f + 0.3f * (1.f - Fade);
 	const float HeadSize = 86.f * S;
 	const float HeadTracking = HeadSize * 0.14f;
@@ -1796,6 +1822,7 @@ void ARRRandomHUD::DrawResults(const ARRRandomGameState& State, const ARRRandomC
 	const FString Result = State.IsDefense()
 		? (Winner == 0 ? FString::Printf(TEXT("DEFENSE STAGE %d CLEARED · ALL %d WAVES"), State.GetDefenseStage(), ARRRandomGameState::WaveCount)
 			: FString::Printf(TEXT("THE DICE TOWER FELL · WAVE %d / %d"), FMath::Max(1, State.GetWave()), ARRRandomGameState::WaveCount))
+		: State.IsBattleRoyale() ? FString::Printf(TEXT("TEAM %d IS THE LAST STANDING · %d TEAMS"), Winner + 1, State.GetBattleTeamCount())
 		: FString::Printf(TEXT("%s WINS · %d : %d"), Winner == 0 ? TEXT("BLUE") : TEXT("RED"), State.GetTeamScore(0), State.GetTeamScore(1));
 	const FVector2D ResultBox = RRUI::MeasureText(Result, ResultSize, EWeight::ExtraBold, ResultSize * 0.24f);
 	const float PillTop = HeadTop + HeadBox.Y + 4.f * S;
@@ -1806,11 +1833,17 @@ void ARRRandomHUD::DrawResults(const ARRRandomGameState& State, const ARRRandomC
 	// The teams on either side, the MVP in the middle of the screen between them
 	const ARRRandomCharacter* MVP = State.GetMVP();
 	const float BoardTop = 210.f * S;
-	DrawTeamBoard(0, Viewer, MVP, 50.f * S, BoardTop, BoardWidth * S, Fade, S);
+	// (the battle royale: the winners on the left, my team on the right)
+	const int32 LeftTeam = State.IsBattleRoyale() ? Winner : 0;
+	const int32 RightTeam = State.IsBattleRoyale() ? (Viewer && Viewer->GetTeam() != Winner ? Viewer->GetTeam() : INDEX_NONE) : 1;
+	DrawTeamBoard(LeftTeam, Viewer, MVP, 50.f * S, BoardTop, BoardWidth * S, Fade, S);
 	// (defense: no villains' board; the next stage opened, if this PC's progress did)
 	if (!State.IsDefense())
 	{
-		DrawTeamBoard(1, Viewer, MVP, ScreenW - (50.f + BoardWidth) * S, BoardTop, BoardWidth * S, Fade, S);
+		if (RightTeam != INDEX_NONE)
+		{
+			DrawTeamBoard(RightTeam, Viewer, MVP, ScreenW - (50.f + BoardWidth) * S, BoardTop, BoardWidth * S, Fade, S);
+		}
 	}
 	else if (const ARRRandomPlayerController* Player = Cast<ARRRandomPlayerController>(PlayerOwner); Player && Player->GetStageOpened() > 0)
 	{
@@ -2482,4 +2515,375 @@ void ARRRandomHUD::DrawRobotDuel(const ARRRandomCharacter* Viewer)
 	}
 	Centered(Done >= Count ? TEXT("DONE! HANG ON FOR YOUR CREW") : TEXT("PRESS THE KEYS IN ORDER!"), FVector2D(Center.X, RowTop + Cap + 14.f * S), 11.f * S,
 		Done >= Count ? RRUI::MintDeep : RRUI::InkSoft);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The battle royale (round 92)
+
+void ARRRandomHUD::DrawBattleStatus(const ARRRandomGameState& State, const ARRRandomCharacter* Viewer)
+{
+	// Top center on one plate: ALIVE n · TEAMS n, and under it the ring: when it closes next (or that it is closing, in
+	// pink, with the seconds to go), its phase; outside it, a blinking pill under the plate with the hurt and the way in
+	const float S = UIScale;
+	const float CenterX = Canvas->ClipX * 0.5f;
+	const float Top = 14.f * S;
+	const float NumberSize = 28.f * S;
+	const float LabelSize = 11.f * S;
+	const float LineSize = 10.f * S;
+	const float Gap = 12.f * S;
+	const FString Alive = FString::FromInt(State.GetAliveFriends());
+	const FString Teams = FString::FromInt(State.GetAliveTeams());
+	const float AliveLabel = RRUI::MeasureText(TEXT("ALIVE"), LabelSize, EWeight::Black, LabelSize * 0.2f).X;
+	const float TeamsLabel = RRUI::MeasureText(TEXT("TEAMS"), LabelSize, EWeight::Black, LabelSize * 0.2f).X;
+	const float AliveWidth = RRUI::MeasureText(Alive, NumberSize, EWeight::Black).X;
+	const float TeamsWidth = RRUI::MeasureText(Teams, NumberSize, EWeight::Black).X;
+	const float DotWidth = RRUI::MeasureText(TEXT("·"), NumberSize, EWeight::Black).X;
+	const float Baseline = Top + NumberSize * 1.01f;
+
+	// The ring's line
+	const ARRRandomBattleZone* Zone = ARRRandomBattleZone::Get(this);
+	FString Ring = TEXT("THE RING IS COMING");
+	FLinearColor RingColor = RRUI::InkSoft;
+	if (Zone && Zone->GetPhase() > 0)
+	{
+		const int32 Seconds = FMath::CeilToInt(Zone->GetSecondsToChange());
+		const bool bLast = Zone->GetPhase() > ARRRandomBattleZone::GetPhaseCount();
+		if (bLast)
+		{
+			Ring = TEXT("FINAL RING");
+		}
+		else if (Zone->IsClosing())
+		{
+			Ring = FString::Printf(TEXT("RING CLOSING  %d:%02d"), Seconds / 60, Seconds % 60);
+			RingColor = RRUI::PinkDeep;
+		}
+		else
+		{
+			Ring = FString::Printf(TEXT("RING CLOSES IN  %d:%02d  ·  %d / %d"), Seconds / 60, Seconds % 60, Zone->GetPhase(), ARRRandomBattleZone::GetPhaseCount());
+		}
+	}
+	const FVector2D RingBox = RRUI::MeasureText(Ring, LineSize, EWeight::ExtraBold, LineSize * 0.22f);
+	const float LineY = Baseline + 6.f * S;
+	const float GroupHalf = FMath::Max(DotWidth * 0.5f + Gap * 0.6f + FMath::Max(AliveWidth + Gap + AliveLabel, TeamsWidth + Gap + TeamsLabel), RingBox.X * 0.5f + 8.f * S);
+	const float GroupBottom = LineY + RingBox.Y + 4.f * S;
+	RRUI::DrawPlate(Canvas, FBox2D(FVector2D(CenterX - GroupHalf, Top + NumberSize * 0.3f), FVector2D(CenterX + GroupHalf, GroupBottom)), 18.f * S);
+
+	float X = CenterX - DotWidth * 0.5f;
+	RRUI::DrawText(Canvas, TEXT("·"), FVector2D(X, Top), NumberSize, EWeight::Black, WithAlpha(RRUI::Ink, 0.4f));
+	X -= Gap * 0.6f + AliveWidth;
+	RRUI::DrawText(Canvas, Alive, FVector2D(X, Top), NumberSize, EWeight::Black, RRUI::Ink);
+	X -= Gap + AliveLabel;
+	RRUI::DrawText(Canvas, TEXT("ALIVE"), FVector2D(X, TopForBaseline(Baseline, LabelSize)), LabelSize, EWeight::Black, RRUI::MintDeep, LabelSize * 0.2f);
+	X = CenterX + DotWidth * 0.5f + Gap * 0.6f;
+	RRUI::DrawText(Canvas, Teams, FVector2D(X, Top), NumberSize, EWeight::Black, RRUI::Ink);
+	X += TeamsWidth + Gap;
+	RRUI::DrawText(Canvas, TEXT("TEAMS"), FVector2D(X, TopForBaseline(Baseline, LabelSize)), LabelSize, EWeight::Black, RRUI::LavenderDeep, LabelSize * 0.2f);
+	RRUI::DrawText(Canvas, Ring, FVector2D(CenterX - RingBox.X * 0.5f, LineY), LineSize, EWeight::ExtraBold, RingColor, LineSize * 0.22f);
+
+	// Outside the ring, in the cotton candy cloud (round 93): COTTON CANDY CLOUD · -8/s · SLOW 10% · an arrow the way back
+	// in (as the camera looks) and how far
+	if (!Viewer || !Viewer->IsAlive() || !Zone || Zone->GetPhase() <= 0 || Zone->IsInside(Viewer->GetActorLocation()))
+	{
+		return;
+	}
+	const FVector2D Here(Viewer->GetActorLocation().X, Viewer->GetActorLocation().Y);
+	const FVector2D ToRing = Zone->GetCenter() - Here;
+	const int32 Meters = FMath::Max(1, FMath::CeilToInt((ToRing.Size() - Zone->GetRadius()) / 100.f));
+	const int32 Slow = FMath::RoundToInt((1.f - Zone->GetSpeedShareAt(Viewer->GetActorLocation())) * 100.f);
+	const FString Warning = FString::Printf(TEXT("COTTON CANDY CLOUD  -%d/s  ·  SLOW %d%%  ·  %dm"), FMath::RoundToInt(Zone->GetDamagePerSecondAt(Viewer->GetActorLocation())), Slow, Meters);
+	const float WarnSize = 15.f * S;
+	const FVector2D WarnBox = RRUI::MeasureText(Warning, WarnSize, EWeight::Black, WarnSize * 0.16f);
+	const float ArrowRoom = 26.f * S;
+	const FBox2D Pill(FVector2D(CenterX - WarnBox.X * 0.5f - 16.f * S - ArrowRoom * 0.5f, GroupBottom + 8.f * S),
+		FVector2D(CenterX + WarnBox.X * 0.5f + 16.f * S + ArrowRoom * 0.5f, GroupBottom + 14.f * S + WarnBox.Y));
+	RRUI::DrawPill(Canvas, Pill.ExpandBy(2.5f * S), WithAlpha(RRUI::PinkDeep, Blink(GetWorld())));
+	RRUI::DrawPill(Canvas, Pill, RRUI::White);
+	const float TextLeft = Pill.Min.X + 16.f * S + ArrowRoom;
+	RRUI::DrawText(Canvas, Warning, FVector2D(TextLeft, Pill.Min.Y + 3.f * S), WarnSize, EWeight::Black, RRUI::PinkDeep, WarnSize * 0.16f);
+	// The arrow: screen up is the camera's forward
+	const float CameraYaw = PlayerOwner && PlayerOwner->PlayerCameraManager ? PlayerOwner->PlayerCameraManager->GetCameraRotation().Yaw : Viewer->GetActorRotation().Yaw;
+	const float Turn = FMath::DegreesToRadians(FMath::RadiansToDegrees(FMath::Atan2(ToRing.Y, ToRing.X)) - CameraYaw);
+	const FVector2D Ahead(FMath::Sin(Turn), -FMath::Cos(Turn));
+	const FVector2D Side(-Ahead.Y, Ahead.X);
+	const FVector2D Tip(Pill.Min.X + 16.f * S + ArrowRoom * 0.4f, Pill.GetCenter().Y);
+	const float Length = 9.f * S;
+	RRUI::DrawTriangle(Canvas, Tip + Ahead * Length, Tip - Ahead * Length * 0.6f + Side * Length * 0.8f, Tip - Ahead * Length * 0.6f - Side * Length * 0.8f, RRUI::PinkDeep);
+}
+
+void ARRRandomHUD::DrawBattleOut(const ARRRandomCharacter& Viewer)
+{
+	// OUT, then my team's place once it is out (#4 OF 10), or that my team is still in; who this screen watches
+	const float S = UIScale;
+	const float CenterX = Canvas->ClipX * 0.5f;
+	const float Top = Canvas->ClipY * 0.22f;
+	const ARRRandomPlayerController* Controller = Cast<ARRRandomPlayerController>(PlayerOwner);
+	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
+	const int32 Place = State ? State->GetTeamPlace(Viewer.GetTeam()) : 0;
+	const float BigSize = 40.f * S;
+	const FString Big = Place > 0 ? FString::Printf(TEXT("#%d"), Place) : FString(TEXT("OUT"));
+	const float BigWidth = RRUI::MeasureText(Big, BigSize, EWeight::Black, BigSize * 0.1f).X;
+	RRUI::DrawGlowText(Canvas, Big, FVector2D(CenterX - BigWidth * 0.5f, Top), BigSize, EWeight::Black, Place > 0 ? RRUI::LavenderDeep : RRUI::PinkDeep, BigSize * 0.1f);
+	const float LabelSize = 13.f * S;
+	FString Label = Place > 0 && State ? FString::Printf(TEXT("YOUR TEAM IS OUT · #%d OF %d"), Place, State->GetBattleTeamCount()) : FString(TEXT("YOU ARE OUT · YOUR TEAM IS STILL IN"));
+	if (Controller && Controller->GetWatched())
+	{
+		const ARRRandomCharacter* Watched = Controller->GetWatched();
+		Label += Watched->GetTeam() == Viewer.GetTeam() ? TEXT(" · WATCHING A TEAMMATE") : TEXT(" · WATCHING");
+	}
+	const float LabelWidth = RRUI::MeasureText(Label, LabelSize, EWeight::ExtraBold, LabelSize * 0.2f).X;
+	RRUI::DrawGlowText(Canvas, Label, FVector2D(CenterX - LabelWidth * 0.5f, Top + BigSize * 1.25f), LabelSize, EWeight::ExtraBold, RRUI::InkSoft, LabelSize * 0.2f);
+}
+
+namespace
+{
+	/** 0 .. 1, the same for the same numbers (where each sugar crystal and puff sits, how it drifts). */
+	float Hash01(int32 Index, int32 Salt)
+	{
+		uint32 Hash = uint32(Index) * 2654435761u ^ uint32(Salt + 1) * 2246822519u;
+		Hash ^= Hash >> 15;
+		Hash *= 2246822519u;
+		Hash ^= Hash >> 13;
+		return float(Hash & 0xFFFF) / 65535.f;
+	}
+	const FLinearColor CandyPink = FLinearColor::FromSRGBColor(FColor(255, 143, 196));
+	const FLinearColor CandyHaze = FLinearColor::FromSRGBColor(FColor(255, 168, 210));
+	const FLinearColor CandyCream = FLinearColor::FromSRGBColor(FColor(255, 240, 248));
+	// Sugar crystals, puffs and frosting dots in all (fewer show nearer the ring)
+	constexpr int32 SugarCount = 170;
+	constexpr int32 PuffCount = 22;
+	constexpr int32 FrostCount = 420;
+}
+
+void ARRRandomHUD::DrawCottonCloud()
+{
+	// Where this screen is: its animal friend (or, out, its camera)
+	const ARRRandomBattleZone* Zone = ARRRandomBattleZone::Get(this);
+	const float Delta = GetWorld()->GetDeltaSeconds();
+	float Wanted = 0.f;
+	float Depth = 0.f;
+	if (Zone && Zone->GetPhase() > 0 && PlayerOwner && PlayerOwner->PlayerCameraManager)
+	{
+		const APawn* Pawn = GetOwningPawn();
+		const FVector Where = Pawn ? Pawn->GetActorLocation() : PlayerOwner->PlayerCameraManager->GetCameraLocation();
+		if (!Zone->IsInside(Where))
+		{
+			Depth = Zone->GetCloudShare(Where);
+			Wanted = 0.15f + 0.85f * Depth;
+		}
+	}
+	CloudShown = FMath::FInterpConstantTo(CloudShown, Wanted, Delta, 1.6f);
+	CloudDepthShown = FMath::FInterpTo(CloudDepthShown, Depth, Delta, 3.f);
+	if (CloudShown < 0.01f)
+	{
+		return;
+	}
+	const float E = CloudShown;
+	const float T = CloudDepthShown;
+	const float S = UIScale;
+	const float W = Canvas->ClipX;
+	const float H = Canvas->ClipY;
+	const float Now = GetWorld()->GetRealTimeSeconds();
+
+	// The pink haze over everything, and a deeper pink soaking in from the edges
+	RRUI::DrawBox(Canvas, FBox2D(FVector2D(0.f, 0.f), FVector2D(W, H)), WithAlpha(CandyHaze, 0.05f + 0.17f * E));
+	for (int32 Edge = 0; Edge < 12; ++Edge)
+	{
+		const float Along = (Edge % 3 + 0.5f) / 3.f;
+		const FVector2D At = Edge < 3 ? FVector2D(W * Along, -H * 0.05f) : Edge < 6 ? FVector2D(W * Along, H * 1.05f)
+			: Edge < 9 ? FVector2D(-W * 0.03f, H * Along) : FVector2D(W * 1.03f, H * Along);
+		RRUI::DrawWash(Canvas, At, FVector2D(H * 0.42f, H * 0.32f), WithAlpha(CandyPink, 0.18f + 0.42f * E));
+	}
+	// Soft puffs drifting across, slowly bobbing
+	for (int32 Puff = 0; Puff < PuffCount; ++Puff)
+	{
+		const float Show = Hash01(Puff, 1);
+		if (Show > E)
+		{
+			continue;
+		}
+		const float Radius = (70.f + 150.f * Hash01(Puff, 2)) * S;
+		const float Span = W + Radius * 2.f;
+		const float X = FMath::Fmod(Hash01(Puff, 3) * Span + (12.f + 30.f * Hash01(Puff, 4)) * S * Now, Span) - Radius;
+		const float Y = Hash01(Puff, 5) * H + FMath::Sin(Now * 0.4f + Puff) * 12.f * S;
+		// (thinner over the middle of the screen, where my animal friend and the aim are)
+		const float FromMiddle = FVector2D::Distance(FVector2D(X, Y), FVector2D(W * 0.5f, H * 0.55f)) / (H * 0.45f);
+		const float Fade = FMath::Clamp((E - Show) * 4.f, 0.f, 1.f) * FMath::Clamp(FromMiddle, 0.3f, 1.f);
+		RRUI::DrawWash(Canvas, FVector2D(X, Y), FVector2D(Radius, Radius * 0.78f), WithAlpha(CandyCream, (0.3f + 0.25f * E) * Fade));
+		RRUI::DrawWash(Canvas, FVector2D(X + Radius * 0.25f, Y + Radius * 0.15f), FVector2D(Radius * 0.7f, Radius * 0.5f), WithAlpha(CandyPink, (0.12f + 0.15f * E) * Fade));
+	}
+	// Sugar crystals floating up and sideways, turning and twinkling; the big ones flash a sparkle now and then
+	const int32 Sugar = FMath::RoundToInt(20.f + (SugarCount - 20) * T);
+	for (int32 Index = 0; Index < Sugar; ++Index)
+	{
+		const float Size = (2.f + 7.f * Hash01(Index, 11)) * S;
+		const float X = FMath::Fmod(Hash01(Index, 12) * W + (Hash01(Index, 13) - 0.5f) * 28.f * S * Now + W * 400.f, W);
+		const float Y = FMath::Fmod(Hash01(Index, 14) * H - (6.f + 16.f * Hash01(Index, 15)) * S * Now + H * 4000.f, H);
+		const float Twinkle = 0.55f + 0.45f * FMath::Sin(Now * 3.f + Hash01(Index, 16) * 6.28f);
+		const bool bWhite = Hash01(Index, 17) < 0.38f;
+		const float Turn = Hash01(Index, 18) * 6.28f + (Hash01(Index, 19) - 0.5f) * 1.4f * Now;
+		const FVector2D Middle(X, Y);
+		const FVector2D U(FMath::Cos(Turn) * Size * 0.5f, FMath::Sin(Turn) * Size * 0.5f);
+		const FVector2D V(-U.Y, U.X);
+		const FLinearColor Color = WithAlpha(bWhite ? CandyCream : CandyPink, (0.55f + 0.45f * Twinkle) * FMath::Min(1.f, E * 1.5f));
+		RRUI::DrawTriangle(Canvas, Middle - U - V, Middle + U - V, Middle + U + V, Color);
+		RRUI::DrawTriangle(Canvas, Middle - U - V, Middle + U + V, Middle - U + V, Color);
+		RRUI::DrawDisc(Canvas, Middle - (U + V) * 0.3f, Size * 0.14f, WithAlpha(RRUI::White, 0.9f * Twinkle * E));
+		if (Size > 7.5f * S && Twinkle > 0.93f)
+		{
+			const float Arm = 9.f * S;
+			DrawLine(X - Arm, Y, X + Arm, Y, WithAlpha(RRUI::White, 0.9f), 1.5f * S);
+			DrawLine(X, Y - Arm, X, Y + Arm, WithAlpha(RRUI::White, 0.9f), 1.5f * S);
+		}
+	}
+	// Sugar frosting the corners, creeping further in the deeper it is
+	for (int32 Index = 0; Index < FrostCount; ++Index)
+	{
+		const float Reach = FMath::Pow(Hash01(Index, 21), 2.2f);
+		if (Reach + Hash01(Index, 22) * 0.25f > T * 1.15f)
+		{
+			continue;
+		}
+		const int32 Corner = Index % 4;
+		const float Angle = Hash01(Index, 23) * UE_HALF_PI;
+		const float Out = Reach * 210.f * S;
+		const FVector2D At(Corner % 2 ? W - FMath::Cos(Angle) * Out : FMath::Cos(Angle) * Out, Corner > 1 ? H - FMath::Sin(Angle) * Out : FMath::Sin(Angle) * Out);
+		RRUI::DrawDisc(Canvas, At, (1.2f + 3.2f * Hash01(Index, 24)) * S, WithAlpha(Hash01(Index, 25) < 0.5f ? CandyCream : CandyPink, 0.85f));
+	}
+}
+
+void ARRRandomHUD::DrawDieFace(const FVector2D& Center, float Size, int32 Face, float Alpha)
+{
+	const FBox2D Box(Center - FVector2D(Size * 0.5f), Center + FVector2D(Size * 0.5f));
+	RRUI::DrawRounded(Canvas, Box.ExpandBy(Size * 0.05f), Size * 0.24f, WithAlpha(RRUI::PinkDeep, Alpha));
+	RRUI::DrawRounded(Canvas, Box, Size * 0.2f, WithAlpha(RRUI::White, Alpha));
+	static const FVector2D Pips[6][6] =
+	{
+		{ FVector2D(0.f, 0.f) },
+		{ FVector2D(-1.f, -1.f), FVector2D(1.f, 1.f) },
+		{ FVector2D(-1.f, -1.f), FVector2D(0.f, 0.f), FVector2D(1.f, 1.f) },
+		{ FVector2D(-1.f, -1.f), FVector2D(1.f, -1.f), FVector2D(-1.f, 1.f), FVector2D(1.f, 1.f) },
+		{ FVector2D(-1.f, -1.f), FVector2D(1.f, -1.f), FVector2D(0.f, 0.f), FVector2D(-1.f, 1.f), FVector2D(1.f, 1.f) },
+		{ FVector2D(-1.f, -1.f), FVector2D(1.f, -1.f), FVector2D(-1.f, 0.f), FVector2D(1.f, 0.f), FVector2D(-1.f, 1.f), FVector2D(1.f, 1.f) },
+	};
+	const int32 Side = FMath::Clamp(Face, 1, 6);
+	for (int32 Pip = 0; Pip < Side; ++Pip)
+	{
+		RRUI::DrawDisc(Canvas, Center + Pips[Side - 1][Pip] * Size * 0.26f, Size * (Side == 1 ? 0.13f : 0.09f), WithAlpha(Side == 1 ? RRUI::PinkDeep : RRUI::Ink, Alpha));
+	}
+}
+
+void ARRRandomHUD::DrawOracle(const ARRRandomCharacter* Viewer)
+{
+	const ARRRandomOracleStorm* Storm = ARRRandomOracleStorm::Get(this);
+	if (!Storm || Storm->GetRound() <= 0)
+	{
+		return;
+	}
+	const float Age = Storm->GetAge();
+	const float S = UIScale;
+	const float CenterX = Canvas->ClipX * 0.5f;
+	const float Now = GetWorld()->GetRealTimeSeconds();
+	TArray<int32> Sums;
+	Storm->GetSums(Sums);
+	const int32 Struck = Storm->GetStruckTeam();
+	const bool bMine = Viewer && Viewer->GetTeam() == Struck;
+
+	// The roll and its sums: the first RevealTime seconds, fading out over the last half second
+	if (Age >= 0.f && Age < ARRRandomOracleStorm::RevealTime)
+	{
+		const float Alpha = FMath::Clamp((ARRRandomOracleStorm::RevealTime - Age) / 0.5f, 0.f, 1.f) * FMath::Clamp(Age / 0.2f, 0.f, 1.f);
+		const bool bRolling = Age < ARRRandomOracleStorm::RollTime;
+		// My own slot's roll
+		int32 MyValue = 0;
+		for (const FRROracleSlot& Slot : Storm->GetSlots())
+		{
+			if (Viewer && Slot.Who == Viewer)
+			{
+				MyValue = Slot.Value;
+			}
+		}
+		// The giant die: tumbling (faces flicking, bouncing) then settling on my roll
+		const float DieSize = 84.f * S;
+		const float Bounce = bRolling ? FMath::Abs(FMath::Sin(Age * 9.f)) * 14.f * S * (1.f - Age / ARRRandomOracleStorm::RollTime) : 0.f;
+		const int32 Face = bRolling ? 1 + int32(Now * 11.f) % 6 : FMath::Max(1, MyValue);
+		const FVector2D DieAt(CenterX, 150.f * S - Bounce);
+		RRUI::DrawWash(Canvas, DieAt, FVector2D(DieSize * 1.3f), WithAlpha(RRUI::White, 0.6f * Alpha));
+		if (bRolling || MyValue > 0)
+		{
+			const float Pop = bRolling ? 1.f : 1.f + 0.12f * FMath::Clamp(1.f - (Age - ARRRandomOracleStorm::RollTime) * 4.f, 0.f, 1.f);
+			DrawDieFace(DieAt, DieSize * Pop, Face, Alpha);
+		}
+		const FString Caption = bRolling ? FString::Printf(TEXT("ORACLE ROLL  ·  %d / %d"), Storm->GetRound(), ARRRandomOracleStorm::GetRoundCount())
+			: MyValue > 0 ? FString::Printf(TEXT("YOU ROLLED %d"), MyValue) : FString(TEXT("THE ORACLE HAS SPOKEN"));
+		const float CaptionSize = 15.f * S;
+		const FVector2D CaptionBox = RRUI::MeasureText(Caption, CaptionSize, EWeight::Black, CaptionSize * 0.18f);
+		const float CaptionTop = DieAt.Y + DieSize * 0.62f;
+		RRUI::DrawGlowText(Canvas, Caption, FVector2D(CenterX - CaptionBox.X * 0.5f, CaptionTop), CaptionSize, EWeight::Black, WithAlpha(RRUI::PinkDeep, Alpha), CaptionSize * 0.18f);
+
+		// Every team standing: its color, TEAM n and its sum ("?" while the dice tumble), the lowest ringed in pink
+		TArray<int32> Teams;
+		for (int32 Team = 0; Team < Sums.Num(); ++Team)
+		{
+			if (Sums[Team] >= 0)
+			{
+				Teams.Add(Team);
+			}
+		}
+		const float Cell = 78.f * S;
+		const float RowTop = CaptionTop + CaptionBox.Y + 10.f * S;
+		const FBox2D Plate(FVector2D(CenterX - Cell * Teams.Num() * 0.5f - 10.f * S, RowTop), FVector2D(CenterX + Cell * Teams.Num() * 0.5f + 10.f * S, RowTop + 50.f * S));
+		RRUI::DrawPlate(Canvas, Plate, 16.f * S, Alpha);
+		for (int32 Index = 0; Index < Teams.Num(); ++Index)
+		{
+			const int32 Team = Teams[Index];
+			const float Left = Plate.Min.X + 10.f * S + Cell * Index;
+			const bool bLow = !bRolling && Team == Struck;
+			if (bLow)
+			{
+				RRUI::DrawRounded(Canvas, FBox2D(FVector2D(Left - 2.f * S, RowTop + 4.f * S), FVector2D(Left + Cell - 4.f * S, RowTop + 46.f * S)), 10.f * S, WithAlpha(RRUI::PinkDeep, Alpha));
+				RRUI::DrawRounded(Canvas, FBox2D(FVector2D(Left + 0.5f * S, RowTop + 6.5f * S), FVector2D(Left + Cell - 6.5f * S, RowTop + 43.5f * S)), 8.f * S, WithAlpha(RRUI::White, Alpha));
+			}
+			RRUI::DrawRounded(Canvas, FBox2D(FVector2D(Left + 6.f * S, RowTop + 12.f * S), FVector2D(Left + 11.f * S, RowTop + 38.f * S)), 2.5f * S, WithAlpha(RRUI::TeamColor(Team), Alpha));
+			RRUI::DrawText(Canvas, FString::Printf(TEXT("TEAM %d"), Team + 1), FVector2D(Left + 16.f * S, RowTop + 9.f * S), 9.f * S, EWeight::Black,
+				WithAlpha(Viewer && Viewer->GetTeam() == Team ? RRUI::Ink : RRUI::InkSoft, Alpha), 1.5f * S);
+			RRUI::DrawText(Canvas, bRolling ? FString(TEXT("?")) : FString::FromInt(Sums[Team]), FVector2D(Left + 16.f * S, RowTop + 19.f * S), 20.f * S, EWeight::Black,
+				WithAlpha(bLow ? RRUI::PinkDeep : RRUI::Ink, Alpha));
+		}
+		if (!bRolling)
+		{
+			const FString Verdict = bMine ? FString(TEXT("METEOR STORM ON YOUR TEAM  ·  CHECK THE MAP")) : FString::Printf(TEXT("LOWEST  ·  TEAM %d  ·  METEOR TARGET"), Struck + 1);
+			const float VerdictSize = 15.f * S;
+			const FVector2D VerdictBox = RRUI::MeasureText(Verdict, VerdictSize, EWeight::Black, VerdictSize * 0.16f);
+			const FBox2D Pill(FVector2D(CenterX - VerdictBox.X * 0.5f - 18.f * S, Plate.Max.Y + 10.f * S), FVector2D(CenterX + VerdictBox.X * 0.5f + 18.f * S, Plate.Max.Y + 16.f * S + VerdictBox.Y));
+			RRUI::DrawPill(Canvas, Pill.ExpandBy(2.5f * S), WithAlpha(RRUI::PinkDeep, Alpha * (bMine ? Blink(GetWorld()) : 1.f)));
+			RRUI::DrawPill(Canvas, Pill, WithAlpha(RRUI::White, Alpha));
+			RRUI::DrawText(Canvas, Verdict, FVector2D(Pill.Min.X + 18.f * S, Pill.Min.Y + 3.f * S), VerdictSize, EWeight::Black, WithAlpha(RRUI::PinkDeep, Alpha), VerdictSize * 0.16f);
+		}
+	}
+
+	// While its meteors fall: TARGET over the one they fall round (if this screen sees them), and a line under the ring's
+	if (Storm->IsStriking())
+	{
+		if (const ARRRandomCharacter* Target = Storm->GetTarget(); Target && Target->IsAlive() && Age >= ARRRandomOracleStorm::RevealTime)
+		{
+			const FVector Over = Project(Target->GetActorLocation() + FVector(0.f, 0.f, 175.f));
+			if (Over.Z > 0.f)
+			{
+				const float Size = 13.f * S;
+				const FVector2D Box = RRUI::MeasureText(TEXT("TARGET"), Size, EWeight::Black, Size * 0.15f);
+				DrawEdgedText(Canvas, TEXT("TARGET"), FVector2D(Over.X - Box.X * 0.5f, Over.Y - Box.Y - 12.f * S), Size, RRUI::PinkDeep, RRUI::White);
+				RRUI::DrawTriangle(Canvas, FVector2D(Over.X, Over.Y - 2.f * S), FVector2D(Over.X - 7.f * S, Over.Y - 11.f * S), FVector2D(Over.X + 7.f * S, Over.Y - 11.f * S), RRUI::PinkDeep);
+			}
+		}
+		if (Age >= ARRRandomOracleStorm::RevealTime)
+		{
+			const FString Line = bMine ? FString(TEXT("METEOR STORM ON YOUR TEAM  ·  WATCH THE PADS")) : FString::Printf(TEXT("METEOR STORM  ·  TEAM %d"), Struck + 1);
+			const float Size = 12.f * S;
+			const FVector2D Box = RRUI::MeasureText(Line, Size, EWeight::Black, Size * 0.16f);
+			const FBox2D Pill(FVector2D(CenterX - Box.X * 0.5f - 14.f * S, 112.f * S), FVector2D(CenterX + Box.X * 0.5f + 14.f * S, 117.f * S + Box.Y));
+			RRUI::DrawPill(Canvas, Pill, WithAlpha(RRUI::White, 0.92f));
+			RRUI::DrawText(Canvas, Line, FVector2D(Pill.Min.X + 14.f * S, Pill.Min.Y + 2.5f * S), Size, EWeight::Black,
+				bMine ? RRUI::PinkDeep : FLinearColor::FromSRGBColor(FColor(216, 100, 42)), Size * 0.16f);
+		}
+	}
 }

@@ -23,4 +23,8 @@
 - [Cannon + planes scope](cannon-plane-design.md) — r88: only one-way cannon/pad sets (shoot while flying) + dice-rolled 1-seat planes with own weapons; no destruction/lava
 - [Perl rep $1 trap](feedback-perl-rep-dollar1.md) — scripted C++ edits: $1 passed into a sub is empty and deletes the anchor; use Edit or direct s///, check git diff
 - [Defense mode plan](defense-mode-plan.md) — r90 spec + built 2026-10-27: TPS/Dice Town only, 7 waves, rat A-3/cat A-2, 3 growing stages, unlocks, room list; my interpretations to confirm
+- [Battle royale plan](battle-royale-plan.md) — r92 BR mode (10x3 teams, bots, 7x7 Dice Town tiles, streaming + far look LOD, BRTest) + r93 cotton candy cloud ring + oracle meteors + r94 indoor big buildings + 16 Tripo cover props + parked cars (built 2026-11-10)
 - [First concepts in Midjourney only](feedback-first-concepts-midjourney.md) — from 2026-10-27 every first 시안 is Midjourney; Tripo only for 3D
+- [Tripo Midjourney queue](tripo-midjourney-queue.md) — MJ v8.2 in Tripo: queue ≤2 at a time (bulk queue fails/hangs); results often WebP named .png; some prompts → Nano Banana Pro
+- [Tripo Smart Mesh](tripo-smart-mesh.md) — 100cr mesh only + 30cr texture click; export ignores file name; topology resets to Quad 5000
+- [Props keep proportions](feedback-props-keep-proportions.md) — never stretch models to cells; even scale, may overhang slightly; check with RRPropBeside

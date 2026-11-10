@@ -1,10 +1,15 @@
 #include "RRRandomAIController.h"
+#include "RRRandomBattleRoyale.h"
+#include "RRRandomCannon.h"
+#include "RRRandomMovementComponent.h"
+#include "RRRandomPlaneStation.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomCover.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomDiceTown.h"
 #include "RRRandomGameMode.h"
 #include "RRRandomGameState.h"
+#include "RRRandomOracle.h"
 #include "RRRandomMeteor.h"
 #include "RRRandomOre.h"
 #include "RRRandomProjectile.h"
@@ -149,6 +154,14 @@ void ARRRandomAIController::OnPossess(APawn* InPawn)
 		PreferredShare = Stream.FRandRange(PreferredRangeShare.X, PreferredRangeShare.Y);
 		LastHealth = Brawler->GetMaxHealth();
 	}
+	// The battle royale (round 92): the map is huge; rides are worth a longer walk, and for shorter trips too
+	bBattle = ARRRandomGameState::IsBattleRoyale(this);
+	if (bBattle)
+	{
+		VehicleSearchRadius = 2500.f;
+		RideTripDistance = 2500.f;
+		RideArriveDistance = 900.f;
+	}
 }
 
 void ARRRandomAIController::Tick(float DeltaSeconds)
@@ -238,13 +251,29 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		Town = It && It->IsBuilt() ? *It : nullptr;
 		bLookedForTown = Town.IsValid() || !It;
 	}
+	// (the battle map: the tile underfoot, looked for again now and then, for its walking graph)
+	if (bBattle)
+	{
+		TownTimer -= DeltaSeconds;
+		if (TownTimer <= 0.f || !Town.IsValid())
+		{
+			TownTimer = 1.f;
+			Town = ARRRandomDiceTown::FindAt(this, Self->GetActorLocation());
+		}
+		UpdateBattleGoal(Self, DeltaSeconds);
+	}
 	const ARRRandomDiceTown* Map = Town.Get();
 	const bool bRoutes = HasRoutes();
 
 	// Nobody in sight and no trail to follow: roam the middle until someone shows up (on a map with routes, anywhere on
 	// its ground, upstairs and rooftops included)
 	PatrolTimer -= DeltaSeconds;
-	if (!Opponent.IsValid() && LastSeenTimer <= 0.f && bHasArenaCenter
+	// (the battle royale: its own goal, UpdateBattleGoal)
+	if (bBattle)
+	{
+		PatrolGoal = bHasBattleGoal ? BattleGoal : Self->GetActorLocation();
+	}
+	else if (!Opponent.IsValid() && LastSeenTimer <= 0.f && bHasArenaCenter
 		&& (PatrolTimer <= 0.f || FVector::Dist2D(Self->GetActorLocation(), PatrolGoal) <= ArenaCenterArriveRadius))
 	{
 		FNavLocation NavSpot;
@@ -321,8 +350,14 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		CoverSearchTimer -= DeltaSeconds;
 		if (!bHasCoverSpot || CoverSearchTimer <= 0.f)
 		{
+			const bool bHadCoverSpot = bHasCoverSpot;
 			bHasCoverSpot = FindCoverSpot(Self, Target->GetActorLocation(), CoverSpot);
 			CoverSearchTimer = CoverSearchInterval;
+			if (bHasCoverSpot && !bHadCoverSpot && ARRRandomGameState::IsBattleRoyale(this))
+			{
+				UE_LOG(LogTemp, Verbose, TEXT("RRRandom: %s takes cover at %s (%.0f up)."), *Self->GetName(), *CoverSpot.ToCompactString(),
+					CoverSpot.Z - (ARRRandomBattleZone::Get(this) ? ARRRandomBattleZone::Get(this)->GetFloorZ() : 0.f));
+			}
 		}
 		if (bHasCoverSpot)
 		{
@@ -353,7 +388,9 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	bool bOnRoute = false;
 	if (bRoutes && !bWantsCover && (bRushing ||!(Target && bCanSee && Distance <= Self->GetAttackRange() * PreferredShare + DistanceSlack)))
 	{
+		// (the battle royale: into the ring first when it is urgent, whoever is about)
 		const FVector Goal = bRushing ? RushGoal
+			: bBattle && bRingUrgent && bHasBattleGoal ? BattleGoal
 			: Target ? Target->GetActorLocation() - FVector(0.f, 0.f, Target->GetCapsuleComponent()->GetScaledCapsuleHalfHeight())
 			: LastSeenTimer > 0.f ? LastSeenLocation - FVector(0.f, 0.f, Self->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight())
 			: PatrolGoal;
@@ -367,7 +404,10 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 
 	// Vehicles: only out of a fight (an opponent in sight near its range, or being hit)
 	const bool bInFight = bWantsCover || UnderFireTimer > 0.f || (Target && Distance <= Self->GetAttackRange() * EngageRangeShare);
-	if (!UpdateStarRobot(Self, bInFight, Wanted, bOnRoute, DeltaSeconds))
+	if (bBattle && UpdateBattleTravel(Self, bInFight, Wanted, bOnRoute, DeltaSeconds))
+	{
+	}
+	else if (!UpdateStarRobot(Self, bInFight, Wanted, bOnRoute, DeltaSeconds))
 	{
 		UpdateVehicles(Self, Target, bInFight, Wanted, DeltaSeconds);
 	}
@@ -375,6 +415,10 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	// (a route already goes round walls, and its stairs would look like walls to the steering's probe)
 	// (On a route the push away from teammates is weak: in a lane between walls it would only shove them into the walls)
 	const FVector Move = Unstick(Self, (bOnRoute ? Wanted : SteerAroundObstacles(Self, Wanted)) + GetSeparation(Self) * (bOnRoute ? RouteSeparationShare : 1.f), DeltaSeconds);
+	if (bBattle)
+	{
+		UpdateSprint(Self, bInFight || (Target && bCanSee), Move);
+	}
 	BadCoverTimer -= DeltaSeconds;
 	if (!Move.IsNearlyZero())
 	{
@@ -513,7 +557,14 @@ FVector ARRRandomAIController::FollowRoute(ARRRandomCharacter* Self, const FVect
 		RouteGoal = Goal;
 		RouteIndex = 0;
 		// The navmesh first (it knows what's smashed); Dice Town's walking graph while the navmesh is still being made
-		bNavRoute = FindNavRoute(Feet, Goal, Route);
+		// (the battle map: the navmesh is only made round the animal friends, so a far goal is aimed at through a spot this far
+		// along the way to it; the route is asked for again as the bot gets on)
+		FVector NavGoal = Goal;
+		if (bBattle && FVector::Dist2D(Feet, Goal) > 5000.f)
+		{
+			NavGoal = Feet + (Goal - Feet).GetSafeNormal2D() * 5000.f;
+		}
+		bNavRoute = FindNavRoute(Feet, NavGoal, Route);
 		if (!bNavRoute && !(Map && Map->FindPath(Feet, Goal, Route)))
 		{
 			Route.Reset();
@@ -684,10 +735,12 @@ bool ARRRandomAIController::UpdateStarRobot(ARRRandomCharacter* Self, bool bInFi
 	// The team's own cars gathered with no robot yet, not too far, out of a fight: over to them (to combine, above)
 	ARRRandomVehicle* Cars[3];
 	FVector Gathered;
-	if (!bInFight && !Self->IsGiant() && !Self->CanFly() && ARRRandomStarRobot::FindGathered(this, Self->GetTeam(), Cars, Gathered))
+	// (the battle map, round 92: any team's sets, the nearest; only one not far off: bots shouldn't all cross the map for it)
+	const float CrewReach = bBattle ? 4000.f : RobotCrewSearchRadius;
+	if (!bInFight && !Self->IsGiant() && !Self->CanFly() && ARRRandomStarRobot::FindGathered(Self, Self->GetTeam(), Cars, Gathered))
 	{
 		const FVector ToCars = (Gathered - Self->GetActorLocation()) * FVector(1.f, 1.f, 0.f);
-		if (ToCars.Size() <= RobotCrewSearchRadius && ToCars.Size() > ARRRandomStarRobot::CombineReach * 0.6f)
+		if (ToCars.Size() <= CrewReach && ToCars.Size() > ARRRandomStarRobot::CombineReach * 0.6f)
 		{
 			if (HasRoutes())
 			{
@@ -710,7 +763,7 @@ bool ARRRandomAIController::UpdateStarRobot(ARRRandomCharacter* Self, bool bInFi
 	}
 	const FVector ToRobot = Robot->GetActorLocation() - Self->GetActorLocation();
 	const float Distance = ToRobot.Size2D();
-	if (Distance > RobotCrewSearchRadius)
+	if (Distance > (bBattle ? 6000.f : RobotCrewSearchRadius))
 	{
 		return false;
 	}
@@ -737,6 +790,12 @@ bool ARRRandomAIController::UpdateVehicles(ARRRandomCharacter* Self, const ARRRa
 	const FVector Location = Self->GetActorLocation();
 	// Defense (round 90): villains are about all the time, so the bots stay on foot by the tower (the rides are the players')
 	if (ARRRandomGameState::IsDefense(this) && !Self->GetVehicle())
+	{
+		VehicleTarget = nullptr;
+		return false;
+	}
+	// (a plane is flown by UpdateBattleTravel)
+	if (Self->IsPiloting())
 	{
 		VehicleTarget = nullptr;
 		return false;
@@ -879,35 +938,20 @@ bool ARRRandomAIController::FindCoverSpot(const ARRRandomCharacter* Self, const 
 
 	bool bFound = false;
 	float BestScore = UE_BIG_NUMBER;
-	for (TActorIterator<ARRRandomCover> It(World); It; ++It)
+	// A spot right behind a piece of cover (its middle at this bot's height, Along its half size the way from the threat),
+	// if it is any good: scored, the best kept
+	auto Consider = [&](const FVector& CoverCenter, const FVector& Away, float Along, bool bCheckRim)
 	{
-		// (Not one smashed for now: ARRRandomWreckage hides it)
-		if (It->IsHidden())
-		{
-			continue;
-		}
-		const FVector CoverCenter(It->GetActorLocation().X, It->GetActorLocation().Y, SelfLocation.Z);
-		if (FVector::Dist2D(CoverCenter, SelfLocation) > CoverSearchRadius)
-		{
-			continue;
-		}
-
-		// Right behind the block, on the side away from the threat
-		const FVector Away = (CoverCenter - Threat).GetSafeNormal2D();
-		if (Away.IsNearlyZero())
-		{
-			continue;
-		}
-		const FVector Spot = CoverCenter + Away * (It->GetExtentAlong(Away) + Radius + CoverSpotGap);
+		const FVector Spot = CoverCenter + Away * (Along + Radius + CoverSpotGap);
 		if (FVector::Dist2D(Spot, Threat) < MinCoverDistanceFromThreat || (BadCoverTimer > 0.f && FVector::Dist2D(Spot, BadCoverSpot) < BadCoverRadius))
 		{
-			continue;
+			return;
 		}
 		// Not past a wall that stops brawlers only (the island's rim, the water's edge): a spot there can't be reached
 		FCollisionQueryParams RimParams(SCENE_QUERY_STAT(RRRandomCoverRim), false, Self);
-		if (World->SweepTestByObjectType(CoverCenter, Spot, FQuat::Identity, FCollisionObjectQueryParams(ECC_WorldDynamic), FCollisionShape::MakeSphere(Radius * 0.5f), RimParams))
+		if (bCheckRim && World->SweepTestByObjectType(CoverCenter, Spot, FQuat::Identity, FCollisionObjectQueryParams(ECC_WorldDynamic), FCollisionShape::MakeSphere(Radius * 0.5f), RimParams))
 		{
-			continue;
+			return;
 		}
 
 		// Somewhere a bot can stand: clear of other cover, with floor under it, and out of the threat's sight
@@ -915,7 +959,7 @@ bool ARRRandomAIController::FindCoverSpot(const ARRRandomCharacter* Self, const 
 			|| !World->LineTraceTestByChannel(Spot, Spot - FVector(0.f, 0.f, HalfHeight + 50.f), ECC_Visibility, Params)
 			|| !SweepHitsCover(World, Threat, Spot, HiddenMargin))
 		{
-			continue;
+			return;
 		}
 
 		// Prefer close spots, and don't run toward the threat to reach one
@@ -932,6 +976,44 @@ bool ARRRandomAIController::FindCoverSpot(const ARRRandomCharacter* Self, const 
 			BestScore = Score;
 			OutSpot = Spot;
 			bFound = true;
+		}
+	};
+	for (TActorIterator<ARRRandomCover> It(World); It; ++It)
+	{
+		// (Not one smashed for now: ARRRandomWreckage hides it)
+		if (It->IsHidden())
+		{
+			continue;
+		}
+		const FVector CoverCenter(It->GetActorLocation().X, It->GetActorLocation().Y, SelfLocation.Z);
+		if (FVector::Dist2D(CoverCenter, SelfLocation) > CoverSearchRadius)
+		{
+			continue;
+		}
+		// Right behind the block, on the side away from the threat
+		const FVector Away = (CoverCenter - Threat).GetSafeNormal2D();
+		if (!Away.IsNearlyZero())
+		{
+			Consider(CoverCenter, Away, It->GetExtentAlong(Away), true);
+		}
+	}
+	// Round 94: the cover inside the big buildings, on the floor this bot is on (a smashed piece no longer hides the spot,
+	// so the sight test drops it)
+	if (const ARRRandomDiceTown* Here = ARRRandomDiceTown::FindAt(Self, SelfLocation))
+	{
+		const float Feet = SelfLocation.Z - HalfHeight;
+		for (const ARRRandomDiceTown::FCoverPiece& Piece : Here->GetCoverPieces())
+		{
+			const FVector CoverCenter(Piece.Center.X, Piece.Center.Y, SelfLocation.Z);
+			if (FMath::Abs(Piece.Center.Z - Feet) > 150.f || FVector::Dist2D(CoverCenter, SelfLocation) > CoverSearchRadius)
+			{
+				continue;
+			}
+			const FVector Away = (CoverCenter - Threat).GetSafeNormal2D();
+			if (!Away.IsNearlyZero())
+			{
+				Consider(CoverCenter, Away, FMath::Abs(Away.X) * Piece.Extent.X + FMath::Abs(Away.Y) * Piece.Extent.Y, false);
+			}
 		}
 	}
 	return bFound;
@@ -1256,4 +1338,279 @@ void ARRRandomAIController::UpdateDice(ARRRandomCharacter* Self, float Distance,
 	{
 		DiceTimer = Stream.FRandRange(DiceReactionMin, DiceReactionMax);
 	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The battle royale (round 92)
+
+namespace
+{
+	// Into the ring: inside the next one by this share of its radius when it closes within this many seconds
+	constexpr float RingSoonSeconds = 45.f;
+	constexpr float RingInsideShare = 0.8f;
+	// Roaming inside the ring: a spot this far from where the bot is at most, a new one on arrival or after this long
+	constexpr float RoamReach = 4000.f;
+	constexpr float RoamTimeMin = 18.f;
+	constexpr float RoamTimeMax = 30.f;
+	constexpr float RoamArrive = 400.f;
+	// Rides for the long ways: a cannon this near whose pad cuts the way by this much at least; a plane station this
+	// near for a way this long; looked for this often
+	constexpr float CannonWalk = 2500.f;
+	constexpr float CannonGain = 3000.f;
+	constexpr float StationWalk = 3000.f;
+	constexpr float PlaneTrip = 9000.f;
+	constexpr float LaunchLookInterval = 2.f;
+	// A plane: flown this high over the floor, landed within this of the goal
+	constexpr float PlaneCruise = 2500.f;
+	constexpr float PlaneLandDistance = 1500.f;
+	// Sprinting out of a fight for a way at least this long (or into the ring)
+	constexpr float SprintTrip = 1500.f;
+}
+
+void ARRRandomAIController::UpdateBattleGoal(const ARRRandomCharacter* Self, float DeltaSeconds)
+{
+	BattleLookTimer -= DeltaSeconds;
+	BattleGoalTimer -= DeltaSeconds;
+	if (BattleLookTimer > 0.f)
+	{
+		return;
+	}
+	BattleLookTimer = 0.5f;
+	const ARRRandomBattleZone* Zone = ARRRandomBattleZone::Get(this);
+	const ARRRandomBattleMap* Battle = ARRRandomBattleMap::Get(this);
+	if (!Zone || !Battle || Zone->GetPhase() <= 0)
+	{
+		bHasBattleGoal = false;
+		bRingUrgent = false;
+		return;
+	}
+	const FVector Feet = Self->GetActorLocation() - FVector(0.f, 0.f, Self->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	const FVector2D Here(Feet.X, Feet.Y);
+	const FVector2D Center = Zone->GetCenter();
+	const float Radius = Zone->GetRadius();
+	const FVector2D Next = Zone->GetNextCenter();
+	const float NextRadius = Zone->GetNextRadius();
+	const bool bInsideNow = FVector2D::Distance(Here, Center) < Radius - 300.f;
+	const bool bInsideNext = FVector2D::Distance(Here, Next) < NextRadius * RingInsideShare;
+	const bool bSoon = Zone->IsClosing() || Zone->GetSecondsToChange() < RingSoonSeconds;
+	const float FloorZ = Battle->GetFloorZ();
+	// The oracle's meteors (round 93): off a landing pad about to be hit, and out of the struck zone while there is ring
+	// to run to (checked every look, before anything else)
+	FVector2D Dodge;
+	if (bInsideNow && ARRRandomOracleStorm::FindDodge(this, Here, Center, Radius, Dodge))
+	{
+		if (!bHasBattleGoal || FVector2D::Distance(FVector2D(BattleGoal), Dodge) > 300.f)
+		{
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s dodges the oracle's meteors (%.0f to go)."), *Self->GetName(), FVector2D::Distance(Here, Dodge));
+		}
+		bRingUrgent = false;
+		bHasBattleGoal = true;
+		BattleGoal = FVector(Dodge, FloorZ);
+		BattleGoalTimer = 2.f;
+		return;
+	}
+	// Outside the ring (or the next one, closing soon): into the next one, toward its middle, half way in from its edge
+	if (!bInsideNow || (bSoon && !bInsideNext))
+	{
+		// (a spot that stops getting nearer for a while, behind walls or up on something: another one round the middle)
+		if (!bRingUrgent)
+		{
+			RingAngle = FMath::Atan2(Here.Y - Next.Y, Here.X - Next.X);
+			RingBest = UE_BIG_NUMBER;
+			RingStuckTimer = 0.f;
+		}
+		const float Left = FVector2D::Distance(Here, Next);
+		if (Left < RingBest - 100.f)
+		{
+			RingBest = Left;
+			RingStuckTimer = 0.f;
+		}
+		else if ((RingStuckTimer += 0.5f) >= 4.f)
+		{
+			RingAngle += Stream.FRandRange(0.8f, 2.4f) * (Stream.FRand() < 0.5f ? -1.f : 1.f);
+			RingBest = UE_BIG_NUMBER;
+			RingStuckTimer = 0.f;
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s gets no nearer the ring; another way in."), *Self->GetName());
+		}
+		const FVector2D Out(FMath::Cos(RingAngle), FMath::Sin(RingAngle));
+		const FVector2D Spot = Next + Out * NextRadius * 0.45f;
+		if (!bRingUrgent)
+		{
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s heads into the ring (%.0f to go)."), *Self->GetName(), FVector2D::Distance(Here, Spot));
+		}
+		bRingUrgent = true;
+		bHasBattleGoal = true;
+		BattleGoal = FVector(Spot, FloorZ);
+		BattleGoalTimer = 0.f;
+		return;
+	}
+	bRingUrgent = false;
+	// Roaming inside it: a spot not far off, drawn a little toward the ring's middle, kept inside the ring that matters
+	if (bHasBattleGoal && BattleGoalTimer > 0.f && FVector2D::Distance(Here, FVector2D(BattleGoal)) > RoamArrive)
+	{
+		return;
+	}
+	const FVector2D KeepCenter = bSoon ? Next : Center;
+	const float KeepRadius = (bSoon ? NextRadius : Radius) * RingInsideShare;
+	FVector2D Spot = Here;
+	for (int32 Try = 0; Try < 12; ++Try)
+	{
+		const float Angle = Stream.FRandRange(0.f, UE_TWO_PI);
+		FVector2D Want = Here + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Stream.FRandRange(RoamReach * 0.3f, RoamReach);
+		Want = FMath::Lerp(Want, KeepCenter, 0.2f);
+		if (FVector2D::Distance(Want, KeepCenter) <= KeepRadius && RRBattle::IsOnBattleIsland(Battle->GetActorLocation(), Battle->GetReach(), FVector(Want, 0.f)))
+		{
+			Spot = Want;
+			break;
+		}
+	}
+	bHasBattleGoal = true;
+	BattleGoal = FVector(Spot, FloorZ);
+	BattleGoalTimer = Stream.FRandRange(RoamTimeMin, RoamTimeMax);
+}
+
+bool ARRRandomAIController::UpdateBattleTravel(ARRRandomCharacter* Self, bool bInFight, FVector& Wanted, bool& bOnRoute, float DeltaSeconds)
+{
+	const ARRRandomBattleMap* Battle = ARRRandomBattleMap::Get(this);
+	const FVector Goal = bHasBattleGoal ? BattleGoal : Self->GetActorLocation();
+	const FVector Location = Self->GetActorLocation();
+	const float Trip = FVector::Dist2D(Location, Goal);
+
+	// Flying a plane: high over the roofs toward the goal, then down; off it on the ground (it goes). Shots as usual.
+	if (Self->IsPiloting())
+	{
+		const float FloorZ = Battle ? Battle->GetFloorZ() : Location.Z;
+		const FVector Toward = (Goal - Location).GetSafeNormal2D();
+		if (Trip > PlaneLandDistance)
+		{
+			Self->SetPlaneDescend(false);
+			if (Location.Z < FloorZ + PlaneCruise)
+			{
+				Self->Jump();
+			}
+			else
+			{
+				Self->StopJumping();
+			}
+			Wanted = Toward;
+		}
+		else
+		{
+			Self->StopJumping();
+			Self->SetPlaneDescend(true);
+			Wanted = Toward * 0.4f;
+			if (Self->IsPlaneLanded())
+			{
+				Self->SetPlaneDescend(false);
+				Self->ToggleRide();
+				UE_LOG(LogTemp, Log, TEXT("RRRandom: %s lands its plane and gets out."), *Self->GetName());
+			}
+		}
+		bOnRoute = false;
+		return true;
+	}
+	// Shot from a cannon: nothing to steer
+	if (Self->IsRidingCannon())
+	{
+		Wanted = FVector::ZeroVector;
+		bOnRoute = false;
+		return true;
+	}
+	if (bInFight || Self->GetVehicle() || Self->GetRobot() || Self->IsGiant() || Self->CanFly() || !bHasBattleGoal)
+	{
+		LaunchTarget = nullptr;
+		return false;
+	}
+
+	// Now and then, for a long way: a cannon near whose pad cuts the way well short, or a plane station for a very long way
+	LaunchTimer -= DeltaSeconds;
+	if (!LaunchTarget.IsValid() && LaunchTimer <= 0.f)
+	{
+		LaunchTimer = LaunchLookInterval;
+		auto IsTaken = [this](const AActor* Launcher)
+		{
+			for (TActorIterator<ARRRandomAIController> Other(GetWorld()); Other; ++Other)
+			{
+				if (*Other != this && Other->GetLaunchTarget() == Launcher)
+				{
+					return true;
+				}
+			}
+			return false;
+		};
+		// (the longer the way, the further off a launcher is still worth the walk)
+		const float CannonReachNow = FMath::Clamp(Trip * 0.35f, CannonWalk, 6000.f);
+		const float StationReachNow = FMath::Clamp(Trip * 0.3f, StationWalk, 7000.f);
+		float BestGain = CannonGain;
+		for (TActorIterator<ARRRandomCannon> It(GetWorld()); It; ++It)
+		{
+			const float Walk = FVector::Dist2D(Location, It->GetActorLocation());
+			if (!It->IsReady() || Walk > CannonReachNow)
+			{
+				continue;
+			}
+			const float Gain = Trip - FVector::Dist2D(It->GetPadLocation(), Goal) - Walk;
+			if (Gain > BestGain && !IsTaken(*It))
+			{
+				BestGain = Gain;
+				LaunchTarget = *It;
+			}
+		}
+		if (!LaunchTarget.IsValid() && Trip > PlaneTrip)
+		{
+			for (TActorIterator<ARRRandomPlaneStation> It(GetWorld()); It; ++It)
+			{
+				if (It->GetPlane() || It->IsRolling() || It->GetRechargeRemaining() > 0.f || FVector::Dist2D(Location, It->GetActorLocation()) > StationReachNow || IsTaken(*It))
+				{
+					continue;
+				}
+				LaunchTarget = *It;
+				break;
+			}
+		}
+		if (const AActor* Picked = LaunchTarget.Get())
+		{
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s heads for %s (%.0f away) for the long way (%.0f)."), *Self->GetName(), *Picked->GetName(),
+				FVector::Dist2D(Location, Picked->GetActorLocation()), Trip);
+		}
+	}
+	const AActor* Launcher = LaunchTarget.Get();
+	if (!Launcher)
+	{
+		return false;
+	}
+	const ARRRandomCannon* Cannon = Cast<ARRRandomCannon>(Launcher);
+	const ARRRandomPlaneStation* Station = Cast<ARRRandomPlaneStation>(Launcher);
+	if ((Cannon && !Cannon->IsReady()) || (Station && (Station->GetPlane() || Station->IsRolling() || Station->GetRechargeRemaining() > 0.f)))
+	{
+		LaunchTarget = nullptr;
+		return false;
+	}
+	const float Reach = Cannon ? ARRRandomCannon::UseRange * 0.7f : ARRRandomPlaneStation::UseRange * 0.6f;
+	if (FVector::Dist2D(Location, Launcher->GetActorLocation()) <= Reach)
+	{
+		// In (the cannon fires it to the pad; the station's die gives a plane, boarded where it stands)
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s uses %s."), *Self->GetName(), *Launcher->GetName());
+		Self->ToggleRide();
+		LaunchTarget = nullptr;
+		LaunchTimer = LaunchLookInterval;
+		Wanted = FVector::ZeroVector;
+		bOnRoute = false;
+		return true;
+	}
+	Wanted = FollowRoute(Self, Launcher->GetActorLocation(), DeltaSeconds);
+	bOnRoute = true;
+	return true;
+}
+
+void ARRRandomAIController::UpdateSprint(ARRRandomCharacter* Self, bool bInFight, const FVector& Move)
+{
+	URRRandomMovementComponent* Movement = Cast<URRRandomMovementComponent>(Self->GetCharacterMovement());
+	if (!Movement)
+	{
+		return;
+	}
+	// Out of a fight, on foot, on a long way (or into the ring): Shift held, as a player would; shooting needs it let go
+	const float Trip = bHasBattleGoal ? FVector::Dist2D(Self->GetActorLocation(), BattleGoal) : 0.f;
+	Movement->bWantsToSprint = !bInFight && !Move.IsNearlyZero() && Self->CanSprint() && !Self->IsReloading() && (bRingUrgent || Trip > SprintTrip);
 }

@@ -161,8 +161,17 @@ void URRRandomSessionSubsystem::RunStartupCommand()
 	if (FParse::Value(FCommandLine::Get(), TEXT("RRRule="), RuleName))
 	{
 		MatchRule = RuleName.Equals(TEXT("MeteorRush"), ESearchCase::IgnoreCase) ? ERRMatchRule::MeteorRush
-			: RuleName.Equals(TEXT("Defense"), ESearchCase::IgnoreCase) ? ERRMatchRule::Defense : ERRMatchRule::Knockout;
+			: RuleName.Equals(TEXT("Defense"), ESearchCase::IgnoreCase) ? ERRMatchRule::Defense
+			: RuleName.Equals(TEXT("BattleRoyale"), ESearchCase::IgnoreCase) ? ERRMatchRule::BattleRoyale : ERRMatchRule::Knockout;
 	}
+	// -RRBRTest: the battle royale's test level (and its rule)
+	if (FParse::Param(FCommandLine::Get(), TEXT("RRBRTest")))
+	{
+		bBattleRoyaleTest = true;
+		MatchRule = ERRMatchRule::BattleRoyale;
+	}
+	// The battle royale is played third person, on its own map
+	bThirdPersonMode |= MatchRule == ERRMatchRule::BattleRoyale;
 	// -RRStage=N: that defense stage, open or not (tests)
 	int32 StageNumber = 0;
 	if (FParse::Value(FCommandLine::Get(), TEXT("RRStage="), StageNumber))
@@ -500,7 +509,7 @@ void URRRandomSessionSubsystem::OnFindSessionsComplete(bool bWasSuccessful)
 			Room.Players = FMath::Max(1, Room.MaxPlayers - Result.Session.NumOpenPublicConnections);
 			int32 Rule = 0;
 			Result.Session.SessionSettings.Get(RuleKey, Rule);
-			Room.Rule = static_cast<ERRMatchRule>(FMath::Clamp(Rule, 0, static_cast<int32>(ERRMatchRule::Defense)));
+			Room.Rule = static_cast<ERRMatchRule>(FMath::Clamp(Rule, 0, static_cast<int32>(ERRMatchRule::BattleRoyale)));
 			Result.Session.SessionSettings.Get(StageKey, Room.Stage);
 			Room.SearchIndex = Index;
 		}
@@ -608,6 +617,18 @@ FString URRRandomSessionSubsystem::GetStartMap() const
 	// A defense stage is built in code on the bare arena (ARRRandomDiceTown with its stage, from the game mode)
 	if (MatchRule == ERRMatchRule::Defense)
 	{
+		return ArenaMap;
+	}
+	// The battle royale (round 92): its level (the battle map placed, the navmesh made round the animal friends), or the
+	// bare arena with the battle map built on it in code
+	if (MatchRule == ERRMatchRule::BattleRoyale)
+	{
+		const FString& Level = bBattleRoyaleTest ? BattleRoyaleTestMap : BattleRoyaleMap;
+		if (!Level.IsEmpty() && FPackageName::DoesPackageExist(Level))
+		{
+			return Level;
+		}
+		UE_LOG(LogTemp, Warning, TEXT("RRRandom: no level %s, the battle map is built on %s instead."), *Level, *ArenaMap);
 		return ArenaMap;
 	}
 	if (bThirdPersonMode)

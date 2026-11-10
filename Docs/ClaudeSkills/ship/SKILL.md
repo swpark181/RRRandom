@@ -20,9 +20,23 @@ Check these before touching anything, and stop with a short explanation if one f
   fresh install may need a new terminal before `gh` is on the PATH; `"C:\Program Files\GitHub CLI\gh.exe"` works meanwhile.
 - The default branch: `git symbolic-ref refs/remotes/origin/HEAD` (usually `main`). Call it MAIN below.
 
-## 1. Look at what is being shipped
+## 1. Bring the Claude rules in, then look at what is being shipped
 
-Run `git status`, `git diff --stat`, `git diff` (skim, more closely for small changes), and `git log --oneline -10`.
+First copy this PC's Claude Code rules into the repo, so every ship carries them to the other PCs (the user asked that
+md files and the Claude rules always go up with a ship):
+
+```
+sh ~/.claude/skills/ship/sync_claude.sh
+```
+
+It copies the memory notes to `Docs/ClaudeMemory/`, the user's own skills (this one included) to `Docs/ClaudeSkills/`,
+and `~/.claude/settings.json` / `keybindings.json` / `CLAUDE.md` plus any `CLAUDE.md` or `.claude/settings*.json` in the
+folders above the repo to `Docs/ClaudeSettings/`. It never copies `.credentials.json`, only overwrites a repo file when
+the local one is newer, and deletes nothing. If it prints "only in repo" files, a note was deleted on this PC or written
+on another one: leave them, unless this session deleted that note on purpose (then `git rm` it). Read the copied
+settings files before staging: if one holds a token, key or password, leave it out and tell the user.
+
+Then run `git status`, `git diff --stat`, `git diff` (skim, more closely for small changes), and `git log --oneline -10`.
 From these, understand what changed and why, so the commit message and PR describe the change, not the file list.
 
 Decide what to stage. Stage the files that belong to this work by path, not with a blind `git add -A`, because a
@@ -34,6 +48,9 @@ working tree often holds strays:
 - Large binaries (roughly over 50 MB) fail on GitHub unless tracked by Git LFS. Check `git lfs ls-files` /
   `.gitattributes`; if a big file isn't covered, ask before going on.
 - If the tree mixes unrelated changes, ship only what the user meant and say what you left out. When unsure, ask.
+- Always stage, whatever else is left out: every changed or new Markdown file in the repo
+  (`git ls-files -m -o --exclude-standard -- '*.md'`, e.g. README, HANDOFF, docs) and everything under
+  `Docs/ClaudeMemory/`, `Docs/ClaudeSkills/` and `Docs/ClaudeSettings/`. The secret rule above still applies to them.
 
 If there is nothing to commit and no unpushed commits, say so and stop.
 

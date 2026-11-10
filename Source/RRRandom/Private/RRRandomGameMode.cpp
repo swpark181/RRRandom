@@ -1,4 +1,5 @@
 #include "RRRandomGameMode.h"
+#include "RRRandomBattleRoyale.h"
 #include "RRRandomSessionSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "RRRandomAIController.h"
@@ -97,6 +98,28 @@ void ARRRandomGameMode::InitGame(const FString& MapName, const FString& Options,
 		bSplitPlayersAcrossTeams = false;
 		TeamSpawnDistance = RRDefense::FriendStartOut * 2.f;
 	}
+	// The battle royale (round 92): its level has the battle map placed (or it is built on the bare arena); ten teams of three
+	// (the test map four), every player on the first team with room, the teams' starts spread round the island
+	const bool bPlacedBattle = static_cast<bool>(TActorIterator<ARRRandomBattleMap>(World));
+	bBattleRoyale = bPlacedBattle || (Sessions && Sessions->GetMatchRule() == ERRMatchRule::BattleRoyale);
+	if (bBattleRoyale)
+	{
+		bBattleRoyaleTest = Sessions && Sessions->IsBattleRoyaleTest();
+		if (bPlacedBattle)
+		{
+			bBattleRoyaleTest = TActorIterator<ARRRandomBattleMap>(World)->GetReach() <= RRBattle::TestTileReach;
+		}
+		BattleTeamCount = bBattleRoyaleTest ? RRBattle::TestTeamCount : RRBattle::TeamCount;
+		FParse::Value(FCommandLine::Get(), TEXT("RRBRTeams="), BattleTeamCount);
+		BattleTeamCount = FMath::Clamp(BattleTeamCount, 2, RRBattle::TeamCount);
+		TeamSize = RRBattle::TeamSize;
+		bPlacedThirdPersonMap = true;
+		bDiceTown = false;
+		bDefense = false;
+		bStudio = false;
+		bSplitPlayersAcrossTeams = false;
+	}
+	TeamSlots.SetNum(GetTeamCount());
 }
 
 void ARRRandomGameMode::StartPlay()
@@ -106,8 +129,32 @@ void ARRRandomGameMode::StartPlay()
 	{
 		SpawnDiceTownIfNoneExists();
 	}
+	// The battle map's tiles: spawned now, each built as play begins (before the bots, whose floor traces land on them)
+	const double BattleBuildStart = FPlatformTime::Seconds();
+	if (bBattleRoyale)
+	{
+		ARRRandomBattleMap* Battle = ARRRandomBattleMap::Get(this);
+		if (!Battle)
+		{
+			const FTransform Where(GetArenaCenter());
+			Battle = GetWorld()->SpawnActorDeferred<ARRRandomBattleMap>(ARRRandomBattleMap::StaticClass(), Where);
+			if (Battle)
+			{
+				Battle->SetReach(bBattleRoyaleTest ? RRBattle::TestTileReach : RRBattle::TileReach);
+				Battle->FinishSpawning(Where);
+			}
+		}
+		if (Battle)
+		{
+			Battle->SpawnTiles();
+		}
+	}
 
 	Super::StartPlay();
+	if (bBattleRoyale)
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: battle map built in %.2f s."), FPlatformTime::Seconds() - BattleBuildStart);
+	}
 
 	// The rule picked on this machine's title (or -RRRule=MeteorRush): Meteor Rush holds ore points instead of counting
 	// knockouts, and has a clock
@@ -129,6 +176,10 @@ void ARRRandomGameMode::StartPlay()
 		if (bDefense)
 		{
 			State->SetDefense(DefenseStage);
+		}
+		if (bBattleRoyale)
+		{
+			State->SetBattleRoyale(BattleTeamCount);
 		}
 		const float PlayStart = GetWorld()->GetTimeSeconds() + StartCountdown;
 		State->SetPlayStartTime(PlayStart);
@@ -154,7 +205,7 @@ void ARRRandomGameMode::StartPlay()
 		{
 			SpawnStudioIfNoneExists();
 		}
-		else if (!bDiceTown)
+		else if (!bDiceTown && !bBattleRoyale)
 		{
 			SpawnDiceLandIfNoneExists();
 		}
@@ -176,9 +227,14 @@ void ARRRandomGameMode::StartPlay()
 			SpawnCoverIfNoneExists();
 		}
 	}
-	if (bSpawnVehicles && !bDefense)
+	if (bSpawnVehicles && !bDefense && !bBattleRoyale)
 	{
 		SpawnVehiclesIfNoneExist();
+	}
+	// The battle royale: the battle map's rides, the ring, and everyone to their team's start
+	if (bBattleRoyale)
+	{
+		SetUpBattleRoyale();
 	}
 	// Dice Town's human cannons and plane stations (round 88), on open ground by each team's base and out on the flanks
 	if (bDiceTown && !bDefense)
@@ -196,6 +252,11 @@ void ARRRandomGameMode::StartPlay()
 	}
 	// The host's own brawler may already hold a spot; bots take the rest
 	FillEmptySlotsWithBots();
+	// (the battle royale: everyone counted standing from the start)
+	if (bBattleRoyale)
+	{
+		UpdateBattleStanding(nullptr);
+	}
 	if (bSpawnDummies)
 	{
 		SpawnDummiesIfNoneExist();
@@ -223,6 +284,17 @@ void ARRRandomGameMode::OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRando
 		{
 			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s knocked out by %s; back up in a moment."), *Victim->GetName(), Attacker ? *Attacker->GetName() : TEXT("a fall"));
 		}
+		return;
+	}
+	// The battle royale: no score, nobody gets back up; a team with nobody left is out (placed), the last one wins
+	if (bBattleRoyale)
+	{
+		if (Attacker && Attacker->GetTeam() != Victim->GetTeam())
+		{
+			Attacker->AddKill();
+		}
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) is out, knocked out by %s."), *Victim->GetName(), Victim->GetTeam(), Attacker ? *Attacker->GetName() : bFell ? TEXT("a fall") : TEXT("the ring"));
+		UpdateBattleStanding(Victim);
 		return;
 	}
 	if (bMeteorRush)
@@ -318,7 +390,8 @@ void ARRRandomGameMode::ArrangeVictoryFormation(ARRRandomCharacter* MVP, int32 W
 	Line.Append(Dancers);
 	TArray<FVector> Spots;
 	float LineYaw = 0.f;
-	if (FindDanceLine(Line, Winner, Spots, LineYaw))
+	// (the battle royale ends anywhere on its big map: the winners dance round the MVP where it stands)
+	if (!bBattleRoyale && FindDanceLine(Line, Winner, Spots, LineYaw))
 	{
 		float HalfWidth = 0.f;
 		for (int32 Index = 0; Index < Line.Num(); ++Index)
@@ -502,6 +575,17 @@ void ARRRandomGameMode::CheatWin(int32 Team)
 	if (bDefense)
 	{
 		EndDefense(Team == 0);
+		return;
+	}
+	// The battle royale: that team is the last standing
+	if (bBattleRoyale)
+	{
+		if (State && !State->IsMatchOver() && Team >= 0 && Team < GetTeamCount())
+		{
+			State->SetTeamPlace(Team, 1);
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, team %d wins the battle royale."), Team);
+			EndMatch(Team);
+		}
 		return;
 	}
 	if (State && !State->IsMatchOver() && (Team == 0 || Team == 1))
@@ -696,7 +780,11 @@ void ARRRandomGameMode::RestartMatch()
 
 void ARRRandomGameMode::EnsureSlots()
 {
-	for (int32 Team = 0; Team < 2; ++Team)
+	if (TeamSlots.Num() < GetTeamCount())
+	{
+		TeamSlots.SetNum(GetTeamCount());
+	}
+	for (int32 Team = 0; Team < GetTeamCount(); ++Team)
 	{
 		if (TeamSlots[Team].Num() < GetTeamSize(Team))
 		{
@@ -707,6 +795,18 @@ void ARRRandomGameMode::EnsureSlots()
 
 int32 ARRRandomGameMode::ChooseTeamForPlayer() const
 {
+	// The battle royale: players make up squads in the order they come, three to a team
+	if (bBattleRoyale)
+	{
+		for (int32 Team = 0; Team < GetTeamCount(); ++Team)
+		{
+			if (FindSlotForPlayer(Team) != INDEX_NONE)
+			{
+				return Team;
+			}
+		}
+		return INDEX_NONE;
+	}
 	int32 Players[2] = { 0, 0 };
 	for (int32 Team = 0; Team < 2; ++Team)
 	{
@@ -727,11 +827,28 @@ int32 ARRRandomGameMode::ChooseTeamForPlayer() const
 
 int32 ARRRandomGameMode::FindSlotForPlayer(int32 Team) const
 {
-	return TeamSlots[Team].IndexOfByPredicate([](const FTeamSlot& Slot) { return !Slot.Player.IsValid(); });
+	return TeamSlots.IsValidIndex(Team) ? TeamSlots[Team].IndexOfByPredicate([](const FTeamSlot& Slot) { return !Slot.Player.IsValid(); }) : INDEX_NONE;
 }
 
 bool ARRRandomGameMode::GetSlotTransform(int32 Team, int32 Slot, float HalfHeight, FTransform& OutTransform) const
 {
+	// The battle royale: round the team's start (the team close together, facing out from the island's middle); before
+	// the map is built (the host's own player logs in first), by the player start for a moment (PlaceTeamsAtStarts)
+	if (bBattleRoyale)
+	{
+		const FVector Start = TeamStarts.IsValidIndex(Team) ? TeamStarts[Team] : GetPlayerStartLocation() + FVector(0.f, Team * 400.f, 0.f);
+		const FVector Out = (Start - GetArenaCenter()).GetSafeNormal2D();
+		const FVector Across = FVector::CrossProduct(FVector::UpVector, Out.IsNearlyZero() ? FVector::ForwardVector : Out);
+		const float Side = Slot % 2 == 1 ? 1.f : -1.f;
+		const int32 Step = (Slot + 1) / 2;
+		FVector Location;
+		if (!FindFloorSpot(Start + Across * Side * Step * 180.f, HalfHeight, Location))
+		{
+			Location = Start + FVector(0.f, 0.f, HalfHeight + 2.f);
+		}
+		OutTransform = FTransform(FRotator(0.f, (Out.IsNearlyZero() ? FVector::ForwardVector : -Out).Rotation().Yaw, 0.f), Location);
+		return true;
+	}
 	// Blue below the middle, red above it across from blue, facing down the screen
 	const FVector Origin = GetArenaCenter() + FVector(TeamSpawnDistance * (Team == 1 ? 0.5f : -0.5f), 0.f, 0.f);
 	// The middle spot first (the first player's), then alternating right and left of it
@@ -781,7 +898,7 @@ ARRRandomCharacter* ARRRandomGameMode::SpawnBrawler(TSubclassOf<ARRRandomCharact
 	Brawler->SetTeam(Team);
 	Brawler->SetSpecies(Species);
 	Brawler->FinishSpawning(SpawnTransform);
-	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s is a %s on team %d."), *Brawler->GetName(), RRSpecies::GetAssetName(Species), Team);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s is a %s on team %d (at %s)."), *Brawler->GetName(), RRSpecies::GetAssetName(Species), Team, *SpawnTransform.GetLocation().ToCompactString());
 	TeamSlots[Team][Slot].Brawler = Brawler;
 	return Brawler;
 }
@@ -789,6 +906,16 @@ ARRRandomCharacter* ARRRandomGameMode::SpawnBrawler(TSubclassOf<ARRRandomCharact
 APawn* ARRRandomGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot)
 {
 	EnsureSlots();
+
+	// The battle royale under way: no spot to start from; a standing bot's place, or watching
+	const ARRRandomGameState* Match = GetGameState<ARRRandomGameState>();
+	if (bBattleRoyale && Match && Match->HasPlayStarted() && TeamStarts.Num() > 0)
+	{
+		const URRRandomSessionSubsystem* JoinSessions = GetGameInstance() ? GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>() : nullptr;
+		const ARRRandomPlayerController* Joiner = Cast<ARRRandomPlayerController>(NewPlayer);
+		return TakeOverBot(NewPlayer, Joiner && Joiner->GetChosenSpecies() != INDEX_NONE ? Joiner->GetChosenSpecies()
+			: NewPlayer && NewPlayer->IsLocalController() && JoinSessions ? JoinSessions->GetSpecies() : RRSpecies::Fox);
+	}
 
 	// A player takes a spot on a team, replacing the bot standing there
 	UClass* PawnClass = GetDefaultPawnClassForController(NewPlayer);
@@ -833,6 +960,11 @@ void ARRRandomGameMode::Logout(AController* Exiting)
 				Slot = FTeamSlot();
 				UE_LOG(LogTemp, Log, TEXT("RRRandom: %s left; a bot takes over their spot."), *GetNameSafe(Exiting));
 				GetWorldTimerManager().SetTimerForNextTick(this, &ARRRandomGameMode::FillEmptySlotsWithBots);
+				// (the battle royale under way: no bot comes; the spot is out)
+				if (bBattleRoyale)
+				{
+					GetWorldTimerManager().SetTimerForNextTick([this]() { UpdateBattleStanding(nullptr); });
+				}
 			}
 		}
 	}
@@ -901,7 +1033,14 @@ void ARRRandomGameMode::FillEmptySlotsWithBots()
 	EnsureSlots();
 
 	const FVector Center = GetArenaCenter();
-	for (int32 Team = 0; Team < 2; ++Team)
+	// The battle royale: bots only fill the spots at the start (a player leaving later leaves the spot empty), and only once
+	// the map is up and the teams' starts are known
+	const ARRRandomGameState* Match = GetGameState<ARRRandomGameState>();
+	if (bBattleRoyale && (TeamStarts.Num() == 0 || (Match && Match->HasPlayStarted())))
+	{
+		return;
+	}
+	for (int32 Team = 0; Team < GetTeamCount(); ++Team)
 	{
 		for (int32 Slot = 0; Slot < TeamSlots[Team].Num(); ++Slot)
 		{
@@ -1126,4 +1265,168 @@ void ARRRandomGameMode::SpawnStudioIfNoneExists()
 		return;
 	}
 	World->SpawnActor<ARRRandomStudio>(ARRRandomStudio::StaticClass(), FTransform(GetArenaCenter()));
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The battle royale (round 92)
+
+void ARRRandomGameMode::SetUpBattleRoyale()
+{
+	UWorld* World = GetWorld();
+	ARRRandomBattleMap* Battle = ARRRandomBattleMap::Get(this);
+	if (!Battle || !Battle->IsBuilt())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("RRRandom: no battle map built; the battle royale has no ground."));
+		return;
+	}
+	// The teams' starts round the island, the rides spread over it, the ring round all of it from play start
+	Battle->GetTeamStarts(GetTeamCount(), TeamStarts);
+	Battle->SpawnRides();
+	if (ARRRandomBattleZone* Zone = World->SpawnActor<ARRRandomBattleZone>())
+	{
+		const ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
+		const float PlayStart = State ? State->GetServerWorldTimeSeconds() + State->GetCountdownRemaining() : World->GetTimeSeconds();
+		const FVector Center = Battle->GetActorLocation();
+		Zone->Begin(FVector2D(Center.X, Center.Y), Battle->GetIslandRadius() * 1.05f, PlayStart, Battle->GetFloorZ(), bBattleRoyaleTest);
+	}
+	PlaceTeamsAtStarts();
+	if (ARRRandomGameState* State = GetGameState<ARRRandomGameState>())
+	{
+		State->SetAlive(0, GetTeamCount());
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: battle royale, %d teams of %d%s."), GetTeamCount(), TeamSize, bBattleRoyaleTest ? TEXT(" (test map)") : TEXT(""));
+}
+
+void ARRRandomGameMode::PlaceTeamsAtStarts()
+{
+	for (int32 Team = 0; Team < TeamSlots.Num(); ++Team)
+	{
+		for (int32 Slot = 0; Slot < TeamSlots[Team].Num(); ++Slot)
+		{
+			ARRRandomCharacter* Brawler = TeamSlots[Team][Slot].Brawler.Get();
+			FTransform Where;
+			if (!Brawler || !GetSlotTransform(Team, Slot, Brawler->GetCapsuleComponent()->GetScaledCapsuleHalfHeight(), Where))
+			{
+				continue;
+			}
+			Brawler->TeleportTo(Where.GetLocation(), Where.Rotator(), false, true);
+			Brawler->SetHome(Where.GetLocation(), Where.Rotator());
+			if (AController* Controller = Brawler->GetController())
+			{
+				Controller->SetControlRotation(Where.Rotator());
+			}
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s starts with team %d at %s."), *Brawler->GetName(), Team, *Where.GetLocation().ToString());
+		}
+	}
+}
+
+void ARRRandomGameMode::UpdateBattleStanding(ARRRandomCharacter* Victim)
+{
+	ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
+	if (!State || State->IsMatchOver())
+	{
+		return;
+	}
+	// Who is still standing, team by team (a spot nobody holds any more counts as out)
+	TArray<int32> Standing;
+	Standing.Init(0, GetTeamCount());
+	int32 Friends = 0;
+	for (int32 Team = 0; Team < TeamSlots.Num(); ++Team)
+	{
+		for (const FTeamSlot& Slot : TeamSlots[Team])
+		{
+			const ARRRandomCharacter* Brawler = Slot.Brawler.Get();
+			if (Brawler && Brawler->IsAlive() && Brawler != Victim)
+			{
+				++Standing[Team];
+				++Friends;
+			}
+		}
+	}
+	int32 Teams = 0;
+	int32 LastTeam = INDEX_NONE;
+	for (int32 Team = 0; Team < Standing.Num(); ++Team)
+	{
+		if (Standing[Team] > 0)
+		{
+			++Teams;
+			LastTeam = Team;
+		}
+	}
+	// A team just gone: placed after every team still standing
+	for (int32 Team = 0; Team < Standing.Num(); ++Team)
+	{
+		if (Standing[Team] == 0 && State->GetTeamPlace(Team) == 0)
+		{
+			State->SetTeamPlace(Team, Teams + 1);
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: team %d is out, #%d of %d."), Team, Teams + 1, GetTeamCount());
+			for (const FTeamSlot& Slot : TeamSlots[Team])
+			{
+				if (ARRRandomPlayerController* Player = Cast<ARRRandomPlayerController>(Slot.Player.Get()))
+				{
+					Player->ClientTeamOut(Teams + 1, GetTeamCount());
+				}
+			}
+		}
+	}
+	State->SetAlive(Friends, Teams);
+	if (Teams <= 1)
+	{
+		const int32 Winner = LastTeam != INDEX_NONE ? LastTeam : Victim ? Victim->GetTeam() : 0;
+		State->SetTeamPlace(Winner, 1);
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: team %d is the last standing and wins the battle royale."), Winner);
+		EndMatch(Winner);
+	}
+}
+
+APawn* ARRRandomGameMode::TakeOverBot(AController* NewPlayer, int32 Species)
+{
+	// A standing bot on the team with the fewest players: the player takes its body over where it stands (its species,
+	// health and gun as they are)
+	int32 BestTeam = INDEX_NONE;
+	int32 BestSlot = INDEX_NONE;
+	int32 FewestPlayers = MAX_int32;
+	for (int32 Team = 0; Team < TeamSlots.Num(); ++Team)
+	{
+		int32 Players = 0;
+		int32 BotSlot = INDEX_NONE;
+		for (int32 Slot = 0; Slot < TeamSlots[Team].Num(); ++Slot)
+		{
+			const FTeamSlot& Entry = TeamSlots[Team][Slot];
+			Players += Entry.Player.IsValid() ? 1 : 0;
+			if (!Entry.Player.IsValid() && Entry.Brawler.IsValid() && Entry.Brawler->IsAlive() && BotSlot == INDEX_NONE)
+			{
+				BotSlot = Slot;
+			}
+		}
+		if (BotSlot != INDEX_NONE && Players < FewestPlayers)
+		{
+			FewestPlayers = Players;
+			BestTeam = Team;
+			BestSlot = BotSlot;
+		}
+	}
+	if (BestTeam == INDEX_NONE)
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s joins the battle royale under way with no bot left to take over; watching."), *GetNameSafe(NewPlayer));
+		return nullptr;
+	}
+	FTeamSlot& Entry = TeamSlots[BestTeam][BestSlot];
+	ARRRandomCharacter* Bot = Entry.Brawler.Get();
+	if (AController* BotController = Bot->GetController())
+	{
+		BotController->UnPossess();
+		BotController->Destroy();
+	}
+	Entry.Player = NewPlayer;
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s takes over %s on team %d (a %s, as it was)."), *GetNameSafe(NewPlayer), *Bot->GetName(), BestTeam, RRSpecies::GetAssetName(Bot->GetSpecies()));
+	return Bot;
+}
+
+void ARRRandomGameMode::CheatZone()
+{
+	if (ARRRandomBattleZone* Zone = ARRRandomBattleZone::Get(this))
+	{
+		Zone->SkipAhead();
+	}
 }

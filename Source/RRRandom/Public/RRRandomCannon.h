@@ -67,6 +67,8 @@ public:
 	static void SpawnDiceTownSets(UWorld* World, const ARRRandomDiceTown* Town);
 	/** Server: a defense stage's four sets (round 90), inside the wall ring shooting out over it. */
 	static void SpawnDefenseSets(UWorld* World, const ARRRandomDiceTown* Town, const FVector& Center);
+	/** Server: a set on the battle map (round 92): its pad near WantPad, its cannon near WantCannon with its arc clear. False with no room. */
+	static bool SpawnBattleSet(UWorld* World, const class ARRRandomBattleMap* Map, const FVector2D& WantCannon, const FVector2D& WantPad, int32 InIndex);
 	/** Server: a set whose cannon stands at From, aimed at a pad at To (both on the floor). */
 	static ARRRandomCannon* SpawnSet(UWorld* World, const FVector& From, const FVector& To, int32 InIndex);
 	/**

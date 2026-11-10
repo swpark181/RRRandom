@@ -120,7 +120,51 @@ public:
 	void SetVillainsLeft(int32 Left) { VillainsLeft = Left; }
 	void SetBossOut(bool bOut) { bBossOut = bOut; }
 
+	/**
+	 * The battle royale (ERRMatchRule::BattleRoyale, round 92): how many teams there are, and how many animal friends and
+	 * teams are still standing (the server counts: far away brawlers aren't on every machine). A team out is placed: the
+	 * number of teams still standing when its last one went down, plus one.
+	 */
+	bool IsBattleRoyale() const { return bBattleRoyale; }
+	static bool IsBattleRoyale(const UObject* WorldContext);
+	int32 GetBattleTeamCount() const { return BattleTeamCount; }
+	int32 GetAliveFriends() const { return AliveFriends; }
+	int32 GetAliveTeams() const { return AliveTeams; }
+	/** A team's place (1 for the winners), 0 while it still stands. */
+	int32 GetTeamPlace(int32 Team) const { return TeamPlaces.IsValidIndex(Team) ? TeamPlaces[Team] : 0; }
+
+	/** Server only. */
+	void SetBattleRoyale(int32 InTeamCount)
+	{
+		bBattleRoyale = true;
+		BattleTeamCount = InTeamCount;
+		TeamPlaces.Init(0, InTeamCount);
+	}
+	void SetAlive(int32 Friends, int32 Teams) { AliveFriends = Friends; AliveTeams = Teams; }
+	void SetTeamPlace(int32 Team, int32 Place)
+	{
+		if (TeamPlaces.IsValidIndex(Team))
+		{
+			TeamPlaces[Team] = Place;
+		}
+	}
+
 private:
+	UPROPERTY(Replicated)
+	bool bBattleRoyale = false;
+
+	UPROPERTY(Replicated)
+	int32 BattleTeamCount = 0;
+
+	UPROPERTY(Replicated)
+	int32 AliveFriends = 0;
+
+	UPROPERTY(Replicated)
+	int32 AliveTeams = 0;
+
+	UPROPERTY(Replicated)
+	TArray<int32> TeamPlaces;
+
 	UPROPERTY(Replicated)
 	bool bDefense = false;
 

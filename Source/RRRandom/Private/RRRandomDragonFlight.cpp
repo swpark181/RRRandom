@@ -120,6 +120,13 @@ void ARRRandomDragonFlight::OnStarted()
 	for (TActorIterator<ARRRandomDiceTown> It(GetWorld()); It; ++It)
 	{
 		MapBounds = It->GetMapBounds();
+		// (the battle map, round 92, is far bigger: the stretch of it round where the dragon is called, as big as Dice Town)
+		if (It->IsBattleTile())
+		{
+			const FVector2D Here(GetActorLocation().X, GetActorLocation().Y);
+			MapBounds = FBox2D(FVector2D::Max(MapBounds.Min, Here - FVector2D(9000.f)), FVector2D::Min(MapBounds.Max, Here + FVector2D(9000.f)));
+		}
+		break;
 	}
 
 	// The bones the code moves

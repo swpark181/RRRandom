@@ -33,6 +33,11 @@ enum class ERRMatchRule : uint8
 	 * (ARRRandomDefenseDirector); the tower falling loses.
 	 */
 	Defense,
+	/**
+	 * Round 92: up to ten teams of three on the battle map (ARRRandomBattleMap), every free spot a bot; no getting back up,
+	 * a shrinking ring of safe ground (ARRRandomBattleZone); the last team standing wins.
+	 */
+	BattleRoyale,
 };
 
 /** A game found online, for the title's room list (URRRandomSessionSubsystem::FindRooms). */
@@ -154,7 +159,13 @@ public:
 	/** Cheat (RRUnlockStages): every stage open, saved. */
 	void UnlockAllStages();
 	/** Players in a game of this rule, the host included: 5 holding the tower together, 6 in a battle. */
-	int32 GetMaxPlayersFor(ERRMatchRule Rule) const { return Rule == ERRMatchRule::Defense ? DefenseMaxPlayers : MaxPlayers; }
+	int32 GetMaxPlayersFor(ERRMatchRule Rule) const { return Rule == ERRMatchRule::Defense ? DefenseMaxPlayers : Rule == ERRMatchRule::BattleRoyale ? BattleRoyaleMaxPlayers : MaxPlayers; }
+	/**
+	 * Round 92: the battle royale on its test level (/Game/Maps/BRTest: 3 x 3 tiles, four teams, a quicker ring), picked with
+	 * -RRBRTest or the title's TEST MAP; the full map otherwise.
+	 */
+	void SetBattleRoyaleTest(bool bOn) { bBattleRoyaleTest = bOn; }
+	bool IsBattleRoyaleTest() const { return bBattleRoyaleTest; }
 
 	/**
 	 * The brawler this machine's player plays (RRSpecies: fox, rabbit, squirrel, tiger), picked on the title and kept across
@@ -186,6 +197,11 @@ protected:
 	FString DiceLandMap = TEXT("/Game/Maps/DiceLand");
 	UPROPERTY(Config)
 	FString StudioMap = TEXT("/Game/Maps/Studio");
+	/** The battle royale's levels (round 92): the full map, and its test level. */
+	UPROPERTY(Config)
+	FString BattleRoyaleMap = TEXT("/Game/Maps/BattleRoyale");
+	UPROPERTY(Config)
+	FString BattleRoyaleTestMap = TEXT("/Game/Maps/BRTest");
 
 	/**
 	 * EOS login: "developer" uses the EOS Dev Auth Tool (DevAuthHost + DevAuthCredential),
@@ -208,6 +224,10 @@ protected:
 	/** Players in a defense game, the host included (the user's rule: up to 5 online). */
 	UPROPERTY(Config)
 	int32 DefenseMaxPlayers = 5;
+
+	/** Players in a battle royale, the host included (the user's rule: ten teams of three). */
+	UPROPERTY(Config)
+	int32 BattleRoyaleMaxPlayers = 30;
 
 	/** How many times -RRJoin looks again when no game is found yet (the host may still be starting). */
 	UPROPERTY(Config)
@@ -280,6 +300,7 @@ private:
 	ERRMatchRule MatchRule = ERRMatchRule::Knockout;
 	int32 Species = 0;
 	int32 DefenseStage = 1;
+	bool bBattleRoyaleTest = false;
 	/** The saved progress, read the first time it is asked for (INDEX_NONE until then). */
 	mutable int32 ClearedStage = INDEX_NONE;
 	void SaveProgress() const;

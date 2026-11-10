@@ -60,6 +60,16 @@ public:
 	bool IsDefense() const { return bDefense; }
 	void EndDefense(bool bWon);
 
+	/**
+	 * The battle royale (round 92, ERRMatchRule::BattleRoyale): up to ten teams of three on the battle map, bots in every free
+	 * spot, nobody getting back up, the ring closing; the last team standing wins.
+	 */
+	bool IsBattleRoyale() const { return bBattleRoyale; }
+	/** Teams in this game (two, or the battle royale's). */
+	int32 GetTeamCount() const { return bBattleRoyale ? BattleTeamCount : 2; }
+	/** Cheat (RRZone): the ring skips ahead. */
+	void CheatZone();
+
 protected:
 	/** Seconds of countdown once the arena has loaded before anybody can move or shoot. */
 	UPROPERTY(EditAnywhere, Category = "Match", meta = (ClampMin = "0"))
@@ -199,7 +209,24 @@ private:
 	/** Places a point on the floor beneath it, or returns false if there is no floor there. */
 	bool FindFloorSpot(const FVector& Spot, float HalfHeight, FVector& OutLocation) const;
 
-	TArray<FTeamSlot> TeamSlots[2];
+	/** Each team's spots (GetTeamCount teams). */
+	TArray<TArray<FTeamSlot>> TeamSlots;
+
+	// Round 92: the battle royale
+	bool bBattleRoyale = false;
+	/** Played on the test map (fewer teams, 3 x 3 tiles, a quicker ring). */
+	bool bBattleRoyaleTest = false;
+	int32 BattleTeamCount = 0;
+	/** Where each team starts (feet), once the battle map is built; empty before. */
+	TArray<FVector> TeamStarts;
+	/** The battle map (placed in the level, or built on the arena), its rides and the ring, then everyone to their team's start. */
+	void SetUpBattleRoyale();
+	/** Moves every brawler already in (the host's own, placed as it logged in) to its team's start. */
+	void PlaceTeamsAtStarts();
+	/** Counts who is still standing; a team with nobody left is placed; one team left wins. */
+	void UpdateBattleStanding(ARRRandomCharacter* Victim);
+	/** A player joining a battle royale under way takes a standing bot's place (where it stands), or watches. */
+	APawn* TakeOverBot(AController* NewPlayer, int32 Species);
 
 	mutable TOptional<FVector> ArenaCenter;
 };

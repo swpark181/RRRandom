@@ -94,9 +94,9 @@ public:
 
 	/**
 	 * Server: smashes what's within Radius of the line From - To (a column through every height, or a ball round the line),
-	 * digging Dig layers into the ground where it reaches the floor.
+	 * digging Dig layers into the ground where it reaches the floor. bLasting (round 93, the oracle meteors): never mended.
 	 */
-	static void Wreck(const UObject* WorldContext, const FVector& From, const FVector& To, float Radius, bool bColumn, int32 Dig = 0);
+	static void Wreck(const UObject* WorldContext, const FVector& From, const FVector& To, float Radius, bool bColumn, int32 Dig = 0, bool bLasting = false);
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -170,8 +170,13 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_Wrecks)
 	TArray<FRRWreck> Wrecks;
 
+	/** Round 92: the battle map tiles a wreck reached last time (mended once none does). */
+	TArray<TWeakObjectPtr<class ARRRandomDiceTown>> WreckedTiles;
+
 	/** Server: when each wreck (by Id) was made. */
 	TMap<int32, float> MadeAt;
+	/** Server: the wrecks never mended (the oracle meteors'). */
+	TSet<int32> Lasting;
 	/** Server: wrecks that made something big: not mended before this time, nor while anybody is in its box. */
 	TMap<int32, float> BigUntil;
 	TMap<int32, FBox> BigArea;

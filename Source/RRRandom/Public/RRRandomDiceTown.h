@@ -14,6 +14,39 @@ struct FRRBrokenBit;
 struct FRRRegrow;
 
 /**
+ * Round 92 (battle royale): which tile of the battle map a Dice Town is (ARRRandomBattleMap). The battle map is a square of
+ * town tiles, each a Dice Town of its own (its blocks, wrecks, lava, walking graph and minimap), laid out from one plan for
+ * the whole island so their roads, districts and rim meet: avenues along the tiles' edges, a street across each tile's
+ * middle, and a district in each (ERRDistrict). Replicated, so every machine builds the same tile.
+ */
+USTRUCT()
+struct FRRBattleTile
+{
+	GENERATED_BODY()
+
+	/** The tile's place, in tiles from the middle tile (+X up the minimap, +Y to the right). */
+	UPROPERTY()
+	int32 X = 0;
+	UPROPERTY()
+	int32 Y = 0;
+	/** Tiles each way from the middle one (the map is 2 Reach + 1 tiles across); 0: not a tile (the town, a defense stage). */
+	UPROPERTY()
+	int32 Reach = 0;
+	/** Cells along a tile's side (RRBattle::TileCells). */
+	UPROPERTY()
+	int32 Cells = 0;
+	/** What stands on it (ERRDistrict). */
+	UPROPERTY()
+	uint8 District = 0;
+	/** Its own layout's seed. */
+	UPROPERTY()
+	int32 Seed = 0;
+	/** The floor's height (level 0's top) for the whole map: the battle map's (a tile has no level floor of its own under it). */
+	UPROPERTY()
+	float FloorZ = 0.f;
+};
+
+/**
  * "Dice Town", the third person mode's big map (about ten times Dice Land's ground): a floating island town built of
  * square blocks stacked like MapleStory 2, from the first concept image of round 36. Built in code on a grid of 100-unit
  * blocks (char-pipeline/scripts/blender_block_town.py: a bevelled block whose top can take a second color, and a die
@@ -60,6 +93,8 @@ public:
 	 * structure and look over it (ARRRandomCharacter keeps flyers inside).
 	 */
 	FBox GetFlightArea() const;
+	/** Round 92: how high flying reaches over this tile alone (its tallest structure plus room), for the battle map's ceiling. */
+	float GetTileFlightTop() const;
 	/** What the minimap shows at a world spot (sky off the island), and how many blocks high it stands there. */
 	FColor GetMapColor(const FVector2D& WorldLocation, int32& OutLevels) const;
 	/** True once the town has laid itself out (BeginPlay). */
@@ -114,6 +149,49 @@ public:
 	float GetDefenseRingRadius() const;
 	float GetDefenseRimRadius() const;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	// Round 92: the battle royale's map is a square of these (ARRRandomBattleMap)
+	/** Set before it finishes spawning (the battle map's), replicated so every machine builds the same tile. */
+	void SetBattleTile(const FRRBattleTile& InTile) { BattleTile = InTile; }
+	const FRRBattleTile& GetBattleTile() const { return BattleTile; }
+	/** Round 94: a spot inside each big building on this tile, on its ground floor (each floor is 600 above). */
+	const TArray<FVector>& GetBigBuildingSpots() const { return BigBuildingSpots; }
+	/** Round 94: a piece of cover inside a big building, for the bots: its middle on the floor it stands on, its half size across. */
+	struct FCoverPiece
+	{
+		FVector Center;
+		FVector2D Extent;
+	};
+	const TArray<FCoverPiece>& GetCoverPieces() const { return CoverPieces; }
+	/** Round 94 (the RRGoCover cheat): where the first cover model of this kind (an ECoverModel number) stands and the way its front faces. */
+	bool GetCoverModelSpot(int32 Model, FVector& OutWhere, float& OutFrontYaw) const;
+	/** The RRPropBeside cheat: this tile's instances of a cover model (an ECoverModel number), if it has any. */
+	const UInstancedStaticMeshComponent* GetCoverModelInstances(int32 Model) const
+	{
+		return CoverModels.IsValidIndex(Model - 1) ? CoverModels[Model - 1].Get() : nullptr;
+	}
+	/** How many kinds of cover model there are, counting the first (none): ECoverModel::Count. */
+	static int32 GetCoverModelKindCount() { return int32(ECoverModel::Count); }
+	bool IsBattleTile() const { return BattleTile.Reach > 0; }
+	/**
+	 * The town (or battle map tile) a spot in the world is on (in 2D), or, off them all, the nearest; null without any. Built
+	 * ones only. Every caller that used to take "the" Dice Town asks this now: a battle map has a tile per district.
+	 */
+	static ARRRandomDiceTown* FindAt(const UObject* WorldContext, const FVector& WorldLocation);
+	/** Every built town (or tile) whose ground (in 2D, grown by Margin) reaches a box. */
+	static void FindTouching(const UObject* WorldContext, const FBox& Box, float Margin, TArray<ARRRandomDiceTown*>& OutTowns);
+	/** This one's own square of ground (a tile's, else the map's: GetMapBounds). */
+	FBox2D GetGroundBounds() const;
+	/**
+	 * Streaming (round 92, the battle map): a tile far from this machine's view keeps only its far look, a few hundred
+	 * stretched blocks of its rooftops (LOD), and drops its blocks, models, lamps and water out of the scene; near, it shows
+	 * them again. The town itself always shows them. Its collision and everything the game asks of it stay either way.
+	 */
+	void SetDetailShown(bool bShown);
+	bool IsDetailShown() const { return bDetailShown; }
+	/** How many instances its detail and its far look draw (for the streaming log). */
+	int32 GetDetailInstanceCount() const;
+	int32 GetFarInstanceCount() const;
 
 	/** Placed in a level (/Game/Maps/DiceTown), the editor builds it too, never saved (RF_Transient), to show it and its navmesh. */
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -186,8 +264,43 @@ private:
 	static FVector2D GetLaneWay(int32 Lane);
 	UPROPERTY(Replicated)
 	int32 DefenseStage = 0;
-	/** The island's size: 1 for the town, less for the smaller defense stages. */
+	/** The island's size: 1 for the town, less for the smaller defense stages, the whole battle map's for its tiles. */
 	float RimScale = 1.f;
+
+	// Round 92: battle map tiles
+	UPROPERTY(Replicated)
+	FRRBattleTile BattleTile;
+	/** The grid's size: cells each way from the middle (the town's 88, a tile's half its side) and all the way across. */
+	int32 HalfCells = 88;
+	int32 GridCells = 176;
+	float MapHalf = 8800.f;
+	/** A tile's middle from the island's middle (zero for the town): the rim, the roads and the districts go by the island's. */
+	FVector2D TileOffset = FVector2D::ZeroVector;
+	/** A cell's middle from the island's middle. */
+	FVector2D IslandSpot(int32 X, int32 Y) const { return CellCenter(FIntPoint(X, Y)) + TileOffset; }
+	/** The cell (X, Y) across the whole battle map (the tile's own plus its place). */
+	FIntPoint GlobalCell(int32 X, int32 Y) const { return FIntPoint(X + BattleTile.X * BattleTile.Cells, Y + BattleTile.Y * BattleTile.Cells); }
+	/** Laid out the same both ways round the middle (the town; not a defense stage nor a tile). */
+	bool IsSymmetric() const { return DefenseStage == 0 && !IsBattleTile(); }
+	/** The middle tile builds the sky round the whole map (the others none). */
+	bool BuildsSky() const { return !IsBattleTile() || (BattleTile.X == 0 && BattleTile.Y == 0); }
+	/** The sky's spread: the town's, or as much bigger as the battle map. */
+	float SkyScale = 1.f;
+	/** A battle map tile's layout (round 92) instead of LayOut. */
+	void LayOutBattle();
+	/** The battle map's roads (in the tile's cells): avenues along the tiles' edges, a street across each tile's middle. */
+	bool IsBattleRoad(int32 X, int32 Y) const;
+	/** Whether a cell next to this tile (off its grid) has the ground under it: neighbors' ground meets ours. */
+	bool IsNeighborGround(int32 X, int32 Y, int32 Level) const;
+	/** The far look (round 92): the tile's rooftops in 4 x 4 cell blocks, merged where alike. */
+	void MakeFarLook();
+	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> FarLook;
+	/** The sky's own blocks and dice (the middle tile's): always shown, whatever its streaming. */
+	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> SkyBlocks;
+	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> SkyDice;
+	bool bDetailShown = true;
+	/** What streaming hides and shows (SetDetailShown). */
+	TArray<UPrimitiveComponent*> GetDetailComponents() const;
 	/** The defense gates, relative to the middle. */
 	TArray<FVector2D> DefenseGates;
 	UInstancedStaticMeshComponent* MakeInstances(UStaticMesh* Mesh, UMaterialInterface* Material, bool bSolid, int32 CustomFloats);
@@ -229,6 +342,28 @@ private:
 	/** A door or window: clears it and frames it. Along U on the front or back wall (Side 0/2), along V on the sides. */
 	void CutOpening(const FFrame& Frame, int32 W, int32 D, int32 Side, int32 Start, int32 Width, int32 L0, int32 L1, uint8 FrameLook);
 	void AddTower(const FFrame& Frame, int32 Style);
+	/**
+	 * Round 94, the battle royale's big buildings to fight inside (up to three stories, 5 m to each ceiling): a mall round
+	 * an atrium open to the top with a bridge across it, a toy factory's tall hall under an L of mezzanine, a school along a
+	 * 34 m corridor, a parking garage of open decks with ramps up to its roof. Walls, floors and stairs are blocks (they
+	 * break); the cover inside is blocks for now (Tripo models to come): full (2 high), half (1), low furniture (1).
+	 */
+	enum class EBigBuilding : uint8 { Mall, Factory, School, Garage };
+	static FIntPoint GetBigBuildingSize(EBigBuilding Kind);
+	static const TCHAR* GetBigBuildingName(EBigBuilding Kind);
+	void AddBigBuilding(const FFrame& Frame, EBigBuilding Kind, int32 Seed);
+	/** One where it fits on this tile (centered round each quarter, then nudged about), reserved; false if none does. */
+	bool PlaceBigBuilding(EBigBuilding Kind, FRandomStream& Stream);
+	/**
+	 * Round 94: the Tripo models drawn over the big buildings' cover blocks (the blocks stay, hidden, to stop things; a wreck
+	 * takes the model with them). Repeated along a long block, crates stacked, turned to face into the building.
+	 */
+	enum class ECoverModel : uint8 { None, Crate, Shelf, Counter, Sofa, Planter, Vending, Lockers, Desk, Bookshelf, CafeTable, Conveyor, Machine, Teddy, Car, Kiosk, AirCon, WaterTank, Count };
+	/** Draws the models over a cover block (its own proportions, as high as the block) and fills the cells under them with
+	 * Hidden; false if this model isn't loaded (the caller fills the block itself). */
+	bool AddCoverModel(ECoverModel Model, const FFrame& Frame, int32 W, int32 D, int32 S, int32 U0, int32 V0, int32 U1, int32 V1, int32 Height, uint8 Hidden);
+	/** A ramp a vehicle can drive: Rise levels over Run cells, Width across, a slab to stand on and nothing over it. */
+	void AddRamp(const FFrame& Frame, int32 U, int32 V, int32 DirU, int32 DirV, int32 AcrossU, int32 AcrossV, int32 Width, int32 Base, int32 Rise, int32 Run, const FColor& Color);
 	void AddTree(const FIntPoint& Cell, int32 Kind, int32 Seed);
 	void AddDie(const FIntPoint& Cell, int32 Level, int32 Size, int32 Kind);
 	/** A stepped hill: Levels terraces, each 3 cells in from the one below, with a ramp up each. */
@@ -254,6 +389,9 @@ private:
 	// Wrecks (round 60)
 	/** Solid and not broken. */
 	bool IsFilled(int32 X, int32 Y, int32 Level) const;
+	/** Round 94: filled and drawn as a block, so it hides its neighbours' faces against it (a block under a Tripo model,
+	 * roof or tree is solid but doesn't: the floor under a cover model has to show). */
+	bool HidesFace(int32 X, int32 Y, int32 Level) const;
 	/** A wreck reaches into a box in the world (a column only between the floor and the grid's top). */
 	bool Touches(const FRRWreck& Wreck, const FBox& Box) const;
 	/** A cell's block drawn or not, as it should be now: broken or buried, hidden; laid bare, drawn (added if never drawn). */
@@ -354,6 +492,8 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> Poles;
 	/** The Tripo trees: round, tiered, candy, mushroom, lollipop (empty without the dreamier pass). */
 	UPROPERTY(Transient) TArray<TObjectPtr<UInstancedStaticMeshComponent>> PropTrees;
+	/** Round 94: one per ECoverModel after None (null where its model isn't imported: that cover stays blocks). */
+	UPROPERTY(Transient) TArray<TObjectPtr<UInstancedStaticMeshComponent>> CoverModels;
 	/** Blocks that stop nothing (awnings). */
 	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> Decor;
 	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> Stars;
@@ -374,6 +514,10 @@ private:
 
 	/** Levels added to every level written (and read) while building on top of something, like a hill. */
 	int32 Lift = 0;
+	/** Big buildings on this tile (round 94), for the log; a spot inside each on its ground floor. */
+	FString BigBuildingsBuilt;
+	TArray<FVector> BigBuildingSpots;
+	TArray<FCoverPiece> CoverPieces;
 	/** The minimap: each cell's color and height in blocks (-1 off the island). */
 	TArray<FColor> MapColors;
 	TArray<int8> MapLevels;

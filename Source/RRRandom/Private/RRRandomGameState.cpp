@@ -38,6 +38,18 @@ void ARRRandomGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ARRRandomGameState, VillainsLeft);
 	DOREPLIFETIME(ARRRandomGameState, WaveVillains);
 	DOREPLIFETIME(ARRRandomGameState, bBossOut);
+	DOREPLIFETIME(ARRRandomGameState, bBattleRoyale);
+	DOREPLIFETIME(ARRRandomGameState, BattleTeamCount);
+	DOREPLIFETIME(ARRRandomGameState, AliveFriends);
+	DOREPLIFETIME(ARRRandomGameState, AliveTeams);
+	DOREPLIFETIME(ARRRandomGameState, TeamPlaces);
+}
+
+bool ARRRandomGameState::IsBattleRoyale(const UObject* WorldContext)
+{
+	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	const ARRRandomGameState* State = World ? World->GetGameState<ARRRandomGameState>() : nullptr;
+	return State && State->bBattleRoyale;
 }
 
 bool ARRRandomGameState::IsDefense(const UObject* WorldContext)

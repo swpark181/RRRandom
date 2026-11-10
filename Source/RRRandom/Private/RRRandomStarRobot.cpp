@@ -1,4 +1,5 @@
 #include "RRRandomStarRobot.h"
+#include "RRRandomBattleRoyale.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomEffects.h"
 #include "RRRandomGameState.h"
@@ -615,12 +616,21 @@ bool ARRRandomStarRobot::FindGathered(const UObject* WorldContext, int32 InTeam,
 		return false;
 	}
 	OutCars[0] = OutCars[1] = OutCars[2] = nullptr;
+	// The team's own cars, or (round 92, the battle map's sets) any team's: the nearest of each part to whoever asks
+	const AActor* Asker = Cast<AActor>(WorldContext);
+	float Nearest[3] = { UE_BIG_NUMBER, UE_BIG_NUMBER, UE_BIG_NUMBER };
 	for (TActorIterator<ARRRandomVehicle> It(World); It; ++It)
 	{
 		const int32 Part = It->GetStarPart();
-		if (Part >= 0 && Part < 3 && It->GetStarTeam() == InTeam && !It->IsCombined() && !OutCars[Part])
+		if (Part < 0 || Part >= 3 || It->IsCombined() || (It->GetStarTeam() != InTeam && It->GetStarTeam() != RRBattle::AnyTeam))
+		{
+			continue;
+		}
+		const float Distance = Asker ? FVector::DistSquared2D(Asker->GetActorLocation(), It->GetActorLocation()) : 0.f;
+		if (!OutCars[Part] || Distance < Nearest[Part])
 		{
 			OutCars[Part] = *It;
+			Nearest[Part] = Distance;
 		}
 	}
 	if (!OutCars[0] || !OutCars[1] || !OutCars[2])
@@ -717,7 +727,7 @@ ARRRandomStarRobot* ARRRandomStarRobot::CheatAssemble(ARRRandomCharacter* Who, c
 	for (TActorIterator<ARRRandomVehicle> It(World); It; ++It)
 	{
 		const int32 Part = It->GetStarPart();
-		if (Part >= 0 && Part < 3 && It->GetStarTeam() == Who->GetTeam() && !It->IsCombined() && !Found[Part])
+		if (Part >= 0 && Part < 3 && (It->GetStarTeam() == Who->GetTeam() || It->GetStarTeam() == RRBattle::AnyTeam) && !It->IsCombined() && !Found[Part])
 		{
 			Found[Part] = *It;
 		}

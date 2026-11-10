@@ -154,7 +154,7 @@ void ARRRandomWreckage::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	DOREPLIFETIME(ARRRandomWreckage, Wrecks);
 }
 
-void ARRRandomWreckage::Wreck(const UObject* WorldContext, const FVector& From, const FVector& To, float Radius, bool bColumn, int32 Dig)
+void ARRRandomWreckage::Wreck(const UObject* WorldContext, const FVector& From, const FVector& To, float Radius, bool bColumn, int32 Dig, bool bLasting)
 {
 	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
 	if (!World || !World->IsGameWorld() || World->GetNetMode() == NM_Client || Radius <= 0.f)
@@ -183,6 +183,10 @@ void ARRRandomWreckage::Wreck(const UObject* WorldContext, const FVector& From, 
 	Added.bColumn = bColumn;
 	Added.Dig = uint8(FMath::Clamp(Dig, 0, 9));
 	Wreckage->MadeAt.Add(Added.Id, World->GetTimeSeconds());
+	if (bLasting)
+	{
+		Wreckage->Lasting.Add(Added.Id);
+	}
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: wreck %d, %s from %s to %s, radius %.0f, digging %d."), Added.Id, bColumn ? TEXT("a column") : TEXT("a ball"),
 		*From.ToCompactString(), *To.ToCompactString(), Radius, int32(Added.Dig));
 	// Applied once this frame's wrecks are all in (a volley of missiles is one change), at the next tick
@@ -327,13 +331,55 @@ void ARRRandomWreckage::Apply()
 	{
 		return;
 	}
-	ARRRandomDiceTown* Town = nullptr;
+	// The town (or a defense stage); on the battle map (round 92) the tiles a wreck reaches now, and those one reached last
+	// time (to mend): each tile smashes and mends its own blocks
+	TArray<ARRRandomDiceTown*> Towns;
+	bool bTiles = false;
+	bool bAnyTown = false;
 	for (TActorIterator<ARRRandomDiceTown> It(World); It; ++It)
 	{
-		Town = *It;
-		break;
+		bAnyTown = true;
+		if (!It->IsBuilt())
+		{
+			bPending = true;
+			return;
+		}
+		if (It->IsBattleTile())
+		{
+			bTiles = true;
+		}
+		else if (Towns.Num() == 0)
+		{
+			Towns.Add(*It);
+		}
 	}
-	if ((Town && !Town->IsBuilt()) || (!Town && !FindPieces()))
+	if (bTiles)
+	{
+		TSet<ARRRandomDiceTown*> Reached;
+		const ARRRandomDiceTown* Any = ARRRandomDiceTown::FindAt(this, FVector::ZeroVector);
+		const float FloorZ = Any ? Any->GetFloorZ() : 0.f;
+		for (const FRRWreck& Wreck : Wrecks)
+		{
+			TArray<ARRRandomDiceTown*> Found;
+			ARRRandomDiceTown::FindTouching(this, Wreck.GetBounds(FloorZ - 1000.f, FloorZ + 5000.f), 400.f, Found);
+			Reached.Append(Found);
+		}
+		TSet<ARRRandomDiceTown*> Now = Reached;
+		for (const TWeakObjectPtr<ARRRandomDiceTown>& Was : WreckedTiles)
+		{
+			if (Was.IsValid())
+			{
+				Reached.Add(Was.Get());
+			}
+		}
+		WreckedTiles.Reset();
+		for (ARRRandomDiceTown* Tile : Now)
+		{
+			WreckedTiles.Add(Tile);
+		}
+		Towns = Reached.Array();
+	}
+	if (!bAnyTown && !FindPieces())
 	{
 		bPending = true;
 		return;
@@ -354,9 +400,12 @@ void ARRRandomWreckage::Apply()
 
 	TArray<FRRBrokenBit> BrokenBits;
 	TArray<FRRRegrow> Regrow;
-	if (Town)
+	for (ARRRandomDiceTown* Town : Towns)
 	{
 		Town->ApplyWrecks(Wrecks, BrokenBits, Regrow);
+	}
+	if (Towns.Num() > 0)
+	{
 		if (HasAuthority())
 		{
 			MarkBigWrecks();
@@ -480,14 +529,17 @@ void ARRRandomWreckage::Apply()
 
 void ARRRandomWreckage::MarkBigWrecks()
 {
-	ARRRandomDiceTown* Town = nullptr;
+	// (every town or battle map tile: what each made, round 92)
+	TArray<FBox> Areas;
 	for (TActorIterator<ARRRandomDiceTown> It(GetWorld()); It; ++It)
 	{
-		Town = *It;
-		break;
+		TArray<FBox> Made;
+		if (It->ConsumeBigAreas(Made))
+		{
+			Areas.Append(Made);
+		}
 	}
-	TArray<FBox> Areas;
-	if (!Town || !Town->ConsumeBigAreas(Areas))
+	if (Areas.Num() == 0)
 	{
 		return;
 	}
@@ -576,7 +628,7 @@ void ARRRandomWreckage::Tick(float DeltaSeconds)
 	{
 		const FRRWreck& Wreck = Wrecks[Index];
 		const float* Made = MadeAt.Find(Wreck.Id);
-		if (Made && Now - *Made < Wait)
+		if ((Made && Now - *Made < Wait) || Lasting.Contains(Wreck.Id))
 		{
 			continue;
 		}

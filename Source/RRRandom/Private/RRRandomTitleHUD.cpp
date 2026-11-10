@@ -414,6 +414,10 @@ void ARRRandomTitleHUD::DrawHUD()
 	{
 		DrawCenteredText(TEXT("PICK A DEFENSE STAGE"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
 	}
+	else if (Menu->IsOnBattleRoyalePage())
+	{
+		DrawCenteredText(TEXT("PICK A BATTLE ROYALE MAP"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
+	}
 	else if (Menu->IsOnRoomPage())
 	{
 		DrawCenteredText(TEXT("PICK A GAME TO JOIN"), RRUI::InkSoft, ColumnX, LabelY, LabelSize, ExtraBold, LabelSize * 0.24f);
@@ -589,7 +593,7 @@ void ARRRandomTitleHUD::DrawHUD()
 	}
 
 	const bool bCanGoBack = Menu->IsOnNetworkPage() || Menu->IsOnViewPage() || Menu->IsOnSpeciesPage() || Menu->IsOnMapPage() || Menu->IsOnRulePage()
-		|| Menu->IsOnStagePage() || Menu->IsOnRoomPage();
+		|| Menu->IsOnStagePage() || Menu->IsOnRoomPage() || Menu->IsOnBattleRoyalePage();
 	const FString Select = bCards ? TEXT("A/D  SELECT") : TEXT("W/S  SELECT");
 	const FString Keys = bCanGoBack ? Select + TEXT("   ·   ENTER  OK   ·   ESC  BACK") : Select + TEXT("   ·   ENTER  OK");
 	DrawCenteredText(Keys, RRUI::InkSoft, ColumnX, ScreenH - 40.f * S, 11.f * S, ExtraBold, 11.f * S * 0.1f);

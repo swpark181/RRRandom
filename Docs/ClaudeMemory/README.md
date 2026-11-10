@@ -17,3 +17,15 @@
 - `ship`: 커밋 → 푸시 → PR → main 머지 절차.
 - 다른 PC 에서 쓰려면 폴더째 그 PC 의 `%USERPROFILE%\.claude\skills\` 에 복사합니다(예: `%USERPROFILE%\.claude\skills\animal-friend\SKILL.md`).
 - 원본은 작업 PC 의 `%USERPROFILE%\.claude\skills\` 쪽이라, 바뀌면 다시 복사해 커밋합니다.
+
+## 설정
+
+`%USERPROFILE%\.claude\settings.json`(자동 모드 규칙 등), 있으면 `keybindings.json`·`CLAUDE.md`, 그리고 저장소 위 폴더의
+`CLAUDE.md`·`.claude\settings*.json` 은 `Docs/ClaudeSettings/` 에 복사합니다(위 폴더 것은 `C--work/` 처럼 폴더 이름 아래).
+로그인 정보(`.credentials.json`)는 복사하지 않습니다.
+
+## 자동 동기화
+
+`ship` 스킬이 커밋 전에 `ship/sync_claude.sh` 를 돌려 메모·스킬·설정을 위 세 폴더로 복사하고, 저장소의 바뀐 `.md` 와 함께
+항상 올립니다. 그 PC 쪽 파일이 저장소 것보다 새로울 때만 덮어쓰고 아무것도 지우지 않으니, 다른 PC 에서 ship 해도
+이 PC 메모가 옛것으로 덮이지 않습니다.

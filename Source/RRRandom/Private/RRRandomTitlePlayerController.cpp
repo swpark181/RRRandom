@@ -28,6 +28,10 @@ TArray<ERRTitleChoice> ARRRandomTitlePlayerController::GetChoices() const
 	{
 		return { ERRTitleChoice::Stage1, ERRTitleChoice::Stage2, ERRTitleChoice::Stage3, ERRTitleChoice::Back };
 	}
+	if (bBRPage)
+	{
+		return { ERRTitleChoice::BRFull, ERRTitleChoice::BRTest, ERRTitleChoice::Back };
+	}
 	if (bRoomPage)
 	{
 		// Every game found, then searching again and back
@@ -49,7 +53,7 @@ TArray<ERRTitleChoice> ARRRandomTitlePlayerController::GetChoices() const
 	{
 		// Round 90: the top view and Dice Land are put away (still there for -RRMap and the code); a battle is third person in
 		// Dice Town, or the defense
-		return { ERRTitleChoice::Battle, ERRTitleChoice::Defense, ERRTitleChoice::Back };
+		return { ERRTitleChoice::Battle, ERRTitleChoice::BattleRoyale, ERRTitleChoice::Defense, ERRTitleChoice::Back };
 	}
 	if (bNetworkPage)
 	{
@@ -98,6 +102,9 @@ FString ARRRandomTitlePlayerController::GetLabel(ERRTitleChoice Choice)
 	case ERRTitleChoice::Stage3: return FString::Printf(TEXT("STAGE %d"), GetStageOf(Choice));
 	case ERRTitleChoice::Room: return TEXT("GAME");
 	case ERRTitleChoice::Refresh: return TEXT("REFRESH");
+	case ERRTitleChoice::BattleRoyale: return TEXT("BATTLE ROYALE");
+	case ERRTitleChoice::BRFull: return TEXT("BIG MAP");
+	case ERRTitleChoice::BRTest: return TEXT("TEST MAP");
 	}
 	return FString();
 }
@@ -141,6 +148,9 @@ FString ARRRandomTitlePlayerController::GetDescription(ERRTitleChoice Choice)
 	case ERRTitleChoice::Stage3: return TEXT("The whole town. Plane stations too, and the toughest cats.");
 	case ERRTitleChoice::Room: return TEXT("Join this game.");
 	case ERRTitleChoice::Refresh: return TEXT("Look for games again.");
+	case ERRTitleChoice::BattleRoyale: return TEXT("Ten teams of three on a huge island town. Nobody gets back up. Last team standing wins.");
+	case ERRTitleChoice::BRFull: return TEXT("The whole island: castles, downtown streets, canals, woods. Ten teams.");
+	case ERRTitleChoice::BRTest: return TEXT("A small corner of it: four teams, the ring closes twice as fast.");
 	}
 	return FString();
 }
@@ -150,6 +160,7 @@ namespace
 	FString DescribeRoom(const FRRRoomInfo& Room)
 	{
 		const FString What = Room.Rule == ERRMatchRule::Defense ? FString::Printf(TEXT("DEFENSE STAGE %d"), FMath::Max(1, Room.Stage))
+			: Room.Rule == ERRMatchRule::BattleRoyale ? TEXT("BATTLE ROYALE")
 			: Room.Rule == ERRMatchRule::MeteorRush ? TEXT("METEOR RUSH") : TEXT("KNOCKOUT");
 		return FString::Printf(TEXT("%s  ·  %s  ·  %d/%d"), *Room.HostName.Left(14).ToUpper(), *What, Room.Players, Room.MaxPlayers);
 	}
@@ -273,7 +284,7 @@ void ARRRandomTitlePlayerController::Choose(ERRTitleChoice Choice)
 		// Third person in Dice Town, then the rule
 		Sessions->SetThirdPersonMode(true);
 		Sessions->SetThirdPersonMap(ERRThirdPersonMap::DiceTown);
-		if (Sessions->GetMatchRule() == ERRMatchRule::Defense)
+		if (Sessions->GetMatchRule() == ERRMatchRule::Defense || Sessions->GetMatchRule() == ERRMatchRule::BattleRoyale)
 		{
 			Sessions->SetMatchRule(ERRMatchRule::Knockout);
 		}
@@ -285,6 +296,19 @@ void ARRRandomTitlePlayerController::Choose(ERRTitleChoice Choice)
 		Sessions->SetMatchRule(ERRMatchRule::Defense);
 		bViewPage = false;
 		OpenStagePage();
+		break;
+	case ERRTitleChoice::BattleRoyale:
+		Sessions->SetThirdPersonMode(true);
+		Sessions->SetMatchRule(ERRMatchRule::BattleRoyale);
+		bViewPage = false;
+		bBRPage = true;
+		Selected = Sessions->IsBattleRoyaleTest() ? 1 : 0;
+		break;
+	case ERRTitleChoice::BRFull:
+	case ERRTitleChoice::BRTest:
+		Sessions->SetBattleRoyaleTest(Choice == ERRTitleChoice::BRTest);
+		bBRPage = false;
+		OpenSpeciesPage(bViewForHost ? EStart::Host : EStart::Solo);
 		break;
 	case ERRTitleChoice::Stage1:
 	case ERRTitleChoice::Stage2:
@@ -343,15 +367,22 @@ void ARRRandomTitlePlayerController::Choose(ERRTitleChoice Choice)
 				OpenStagePage();
 				break;
 			}
+			if (Sessions->GetMatchRule() == ERRMatchRule::BattleRoyale)
+			{
+				bBRPage = true;
+				Selected = Sessions->IsBattleRoyaleTest() ? 1 : 0;
+				break;
+			}
 			OpenRulePage();
 			break;
 		}
-		if (bRulePage || bStagePage)
+		if (bRulePage || bStagePage || bBRPage)
 		{
 			// Back to what to play
-			const ERRTitleChoice Was = bStagePage ? ERRTitleChoice::Defense : ERRTitleChoice::Battle;
+			const ERRTitleChoice Was = bStagePage ? ERRTitleChoice::Defense : bBRPage ? ERRTitleChoice::BattleRoyale : ERRTitleChoice::Battle;
 			bRulePage = false;
 			bStagePage = false;
+			bBRPage = false;
 			bViewPage = true;
 			Selected = GetChoices().IndexOfByKey(Was);
 			break;
@@ -535,7 +566,7 @@ void ARRRandomTitlePlayerController::OnBack()
 	{
 		Sessions->CancelPending();
 	}
-	else if (bNetworkPage || bViewPage || bSpeciesPage || bMapPage || bRulePage || bStagePage || bRoomPage)
+	else if (bNetworkPage || bViewPage || bSpeciesPage || bMapPage || bRulePage || bStagePage || bRoomPage || bBRPage)
 	{
 		Choose(ERRTitleChoice::Back);
 	}

@@ -1,4 +1,7 @@
 #include "RRRandomCharacter.h"
+#include "RRRandomBattleRoyale.h"
+#include "NavigationSystem.h"
+#include "GameFramework/PlayerController.h"
 #include "RRRandomAIController.h"
 #include "RRRandomBodyAnimInstance.h"
 #include "RRRandomCannon.h"
@@ -546,6 +549,17 @@ void ARRRandomCharacter::BeginPlay()
 	MeshCollisionProfile = BodyMesh->GetCollisionProfileName();
 	CapsulePawnResponse = GetCapsuleComponent()->GetCollisionResponseToChannel(ECC_Pawn);
 
+	// Round 92: on the battle map the navmesh is made only round the animal friends (URRRandomNavigationSystem): each one
+	// asks for it round itself as it goes (the server's, where the bots find their way)
+	if (HasAuthority())
+	{
+		if (const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()); Nav && Nav->IsActiveTilesGenerationEnabled())
+		{
+			UNavigationSystemV1::RegisterNavigationInvoker(*this, RRBattle::NavGenerateRadius, RRBattle::NavRemoveRadius);
+			bNavInvoker = true;
+		}
+	}
+
 	// Joined a game where this brawler is lying knocked out
 	if (!bAlive)
 	{
@@ -561,6 +575,11 @@ void ARRRandomCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (Robot && HasAuthority())
 	{
 		Robot->Leave(this);
+	}
+	if (bNavInvoker)
+	{
+		UNavigationSystemV1::UnregisterNavigationInvoker(*this);
+		bNavInvoker = false;
 	}
 	Super::EndPlay(EndPlayReason);
 }
@@ -610,7 +629,24 @@ void ARRRandomCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 
 FLinearColor ARRRandomCharacter::GetTeamColor(int32 InTeam)
 {
-	return InTeam == 0 ? FLinearColor(0.15f, 0.45f, 1.f) : FLinearColor(1.f, 0.2f, 0.15f);
+	// Blue and red, then (the battle royale's ten teams, round 92) mint, lemon, lilac, orange, teal, magenta, lime, brown
+	static const FLinearColor Colors[] = { FLinearColor(0.15f, 0.45f, 1.f), FLinearColor(1.f, 0.2f, 0.15f), FLinearColor(0.15f, 0.85f, 0.55f),
+		FLinearColor(1.f, 0.82f, 0.1f), FLinearColor(0.6f, 0.35f, 1.f), FLinearColor(1.f, 0.5f, 0.1f), FLinearColor(0.1f, 0.75f, 0.8f),
+		FLinearColor(1.f, 0.25f, 0.7f), FLinearColor(0.55f, 0.9f, 0.15f), FLinearColor(0.6f, 0.38f, 0.22f) };
+	return Colors[FMath::Abs(InTeam) % UE_ARRAY_COUNT(Colors)];
+}
+
+bool ARRRandomCharacter::IsNetRelevantFor(const AActor* RealViewer, const AActor* ViewTarget, const FVector& SrcLocation) const
+{
+	// Round 92: on the battle map teammates are on every machine of their team, however far apart (the minimap, the team
+	// cards); the rest as usual (near enough)
+	if (Super::IsNetRelevantFor(RealViewer, ViewTarget, SrcLocation))
+	{
+		return true;
+	}
+	const APlayerController* Viewer = Cast<APlayerController>(RealViewer);
+	const ARRRandomCharacter* Mine = Viewer ? Cast<ARRRandomCharacter>(Viewer->GetPawn()) : nullptr;
+	return Mine && Mine->GetTeam() == Team;
 }
 
 void ARRRandomCharacter::ApplyTeamColor()
@@ -997,8 +1033,9 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 		// Powers lost on a knockout end without a show
 		bWasGiant = bGiant;
 		bWasFlying = bFlying;
-		// Nobody gets back up once the match is over; a villain never does (the defense director clears it away)
-		if (HasAuthority() && !ARRRandomGameState::IsMatchOver(this) && !IsVillain())
+		// Nobody gets back up once the match is over; a villain never does (the defense director clears it away), nor anyone in
+		// a battle royale (round 92)
+		if (HasAuthority() && !ARRRandomGameState::IsMatchOver(this) && !IsVillain() && !ARRRandomGameState::IsBattleRoyale(this))
 		{
 			RespawnRemaining -= DeltaSeconds;
 			if (RespawnRemaining <= 0.f)
@@ -1606,8 +1643,11 @@ void ARRRandomCharacter::UpdateWalkSpeed()
 	const float VehicleSpeed = Vehicle ? Vehicle->GetHandling().SpeedMultiplier : 1.f;
 	// On foot the species' kit counts too (the rabbit quicker, the tiger slower); a vehicle goes at its own speed
 	const float KitSpeed = Vehicle ? 1.f : RRKit::Get(Species).MoveSpeedScale;
+	// The battle royale's cotton candy cloud: sticky, slower the deeper in (on foot or riding; every machine the same)
+	const ARRRandomBattleZone* Zone = ARRRandomGameState::IsBattleRoyale(this) ? ARRRandomBattleZone::Get(this) : nullptr;
+	const float CloudSpeed = Zone ? Zone->GetSpeedShareAt(GetActorLocation()) : 1.f;
 	GetCharacterMovement()->MaxWalkSpeed = IsUsingUltimate() ? 0.f
-		: BaseWalkSpeed * VehicleSpeed * KitSpeed * RandomEvents->GetSpeedMultiplier() * DiceBuffs->GetMultiplier(ERRDiceBuffStat::MoveSpeed);
+		: BaseWalkSpeed * VehicleSpeed * KitSpeed * RandomEvents->GetSpeedMultiplier() * DiceBuffs->GetMultiplier(ERRDiceBuffStat::MoveSpeed) * CloudSpeed;
 	// A plane flies as fast as it would drive
 	GetCharacterMovement()->MaxFlySpeed = GetCharacterMovement()->MaxWalkSpeed;
 	if (IsDashingToFormation())
@@ -1795,8 +1835,10 @@ void ARRRandomCharacter::ToggleRide()
 	}
 	// A human cannon or a plane station in reach first: they are what F is for there (the players'; a bot's F is for
 	// vehicles and seats, and bots don't fly); with both in reach, the nearer
-	ARRRandomCannon* Cannon = IsPlayerControlled() ? ARRRandomCannon::FindInReach(this) : nullptr;
-	ARRRandomPlaneStation* Station = IsPlayerControlled() ? ARRRandomPlaneStation::FindInReach(this) : nullptr;
+	// (round 92: in a battle royale the bots fly and get shot about too: ARRRandomAIController::UpdateBattleTravel)
+	const bool bMayLaunch = IsPlayerControlled() || ARRRandomGameState::IsBattleRoyale(this);
+	ARRRandomCannon* Cannon = bMayLaunch ? ARRRandomCannon::FindInReach(this) : nullptr;
+	ARRRandomPlaneStation* Station = bMayLaunch ? ARRRandomPlaneStation::FindInReach(this) : nullptr;
 	if (Cannon && Station)
 	{
 		if (FVector::Dist2D(Cannon->GetActorLocation(), GetActorLocation()) < FVector::Dist2D(Station->GetActorLocation(), GetActorLocation()))

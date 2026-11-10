@@ -79,6 +79,8 @@ public:
 	URRRandomGunComponent* GetGun() const { return Gun; }
 	/** Where this brawler starts and gets back up. */
 	const FVector& GetHomeLocation() const { return HomeLocation; }
+	/** Round 92: where it gets back up and what counts as falling off (the battle royale moves the teams to their starts). */
+	void SetHome(const FVector& Location, const FRotator& Rotation) { HomeLocation = Location; HomeRotation = Rotation; }
 
 	/** The ultimate running (ARRRandomUltimate: each species has its own), or null. */
 	ARRRandomUltimate* GetUltimate() const { return Ultimate; }
@@ -405,6 +407,7 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual bool IsNetRelevantFor(const AActor* RealViewer, const AActor* ViewTarget, const FVector& SrcLocation) const override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<USpringArmComponent> CameraBoom;
@@ -1069,6 +1072,8 @@ private:
 
 	FVector HomeLocation = FVector::ZeroVector;
 	FRotator HomeRotation = FRotator::ZeroRotator;
+	/** Round 92: asked the navmesh to be made round it (the battle map). */
+	bool bNavInvoker = false;
 	FVector MeshRelativeLocation = FVector::ZeroVector;
 	FRotator MeshRelativeRotation = FRotator::ZeroRotator;
 
