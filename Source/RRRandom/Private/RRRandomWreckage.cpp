@@ -19,6 +19,13 @@ namespace
 {
 	TAutoConsoleVariable<float> CVarRestoreSeconds(TEXT("rr.Wreck.RestoreSeconds"), 15.f,
 		TEXT("Seconds a smashed structure stays smashed at least; then it mends as soon as nobody is in it."));
+	TAutoConsoleVariable<float> CVarBigRestoreSeconds(TEXT("rr.Wreck.BigRestoreSeconds"), 45.f,
+		TEXT("Seconds a collapsed building or a lava pool stays at least, from when it happened (Dice Town)."));
+
+	/** Room kept round a big wreck's box (a collapse, a lava pool) before it may mend. */
+	constexpr float BigRoom = 80.f;
+	/** How far round something big a wreck may be and still count as one that made it. */
+	constexpr float BigReach = 150.f;
 
 	/** Room kept round who's in a wreck before it may mend: animal friends (plus their size), cars, the robot. */
 	constexpr float PeopleRoom = 120.f;
@@ -28,10 +35,19 @@ namespace
 
 	/** The rubble: the town's block, lit like it (custom data: body color, then the top's). */
 	const TCHAR* const RubbleMesh = TEXT("/Game/Environment/DiceTown/SM_BTBlock.SM_BTBlock");
-	constexpr int32 RubblePool = 420;
+	constexpr int32 RubblePool = 520;
 	constexpr int32 RubblePerBurst = 110;
 	constexpr float RubbleGravity = 1900.f;
 	constexpr float RubbleShrink = 0.35f;
+	/**
+	 * Round 91, big chunks (ThrowRubble): broken blocks grouped in cubes this big (2 blocks a side), each group one chunk
+	 * of about its blocks' volume (times ChunkFill, at most ChunkMaxSize blocks across); small bits besides, this many per
+	 * broken block.
+	 */
+	constexpr float ChunkCell = 200.f;
+	constexpr float ChunkFill = 0.92f;
+	constexpr float ChunkMaxSize = 2.2f;
+	constexpr float SmallBitShare = 0.5f;
 	/** Seconds a piece takes to grow back into place, and sparkles where things grow back (at most). */
 	constexpr float GrowSeconds = 0.4f;
 	constexpr int32 GrowSparkles = 8;
@@ -113,13 +129,32 @@ float ARRRandomWreckage::GetRestoreSeconds()
 	return FMath::Max(1.f, CVarRestoreSeconds.GetValueOnGameThread());
 }
 
+float ARRRandomWreckage::GetBigRestoreSeconds()
+{
+	return FMath::Max(1.f, CVarBigRestoreSeconds.GetValueOnGameThread());
+}
+
+ARRRandomWreckage* ARRRandomWreckage::Find(const UObject* WorldContext)
+{
+	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	if (!World)
+	{
+		return nullptr;
+	}
+	for (TActorIterator<ARRRandomWreckage> It(World); It; ++It)
+	{
+		return *It;
+	}
+	return nullptr;
+}
+
 void ARRRandomWreckage::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ARRRandomWreckage, Wrecks);
 }
 
-void ARRRandomWreckage::Wreck(const UObject* WorldContext, const FVector& From, const FVector& To, float Radius, bool bColumn)
+void ARRRandomWreckage::Wreck(const UObject* WorldContext, const FVector& From, const FVector& To, float Radius, bool bColumn, int32 Dig, bool bLasting)
 {
 	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
 	if (!World || !World->IsGameWorld() || World->GetNetMode() == NM_Client || Radius <= 0.f)
@@ -146,10 +181,16 @@ void ARRRandomWreckage::Wreck(const UObject* WorldContext, const FVector& From, 
 	Added.To = To;
 	Added.Radius = Radius;
 	Added.bColumn = bColumn;
+	Added.Dig = uint8(FMath::Clamp(Dig, 0, 9));
 	Wreckage->MadeAt.Add(Added.Id, World->GetTimeSeconds());
-	UE_LOG(LogTemp, Log, TEXT("RRRandom: wreck %d, %s from %s to %s, radius %.0f."), Added.Id, bColumn ? TEXT("a column") : TEXT("a ball"),
-		*From.ToCompactString(), *To.ToCompactString(), Radius);
-	Wreckage->Apply();
+	if (bLasting)
+	{
+		Wreckage->Lasting.Add(Added.Id);
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: wreck %d, %s from %s to %s, radius %.0f, digging %d."), Added.Id, bColumn ? TEXT("a column") : TEXT("a ball"),
+		*From.ToCompactString(), *To.ToCompactString(), Radius, int32(Added.Dig));
+	// Applied once this frame's wrecks are all in (a volley of missiles is one change), at the next tick
+	Wreckage->bPending = true;
 	Wreckage->ForceNetUpdate();
 }
 
@@ -290,13 +331,55 @@ void ARRRandomWreckage::Apply()
 	{
 		return;
 	}
-	ARRRandomDiceTown* Town = nullptr;
+	// The town (or a defense stage); on the battle map (round 92) the tiles a wreck reaches now, and those one reached last
+	// time (to mend): each tile smashes and mends its own blocks
+	TArray<ARRRandomDiceTown*> Towns;
+	bool bTiles = false;
+	bool bAnyTown = false;
 	for (TActorIterator<ARRRandomDiceTown> It(World); It; ++It)
 	{
-		Town = *It;
-		break;
+		bAnyTown = true;
+		if (!It->IsBuilt())
+		{
+			bPending = true;
+			return;
+		}
+		if (It->IsBattleTile())
+		{
+			bTiles = true;
+		}
+		else if (Towns.Num() == 0)
+		{
+			Towns.Add(*It);
+		}
 	}
-	if ((Town && !Town->IsBuilt()) || (!Town && !FindPieces()))
+	if (bTiles)
+	{
+		TSet<ARRRandomDiceTown*> Reached;
+		const ARRRandomDiceTown* Any = ARRRandomDiceTown::FindAt(this, FVector::ZeroVector);
+		const float FloorZ = Any ? Any->GetFloorZ() : 0.f;
+		for (const FRRWreck& Wreck : Wrecks)
+		{
+			TArray<ARRRandomDiceTown*> Found;
+			ARRRandomDiceTown::FindTouching(this, Wreck.GetBounds(FloorZ - 1000.f, FloorZ + 5000.f), 400.f, Found);
+			Reached.Append(Found);
+		}
+		TSet<ARRRandomDiceTown*> Now = Reached;
+		for (const TWeakObjectPtr<ARRRandomDiceTown>& Was : WreckedTiles)
+		{
+			if (Was.IsValid())
+			{
+				Reached.Add(Was.Get());
+			}
+		}
+		WreckedTiles.Reset();
+		for (ARRRandomDiceTown* Tile : Now)
+		{
+			WreckedTiles.Add(Tile);
+		}
+		Towns = Reached.Array();
+	}
+	if (!bAnyTown && !FindPieces())
 	{
 		bPending = true;
 		return;
@@ -317,9 +400,16 @@ void ARRRandomWreckage::Apply()
 
 	TArray<FRRBrokenBit> BrokenBits;
 	TArray<FRRRegrow> Regrow;
-	if (Town)
+	for (ARRRandomDiceTown* Town : Towns)
 	{
 		Town->ApplyWrecks(Wrecks, BrokenBits, Regrow);
+	}
+	if (Towns.Num() > 0)
+	{
+		if (HasAuthority())
+		{
+			MarkBigWrecks();
+		}
 	}
 	int32 Changed = 0;
 	for (FPiece& Piece : Pieces)
@@ -427,7 +517,7 @@ void ARRRandomWreckage::Apply()
 			{
 				Instances->UpdateInstanceTransform(Grow.Index, Shrunk(Grow.Target), true, false, false);
 				Dirty.Add(Instances);
-				Growing.Add({ Grow, 0.f });
+				Growing.Add({ Grow, -Grow.Delay });
 			}
 		}
 	}
@@ -437,14 +527,56 @@ void ARRRandomWreckage::Apply()
 	}
 }
 
+void ARRRandomWreckage::MarkBigWrecks()
+{
+	// (every town or battle map tile: what each made, round 92)
+	TArray<FBox> Areas;
+	for (TActorIterator<ARRRandomDiceTown> It(GetWorld()); It; ++It)
+	{
+		TArray<FBox> Made;
+		if (It->ConsumeBigAreas(Made))
+		{
+			Areas.Append(Made);
+		}
+	}
+	if (Areas.Num() == 0)
+	{
+		return;
+	}
+	// Every wreck reaching into it (as a box round the wreck, down to under the floor) made it, the older ones too
+	const float Until = GetWorld()->GetTimeSeconds() + GetBigRestoreSeconds();
+	for (const FBox& Area : Areas)
+	{
+		const FBox Reach = Area.ExpandBy(BigReach);
+		for (const FRRWreck& Wreck : Wrecks)
+		{
+			if (!Wreck.GetBounds(Area.Min.Z - 400.f, Area.Max.Z).Intersect(Reach))
+			{
+				continue;
+			}
+			float& Wait = BigUntil.FindOrAdd(Wreck.Id);
+			Wait = FMath::Max(Wait, Until);
+			FBox& Keep = BigArea.FindOrAdd(Wreck.Id, Area);
+			Keep += Area;
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: wreck %d made something big (%s), it waits %.0f s."), Wreck.Id, *Area.ToString(), GetBigRestoreSeconds());
+		}
+	}
+}
+
 bool ARRRandomWreckage::IsOccupied(const FRRWreck& Wreck) const
 {
 	UWorld* World = GetWorld();
+	const FBox* Big = BigArea.Find(Wreck.Id);
 	for (TActorIterator<ARRRandomCharacter> It(World); It; ++It)
 	{
 		const UCapsuleComponent* Capsule = It->GetCapsuleComponent();
 		const float Room = PeopleRoom + (Capsule ? (Wreck.bColumn ? Capsule->GetScaledCapsuleRadius() : Capsule->GetScaledCapsuleHalfHeight()) : 100.f);
 		if (Wreck.Contains(It->GetActorLocation(), Room))
+		{
+			return true;
+		}
+		// What fell or the lava pool it made: anyone anywhere in it holds it too (it grows back round them otherwise)
+		if (Big && Big->ExpandBy(BigRoom + (Capsule ? Capsule->GetScaledCapsuleRadius() : 50.f)).IsInsideOrOn(It->GetActorLocation()))
 		{
 			return true;
 		}
@@ -496,7 +628,12 @@ void ARRRandomWreckage::Tick(float DeltaSeconds)
 	{
 		const FRRWreck& Wreck = Wrecks[Index];
 		const float* Made = MadeAt.Find(Wreck.Id);
-		if (Made && Now - *Made < Wait)
+		if ((Made && Now - *Made < Wait) || Lasting.Contains(Wreck.Id))
+		{
+			continue;
+		}
+		const float* Big = BigUntil.Find(Wreck.Id);
+		if (Big && Now < *Big)
 		{
 			continue;
 		}
@@ -505,6 +642,8 @@ void ARRRandomWreckage::Tick(float DeltaSeconds)
 			continue;
 		}
 		MadeAt.Remove(Wreck.Id);
+		BigUntil.Remove(Wreck.Id);
+		BigArea.Remove(Wreck.Id);
 		Wrecks.RemoveAt(Index);
 		++Mended;
 	}
@@ -531,26 +670,71 @@ void ARRRandomWreckage::ThrowRubble(const TArray<FRRBrokenBit>& Bits)
 		Middle += Bit.Where;
 	}
 	Middle /= Bits.Num();
-	const int32 Count = FMath::Min(RubblePerBurst, Bits.Num() * 2);
+	// Out from the middle of what broke (and a little to the side by chance)
+	const auto Outward = [&Middle](const FVector& Where, float Jitter)
+	{
+		const FVector Out = ((Where - Middle) * FVector(1.f, 1.f, 0.f)).GetSafeNormal();
+		return (Out.IsNearlyZero() ? FMath::VRand() * FVector(1.f, 1.f, 0.f) : Out + FMath::VRand() * FVector(Jitter, Jitter, 0.f)).GetSafeNormal();
+	};
+	const auto Paint = [this](int32 Slot, const FRRBrokenBit& Bit)
+	{
+		const float Shade = FMath::FRandRange(0.88f, 1.08f);
+		const float Data[6] = { Bit.Body.R * Shade, Bit.Body.G * Shade, Bit.Body.B * Shade, Bit.Accent.R * Shade, Bit.Accent.G * Shade, Bit.Accent.B * Shade };
+		Rubble->SetCustomData(Slot, MakeArrayView(Data, 6));
+	};
+	// Round 91 (the user: "부서질 때 부피가 줄어든 느낌 … 큰 덩어리가 떨어지면 좋을 듯"): what broke comes down as big chunks,
+	// the blocks grouped ChunkCell a side and each group one chunk about as big as its blocks together (n blocks of size s:
+	// the cube root of n times s, a little under), tumbling slowly and falling heavily; then only a sprinkle of small bits
+	TMap<FIntVector, TArray<int32>> Groups;
+	for (int32 Index = 0; Index < Bits.Num(); ++Index)
+	{
+		const FVector& Where = Bits[Index].Where;
+		Groups.FindOrAdd(FIntVector(FMath::FloorToInt(Where.X / ChunkCell), FMath::FloorToInt(Where.Y / ChunkCell), FMath::FloorToInt(Where.Z / ChunkCell))).Add(Index);
+	}
+	for (const TPair<FIntVector, TArray<int32>>& Group : Groups)
+	{
+		if (FreeSlots.Num() == 0)
+		{
+			break;
+		}
+		FVector Center = FVector::ZeroVector;
+		float Volume = 0.f;
+		for (const int32 Index : Group.Value)
+		{
+			Center += Bits[Index].Where;
+			Volume += FMath::Cube(Bits[Index].Size);
+		}
+		Center /= Group.Value.Num();
+		const FRRBrokenBit& Bit = Bits[Group.Value[FMath::RandRange(0, Group.Value.Num() - 1)]];
+		FChunk Chunk;
+		Chunk.Slot = FreeSlots.Pop(EAllowShrinking::No);
+		Chunk.Location = Center;
+		Chunk.Velocity = Outward(Center, 0.4f) * FMath::FRandRange(80.f, 300.f) + FVector(0.f, 0.f, FMath::FRandRange(120.f, 380.f));
+		// Breaking off the way it stood, a little askew, then tumbling over slowly
+		Chunk.Turn = FRotator(FMath::FRandRange(-12.f, 12.f), FMath::FRandRange(-20.f, 20.f), FMath::FRandRange(-12.f, 12.f));
+		Chunk.Spin = FRotator(FMath::FRandRange(-180.f, 180.f), FMath::FRandRange(-90.f, 90.f), FMath::FRandRange(-180.f, 180.f));
+		Chunk.Size = FMath::Min(FMath::Pow(Volume, 1.f / 3.f) * ChunkFill, ChunkMaxSize);
+		Chunk.Age = 0.f;
+		Chunk.Life = FMath::FRandRange(2.2f, 3.2f);
+		Chunk.FloorZ = FloorZ;
+		Paint(Chunk.Slot, Bit);
+		Chunks.Add(Chunk);
+	}
+	const int32 Count = FMath::Min(RubblePerBurst, FMath::CeilToInt(Bits.Num() * SmallBitShare));
 	for (int32 Index = 0; Index < Count && FreeSlots.Num() > 0; ++Index)
 	{
-		const FRRBrokenBit& Bit = Bits[Bits.Num() <= Count ? Index % Bits.Num() : FMath::RandRange(0, Bits.Num() - 1)];
+		const FRRBrokenBit& Bit = Bits[FMath::RandRange(0, Bits.Num() - 1)];
 		FChunk Chunk;
 		Chunk.Slot = FreeSlots.Pop(EAllowShrinking::No);
 		Chunk.Location = Bit.Where + FMath::VRand() * 25.f * Bit.Size;
-		// Out from the middle of what broke, and up
-		const FVector Out = ((Bit.Where - Middle) * FVector(1.f, 1.f, 0.f)).GetSafeNormal();
-		const FVector Way = (Out.IsNearlyZero() ? FMath::VRand() * FVector(1.f, 1.f, 0.f) : Out + FMath::VRand() * FVector(0.6f, 0.6f, 0.f)).GetSafeNormal();
-		Chunk.Velocity = Way * FMath::FRandRange(180.f, 620.f) + FVector(0.f, 0.f, FMath::FRandRange(250.f, 820.f));
+		Chunk.Velocity = Outward(Bit.Where, 0.6f) * FMath::FRandRange(180.f, 620.f) + FVector(0.f, 0.f, FMath::FRandRange(250.f, 820.f));
 		Chunk.Turn = FRotator(FMath::FRandRange(0.f, 360.f), FMath::FRandRange(0.f, 360.f), FMath::FRandRange(0.f, 360.f));
 		Chunk.Spin = FRotator(FMath::FRandRange(-540.f, 540.f), FMath::FRandRange(-540.f, 540.f), FMath::FRandRange(-540.f, 540.f));
-		Chunk.Size = Bit.Size * FMath::FRandRange(0.26f, 0.5f);
+		Chunk.Size = Bit.Size * FMath::FRandRange(0.2f, 0.38f);
 		Chunk.Age = 0.f;
 		Chunk.Life = FMath::FRandRange(1.3f, 2.2f);
 		Chunk.FloorZ = FloorZ;
-		const float Shade = FMath::FRandRange(0.88f, 1.08f);
-		const float Data[6] = { Bit.Body.R * Shade, Bit.Body.G * Shade, Bit.Body.B * Shade, Bit.Accent.R * Shade, Bit.Accent.G * Shade, Bit.Accent.B * Shade };
-		Rubble->SetCustomData(Chunk.Slot, MakeArrayView(Data, 6));
+		Paint(Chunk.Slot, Bit);
 		Chunks.Add(Chunk);
 	}
 }

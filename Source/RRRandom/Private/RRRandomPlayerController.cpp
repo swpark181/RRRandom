@@ -1,20 +1,30 @@
 #include "RRRandomPlayerController.h"
+#include "RRRandomBattleRoyale.h"
 #include "RRRandomFogOfWar.h"
+#include "RRRandomCannon.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomDefense.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomGameMode.h"
 #include "RRRandomGameState.h"
+#include "RRRandomOracle.h"
 #include "RRRandomHUD.h"
 #include "RRRandomMeteor.h"
 #include "RRRandomMovementComponent.h"
 #include "RRRandomOre.h"
+#include "RRRandomPlaneStation.h"
 #include "RRRandomResultsDirector.h"
 #include "RRRandomSessionSubsystem.h"
 #include "RRRandomStarRobot.h"
 #include "RRRandomUltimate.h"
 #include "RRRandomVehicle.h"
 #include "RRRandomWreckage.h"
+#include "RRRandomDiceTown.h"
 #include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/CapsuleComponent.h"
@@ -180,6 +190,11 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 		SprintAction = NewObject<UInputAction>(this, TEXT("IA_Sprint"));
 		SprintAction->ValueType = EInputActionValueType::Boolean;
 	}
+	if (!DescendAction)
+	{
+		DescendAction = NewObject<UInputAction>(this, TEXT("IA_Descend"));
+		DescendAction->ValueType = EInputActionValueType::Boolean;
+	}
 	if (CheatGunActions.IsEmpty())
 	{
 		for (int32 Type = 0; Type < FRRWeapon::GetTypeCount(); ++Type)
@@ -213,6 +228,8 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 	MappingContext->MapKey(MapAction, EKeys::M);
 	MappingContext->MapKey(SprintAction, EKeys::LeftShift);
 	MappingContext->MapKey(SprintAction, EKeys::RightShift);
+	MappingContext->MapKey(DescendAction, EKeys::LeftControl);
+	MappingContext->MapKey(DescendAction, EKeys::RightControl);
 	// Third person: the mouse looks, the right button aims down the sights
 	MappingContext->MapKey(LookAction, EKeys::Mouse2D);
 	MappingContext->MapKey(AimAction, EKeys::RightMouseButton);
@@ -337,6 +354,8 @@ void ARRRandomPlayerController::SetupInputComponent()
 	EnhancedInput->BindAction(AimAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnAimStop);
 	EnhancedInput->BindAction(SprintAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnSprintStart);
 	EnhancedInput->BindAction(SprintAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnSprintStop);
+	EnhancedInput->BindAction(DescendAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnDescendStart);
+	EnhancedInput->BindAction(DescendAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnDescendStop);
 	EnhancedInput->BindAction(FreeCursorAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnFreeCursorStart);
 	EnhancedInput->BindAction(FreeCursorAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnFreeCursorStop);
 	EnhancedInput->BindAction(CheatFlyAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRFly);
@@ -351,6 +370,7 @@ void ARRRandomPlayerController::PlayerTick(float DeltaTime)
 	Super::PlayerTick(DeltaTime);
 
 	UpdateSprint();
+	UpdateWatching(DeltaTime);
 	// Locked in a sword clash in the star robot: W A S D are the clash's keys (the robot can't walk meanwhile)
 	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()); Mine && Mine->IsInRobot() && Mine->GetRobot()->IsClashing() && !IsGameplayInputBlocked())
 	{
@@ -470,6 +490,13 @@ void ARRRandomPlayerController::RRNewGame()
 	// The game mode exists only on the host (or in a solo game)
 	if (ARRRandomGameMode* GameMode = GetWorld()->GetAuthGameMode<ARRRandomGameMode>())
 	{
+		// Defense won: on to the next stage (NEXT STAGE), else the same again
+		const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
+		URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>();
+		if (State && Sessions && State->IsDefense() && State->GetWinningTeam() == 0 && State->GetDefenseStage() < URRRandomSessionSubsystem::DefenseStageCount)
+		{
+			Sessions->SetDefenseStage(State->GetDefenseStage() + 1);
+		}
 		GameMode->RestartMatch();
 	}
 	else
@@ -754,6 +781,61 @@ void ARRRandomPlayerController::ServerCheatWreck_Implementation(FVector_NetQuant
 #endif
 }
 
+FVector ARRRandomPlayerController::GetCheatAimSpot() const
+{
+	FVector ViewFrom;
+	FRotator ViewTurn;
+	GetPlayerViewPoint(ViewFrom, ViewTurn);
+	const FVector ViewTo = ViewFrom + ViewTurn.Vector() * 8000.f;
+	FHitResult Hit;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomCheatAim), false, GetPawn());
+	return GetWorld()->LineTraceSingleByObjectType(Hit, ViewFrom, ViewTo, FCollisionObjectQueryParams(ECC_WorldStatic), Params) ? FVector(Hit.ImpactPoint) : ViewTo;
+}
+
+void ARRRandomPlayerController::RRDig(int32 DigLayers, float Radius)
+{
+	ServerCheatDig(GetCheatAimSpot(), Radius, FMath::Clamp(DigLayers, 1, 3), false);
+}
+
+void ARRRandomPlayerController::RRLava(float Radius)
+{
+	ServerCheatDig(GetCheatAimSpot(), Radius, 3, false);
+}
+
+void ARRRandomPlayerController::RRUndercut(float Radius)
+{
+	ServerCheatDig(GetCheatAimSpot(), Radius, 0, true);
+}
+
+void ARRRandomPlayerController::ServerCheatDig_Implementation(FVector_NetQuantize Spot, float Radius, int32 DigLayers, bool bUndercut)
+{
+#if !UE_BUILD_SHIPPING
+	// Down to the floor under the spot (Dice Town's floor)
+	FVector Floor = Spot;
+	for (TActorIterator<ARRRandomDiceTown> It(GetWorld()); It; ++It)
+	{
+		Floor.Z = It->GetFloorZ();
+		break;
+	}
+	Radius = FMath::Clamp(Radius, 50.f, 3000.f);
+	if (bUndercut)
+	{
+		// Three blocks high over the floor, a square this big round the spot, cut away in rows (capsules along X): the
+		// walls of a building's ground floor, so what stands on them comes down
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, undercutting round %s."), *Floor.ToCompactString());
+		constexpr float Row = 250.f;
+		for (float Across = -Radius; Across <= Radius + 1.f; Across += Row)
+		{
+			const FVector Middle = Floor + FVector(0.f, Across, 150.f);
+			ARRRandomWreckage::Wreck(this, Middle - FVector(Radius, 0.f, 0.f), Middle + FVector(Radius, 0.f, 0.f), 160.f, false, 0);
+		}
+		return;
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, digging %d layers round %s."), DigLayers, *Floor.ToCompactString());
+	ARRRandomWreckage::Wreck(this, Floor, Floor, Radius, false, DigLayers);
+#endif
+}
+
 void ARRRandomPlayerController::RRStudioCam(float Yaw, float Distance, float Height)
 {
 	if (!StudioCam)
@@ -777,6 +859,7 @@ void ARRRandomPlayerController::RRStudioCam(float Yaw, float Distance, float Hei
 
 void ARRRandomPlayerController::RRStudioCamOff()
 {
+	ClearPropBeside();
 	bStudioCam = false;
 	if (GetPawn())
 	{
@@ -1743,4 +1826,506 @@ void ARRRandomPlayerController::CenterMouse()
 		// (the camera turns by the raw mouse movement, so the jump back doesn't turn it)
 		Viewport->SetMouse(Middle.X, Middle.Y);
 	}
+}
+
+void ARRRandomPlayerController::OnDescendStart()
+{
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		RandomCharacter->SetPlaneDescend(!IsGameplayInputBlocked());
+	}
+}
+
+void ARRRandomPlayerController::OnDescendStop()
+{
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		RandomCharacter->SetPlaneDescend(false);
+	}
+}
+
+void ARRRandomPlayerController::RRCannon(int32 Index)
+{
+	ServerCheatCannon(Index);
+}
+
+void ARRRandomPlayerController::ServerCheatCannon_Implementation(int32 Index)
+{
+#if !UE_BUILD_SHIPPING
+	ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	if (!RandomCharacter || !RandomCharacter->IsAlive() || RandomCharacter->IsRidingCannon())
+	{
+		return;
+	}
+	for (TActorIterator<ARRRandomCannon> It(GetWorld()); It; ++It)
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: cannon %d at %s, pad at %s."), It->GetIndex(), *It->GetActorLocation().ToString(), *It->GetPadLocation().ToString());
+		if (It->GetIndex() != Index)
+		{
+			continue;
+		}
+		// Off whatever it rides, just behind the cannon (away from its pad), facing it
+		RandomCharacter->LeaveVehicle();
+		const FVector Back = -It->GetActorForwardVector();
+		const FVector Spot = It->GetActorLocation() + Back * 200.f + FVector(0.f, 0.f, RandomCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 5.f);
+		RandomCharacter->TeleportTo(Spot, FRotator(0.f, It->GetActorRotation().Yaw, 0.f));
+		ClientMessage(FString::Printf(TEXT("Cheat: cannon %d (press F)"), Index));
+	}
+#endif
+}
+
+void ARRRandomPlayerController::RRPlane(int32 Face)
+{
+	ServerCheatPlane(FMath::Clamp(Face, 1, 6));
+}
+
+void ARRRandomPlayerController::ServerCheatPlane_Implementation(int32 Face)
+{
+#if !UE_BUILD_SHIPPING
+	ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
+	if (!RandomCharacter)
+	{
+		return;
+	}
+	// Off whatever it rides first
+	RandomCharacter->LeaveVehicle();
+	if (const ARRRandomVehicle* Plane = ARRRandomPlaneStation::SpawnPlaneFor(RandomCharacter, Face, nullptr))
+	{
+		ClientMessage(FString::Printf(TEXT("Cheat: %s"), Plane->GetHandling().Name));
+	}
+#endif
+}
+
+void ARRRandomPlayerController::RRDefer(const FString& Command)
+{
+	const FString Line = Command.Replace(TEXT("+"), TEXT(" "));
+	GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this, Line]()
+	{
+		ConsoleCommand(Line);
+	}));
+}
+
+void ARRRandomPlayerController::RRPlaneDown(int32 bHold)
+{
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		RandomCharacter->SetPlaneDescend(bHold != 0);
+	}
+}
+
+void ARRRandomPlayerController::ClientDefenseCleared_Implementation(int32 Stage)
+{
+	StageOpened = 0;
+	if (URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>())
+	{
+		if (Sessions->RecordStageCleared(Stage))
+		{
+			StageOpened = Stage + 1;
+		}
+	}
+}
+
+void ARRRandomPlayerController::RRWave(int32 Wave)
+{
+	ServerCheatWave(Wave);
+}
+
+void ARRRandomPlayerController::ServerCheatWave_Implementation(int32 Wave)
+{
+#if !UE_BUILD_SHIPPING
+	if (ARRRandomDefenseDirector* Director = ARRRandomDefenseDirector::Get(this))
+	{
+		Director->CheatSkipToWave(Wave);
+	}
+#endif
+}
+
+void ARRRandomPlayerController::RRClearWave()
+{
+	ServerCheatClearWave();
+}
+
+void ARRRandomPlayerController::ServerCheatClearWave_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+	if (ARRRandomDefenseDirector* Director = ARRRandomDefenseDirector::Get(this))
+	{
+		Director->CheatClearWave();
+	}
+#endif
+}
+
+void ARRRandomPlayerController::RRUnlockStages()
+{
+#if !UE_BUILD_SHIPPING
+	if (URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>())
+	{
+		Sessions->UnlockAllStages();
+		ClientMessage(TEXT("Every defense stage is open."));
+	}
+#endif
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The battle royale (round 92)
+
+void ARRRandomPlayerController::ClientTeamOut_Implementation(int32 Place, int32 Teams)
+{
+	TeamOutPlace = Place;
+	TeamOutOf = Teams;
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: my team is out, #%d of %d."), Place, Teams);
+}
+
+void ARRRandomPlayerController::UpdateWatching(float DeltaTime)
+{
+	if (!IsLocalController() || !ARRRandomGameState::IsBattleRoyale(this))
+	{
+		return;
+	}
+	const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	// Playing (or the results are up): my own view
+	if (!Mine || Mine->IsAlive() || ARRRandomGameState::IsMatchOver(this))
+	{
+		if (Watched.IsValid())
+		{
+			Watched = nullptr;
+			if (Mine)
+			{
+				SetViewTarget(const_cast<ARRRandomCharacter*>(Mine));
+			}
+		}
+		WatchTimer = 2.5f;
+		return;
+	}
+	// Out: a moment on my own fall, then a teammate still standing (the nearest one standing if none), again when that one goes
+	WatchTimer -= DeltaTime;
+	if (WatchTimer > 0.f || (Watched.IsValid() && Watched->IsAlive()))
+	{
+		return;
+	}
+	WatchTimer = 1.f;
+	ARRRandomCharacter* Best = nullptr;
+	float BestScore = UE_BIG_NUMBER;
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		if (!It->IsAlive() || It->IsDecoy() || *It == Mine)
+		{
+			continue;
+		}
+		const float Score = FVector::Dist(It->GetActorLocation(), Mine->GetActorLocation()) + (It->GetTeam() == Mine->GetTeam() ? 0.f : 1000000.f);
+		if (Score < BestScore)
+		{
+			BestScore = Score;
+			Best = *It;
+		}
+	}
+	if (Best && Best != Watched.Get())
+	{
+		Watched = Best;
+		SetViewTargetWithBlend(Best, 0.6f);
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: out; watching %s (team %d)."), *Best->GetName(), Best->GetTeam());
+	}
+}
+
+void ARRRandomPlayerController::RRZone()
+{
+	ServerCheatZone();
+}
+
+void ARRRandomPlayerController::ServerCheatZone_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+	if (ARRRandomGameMode* Mode = GetWorld()->GetAuthGameMode<ARRRandomGameMode>())
+	{
+		Mode->CheatZone();
+	}
+#endif
+}
+
+void ARRRandomPlayerController::RROracle(int32 bOnMe)
+{
+	ServerCheatOracle(bOnMe != 0);
+}
+
+void ARRRandomPlayerController::ServerCheatOracle_Implementation(bool bOnMe)
+{
+#if !UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, the oracle dice roll now%s."), bOnMe ? TEXT(" (on me)") : TEXT(""));
+	ARRRandomOracleStorm::RollNext(this, bOnMe ? Cast<ARRRandomCharacter>(GetPawn()) : nullptr);
+#endif
+}
+
+void ARRRandomPlayerController::RRRingEdge(float Inside)
+{
+	ServerCheatRingEdge(Inside);
+}
+
+void ARRRandomPlayerController::ServerCheatRingEdge_Implementation(float Inside)
+{
+#if !UE_BUILD_SHIPPING
+	ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	const ARRRandomBattleZone* Zone = ARRRandomBattleZone::Get(this);
+	const ARRRandomBattleMap* Battle = ARRRandomBattleMap::Get(this);
+	if (!Mine || !Zone || !Battle || Zone->GetPhase() <= 0)
+	{
+		return;
+	}
+	// Out from the ring's middle the way I am from it, a little inside its edge, on open ground
+	const FVector2D Center = Zone->GetCenter();
+	FVector2D Out = FVector2D(Mine->GetActorLocation()) - Center;
+	Out = Out.IsNearlyZero() ? FVector2D(1.f, 0.f) : Out.GetSafeNormal();
+	FVector Spot;
+	if (!Battle->FindOpenGround(Center + Out * FMath::Max(0.f, Zone->GetRadius() - Inside), 150.f, 2500.f, Spot))
+	{
+		ClientMessage(TEXT("No open ground there."));
+		return;
+	}
+	const FRotator Facing(0.f, FMath::RadiansToDegrees(FMath::Atan2(Out.Y, Out.X)), 0.f);
+	Mine->TeleportTo(Spot + FVector(0.f, 0.f, Mine->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 5.f), Facing, false, true);
+	ClientSetRotation(Facing);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, %s to the ring's edge at %s (ring %.0f)."), *Mine->GetName(), *Spot.ToString(), Zone->GetRadius());
+#endif
+}
+
+void ARRRandomPlayerController::RRGoBuilding(int32 Index, int32 Floor, float Yaw)
+{
+	ServerCheatGoBuilding(Index, Floor, Yaw);
+}
+
+void ARRRandomPlayerController::ServerCheatGoBuilding_Implementation(int32 Index, int32 Floor, float Yaw)
+{
+#if !UE_BUILD_SHIPPING
+	ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	TArray<FVector> Spots;
+	for (TActorIterator<ARRRandomDiceTown> It(GetWorld()); It; ++It)
+	{
+		Spots.Append(It->GetBigBuildingSpots());
+	}
+	if (!Mine || Spots.Num() == 0)
+	{
+		ClientMessage(TEXT("No big buildings here."));
+		return;
+	}
+	const int32 Which = (Index % Spots.Num() + Spots.Num()) % Spots.Num();
+	const FVector Spot = Spots[Which] + FVector(0.f, 0.f, FMath::Clamp(Floor, 0, 2) * 600.f + Mine->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 10.f);
+	const FRotator Facing = Yaw >= 0.f ? FRotator(0.f, Yaw, 0.f) : Mine->GetActorRotation();
+	Mine->TeleportTo(Spot, Facing, false, true);
+	if (Yaw >= 0.f)
+	{
+		ClientSetRotation(Facing);
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, %s to big building %d of %d, floor %d, at %s."), *Mine->GetName(), Which, Spots.Num(), Floor, *Spot.ToString());
+#endif
+}
+
+void ARRRandomPlayerController::RRGoCover(int32 Model)
+{
+	ServerCheatGoCover(Model);
+}
+
+void ARRRandomPlayerController::ServerCheatGoCover_Implementation(int32 Model)
+{
+#if !UE_BUILD_SHIPPING
+	ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	for (TActorIterator<ARRRandomDiceTown> It(GetWorld()); It && Mine; ++It)
+	{
+		FVector Where;
+		float FrontYaw = 0.f;
+		if (It->GetCoverModelSpot(Model, Where, FrontYaw))
+		{
+			const FVector Front = FRotator(0.f, FrontYaw, 0.f).Vector();
+			const FRotator Facing(0.f, FrontYaw + 180.f, 0.f);
+			Mine->TeleportTo(Where + Front * 350.f + FVector(0.f, 0.f, Mine->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 10.f), Facing, false, true);
+			ClientSetRotation(Facing);
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, %s in front of cover model %d at %s (its front %.0f)."), *Mine->GetName(), Model, *Where.ToString(), FrontYaw);
+			return;
+		}
+	}
+	ClientMessage(TEXT("No such cover model."));
+#endif
+}
+
+void ARRRandomPlayerController::ClearPropBeside()
+{
+	for (AActor* Actor : PropBesideActors)
+	{
+		if (IsValid(Actor))
+		{
+			Actor->Destroy();
+		}
+	}
+	PropBesideActors.Reset();
+}
+
+void ARRRandomPlayerController::RRPropBeside(int32 Model, int32 Instance)
+{
+#if !UE_BUILD_SHIPPING
+	UWorld* World = GetWorld();
+	ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	if (!World || !Mine || !IsLocalController())
+	{
+		return;
+	}
+	ClearPropBeside();
+	bStudioCam = false;
+
+	// Every instance of every model, by its size in the world (the mesh's box times the instance's scale), for the log;
+	// and the one to show
+	const UInstancedStaticMeshComponent* Shown = nullptr;
+	FTransform ShownTransform;
+	float ShownFrontOffset = 0.f;
+	int32 Seen = 0;
+	for (int32 Kind = 1; Kind < ARRRandomDiceTown::GetCoverModelKindCount(); ++Kind)
+	{
+		int32 Count = 0;
+		FVector Lo(TNumericLimits<float>::Max()), Hi(0.f), Natural(0.f);
+		FString Name;
+		for (TActorIterator<ARRRandomDiceTown> It(World); It; ++It)
+		{
+			const UInstancedStaticMeshComponent* Instances = It->GetCoverModelInstances(Kind);
+			if (!Instances || !Instances->GetStaticMesh())
+			{
+				continue;
+			}
+			Natural = Instances->GetStaticMesh()->GetBoundingBox().GetSize();
+			Name = Instances->GetStaticMesh()->GetName();
+			for (int32 i = 0; i < Instances->GetInstanceCount(); ++i)
+			{
+				FTransform Transform;
+				Instances->GetInstanceTransform(i, Transform, true);
+				const FVector Size = Natural * Transform.GetScale3D().GetAbs();
+				Lo = Lo.ComponentMin(Size);
+				Hi = Hi.ComponentMax(Size);
+				if (Kind == Model && Seen++ == Instance)
+				{
+					Shown = Instances;
+					ShownTransform = Transform;
+					FVector Where;
+					float FrontYaw = 0.f;
+					It->GetCoverModelSpot(Kind, Where, FrontYaw);
+					FTransform First;
+					Instances->GetInstanceTransform(0, First, true);
+					ShownFrontOffset = FrontYaw - First.Rotator().Yaw;
+				}
+				if (Kind == Model)
+				{
+					UE_LOG(LogTemp, Log, TEXT("PROPSIZE %d %s instance %d: %.0f x %.0f x %.0f (across x deep x high)"), Kind, *Name, Count, Size.X, Size.Y, Size.Z);
+				}
+				++Count;
+			}
+		}
+		if (Count > 0)
+		{
+			UE_LOG(LogTemp, Log, TEXT("PROPSIZE %d %s: %d placed, own %.0f x %.0f x %.0f, placed across %.0f-%.0f deep %.0f-%.0f high %.0f-%.0f"),
+				Kind, *Name, Count, Natural.X, Natural.Y, Natural.Z, Lo.X, Hi.X, Lo.Y, Hi.Y, Lo.Z, Hi.Z);
+		}
+	}
+	const float FoxHigh = Mine->GetMesh() ? Mine->GetMesh()->Bounds.BoxExtent.Z * 2.f : 0.f;
+	UE_LOG(LogTemp, Log, TEXT("PROPSIZE fox: mesh %.0f high, capsule %.0f high, %.0f across"), FoxHigh,
+		Mine->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() * 2.f, Mine->GetCapsuleComponent()->GetScaledCapsuleRadius() * 2.f);
+	if (!Shown)
+	{
+		ClientMessage(TEXT("No such cover model instance."));
+		return;
+	}
+
+	// A bare floor 60 m over my spot; looking along +X, my animal friend on the left facing the camera, then the model as
+	// placed, then the model at its own proportions as high
+	const FVector Floor = Mine->GetActorLocation() + FVector(0.f, 0.f, 6000.f);
+	UStaticMesh* Mesh = Shown->GetStaticMesh();
+	const FVector Placed = ShownTransform.GetScale3D().GetAbs();
+	const FVector Even(Placed.Z);
+	FActorSpawnParameters Params;
+	Params.ObjectFlags |= RF_Transient;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	auto Spawn = [&](UStaticMesh* Shape, const FVector& Scale, float Yaw) -> AStaticMeshActor*
+	{
+		AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), FTransform(Floor), Params);
+		if (Actor)
+		{
+			Actor->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+			Actor->GetStaticMeshComponent()->SetStaticMesh(Shape);
+			Actor->SetActorRotation(FRotator(0.f, Yaw, 0.f));
+			Actor->SetActorScale3D(Scale);
+			PropBesideActors.Add(Actor);
+		}
+		return Actor;
+	};
+	// Stands a model with the middle of its box at Across (to the camera's right) and its bottom on the floor
+	auto StandAt = [&](AActor* Actor, float Across)
+	{
+		const FBox Box = Actor->GetComponentsBoundingBox(true);
+		Actor->AddActorWorldOffset(FVector(Floor.X - Box.GetCenter().X, Floor.Y + Across - Box.GetCenter().Y, Floor.Z - Box.Min.Z));
+		return Box.GetSize();
+	};
+	// The front (ShownFrontOffset from the mesh's X) toward the camera (-X)
+	const float FacingCamera = 180.f - ShownFrontOffset;
+	constexpr float Gap = 90.f;
+	constexpr float FoxHalf = 50.f;
+	AStaticMeshActor* AsPlaced = Spawn(Mesh, Placed, FacingCamera);
+	AStaticMeshActor* AsMade = Spawn(Mesh, Even, FacingCamera);
+	if (!AsPlaced || !AsMade)
+	{
+		return;
+	}
+	const float PlacedWide = AsPlaced->GetComponentsBoundingBox(true).GetSize().Y;
+	const float MadeWide = AsMade->GetComponentsBoundingBox(true).GetSize().Y;
+	const float PlacedAt = FoxHalf + Gap + PlacedWide * 0.5f;
+	const float MadeAt = PlacedAt + PlacedWide * 0.5f + Gap * 1.5f + MadeWide * 0.5f;
+	const FVector PlacedSize = StandAt(AsPlaced, PlacedAt);
+	const FVector MadeSize = StandAt(AsMade, MadeAt);
+	const float Right = MadeAt + MadeWide * 0.5f;
+	const float High = FMath::Max3(FoxHigh, float(PlacedSize.Z), float(MadeSize.Z));
+	if (UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")))
+	{
+		const float Wide = Right + FoxHalf + 2000.f;
+		if (AStaticMeshActor* Slab = Spawn(Cube, FVector(30.f, Wide / 100.f, 0.2f), 0.f))
+		{
+			Slab->SetActorLocation(Floor + FVector(0.f, (Right - FoxHalf) * 0.5f, -10.f));
+		}
+	}
+	Mine->TeleportTo(Floor + FVector(0.f, 0.f, Mine->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 5.f), FRotator(0.f, 180.f, 0.f), false, true);
+	SetControlRotation(FRotator(0.f, 180.f, 0.f));
+
+	// The camera: straight on, narrow (40 degrees) so the sizes compare fairly, everything in frame
+	ACameraActor* Camera = World->SpawnActor<ACameraActor>(ACameraActor::StaticClass(), FTransform::Identity, Params);
+	if (Camera)
+	{
+		constexpr float Fov = 40.f;
+		Camera->GetCameraComponent()->SetFieldOfView(Fov);
+		Camera->GetCameraComponent()->SetConstraintAspectRatio(false);
+		const float HalfTan = FMath::Tan(FMath::DegreesToRadians(Fov * 0.5f));
+		const float Middle = (Right - FoxHalf) * 0.5f;
+		const float Span = Right + FoxHalf;
+		const float Distance = FMath::Max(Span * 0.5f * 1.15f / HalfTan, High * 0.5f * 1.3f / (HalfTan * 9.f / 16.f));
+		const FVector Target = Floor + FVector(0.f, Middle, High * 0.5f);
+		Camera->SetActorLocationAndRotation(Target - FVector(Distance, 0.f, 0.f), FRotator::ZeroRotator);
+		PropBesideActors.Add(Camera);
+		SetViewTarget(Camera);
+	}
+	UE_LOG(LogTemp, Log, TEXT("PROPSIZE shown %d instance %d: as placed %.0f x %.0f x %.0f, own proportions %.0f x %.0f x %.0f, fox %.0f high"),
+		Model, Instance, PlacedSize.Y, PlacedSize.X, PlacedSize.Z, MadeSize.Y, MadeSize.X, MadeSize.Z, FoxHigh);
+#endif
+}
+
+void ARRRandomPlayerController::RRGoTile(int32 X, int32 Y)
+{
+	ServerCheatGoTile(X, Y);
+}
+
+void ARRRandomPlayerController::ServerCheatGoTile_Implementation(int32 X, int32 Y)
+{
+#if !UE_BUILD_SHIPPING
+	ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	const ARRRandomBattleMap* Battle = ARRRandomBattleMap::Get(this);
+	const ARRRandomDiceTown* Tile = Battle ? Battle->GetTile(X, Y) : nullptr;
+	FVector Spot;
+	if (!Mine || !Tile || !Battle->FindOpenGround(FVector2D(Tile->GetActorLocation()), 150.f, 4000.f, Spot))
+	{
+		ClientMessage(TEXT("No such tile, or no open ground on it."));
+		return;
+	}
+	Mine->TeleportTo(Spot + FVector(0.f, 0.f, Mine->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 5.f), Mine->GetActorRotation(), false, true);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, %s to tile (%d, %d) at %s."), *Mine->GetName(), X, Y, *Spot.ToString());
+#endif
 }

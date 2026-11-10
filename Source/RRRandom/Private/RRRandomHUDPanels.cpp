@@ -1,5 +1,7 @@
 // ARRRandomHUD, continued: the start countdown, the teammates' cards and the minimap.
 #include "RRRandomHUD.h"
+#include "RRRandomBattleRoyale.h"
+#include "RRRandomCannon.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomCover.h"
 #include "RRRandomDiceBuffComponent.h"
@@ -7,9 +9,11 @@
 #include "RRRandomDiceTown.h"
 #include "RRRandomFogOfWar.h"
 #include "RRRandomGameState.h"
+#include "RRRandomOracle.h"
 #include "RRRandomIsland.h"
 #include "RRRandomMeteor.h"
 #include "RRRandomOre.h"
+#include "RRRandomPlaneStation.h"
 #include "RRRandomPlayerController.h"
 #include "RRRandomStarRobot.h"
 #include "RRRandomUIStyle.h"
@@ -42,7 +46,11 @@ namespace
 
 	// Minimap: texture pixels per side, how often the fog shading is redone, the full-screen map's share of the screen,
 	// how far fog veils never-seen and not-seen-now places, and the marker size on the corner map (scaled up full screen)
-	constexpr int32 MapPixels = 288;
+	constexpr int32 TownMapPixels = 288;
+	// Round 92: the battle map's minimap (it is four times as wide as Dice Town): more pixels, and the corner map shows only
+	// this far round me (the full screen map all of it)
+	constexpr int32 BattleMapPixels = 768;
+	constexpr float BattleCornerHalf = 9000.f;
 	constexpr float MapRefreshInterval = 0.12f;
 	constexpr float ExpandedShare = 0.86f;
 	constexpr float UnexploredFog = 0.82f;
@@ -295,6 +303,12 @@ FVector2D ARRRandomHUD::MapPixelToWorld(int32 X, int32 Y) const
 
 bool ARRRandomHUD::BuildMinimapBase()
 {
+	// The battle map (round 92): its own pixels, tile by tile
+	if (const ARRRandomBattleMap* Battle = ARRRandomBattleMap::Get(this))
+	{
+		return Battle->IsBuilt() && BuildBattleMinimap(nullptr);
+	}
+	MapPixels = TownMapPixels;
 	TActorIterator<ARRRandomIsland> IslandIt(GetWorld());
 	const ARRRandomIsland* Island = IslandIt && IslandIt->TypeRows.Num() > 0 ? *IslandIt : nullptr;
 	// The third person mode's map instead: it has no cells, so it says what each spot shows
@@ -434,6 +448,33 @@ void ARRRandomHUD::RefreshMinimap()
 		MapTexture->AddressY = TA_Clamp;
 		MapTexture->UpdateResource();
 	}
+	else if (const ARRRandomBattleMap* Battle = ARRRandomBattleMap::Get(this))
+	{
+		// The battle map (round 92): no fog of war, so the texture changes only where a tile was smashed or mended: those
+		// tiles' pixels again, then one upload
+		TArray<const ARRRandomDiceTown*> Changed;
+		const TArray<TWeakObjectPtr<ARRRandomDiceTown>>& Tiles = Battle->GetTiles();
+		MapTileVersions.SetNum(Tiles.Num());
+		for (int32 Index = 0; Index < Tiles.Num(); ++Index)
+		{
+			const ARRRandomDiceTown* Tile = Tiles[Index].Get();
+			if (Tile && Tile->IsBuilt() && Tile->GetMapVersion() != MapTileVersions[Index])
+			{
+				MapTileVersions[Index] = Tile->GetMapVersion();
+				Changed.Add(Tile);
+			}
+		}
+		if (Changed.Num() > 0)
+		{
+			BuildBattleMinimap(&Changed);
+			bMapUploaded = false;
+		}
+		if (bMapUploaded)
+		{
+			return;
+		}
+		bMapUploaded = true;
+	}
 	else
 	{
 		// Cover reaches clients a little after the island
@@ -444,6 +485,13 @@ void ARRRandomHUD::RefreshMinimap()
 		}
 		if (Covers != MapCoverCount)
 		{
+			BuildMinimapBase();
+		}
+		// Dice Town's holes, what fell and its lava (round 89)
+		TActorIterator<ARRRandomDiceTown> TownIt(GetWorld());
+		if (TownIt && TownIt->IsBuilt() && TownIt->GetMapVersion() != MapTownVersion)
+		{
+			MapTownVersion = TownIt->GetMapVersion();
 			BuildMinimapBase();
 		}
 	}
@@ -506,15 +554,36 @@ void ARRRandomHUD::DrawMinimap(const ARRRandomCharacter* Viewer)
 		RRUI::DrawTextureRounded(Canvas, MapTexture, Rect, 20.f * S, FLinearColor::White);
 		const float Size = 11.f * S;
 		RRUI::DrawGlowText(Canvas, TEXT("MAP · M OR CLICK TO CLOSE"), FVector2D(Rect.Min.X, Rect.Min.Y - 12.f * S - Size * 1.36f), Size, EWeight::ExtraBold, RRUI::Ink, Size * 0.12f);
+		MapView = MapBounds;
 		DrawMapMarkers(Rect, Viewer);
 		return;
 	}
 
-	// The corner map is round: a faint white halo, the map in the circle, a white rim
+	// The corner map is round: a faint white halo, the map in the circle, a white rim. On the battle map (round 92) it shows
+	// a window of the map round me (or whoever I watch), the full screen map all of it
 	const FVector2D Center = MinimapRect.GetCenter();
 	const float Radius = MinimapRect.GetSize().X * 0.5f;
 	RRUI::DrawRing(Canvas, Center, Radius + 4.f * S, 6.f * S, FLinearColor(1.f, 1.f, 1.f, 0.35f));
-	RRUI::DrawTextureRounded(Canvas, MapTexture, MinimapRect, Radius, FLinearColor(1.f, 1.f, 1.f, MinimapOpacity));
+	MapView = MapBounds;
+	const AActor* Focus = Viewer;
+	if (const ARRRandomPlayerController* Watcher = Cast<ARRRandomPlayerController>(PlayerOwner); Watcher && Watcher->GetWatched())
+	{
+		Focus = Watcher->GetWatched();
+	}
+	if (ARRRandomBattleMap::Get(this) && Focus)
+	{
+		const FVector2D Here(Focus->GetActorLocation().X, Focus->GetActorLocation().Y);
+		MapView = FBox2D(Here - FVector2D(BattleCornerHalf), Here + FVector2D(BattleCornerHalf));
+		const FVector2D Area = MapBounds.GetSize();
+		// Texture U runs with world +Y, V down with world -X
+		const FBox2D UVs(FVector2D((MapView.Min.Y - MapBounds.Min.Y) / Area.Y, (MapBounds.Max.X - MapView.Max.X) / Area.X),
+			FVector2D((MapView.Max.Y - MapBounds.Min.Y) / Area.Y, (MapBounds.Max.X - MapView.Min.X) / Area.X));
+		RRUI::DrawTextureRounded(Canvas, MapTexture, MinimapRect, Radius, FLinearColor(1.f, 1.f, 1.f, MinimapOpacity), UVs);
+	}
+	else
+	{
+		RRUI::DrawTextureRounded(Canvas, MapTexture, MinimapRect, Radius, FLinearColor(1.f, 1.f, 1.f, MinimapOpacity));
+	}
 	RRUI::DrawRing(Canvas, Center, Radius, 2.f * S, RRUI::White);
 	DrawMapMarkers(MinimapRect, Viewer);
 }
@@ -523,13 +592,15 @@ void ARRRandomHUD::DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* 
 {
 	const bool bThirdPersonGame = ARRRandomGameState::IsThirdPersonMode(this);
 	const FVector2D Size = Rect.GetSize();
-	const FVector2D Area = MapBounds.GetSize();
+	// (the world square shown: the whole map, or the battle map's window round me)
+	const FBox2D View = MapView.bIsValid ? MapView : MapBounds;
+	const FVector2D Area = View.GetSize();
 	const float Scale = Size.X / MinimapSize;
 	const FVector2D Center = Rect.GetCenter();
 	const float Edge = Size.X * 0.5f - MarkerRadius * Scale;
 	auto ToScreen = [&](const FVector& World)
 	{
-		const FVector2D Point(Rect.Min.X + (World.Y - MapBounds.Min.Y) / Area.Y * Size.X, Rect.Min.Y + (MapBounds.Max.X - World.X) / Area.X * Size.Y);
+		const FVector2D Point(Rect.Min.X + (World.Y - View.Min.Y) / Area.Y * Size.X, Rect.Min.Y + (View.Max.X - World.X) / Area.X * Size.Y);
 		if (!bMapExpanded)
 		{
 			// Kept inside the round corner map
@@ -542,6 +613,15 @@ void ARRRandomHUD::DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* 
 	// Teammates always; opponents only while the team sees them (as on screen and for the bots)
 	const int32 Team = Viewer ? Viewer->GetTeam() : INDEX_NONE;
 	const float Radius = MarkerRadius * Scale;
+
+	// The battle royale's ring of safe ground (round 92), under everything else
+	if (ARRRandomGameState::IsBattleRoyale(this))
+	{
+		DrawZoneOnMap(Rect, [&](const FVector& World)
+		{
+			return FVector2D(Rect.Min.X + (World.Y - View.Min.Y) / Area.Y * Size.X, Rect.Min.Y + (View.Max.X - World.X) / Area.X * Size.Y);
+		});
+	}
 
 	// Meteor Rush: where meteors are coming down (a pulsing ring), the ore lying about (small dots in its color) and
 	// anyone carrying a crystal, seen or not (a gold ring)
@@ -591,6 +671,55 @@ void ARRRandomHUD::DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* 
 				}
 			}
 		}
+	}
+	// The human cannons (round 88): each a gold dot with a dashed line out to its pad, a gold ring
+	for (TActorIterator<ARRRandomCannon> It(GetWorld()); It; ++It)
+	{
+		const FVector2D From = ToScreen(It->GetActorLocation());
+		const FVector2D To = ToScreen(It->GetPadLocation());
+		const FVector2D Way = To - From;
+		const float Length = Way.Size();
+		const float Dash = 4.f * Scale;
+		for (float Along = Dash; Along + Dash < Length; Along += Dash * 2.f)
+		{
+			const FVector2D A = From + Way * (Along / Length);
+			const FVector2D B = From + Way * ((Along + Dash) / Length);
+			DrawLine(A.X, A.Y, B.X, B.Y, RRUI::WithAlpha(RRUI::Gold, 0.8f), 1.5f * Scale);
+		}
+		RRUI::DrawRing(Canvas, To, 4.5f * Scale, 2.f * Scale, RRUI::Gold);
+		RRUI::DrawDisc(Canvas, From, 4.f * Scale, RRUI::White);
+		RRUI::DrawDisc(Canvas, From, 2.8f * Scale, RRUI::Gold);
+	}
+	// The plane stations: a sky square with a white rim (faded while charging or its plane is out)
+	for (TActorIterator<ARRRandomPlaneStation> It(GetWorld()); It; ++It)
+	{
+		const FVector2D Point = ToScreen(It->GetActorLocation());
+		const float Half = 4.5f * Scale;
+		const float Alpha = It->GetPlane() || It->GetRechargeRemaining() > 0.f ? 0.45f : 1.f;
+		RRUI::DrawRounded(Canvas, FBox2D(Point - FVector2D(Half + 1.5f * Scale), Point + FVector2D(Half + 1.5f * Scale)), 2.f * Scale, RRUI::WithAlpha(RRUI::White, Alpha));
+		RRUI::DrawRounded(Canvas, FBox2D(Point - FVector2D(Half), Point + FVector2D(Half)), 1.5f * Scale, RRUI::WithAlpha(RRUI::SkyDeep, Alpha));
+	}
+	// The planes in the air: a little arrowhead the way it flies, in its pilot's team color (opponents' only as their
+	// pilots would be shown)
+	for (TActorIterator<ARRRandomVehicle> It(GetWorld()); It; ++It)
+	{
+		const ARRRandomCharacter* Pilot = It->GetRider();
+		if (!It->IsPlane() || !Pilot || Pilot == Viewer)
+		{
+			continue;
+		}
+		const bool bAlly = Pilot->GetTeam() == Team;
+		if (!bAlly && (bThirdPersonGame || !Pilot->IsNoticedByTeam(Team)))
+		{
+			continue;
+		}
+		const FVector2D Point = ToScreen(It->GetActorLocation());
+		const float Yaw = FMath::DegreesToRadians(It->GetActorRotation().Yaw);
+		const FVector2D Ahead(FMath::Sin(Yaw), -FMath::Cos(Yaw));
+		const FVector2D Side(-Ahead.Y, Ahead.X);
+		const float Length = Radius * 2.2f;
+		RRUI::DrawTriangle(Canvas, Point + Ahead * (Length + 2.f * Scale), Point - Ahead * Length * 0.7f + Side * (Length + 2.f * Scale), Point - Ahead * Length * 0.7f - Side * (Length + 2.f * Scale), RRUI::White);
+		RRUI::DrawTriangle(Canvas, Point + Ahead * Length, Point - Ahead * Length * 0.6f + Side * Length, Point - Ahead * Length * 0.6f - Side * Length, bAlly ? RRUI::SkyDeep : RRUI::PinkDeep);
 	}
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
 	{
@@ -658,4 +787,149 @@ bool ARRRandomHUD::HandleMapClick(const FVector2D& ScreenPoint)
 bool ARRRandomHUD::IsPointOnMap(const FVector2D& ScreenPoint) const
 {
 	return bMapExpanded || IsOnCornerMap(ScreenPoint);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The battle map's minimap (round 92)
+
+bool ARRRandomHUD::BuildBattleMinimap(const TArray<const ARRRandomDiceTown*>* OnlyTiles)
+{
+	const ARRRandomBattleMap* Battle = ARRRandomBattleMap::Get(this);
+	if (!Battle)
+	{
+		return false;
+	}
+	MapPixels = BattleMapPixels;
+	MapBounds = Battle->GetMapBounds();
+	const bool bAll = !OnlyTiles || MapBase.Num() != MapPixels * MapPixels;
+	if (bAll)
+	{
+		MapBase.Init(WaterColor, MapPixels * MapPixels);
+	}
+	// The pixels to make again: all of them, or those over the tiles that changed (a pixel more round them, for the shading)
+	const FVector2D Size = MapBounds.GetSize();
+	auto PixelBox = [&](const FBox2D& World)
+	{
+		const int32 X0 = FMath::Clamp(FMath::FloorToInt((World.Min.Y - MapBounds.Min.Y) / Size.Y * MapPixels) - 1, 0, MapPixels - 1);
+		const int32 X1 = FMath::Clamp(FMath::CeilToInt((World.Max.Y - MapBounds.Min.Y) / Size.Y * MapPixels) + 1, 0, MapPixels - 1);
+		const int32 Y0 = FMath::Clamp(FMath::FloorToInt((MapBounds.Max.X - World.Max.X) / Size.X * MapPixels) - 1, 0, MapPixels - 1);
+		const int32 Y1 = FMath::Clamp(FMath::CeilToInt((MapBounds.Max.X - World.Min.X) / Size.X * MapPixels) + 1, 0, MapPixels - 1);
+		return FIntRect(X0, Y0, X1, Y1);
+	};
+	TArray<FIntRect> Regions;
+	if (bAll)
+	{
+		Regions.Add(FIntRect(0, 0, MapPixels - 1, MapPixels - 1));
+	}
+	else
+	{
+		for (const ARRRandomDiceTown* Tile : *OnlyTiles)
+		{
+			Regions.Add(PixelBox(Tile->GetGroundBounds()));
+		}
+	}
+	for (const FIntRect& Region : Regions)
+	{
+		// Each pixel's color and height from the tile under it; then a step down the screen (toward the camera) shades the
+		// pixel over the drop, as on the town's map
+		const int32 W = Region.Max.X - Region.Min.X + 2;
+		const int32 H = Region.Max.Y - Region.Min.Y + 2;
+		TArray<int32> Heights;
+		Heights.Init(-1, W * H);
+		for (int32 Y = Region.Min.Y; Y <= FMath::Min(Region.Max.Y + 1, MapPixels - 1); ++Y)
+		{
+			for (int32 X = Region.Min.X; X <= Region.Max.X; ++X)
+			{
+				const FVector2D World = MapPixelToWorld(X, Y);
+				const ARRRandomDiceTown* Tile = Battle->GetTileAt(World);
+				int32 Levels = -1;
+				const FColor Color = Tile ? Tile->GetMapColor(World, Levels) : WaterColor;
+				if (Y <= Region.Max.Y)
+				{
+					MapBase[Y * MapPixels + X] = Color;
+				}
+				Heights[(Y - Region.Min.Y) * W + (X - Region.Min.X)] = Levels;
+			}
+		}
+		for (int32 Y = Region.Min.Y; Y <= Region.Max.Y && Y < MapPixels - 1; ++Y)
+		{
+			for (int32 X = Region.Min.X; X <= Region.Max.X; ++X)
+			{
+				if (Heights[(Y - Region.Min.Y) * W + (X - Region.Min.X)] > Heights[(Y + 1 - Region.Min.Y) * W + (X - Region.Min.X)])
+				{
+					MapBase[Y * MapPixels + X] = Shaded(MapBase[Y * MapPixels + X], CliffShade);
+				}
+			}
+		}
+	}
+	if (bAll)
+	{
+		const TArray<TWeakObjectPtr<ARRRandomDiceTown>>& Tiles = Battle->GetTiles();
+		MapTileVersions.SetNum(Tiles.Num());
+		for (int32 Index = 0; Index < Tiles.Num(); ++Index)
+		{
+			MapTileVersions[Index] = Tiles[Index].IsValid() ? Tiles[Index]->GetMapVersion() : 0;
+		}
+	}
+	bMapUploaded = false;
+	return true;
+}
+
+void ARRRandomHUD::DrawZoneOnMap(const FBox2D& Rect, TFunctionRef<FVector2D(const FVector&)> ToScreen)
+{
+	const ARRRandomBattleZone* Zone = ARRRandomBattleZone::Get(this);
+	if (!Zone || Zone->GetPhase() <= 0)
+	{
+		return;
+	}
+	const float Scale = Rect.GetSize().X / MinimapSize;
+	// Only what is on the map being drawn: inside the corner circle, or the full screen square
+	const FVector2D Middle = Rect.GetCenter();
+	const float Inner = Rect.GetSize().X * 0.5f - 2.f * Scale;
+	auto Shows = [&](const FVector2D& Point)
+	{
+		return bMapExpanded ? Rect.IsInside(Point) : FVector2D::Distance(Point, Middle) <= Inner;
+	};
+	auto Ring = [&](const FVector2D& Center, float Radius, float Thickness, const FLinearColor& Color, bool bDashed)
+	{
+		constexpr int32 Segments = 128;
+		FVector2D Last = ToScreen(FVector(Center.X + Radius, Center.Y, 0.f));
+		for (int32 Step = 1; Step <= Segments; ++Step)
+		{
+			const float Angle = UE_TWO_PI * Step / Segments;
+			const FVector2D Point = ToScreen(FVector(Center.X + FMath::Cos(Angle) * Radius, Center.Y + FMath::Sin(Angle) * Radius, 0.f));
+			if ((!bDashed || Step % 2 == 0) && Shows(Point) && Shows(Last))
+			{
+				DrawLine(Last.X, Last.Y, Point.X, Point.Y, Color, Thickness);
+			}
+			Last = Point;
+		}
+	};
+	// Where it closes to: sky, dashed; the ring now: white over a lavender edge (red-pink while it is closing)
+	if (Zone->GetNextRadius() < Zone->GetRadius() - 1.f)
+	{
+		Ring(Zone->GetNextCenter(), Zone->GetNextRadius(), 2.f * Scale, RRUI::SkyDeep, true);
+	}
+	const FLinearColor Edge = Zone->IsClosing() ? RRUI::PinkDeep : FLinearColor::FromSRGBColor(FColor(154, 123, 224));
+	Ring(Zone->GetCenter(), Zone->GetRadius(), 4.f * Scale, RRUI::WithAlpha(Edge, 0.8f), false);
+	Ring(Zone->GetCenter(), Zone->GetRadius(), 1.8f * Scale, RRUI::White, false);
+
+	// The oracle's meteor zone while its meteors fall (round 93: shown on the maps only, never on the ground): a red ring
+	// pulsing, dashed inside, and each meteor still to land a red dot
+	const ARRRandomOracleStorm* Storm = ARRRandomOracleStorm::Get(this);
+	if (Storm && Storm->IsStriking())
+	{
+		const float Pulse = 0.55f + 0.45f * FMath::Sin(GetWorld()->GetRealTimeSeconds() * 6.f);
+		const FLinearColor Red = FLinearColor::FromSRGBColor(FColor(255, 61, 110));
+		Ring(Storm->GetZoneCenter(), Storm->GetZoneRadius(), 4.5f * Scale, RRUI::WithAlpha(Red, 0.5f + 0.5f * Pulse), false);
+		Ring(Storm->GetZoneCenter(), Storm->GetZoneRadius() * 0.93f, 2.f * Scale, RRUI::WithAlpha(Red, 0.7f), true);
+		for (TActorIterator<ARRRandomOracleMeteor> It(GetWorld()); It; ++It)
+		{
+			const FVector2D Point = ToScreen(It->GetActorLocation());
+			if (It->GetTimeToImpact() > 0.f && Shows(Point))
+			{
+				RRUI::DrawDisc(Canvas, Point, 3.2f * Scale, RRUI::WithAlpha(Red, Pulse));
+			}
+		}
+	}
 }

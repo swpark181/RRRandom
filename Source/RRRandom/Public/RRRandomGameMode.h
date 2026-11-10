@@ -53,6 +53,23 @@ public:
 	/** Cheat: the team wins now with a full score (straight to the results screen). */
 	void CheatWin(int32 Team);
 
+	/**
+	 * Defense (round 90, ERRMatchRule::Defense): this game is played by the defense rule on a defense stage. EndDefense ends it:
+	 * won (the seventh wave beaten: the winners dance, every player's PC opens the next stage) or lost (the tower fell).
+	 */
+	bool IsDefense() const { return bDefense; }
+	void EndDefense(bool bWon);
+
+	/**
+	 * The battle royale (round 92, ERRMatchRule::BattleRoyale): up to ten teams of three on the battle map, bots in every free
+	 * spot, nobody getting back up, the ring closing; the last team standing wins.
+	 */
+	bool IsBattleRoyale() const { return bBattleRoyale; }
+	/** Teams in this game (two, or the battle royale's). */
+	int32 GetTeamCount() const { return bBattleRoyale ? BattleTeamCount : 2; }
+	/** Cheat (RRZone): the ring skips ahead. */
+	void CheatZone();
+
 protected:
 	/** Seconds of countdown once the arena has loaded before anybody can move or shoot. */
 	UPROPERTY(EditAnywhere, Category = "Match", meta = (ClampMin = "0"))
@@ -177,12 +194,39 @@ private:
 	bool bStudio = false;
 	/** This game is played by Meteor Rush's rule (ERRMatchRule, picked on this machine's title). */
 	bool bMeteorRush = false;
+	/** Defense (decided in InitGame): its stage, and the spots on the animal friends' team (players up to 5, bots fill up to 3). */
+	bool bDefense = false;
+	int32 DefenseStage = 1;
+	static constexpr int32 DefenseTeamSize = 5;
+	static constexpr int32 DefenseBotFill = 3;
+	/** The spots a team has: TeamSize each, or in defense the friends' DefenseTeamSize and none for the villains (the director's). */
+	int32 GetTeamSize(int32 InTeam) const;
+	/** Defense: the tower, the wall ring and the director round the stage's middle, and the stage's rides. */
+	void SetUpDefense();
+	void SpawnDefenseRides(const class ARRRandomDiceTown* Town);
 	FVector GetPlayerStartLocation() const;
 
 	/** Places a point on the floor beneath it, or returns false if there is no floor there. */
 	bool FindFloorSpot(const FVector& Spot, float HalfHeight, FVector& OutLocation) const;
 
-	TArray<FTeamSlot> TeamSlots[2];
+	/** Each team's spots (GetTeamCount teams). */
+	TArray<TArray<FTeamSlot>> TeamSlots;
+
+	// Round 92: the battle royale
+	bool bBattleRoyale = false;
+	/** Played on the test map (fewer teams, 3 x 3 tiles, a quicker ring). */
+	bool bBattleRoyaleTest = false;
+	int32 BattleTeamCount = 0;
+	/** Where each team starts (feet), once the battle map is built; empty before. */
+	TArray<FVector> TeamStarts;
+	/** The battle map (placed in the level, or built on the arena), its rides and the ring, then everyone to their team's start. */
+	void SetUpBattleRoyale();
+	/** Moves every brawler already in (the host's own, placed as it logged in) to its team's start. */
+	void PlaceTeamsAtStarts();
+	/** Counts who is still standing; a team with nobody left is placed; one team left wins. */
+	void UpdateBattleStanding(ARRRandomCharacter* Victim);
+	/** A player joining a battle royale under way takes a standing bot's place (where it stands), or watches. */
+	APawn* TakeOverBot(AController* NewPlayer, int32 Species);
 
 	mutable TOptional<FVector> ArenaCenter;
 };

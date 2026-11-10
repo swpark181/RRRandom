@@ -92,6 +92,8 @@ namespace RRUI
 	void DrawTriangle(UCanvas* Canvas, const FVector2D& A, const FVector2D& B, const FVector2D& C, const FLinearColor& Color);
 	/** A texture clipped to a rounded rectangle (Radius half the side for a circle): portraits, the minimap. */
 	void DrawTextureRounded(UCanvas* Canvas, UTexture* Texture, const FBox2D& Rect, float Radius, const FLinearColor& Tint);
+	/** The same with only a part of the texture (UVs: its square of the texture, 0..1, may reach past it: clamped). */
+	void DrawTextureRounded(UCanvas* Canvas, UTexture* Texture, const FBox2D& Rect, float Radius, const FLinearColor& Tint, const FBox2D& UVs);
 	/** A thin rounded bar: the track, then Share of it filled. */
 	void DrawBar(UCanvas* Canvas, const FBox2D& Rect, float Share, const FLinearColor& Track, const FLinearColor& Fill);
 	/** A key cap like [E] with its top-left at Pos; returns its width. */

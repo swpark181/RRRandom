@@ -4,6 +4,7 @@
 #include "GameFramework/PlayerController.h"
 #include "RRRandomPlayerController.generated.h"
 
+class ARRRandomCharacter;
 class ARRRandomFogOfWar;
 class ARRRandomResultsDirector;
 class UInputAction;
@@ -139,6 +140,26 @@ public:
 	UFUNCTION(Exec)
 	void RRRide();
 
+	/**
+	 * Runs a console command on the next tick, '+' standing for a space (RRDefer RRCannon+0). For scripted tests driven from
+	 * Python: a command run straight from Python runs a joined client's requests to the host on the client itself (Python
+	 * calls run as editor script, which takes every RPC as local), and one asking again in turn never ends.
+	 */
+	UFUNCTION(Exec)
+	void RRDefer(const FString& Command);
+
+	/** Next to a human cannon (round 88), its number Index (as spawned; RRCannon lists them in the log), ready to press F. */
+	UFUNCTION(Exec)
+	void RRCannon(int32 Index = 0);
+
+	/** A plane for that die face (1-2 wooden, 3-4 fighter, 5-6 spaceship) popped in under me, boarded, no station needed. */
+	UFUNCTION(Exec)
+	void RRPlane(int32 Face = 3);
+
+	/** Holds (1) or lets go of (0) Ctrl for my plane: down (scripted tests). */
+	UFUNCTION(Exec)
+	void RRPlaneDown(int32 bHold = 1);
+
 	/** Fires once at the nearest opponent, or straight ahead with none about (console only, for scripted tests). */
 	UFUNCTION(Exec)
 	void RRShoot();
@@ -158,6 +179,19 @@ public:
 	void RRWreck(float Radius = 300.f, int32 bColumn = 0);
 
 	/**
+	 * Cheats for round 89 (Dice Town), at the floor where the middle of the view meets something: RRDig digs that many
+	 * layers of ground (a crater 200 round; 3 breaks through to the lava), RRLava digs straight through (lava at once),
+	 * RRUndercut smashes a ball this big low over the floor and nothing under it (a building's ground floor: what stood on
+	 * it comes down). Not in shipping builds.
+	 */
+	UFUNCTION(Exec)
+	void RRDig(int32 DigLayers = 1, float Radius = 200.f);
+	UFUNCTION(Exec)
+	void RRLava(float Radius = 250.f);
+	UFUNCTION(Exec)
+	void RRUndercut(float Radius = 650.f);
+
+	/**
 	 * For animation work (the studio, -RRMap=Studio, though it works anywhere; console only): this screen watches my
 	 * animal friend (the star robot while I'm aboard it) from a fixed side, following it: Yaw round from its front (0
 	 * its face, 90 its right side, 180 its back, -90 its left), this far away and this high over its middle (0: a distance
@@ -165,6 +199,70 @@ public:
 	 */
 	UFUNCTION(Exec)
 	void RRStudioCam(float Yaw = 90.f, float Distance = 0.f, float Height = 0.f);
+
+	/**
+	 * Defense (round 90): the host tells every player's machine the stage was cleared; this PC counts it for itself
+	 * (URRRandomSessionSubsystem::RecordStageCleared: only if it had that stage open) and the results say what opened.
+	 */
+	UFUNCTION(Client, Reliable)
+	void ClientDefenseCleared(int32 Stage);
+	/** The stage this PC's progress opened with the last clear (0 for none), for the results screen. */
+	int32 GetStageOpened() const { return StageOpened; }
+
+	/**
+	 * The battle royale (round 92): the host tells a player its team is out and its place (of how many teams). Out, this
+	 * screen watches a teammate still standing (then whoever is left near), until the end.
+	 */
+	UFUNCTION(Client, Reliable)
+	void ClientTeamOut(int32 Place, int32 Teams);
+	int32 GetTeamOutPlace() const { return TeamOutPlace; }
+	int32 GetTeamOutOf() const { return TeamOutOf; }
+	/** The one this screen watches while out (null while playing). */
+	const ARRRandomCharacter* GetWatched() const { return Watched.Get(); }
+	/** Battle royale cheats (console; not in shipping builds): the ring skips ahead; my animal friend to the middle of tile (X, Y). */
+	UFUNCTION(Exec)
+	void RRZone();
+	UFUNCTION(Exec)
+	void RRGoTile(int32 X = 0, int32 Y = 0);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatZone();
+	/** Battle royale cheat (round 93): the oracle dice roll now (the next storm, on the ring as it stands; RROracle 1: on my animal friend). */
+	UFUNCTION(Exec)
+	void RROracle(int32 bOnMe = 0);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatOracle(bool bOnMe);
+	/** Battle royale cheat (round 93): my animal friend just inside the ring's edge (Inside that far in), facing out at the cloud bank. */
+	UFUNCTION(Exec)
+	void RRRingEdge(float Inside = 1500.f);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatRingEdge(float Inside);
+	/** Battle royale cheat (round 94): my animal friend inside big building Index (of all the map's), on Floor (0 the ground), facing Yaw (if 0 or more). */
+	UFUNCTION(Exec)
+	void RRGoBuilding(int32 Index = 0, int32 Floor = 0, float Yaw = -1.f);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatGoBuilding(int32 Index, int32 Floor, float Yaw);
+	/** Round 94 cheat: my animal friend 3.5 m in front of the first cover model of kind Model (ECoverModel number), looking at it. */
+	UFUNCTION(Exec)
+	void RRGoCover(int32 Model = 1);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatGoCover(int32 Model);
+	/**
+	 * Round 94 size check (alone/standalone; console only): on a bare floor high over the map, my animal friend with cover
+	 * model Model beside it twice — as the game sizes it (instance Instance's own scale, of all the map's) and at its own
+	 * proportions at the same height — seen from the front; logs every instance's size ("PROPSIZE"). RRStudioCamOff ends it.
+	 */
+	UFUNCTION(Exec)
+	void RRPropBeside(int32 Model = 1, int32 Instance = 0);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatGoTile(int32 X, int32 Y);
+
+	/** Defense cheats (console; not in shipping builds): the break before this wave now, every villain out down, every stage open. */
+	UFUNCTION(Exec)
+	void RRWave(int32 Wave = 4);
+	UFUNCTION(Exec)
+	void RRClearWave();
+	UFUNCTION(Exec)
+	void RRUnlockStages();
 	UFUNCTION(Exec)
 	void RRStudioCamOff();
 
@@ -312,6 +410,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> SprintAction;
 
+	/** Held (Ctrl): flying a plane, down (jump is up). */
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> DescendAction;
+
 	/** Third person: held, the cursor comes back and the mouse stops turning the camera. */
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> FreeCursorAction;
@@ -369,7 +471,27 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerCheatStarCars();
 	UFUNCTION(Server, Reliable)
+	void ServerCheatWave(int32 Wave);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatClearWave();
+	int32 StageOpened = 0;
+	// Round 92: the battle royale
+	int32 TeamOutPlace = 0;
+	int32 TeamOutOf = 0;
+	TWeakObjectPtr<ARRRandomCharacter> Watched;
+	float WatchTimer = 0.f;
+	/** Out (knocked out for good) in a battle royale: watch a teammate standing, or the nearest one standing. */
+	void UpdateWatching(float DeltaTime);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatCannon(int32 Index);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatPlane(int32 Face);
+	UFUNCTION(Server, Reliable)
 	void ServerCheatWreck(FVector_NetQuantize Spot, float Radius, bool bColumn);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatDig(FVector_NetQuantize Spot, float Radius, int32 DigLayers, bool bUndercut);
+	/** Where the middle of the view first meets something solid (my own animal friend aside), at most 8000 away. */
+	FVector GetCheatAimSpot() const;
 	UFUNCTION(Server, Reliable)
 	void ServerCheatSlomo(float Rate);
 	UFUNCTION(Server, Reliable)
@@ -392,6 +514,10 @@ private:
 	float StudioDistance = 0.f;
 	float StudioHeight = 0.f;
 	float StudioFacing = 0.f;
+	/** RRPropBeside: its floor, the two models and its camera (gone with RRStudioCamOff or the next RRPropBeside). */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<AActor>> PropBesideActors;
+	void ClearPropBeside();
 
 	/** My tiger's spirit strikes at this spot (if it's ready for one). */
 	UFUNCTION(Server, Reliable)
@@ -436,6 +562,8 @@ private:
 	void OnAimStop();
 	/** The right button held: in the star robot's ATTACK seat, its missiles at the aim. */
 	void OnAimHeld();
+	void OnDescendStart();
+	void OnDescendStop();
 	void OnSprintStart() { bSprintHeld = true; }
 	void OnSprintStop() { bSprintHeld = false; }
 	bool bSprintHeld = false;

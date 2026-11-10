@@ -144,14 +144,20 @@ namespace RRUI
 		SoftSprite = Soft;
 	}
 
+	// Round 92: the battle royale's ten teams (sRGB): sky and pink, then mint, butter, lavender, peach, teal, rose, lime, cocoa
+	const FColor BattleTeamColors[] = { FColor(151, 201, 245), FColor(247, 168, 196), FColor(143, 221, 190), FColor(247, 216, 138), FColor(189, 166, 240),
+		FColor(250, 190, 140), FColor(140, 214, 222), FColor(242, 160, 214), FColor(190, 226, 140), FColor(206, 170, 140) };
+	const FColor BattleTeamDeep[] = { FColor(102, 165, 230), FColor(242, 127, 166), FColor(70, 180, 140), FColor(225, 170, 50), FColor(154, 123, 224),
+		FColor(235, 140, 70), FColor(60, 170, 185), FColor(220, 100, 175), FColor(130, 185, 60), FColor(160, 115, 80) };
+
 	FLinearColor TeamColor(int32 Team)
 	{
-		return Team == 0 ? Sky : Pink;
+		return Team == 0 ? Sky : Team == 1 ? Pink : FLinearColor::FromSRGBColor(BattleTeamColors[FMath::Abs(Team) % UE_ARRAY_COUNT(BattleTeamColors)]);
 	}
 
 	FLinearColor TeamColorDeep(int32 Team)
 	{
-		return Team == 0 ? SkyDeep : PinkDeep;
+		return Team == 0 ? SkyDeep : Team == 1 ? PinkDeep : FLinearColor::FromSRGBColor(BattleTeamDeep[FMath::Abs(Team) % UE_ARRAY_COUNT(BattleTeamDeep)]);
 	}
 
 	FLinearColor Pastel(const FLinearColor& Color, float Amount)
@@ -341,6 +347,11 @@ namespace RRUI
 
 	void DrawTextureRounded(UCanvas* Canvas, UTexture* Texture, const FBox2D& Rect, float Radius, const FLinearColor& Tint)
 	{
+		DrawTextureRounded(Canvas, Texture, Rect, Radius, Tint, FBox2D(FVector2D(0.f), FVector2D(1.f)));
+	}
+
+	void DrawTextureRounded(UCanvas* Canvas, UTexture* Texture, const FBox2D& Rect, float Radius, const FLinearColor& Tint, const FBox2D& UVs)
+	{
 		FTexture* Resource = Texture ? Texture->GetResource() : nullptr;
 		const FVector2D Size = Rect.GetSize();
 		if (!Resource || Size.X <= 0.f || Size.Y <= 0.f)
@@ -362,7 +373,7 @@ namespace RRUI
 			}
 		}
 		const FVector2D Middle = Rect.GetCenter();
-		auto UV = [&Rect, &Size](const FVector2D& Point) { return (Point - Rect.Min) / Size; };
+		auto UV = [&Rect, &Size, &UVs](const FVector2D& Point) { return UVs.Min + (Point - Rect.Min) / Size * UVs.GetSize(); };
 		TArray<FCanvasUVTri> Triangles;
 		for (int32 Index = 0; Index < Outline.Num(); ++Index)
 		{

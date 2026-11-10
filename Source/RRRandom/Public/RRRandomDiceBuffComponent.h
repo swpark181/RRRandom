@@ -117,6 +117,8 @@ public:
 	int32 GetUltimateCharges() const { return UltimateCharges; }
 	/** Server: stores an ultimate die (a cheat), if the owner has an ultimate. */
 	void GiveUltimateDie();
+	/** Server: one more stored die (a plain one, or an ultimate die if the owner has an ultimate): a defense villain's drop. */
+	void AddCharge(bool bUltimate = false);
 
 	/** 0..1 progress toward the next charge. */
 	UFUNCTION(BlueprintPure, Category = "RRRandom")

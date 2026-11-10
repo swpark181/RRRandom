@@ -32,6 +32,7 @@ public:
 	/**
 	 * Push from the right palm in the brawler's own frame (forward, right, up), at normal size. The fox's stubby arms
 	 * hold the gun inside its round body, where the big head hides it from the high camera; this brings it out front.
+	 * Only for the old rifle (a gun whose own model is missing): the round-90 toy guns sit in the fist (GunLooks' grips).
 	 */
 	UPROPERTY(EditAnywhere, Category = "Gun")
 	FVector HoldOffset = FVector(30.f, 0.f, 10.f);
@@ -104,6 +105,9 @@ protected:
 private:
 	/** 0 in the hands .. 1 aimed down the line shots fly (only without the aiming animations). */
 	float AimBlend = 0.f;
+
+	/** When rr.Gun.Debug last logged the hand. */
+	double DebugLogTime = 0.0;
 
 	/** GetAimMuzzleOffset at normal size, for the gun model MuzzleLook (GunLooks index; INDEX_NONE the rifle). */
 	FVector AimMuzzle = FVector::ZeroVector;

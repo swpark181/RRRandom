@@ -79,6 +79,8 @@ public:
 	URRRandomGunComponent* GetGun() const { return Gun; }
 	/** Where this brawler starts and gets back up. */
 	const FVector& GetHomeLocation() const { return HomeLocation; }
+	/** Round 92: where it gets back up and what counts as falling off (the battle royale moves the teams to their starts). */
+	void SetHome(const FVector& Location, const FRotator& Rotation) { HomeLocation = Location; HomeRotation = Rotation; }
 
 	/** The ultimate running (ARRRandomUltimate: each species has its own), or null. */
 	ARRRandomUltimate* GetUltimate() const { return Ultimate; }
@@ -97,6 +99,33 @@ public:
 	/** Server: the clone goes up in smoke. */
 	void VanishDecoy();
 	URRRandomOverheadDieComponent* GetOverheadDie() const { return OverheadDie; }
+
+	/**
+	 * A defense mode villain (round 90, RRSpecies::Rat or Cat on the villains' team): run by ARRRandomVillainAI, it bites
+	 * and claws instead of shooting (VillainStrike, the cat also slams the ground round it), holds no gun, rolls no dice,
+	 * doesn't heal and never gets back up (ARRRandomDefenseDirector clears it away).
+	 */
+	bool IsVillain() const { return RRSpecies::IsVillain(Species); }
+	/** The cat of a boss wave: bigger, tougher, with its slam (the HUD names it). */
+	bool IsVillainBoss() const { return bVillainBoss; }
+	/**
+	 * Server, before it finishes spawning: a villain this much tougher and harder hitting than its kind's base, drawn this
+	 * much bigger and in this color (each wave's are bigger, stronger and differently colored).
+	 */
+	void SetupVillain(float HealthScale, float Damage, float BodyScale, const FLinearColor& Tint, bool bBoss);
+	/** How far a villain's bite or claw reaches past its capsule (bigger, further). */
+	float GetVillainReach() const;
+	/** The villain's size (1 as its kind is drawn). */
+	float GetVillainBodyScale() const { return VillainBodyScale; }
+	/**
+	 * Server: a villain's bite or claw at a brawler, a wall or the tower within reach, if its pace allows (the attack
+	 * animation on every machine, the hit a moment later if it's still in reach). Returns whether it struck.
+	 */
+	bool VillainStrike(AActor* Target);
+	/** Server: the cat boss's slam (round it, a ring of damage and a push), if its pace allows. Returns whether it slammed. */
+	bool VillainSlam();
+	/** Seconds until the cat can slam again. */
+	float GetSlamCooldown() const;
 
 	/**
 	 * Turns toward a target and shoots a projectile at it if the magazine has a round and the fire cooldown allows.
@@ -155,8 +184,34 @@ public:
 	void ToggleRide();
 	/** The vehicle being ridden, if any (replicated). */
 	ARRRandomVehicle* GetVehicle() const { return Vehicle; }
-	/** At the wheel (not in the rear seat): both hands on it, so no shooting, and the gun is put away. */
-	bool IsDriving() const { return Vehicle && !bPassenger; }
+	/** At the wheel (not in the rear seat): both hands on it, so no shooting, and the gun is put away. Not a plane's pilot. */
+	bool IsDriving() const;
+	/**
+	 * Flying a plane (round 88, ARRRandomVehicle::IsPlane): the movement in flying mode (WASD across, jump up, Ctrl down,
+	 * hovering with no input), the body sitting with the arms free, and the fire button shooting (the plane's own gun, or the
+	 * pilot's); the plane takes the hits. F on the ground puts it down; in the air it bails out and glides down.
+	 */
+	bool IsPiloting() const;
+	/** On its own feet and free to take a plane now (not riding, in the robot, giant, flying, in a cannon or an ultimate). */
+	bool CanBoardPlane() const;
+	/** Server: into the pilot's seat of a plane just popped in under it (ARRRandomPlaneStation). False if it can't. */
+	bool BoardPlane(ARRRandomVehicle* Plane);
+	/** Server: out of the plane in mid-air (or shot down): thrown up and out, gliding down till it lands. */
+	void BailOut();
+	/** A plane's bottom near enough the ground under it to count as landed (F puts it down then, instead of bailing out). */
+	bool IsPlaneLanded() const;
+	/** This machine's Ctrl: held, a plane goes down. */
+	void SetPlaneDescend(bool bHeld) { bPlaneDescendHeld = bHeld; }
+	/**
+	 * In a human cannon (round 88, ARRRandomCannon): hidden in the barrel while it loads, then flying its arc to the pad (it
+	 * may shoot meanwhile, nothing else). The controlling machine moves it along the arc; the server trusts that client
+	 * meanwhile, as in a climb.
+	 */
+	bool IsRidingCannon() const { return CannonRide != nullptr || CannonTime >= 0.f; }
+	/** Out of the barrel and on the way to the pad. */
+	bool IsCannonFlying() const;
+	/** Server, by the cannon: into it and off to its pad. */
+	void StartCannonRide(class ARRRandomCannon* Cannon);
 	/**
 	 * The star robot this animal friend is combining (standing still till it is done) or sitting in, and how
 	 * (replicated). F does the robot's things first: starts combining the gathered cars, gets in, gets out.
@@ -178,6 +233,8 @@ public:
 	float GetSprintShare() const;
 	/** The made-up "gun held low" pose's share: the sprint's, unless the species' own run (rifle already down) plays. */
 	float GetSprintPoseShare() const { return RunAnimation && CurrentAnimation == RunAnimation ? 0.f : GetSprintShare(); }
+	/** 1 while the walk plays (round 90: its arms carry the gun under the big head, URRRandomBodyAnimInstance lowers them). */
+	float GetWalkPoseShare() const { return WalkAnimation && CurrentAnimation == WalkAnimation ? 1.f : 0.f; }
 	/** Server, by the robot: combining it, in a seat, or done with it (null). */
 	void SetRobotSeat(ARRRandomStarRobot* NewRobot, ERRRobotSeat NewSeat);
 	/** Server: off the vehicle ridden, if any (the driver getting off lets the one behind out too). */
@@ -307,6 +364,11 @@ public:
 	/** Every push goes through here; the species' kit scales it (the tiger is pushed half as far). */
 	virtual void LaunchCharacter(FVector LaunchVelocity, bool bXYOverride, bool bZOverride) override;
 	virtual void Landed(const FHitResult& Hit) override;
+	/**
+	 * Round 91: thrown off a jump ramp, falling this many times heavier until it lands (Landed), so the leap is low and
+	 * fast rather than floating. Each machine that throws it (the server, the driver's own) does the same.
+	 */
+	void StartRampLeap(float GravityMultiplier);
 	/** A jump taken on the run carries on a little faster (JumpCarryShare), so it goes further. */
 	virtual void OnJumped_Implementation() override;
 	const TArray<FRRDamagePopup>& GetDamagePopups() const { return DamagePopups; }
@@ -345,6 +407,7 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual bool IsNetRelevantFor(const AActor* RealViewer, const AActor* ViewTarget, const FVector& SrcLocation) const override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<USpringArmComponent> CameraBoom;
@@ -747,6 +810,43 @@ private:
 
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastDamagePopup(float Amount, ERRHitEffect Effect, bool bBackstab);
+	/** A plane shows the hits on its hull over its pilot (MulticastDamagePopup) and throws it out (BailOut). */
+	friend class ARRRandomVehicle;
+
+	/** The human cannon this one is in (replicated), and this machine's seconds since it climbed in (-1: not in one). */
+	UPROPERTY(ReplicatedUsing = OnRep_CannonRide)
+	TObjectPtr<class ARRRandomCannon> CannonRide;
+	float CannonTime = -1.f;
+	/** This machine: out of the barrel yet, and knocked off the arc (into a wall) and falling. */
+	bool bCannonFired = false;
+	bool bCannonOffArc = false;
+	/** Where the flier was last frame, for its contrail (ARRRandomEffects::CannonTrail). */
+	FVector CannonTrailLast = FVector::ZeroVector;
+	/** Server: seconds since the ride began (it ends a little after the flight is over, for a remote flier). */
+	float CannonServerTime = 0.f;
+	UFUNCTION()
+	void OnRep_CannonRide();
+	/** Every machine: into the barrel (hidden; where it is controlled, held at the muzzle with movement off). */
+	void BeginCannonRide();
+	/** Every machine, every frame of the ride: the load, the shot, the arc (moved where it is controlled), the landing. */
+	void UpdateCannonRide(float DeltaSeconds);
+	/** Every machine: the ride is over (landed on the pad: the thud). */
+	void EndCannonRide(bool bLanded);
+
+	/** Bailed out of a plane: gliding down till it lands (replicated, so the client's movement glides too). */
+	UPROPERTY(Replicated)
+	bool bBailedOut = false;
+	/** This machine, piloting: jump (up) and Ctrl (down) held, and when it took off (it climbs by itself at first). */
+	bool bPlaneRiseHeld = false;
+	bool bPlaneDescendHeld = false;
+	float PlaneBoardTime = -100.f;
+	/** The plane last seen flown (a new one restarts the take-off). */
+	TWeakObjectPtr<ARRRandomVehicle> PilotedPlane;
+	/** Piloting, every frame: up and down, facing the way it flies, kept in the flight area (where it is controlled). */
+	void UpdatePlaneFlight(float DeltaSeconds);
+	/** Server: the plane's own gun at the target, if its cooldown allows; which of its two muzzles goes next. */
+	bool ShootPlaneGun(const FVector& TargetLocation, float CooldownSlack);
+	int32 PlaneGunSide = 0;
 
 	UFUNCTION()
 	void OnRep_Team();
@@ -792,6 +892,27 @@ private:
 	/** Counts shots so every machine can play the firing animation; only the change matters. */
 	UPROPERTY(ReplicatedUsing = OnRep_ShotCount)
 	uint8 ShotCount = 0;
+
+	// A defense villain's (round 90): its toughness, size and color, replicated with it (set before it spawns)
+	UPROPERTY(Replicated)
+	float VillainHealthScale = 1.f;
+	UPROPERTY(Replicated)
+	float VillainBodyScale = 1.f;
+	UPROPERTY(Replicated)
+	FLinearColor VillainTint = FLinearColor::White;
+	UPROPERTY(Replicated)
+	bool bVillainBoss = false;
+	/** Server: a bite's or claw's damage, when the next may come, and the one under way (lands after VillainStrikeDelay). */
+	float VillainDamage = 8.f;
+	float NextStrikeTime = 0.f;
+	float NextSlamTime = 0.f;
+	TWeakObjectPtr<AActor> StrikeTarget;
+	FTimerHandle StrikeTimer;
+	FTimerHandle SlamTimer;
+	void LandVillainStrike();
+	void LandVillainSlam();
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastVillainSlam(FVector_NetQuantize Where, float Radius);
 
 	/** When this machine last saw the brawler shoot. */
 	float LastShotTime = -UE_BIG_NUMBER;
@@ -951,6 +1072,8 @@ private:
 
 	FVector HomeLocation = FVector::ZeroVector;
 	FRotator HomeRotation = FRotator::ZeroRotator;
+	/** Round 92: asked the navmesh to be made round it (the battle map). */
+	bool bNavInvoker = false;
 	FVector MeshRelativeLocation = FVector::ZeroVector;
 	FRotator MeshRelativeRotation = FRotator::ZeroRotator;
 
@@ -1014,6 +1137,10 @@ private:
 	float FlightCameraPull = 0.f;
 	/** 0..1, eased: my own sprint, for the over-the-shoulder camera's pull back. */
 	float SprintCameraBlend = 0.f;
+	/** 0..1, eased: rushing through the air (cannon, ramp leap), for the over-the-shoulder camera's wider view. */
+	float RushCameraBlend = 0.f;
+	/** A jump ramp's heavier fall while its leap lasts (StartRampLeap); 0 when not leaping. */
+	float RampLeapGravity = 0.f;
 	float BaseCameraArmLength = 0.f;
 	FName MeshCollisionProfile;
 };

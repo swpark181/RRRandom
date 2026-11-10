@@ -1,9 +1,11 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "RRRandomWeapon.h"
 #include "RRRandomProjectile.generated.h"
+
+class UStaticMesh;
 
 class ARRRandomCharacter;
 class UNiagaraComponent;
@@ -82,9 +84,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat")
 	float ImpactImpulse = 300.f;
 
-	/** Above 0: where it lands on anything but an animal friend, the structures this close are smashed (the star robot's fists). */
+	/**
+	 * Above 0: where it lands on anything but an animal friend, the structures this close are smashed (the star robot's
+	 * missiles, a CANNON's shells since round 89), and WreckDig layers of ground dug where it hits the floor.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	float WreckRadius = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	int32 WreckDig = 0;
 
 	/** Color of the viewer's own shots, so they stand out; everyone else's take their team color. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
@@ -100,8 +108,24 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	float PokeDamage = 1.f;
 
-	/** The sticker a hit shows on the brawler (the shooter's gun); set before the shot begins play. Server only. */
+	/**
+	 * The sticker a hit shows on the brawler (the shooter's gun); set before the shot begins play. Replicated (round 90): a
+	 * CANNON's shell and a BLASTER's plasma burst where they land, every machine showing the blast (GetSplash).
+	 */
+	UPROPERTY(Replicated)
 	ERRHitEffect HitEffect = ERRHitEffect::Pistol;
+	/**
+	 * Round 90: how far round where it lands a gun's shot also hurts (0: only what it hits), and the share of its damage
+	 * that does at the middle (half that at the edge): the CANNON's shell blows up, the BLASTER's plasma bursts.
+	 */
+	static void GetSplash(ERRHitEffect Effect, float& OutRadius, float& OutShare);
+	/** Server: that splash round Where (Hit, if anything, already took the shot in full). */
+	void Splash(const FVector& Where, AActor* Hit, float BaseDamage);
+	/** A gun's own shot model (round 90; null until imported), and how long it is drawn. */
+	static UStaticMesh* LoadShotModel(ERRHitEffect Effect);
+	static float GetShotLength(ERRHitEffect Effect);
+	/** Drawn as its gun's own model (not the tinted ball). */
+	bool bOwnModel = false;
 
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	float BackstabAngle = 60.f;

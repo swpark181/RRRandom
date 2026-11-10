@@ -36,6 +36,13 @@ public:
 	/** While flying or gliding, every frame: a trail of stars and soft glows from the back, more the faster it goes. */
 	void FlightTrail(const FVector& Back, const FVector& Velocity, const FLinearColor& Tint, float DeltaSeconds);
 	/**
+	 * Rushing through the air (round 91): shot out of a human cannon (in place of FlightTrail's stars and puffs, which read as
+	 * smoke) or a ride leaping off a jump ramp. Every frame
+	 * from where the flier was last frame (From) to now (Head), a smooth contrail tapering off behind it and thin streaks
+	 * of wind rushing past its body.
+	 */
+	void RushTrail(const FVector& From, const FVector& Head, const FVector& Velocity, float DeltaSeconds);
+	/**
 	 * Something falling like a shooting star, every frame: a long glowing tail laid along the way it came (From, where it
 	 * was last frame, to Head), Width across at the head and tapering to nothing about Length behind it, white hot in the
 	 * middle and Tint round it, with twinkling stars shed all along.
@@ -119,6 +126,10 @@ public:
 	void RocketBlast(const FVector& Where, const FVector& Normal, float Size);
 	/** A big foot coming down (the star robot's steps): dust puffing out along the ground and a faint ring. */
 	void Footstep(const FVector& Where, float Size);
+	/** Lava breaking through a crater's floor (round 89): a glowing gush, fat blobs flung up and falling back, a ring, sparks. */
+	void LavaFountain(const FVector& Where, float Size);
+	/** A bubble swelling and popping on the lava, a spark drifting up off it. */
+	void LavaBubble(const FVector& Where, float Size);
 
 private:
 	enum class EShape : uint8 { Ball, Ring, Star, Die, Count };

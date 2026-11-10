@@ -28,6 +28,29 @@ enum class ERRMatchRule : uint8
 	Knockout,
 	/** Meteors drop dice ore; a team holding 30 points of it for 12 seconds wins (ARRRandomMeteorRushDirector). */
 	MeteorRush,
+	/**
+	 * Round 90: everyone on one team holds the giant dice tower against 7 waves of rats (and cat bosses) on a defense stage
+	 * (ARRRandomDefenseDirector); the tower falling loses.
+	 */
+	Defense,
+	/**
+	 * Round 92: up to ten teams of three on the battle map (ARRRandomBattleMap), every free spot a bot; no getting back up,
+	 * a shrinking ring of safe ground (ARRRandomBattleZone); the last team standing wins.
+	 */
+	BattleRoyale,
+};
+
+/** A game found online, for the title's room list (URRRandomSessionSubsystem::FindRooms). */
+struct FRRRoomInfo
+{
+	FString HostName;
+	int32 Players = 0;
+	int32 MaxPlayers = 0;
+	ERRMatchRule Rule = ERRMatchRule::Knockout;
+	/** The defense stage (1..3), or 0 for a battle. */
+	int32 Stage = 0;
+	/** Its index in the search's results. */
+	int32 SearchIndex = INDEX_NONE;
 };
 
 /**
@@ -57,6 +80,17 @@ public:
 
 	/** Logs in if needed, finds a game and joins the first one. Retries a few times when nothing is found yet. */
 	void JoinGame(int32 Retries = 0);
+
+	/**
+	 * The title's room list (round 90): logs in if needed and looks for games without joining any; GetRooms has them once
+	 * IsBusy is over. JoinRoom joins one of them.
+	 */
+	void FindRooms();
+	const TArray<FRRRoomInfo>& GetRooms() const { return Rooms; }
+	/** A search for the room list has come back at least once since FindRooms. */
+	bool HasRoomResults() const { return bRoomsFound; }
+	/** Joins the room at this place in GetRooms. */
+	void JoinRoom(int32 Index);
 
 	/** Ends or leaves any online game and plays alone in the arena (the title's SINGLE PLAY, F3 in the arena). */
 	void PlaySolo();
@@ -105,6 +139,35 @@ public:
 	ERRMatchRule GetMatchRule() const { return MatchRule; }
 
 	/**
+	 * The defense stage (1..3) the next defense game this machine starts is played on, picked on the title. -RRStage=N on the
+	 * command line sets it too (locked or not, for tests). Joiners play the host's (ARRRandomGameState::GetDefenseStage).
+	 */
+	void SetDefenseStage(int32 InStage) { DefenseStage = FMath::Clamp(InStage, 1, DefenseStageCount); }
+	int32 GetDefenseStage() const { return DefenseStage; }
+	static constexpr int32 DefenseStageCount = 3;
+	/**
+	 * This PC's defense progress (saved locally, URRRandomSaveGame): the highest stage cleared (0 for none). A stage is open
+	 * once the one before it is cleared; hosting offers only open stages.
+	 */
+	int32 GetClearedStage() const;
+	bool IsStageUnlocked(int32 Stage) const { return Stage >= 1 && Stage <= FMath::Min(GetClearedStage() + 1, DefenseStageCount); }
+	/**
+	 * A defense stage was just cleared with this machine's player in it (the host's game says so, ARRRandomPlayerController):
+	 * counts only if this PC had that stage open (cleared the one before it); then saved. Returns whether a new stage opened.
+	 */
+	bool RecordStageCleared(int32 Stage);
+	/** Cheat (RRUnlockStages): every stage open, saved. */
+	void UnlockAllStages();
+	/** Players in a game of this rule, the host included: 5 holding the tower together, 6 in a battle. */
+	int32 GetMaxPlayersFor(ERRMatchRule Rule) const { return Rule == ERRMatchRule::Defense ? DefenseMaxPlayers : Rule == ERRMatchRule::BattleRoyale ? BattleRoyaleMaxPlayers : MaxPlayers; }
+	/**
+	 * Round 92: the battle royale on its test level (/Game/Maps/BRTest: 3 x 3 tiles, four teams, a quicker ring), picked with
+	 * -RRBRTest or the title's TEST MAP; the full map otherwise.
+	 */
+	void SetBattleRoyaleTest(bool bOn) { bBattleRoyaleTest = bOn; }
+	bool IsBattleRoyaleTest() const { return bBattleRoyaleTest; }
+
+	/**
 	 * The brawler this machine's player plays (RRSpecies: fox, rabbit, squirrel, tiger), picked on the title and kept across
 	 * levels. -RRSpecies=<name> on the command line sets it too. Sent to the host by ARRRandomPlayerController.
 	 */
@@ -134,6 +197,11 @@ protected:
 	FString DiceLandMap = TEXT("/Game/Maps/DiceLand");
 	UPROPERTY(Config)
 	FString StudioMap = TEXT("/Game/Maps/Studio");
+	/** The battle royale's levels (round 92): the full map, and its test level. */
+	UPROPERTY(Config)
+	FString BattleRoyaleMap = TEXT("/Game/Maps/BattleRoyale");
+	UPROPERTY(Config)
+	FString BattleRoyaleTestMap = TEXT("/Game/Maps/BRTest");
 
 	/**
 	 * EOS login: "developer" uses the EOS Dev Auth Tool (DevAuthHost + DevAuthCredential),
@@ -153,6 +221,14 @@ protected:
 	UPROPERTY(Config)
 	int32 MaxPlayers = 6;
 
+	/** Players in a defense game, the host included (the user's rule: up to 5 online). */
+	UPROPERTY(Config)
+	int32 DefenseMaxPlayers = 5;
+
+	/** Players in a battle royale, the host included (the user's rule: ten teams of three). */
+	UPROPERTY(Config)
+	int32 BattleRoyaleMaxPlayers = 30;
+
 	/** How many times -RRJoin looks again when no game is found yet (the host may still be starting). */
 	UPROPERTY(Config)
 	int32 StartupJoinRetries = 10;
@@ -167,6 +243,8 @@ private:
 		None,
 		Host,
 		Join,
+		/** Looking for games for the room list, joining none. */
+		ListRooms,
 	};
 
 	/** Where to go once the current session is gone. */
@@ -221,10 +299,22 @@ private:
 	ERRThirdPersonMap ThirdPersonMap = ERRThirdPersonMap::DiceTown;
 	ERRMatchRule MatchRule = ERRMatchRule::Knockout;
 	int32 Species = 0;
+	int32 DefenseStage = 1;
+	bool bBattleRoyaleTest = false;
+	/** The saved progress, read the first time it is asked for (INDEX_NONE until then). */
+	mutable int32 ClearedStage = INDEX_NONE;
+	void SaveProgress() const;
 	int32 JoinRetriesLeft = 0;
 	FString Status;
 	TSharedPtr<FOnlineSessionSearch> Search;
 	FTimerHandle RetryTimer;
+	/** The room list's games, from the last search (Search keeps what joining one needs). */
+	TArray<FRRRoomInfo> Rooms;
+	bool bRoomsFound = false;
+	/** The game JoinRoom is joining (in Search), or INDEX_NONE to join the first open one. */
+	int32 RoomToJoin = INDEX_NONE;
+	/** A room list search found (JoinRoom then joins from it without searching again). */
+	bool bJoinFromRooms = false;
 
 	FDelegateHandle LoginHandle;
 	FDelegateHandle CreateHandle;

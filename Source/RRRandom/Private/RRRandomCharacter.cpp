@@ -1,7 +1,16 @@
 #include "RRRandomCharacter.h"
+#include "RRRandomBattleRoyale.h"
+#include "NavigationSystem.h"
+#include "GameFramework/PlayerController.h"
 #include "RRRandomAIController.h"
 #include "RRRandomBodyAnimInstance.h"
+#include "RRRandomCannon.h"
 #include "RRRandomCover.h"
+#include "RRRandomDefense.h"
+#include "RRRandomVillainAI.h"
+#include "RRRandomHUD.h"
+#include "RRRandomPlaneStation.h"
+#include "RRRandomUIStyle.h"
 #include "RRRandomDiceBuffComponent.h"
 #include "RRRandomDiceLand.h"
 #include "RRRandomDiceTown.h"
@@ -33,6 +42,8 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/DamageEvents.h"
+#include "GameFramework/DamageType.h"
+#include "TimerManager.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -48,6 +59,8 @@ namespace
 {
 	// Below this ground speed the character counts as standing still
 	constexpr float WalkAnimationThreshold = 10.f;
+	/** A CANNON's shell smashes the structures this close round where it hits (round 89). */
+	constexpr float CannonWreckRadius = 110.f;
 
 	// The body mesh's place on the capsule: feet at its bottom, turned to face +X
 	const FVector MeshFeet(0.f, 0.f, -96.f);
@@ -134,6 +147,12 @@ namespace
 	constexpr float ShoulderFlightPull = 0.55f;
 	constexpr float ShoulderFlightRise = 70.f;
 	constexpr float ShoulderFlightFieldOfView = 8.f;
+	// Round 91: rushing through the air (a human cannon shot, a ramp leap faster than this) the view widens this many more
+	// degrees, quickly in and slower out (FInterpTo rates)
+	constexpr float RushFieldOfView = 16.f;
+	constexpr float RushCameraMinSpeed = 900.f;
+	constexpr float RushCameraInRate = 6.f;
+	constexpr float RushCameraOutRate = 2.5f;
 	// The glowing effects (ARRRandomEffects): the body's flash when hit (its brightness, how long it fades) and how strong
 	// each gun's hit burst is and its color, in ERRHitEffect order
 	// The dance line after the match: close enough to count as there, the longest the way may take (teleported after),
@@ -212,6 +231,23 @@ namespace
 	constexpr float ClimbJumpWindow = 0.5f;
 	// Extra room the server allows a client's climb request, for movement during the request's trip
 	constexpr float ClimbRequestTolerance = 150.f;
+
+	// A defense villain (round 90): how strongly its wave's color tints it (a stand-in's borrowed look more), a bite's reach
+	// past its capsule and pace, the hit landing this long after the bite starts (with the animation), the cat's claws a
+	// little slower; the cat boss's slam: its pace, wind-up, radius and push, its share of a claw's damage
+	constexpr float VillainTintStrength = 0.35f;
+	constexpr float VillainStandInTint = 0.7f;
+	constexpr float VillainReach = 70.f;
+	constexpr float RatStrikeInterval = 1.1f;
+	constexpr float CatStrikeInterval = 1.4f;
+	constexpr float VillainStrikeDelay = 0.3f;
+	constexpr float SlamInterval = 7.f;
+	constexpr float SlamWindup = 0.55f;
+	constexpr float SlamRadius = 380.f;
+	constexpr float SlamPush = 700.f;
+	constexpr float SlamDamageShare = 1.6f;
+	// A villain climbs this high at most (out of a crater a shell dug, a block deep), never the castle wall
+	constexpr float VillainClimbHeight = 120.f;
 }
 
 ARRRandomCharacter::ARRRandomCharacter(const FObjectInitializer& ObjectInitializer)
@@ -395,6 +431,11 @@ void ARRRandomCharacter::ApplySpecies()
 	}
 	ShownSpecies = Species;
 	UseLook(SpeciesLooks[Species]);
+	// A villain bites and claws with its fire animation, never takes the rifle's aiming pose (a stand-in's look has one)
+	if (IsVillain())
+	{
+		AimAnimations = FRRAimAnimations();
+	}
 	// Every species has its ultimate (OnUltimateDie); a clone rolls nothing
 	DiceBuffs->UltimateDieChance = bDecoy ? 0.f : UltimateDieChance;
 	ApplyKit();
@@ -464,6 +505,11 @@ void ARRRandomCharacter::BeginPlay()
 
 	// The random event component has made per-slot dynamic materials by now
 	ApplyTeamColor();
+	// A defense villain moves as its own kind of object: what the wall ring stops (and nothing else)
+	if (IsVillain())
+	{
+		GetCapsuleComponent()->SetCollisionObjectType(RRDefense::VillainChannel);
+	}
 
 	// Health, ammo, guns and dice are the server's; clients get them replicated (already, by the time they begin play)
 	if (HasAuthority())
@@ -503,6 +549,17 @@ void ARRRandomCharacter::BeginPlay()
 	MeshCollisionProfile = BodyMesh->GetCollisionProfileName();
 	CapsulePawnResponse = GetCapsuleComponent()->GetCollisionResponseToChannel(ECC_Pawn);
 
+	// Round 92: on the battle map the navmesh is made only round the animal friends (URRRandomNavigationSystem): each one
+	// asks for it round itself as it goes (the server's, where the bots find their way)
+	if (HasAuthority())
+	{
+		if (const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()); Nav && Nav->IsActiveTilesGenerationEnabled())
+		{
+			UNavigationSystemV1::RegisterNavigationInvoker(*this, RRBattle::NavGenerateRadius, RRBattle::NavRemoveRadius);
+			bNavInvoker = true;
+		}
+	}
+
 	// Joined a game where this brawler is lying knocked out
 	if (!bAlive)
 	{
@@ -518,6 +575,11 @@ void ARRRandomCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (Robot && HasAuthority())
 	{
 		Robot->Leave(this);
+	}
+	if (bNavInvoker)
+	{
+		UNavigationSystemV1::UnregisterNavigationInvoker(*this);
+		bNavInvoker = false;
 	}
 	Super::EndPlay(EndPlayReason);
 }
@@ -557,11 +619,34 @@ void ARRRandomCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ARRRandomCharacter, FormationSpot);
 	DOREPLIFETIME(ARRRandomCharacter, FormationPath);
 	DOREPLIFETIME(ARRRandomCharacter, FormationDashSpeed);
+	DOREPLIFETIME(ARRRandomCharacter, CannonRide);
+	DOREPLIFETIME(ARRRandomCharacter, bBailedOut);
+	DOREPLIFETIME(ARRRandomCharacter, VillainHealthScale);
+	DOREPLIFETIME(ARRRandomCharacter, VillainBodyScale);
+	DOREPLIFETIME(ARRRandomCharacter, VillainTint);
+	DOREPLIFETIME(ARRRandomCharacter, bVillainBoss);
 }
 
 FLinearColor ARRRandomCharacter::GetTeamColor(int32 InTeam)
 {
-	return InTeam == 0 ? FLinearColor(0.15f, 0.45f, 1.f) : FLinearColor(1.f, 0.2f, 0.15f);
+	// Blue and red, then (the battle royale's ten teams, round 92) mint, lemon, lilac, orange, teal, magenta, lime, brown
+	static const FLinearColor Colors[] = { FLinearColor(0.15f, 0.45f, 1.f), FLinearColor(1.f, 0.2f, 0.15f), FLinearColor(0.15f, 0.85f, 0.55f),
+		FLinearColor(1.f, 0.82f, 0.1f), FLinearColor(0.6f, 0.35f, 1.f), FLinearColor(1.f, 0.5f, 0.1f), FLinearColor(0.1f, 0.75f, 0.8f),
+		FLinearColor(1.f, 0.25f, 0.7f), FLinearColor(0.55f, 0.9f, 0.15f), FLinearColor(0.6f, 0.38f, 0.22f) };
+	return Colors[FMath::Abs(InTeam) % UE_ARRAY_COUNT(Colors)];
+}
+
+bool ARRRandomCharacter::IsNetRelevantFor(const AActor* RealViewer, const AActor* ViewTarget, const FVector& SrcLocation) const
+{
+	// Round 92: on the battle map teammates are on every machine of their team, however far apart (the minimap, the team
+	// cards); the rest as usual (near enough)
+	if (Super::IsNetRelevantFor(RealViewer, ViewTarget, SrcLocation))
+	{
+		return true;
+	}
+	const APlayerController* Viewer = Cast<APlayerController>(RealViewer);
+	const ARRRandomCharacter* Mine = Viewer ? Cast<ARRRandomCharacter>(Viewer->GetPawn()) : nullptr;
+	return Mine && Mine->GetTeam() == Team;
 }
 
 void ARRRandomCharacter::ApplyTeamColor()
@@ -571,8 +656,10 @@ void ARRRandomCharacter::ApplyTeamColor()
 	{
 		if (UMaterialInstanceDynamic* Material = Cast<UMaterialInstanceDynamic>(BodyMesh->GetMaterial(Slot)))
 		{
-			Material->SetVectorParameterValue(ColorParameter, GetTeamColor(Team));
-			Material->SetScalarParameterValue(TintStrengthParameter, BodyTeamTint);
+			// A villain wears its wave's color (a stand-in's borrowed look more strongly, to tell it from the animal friend)
+			const bool bStandIn = SpeciesLooks.IsValidIndex(ShownSpecies) && SpeciesLooks[ShownSpecies].bStandIn;
+			Material->SetVectorParameterValue(ColorParameter, IsVillain() ? VillainTint : GetTeamColor(Team));
+			Material->SetScalarParameterValue(TintStrengthParameter, IsVillain() ? (bStandIn ? VillainStandInTint : VillainTintStrength) : BodyTeamTint);
 		}
 	}
 }
@@ -748,7 +835,8 @@ void ARRRandomCharacter::ApplyKit()
 	}
 	// Health keeps its share of the new maximum (a joiner's pick arriving after its brawler began play)
 	const float OldMax = MaxHealth;
-	MaxHealth = BaseMaxHealth * Traits.HealthScale;
+	// (a defense villain: its wave's toughness on top, replicated so every machine's health bar has it)
+	MaxHealth = BaseMaxHealth * Traits.HealthScale * VillainHealthScale;
 	if (HasAuthority() && HasActorBegunPlay() && OldMax > 0.f)
 	{
 		Health = FMath::Min(MaxHealth, Health * MaxHealth / OldMax);
@@ -758,6 +846,13 @@ void ARRRandomCharacter::ApplyKit()
 	DiceBuffs->GiantDieChance = bDecoy ? 0.f : Traits.GiantDieChance;
 	DiceBuffs->FlightDieChance = bDecoy ? 0.f : Traits.FlightDieChance;
 	DiceBuffs->OwnDieChance = bDecoy ? 0.f : Traits.OwnDieChance;
+	// A villain rolls nothing
+	if (IsVillain())
+	{
+		DiceBuffs->StartingCharges = 0;
+		DiceBuffs->GaugeFillTime = UE_BIG_NUMBER;
+		DiceBuffs->UltimateDieChance = 0.f;
+	}
 }
 
 bool ARRRandomCharacter::TrySuperHop()
@@ -852,7 +947,8 @@ void ARRRandomCharacter::UpdateFlight()
 	if (URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(Movement))
 	{
 		const bool bAboveArena = Movement->IsFalling() && GetActorLocation().Z > HomeLocation.Z - GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
-		bFlightGlide = !Robot && (bFlying || (bFlightGlide && bAboveArena));
+		// (Out of a plane in mid-air too, till landing)
+		bFlightGlide = !Robot && (bFlying || bBailedOut || (bFlightGlide && bAboveArena));
 		const bool bHeldGlide = RRKit::Get(Species).bGlide && bAlive && bJumpHeld && bAboveArena && Movement->Velocity.Z <= 0.f && !Robot;
 		RandomMovement->bGliding = bFlightGlide || bHeldGlide;
 		Movement->AirControl = RandomMovement->bGliding ? FlightAirControl : BaseAirControl;
@@ -884,12 +980,13 @@ void ARRRandomCharacter::UpdateFlight()
 void ARRRandomCharacter::UpdateGiantSize(float DeltaSeconds)
 {
 	const float Current = GetActorScale3D().Z;
-	const float Target = bGiant ? GiantScale : 1.f;
+	// (a defense villain is its wave's size, giant or not)
+	const float Target = (bGiant ? GiantScale : 1.f) * VillainBodyScale;
 	if (FMath::IsNearlyEqual(Current, Target))
 	{
 		return;
 	}
-	const float GrowSpeed = GiantGrowTime > 0.f ? FMath::Abs(GiantScale - 1.f) / GiantGrowTime : UE_BIG_NUMBER;
+	const float GrowSpeed = GiantGrowTime > 0.f ? FMath::Abs(GiantScale - 1.f) * VillainBodyScale / GiantGrowTime : UE_BIG_NUMBER;
 	SetBodyScale(FMath::FInterpConstantTo(Current, Target, DeltaSeconds, GrowSpeed));
 }
 
@@ -928,12 +1025,17 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 	}
 	if (!bAlive)
 	{
+		if (CannonTime >= 0.f)
+		{
+			EndCannonRide(false);
+		}
 		UpdateFling(DeltaSeconds);
 		// Powers lost on a knockout end without a show
 		bWasGiant = bGiant;
 		bWasFlying = bFlying;
-		// Nobody gets back up once the match is over
-		if (HasAuthority() && !ARRRandomGameState::IsMatchOver(this))
+		// Nobody gets back up once the match is over; a villain never does (the defense director clears it away), nor anyone in
+		// a battle royale (round 92)
+		if (HasAuthority() && !ARRRandomGameState::IsMatchOver(this) && !IsVillain() && !ARRRandomGameState::IsBattleRoyale(this))
 		{
 			RespawnRemaining -= DeltaSeconds;
 			if (RespawnRemaining <= 0.f)
@@ -946,6 +1048,7 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 	UpdatePowerEffects(DeltaSeconds);
 	UpdateFormation(DeltaSeconds);
 	UpdateDashEffects(DeltaSeconds);
+	UpdateCannonRide(DeltaSeconds);
 
 	if (HasAuthority())
 	{
@@ -1015,6 +1118,7 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 		GetOffVehicle();
 	}
 	UpdateVehicleHandling();
+	UpdatePlaneFlight(DeltaSeconds);
 	UpdateRobotIntroTurn(DeltaSeconds);
 	UpdateWalkSpeed();
 	UpdateLocomotionAnimation();
@@ -1051,6 +1155,16 @@ void ARRRandomCharacter::Jump()
 		{
 			Super::Jump();
 		}
+		return;
+	}
+	// Flying a plane, jump is up (UpdatePlaneFlight); in a cannon, nothing
+	if (IsPiloting())
+	{
+		bPlaneRiseHeld = true;
+		return;
+	}
+	if (IsRidingCannon())
+	{
 		return;
 	}
 	// No jumping (or climbing) on a vehicle, or while the tiger's spirit is out
@@ -1237,7 +1351,9 @@ bool ARRRandomCharacter::TryClimb()
 	// Its top, a capsule's width past the wall face, high enough to be worth climbing and low enough to reach
 	const FVector Over = Wall.ImpactPoint - Wall.ImpactNormal.GetSafeNormal2D() * (Radius + ClimbLedgeInset);
 	FHitResult Top;
-	if (!World->LineTraceSingleByObjectType(Top, FVector(Over.X, Over.Y, FeetZ + MaxClimbHeight + 1.f), FVector(Over.X, Over.Y, FeetZ + MinClimbHeight), StaticOnly, Params)
+	// (a defense villain only gets out of a crater: never up the castle wall)
+	const float ClimbHeight = IsVillain() ? VillainClimbHeight : MaxClimbHeight;
+	if (!World->LineTraceSingleByObjectType(Top, FVector(Over.X, Over.Y, FeetZ + ClimbHeight + 1.f), FVector(Over.X, Over.Y, FeetZ + MinClimbHeight), StaticOnly, Params)
 		|| Top.bStartPenetrating || Top.ImpactNormal.Z < GetCharacterMovement()->GetWalkableFloorZ())
 	{
 		return false;
@@ -1392,6 +1508,7 @@ void ARRRandomCharacter::StopJumping()
 {
 	Super::StopJumping();
 	SetJumpHeld(false);
+	bPlaneRiseHeld = false;
 	// Letting go of the second press ends the dash
 	if (bDashing && IsLocallyControlled())
 	{
@@ -1399,11 +1516,30 @@ void ARRRandomCharacter::StopJumping()
 	}
 }
 
+void ARRRandomCharacter::StartRampLeap(float GravityMultiplier)
+{
+	if (RampLeapGravity <= 0.f && GravityMultiplier > 0.f)
+	{
+		RampLeapGravity = GravityMultiplier;
+		GetCharacterMovement()->GravityScale *= GravityMultiplier;
+	}
+}
+
 void ARRRandomCharacter::Landed(const FHitResult& Hit)
 {
 	Super::Landed(Hit);
-	// Back on the ground: the next flight gets its dash
+	// Back on the ground: the next flight gets its dash; a glide out of a plane is over
 	bDashUsed = false;
+	// A jump ramp's leap is over: its heavier fall too
+	if (RampLeapGravity > 0.f)
+	{
+		GetCharacterMovement()->GravityScale /= RampLeapGravity;
+		RampLeapGravity = 0.f;
+	}
+	if (HasAuthority())
+	{
+		bBailedOut = false;
+	}
 }
 
 void ARRRandomCharacter::SetTrustClientMovement(bool bTrust)
@@ -1478,7 +1614,8 @@ void ARRRandomCharacter::UpdateAmmoAndHealth(float DeltaSeconds)
 		}
 	}
 
-	if (Health < MaxHealth && GetWorld()->GetTimeSeconds() - LastCombatTime >= RegenDelay)
+	// (a defense villain doesn't heal)
+	if (Health < MaxHealth && !IsVillain() && GetWorld()->GetTimeSeconds() - LastCombatTime >= RegenDelay)
 	{
 		Health = FMath::Min(MaxHealth, Health + MaxHealth * RegenPerSecond * DeltaSeconds);
 	}
@@ -1506,8 +1643,13 @@ void ARRRandomCharacter::UpdateWalkSpeed()
 	const float VehicleSpeed = Vehicle ? Vehicle->GetHandling().SpeedMultiplier : 1.f;
 	// On foot the species' kit counts too (the rabbit quicker, the tiger slower); a vehicle goes at its own speed
 	const float KitSpeed = Vehicle ? 1.f : RRKit::Get(Species).MoveSpeedScale;
+	// The battle royale's cotton candy cloud: sticky, slower the deeper in (on foot or riding; every machine the same)
+	const ARRRandomBattleZone* Zone = ARRRandomGameState::IsBattleRoyale(this) ? ARRRandomBattleZone::Get(this) : nullptr;
+	const float CloudSpeed = Zone ? Zone->GetSpeedShareAt(GetActorLocation()) : 1.f;
 	GetCharacterMovement()->MaxWalkSpeed = IsUsingUltimate() ? 0.f
-		: BaseWalkSpeed * VehicleSpeed * KitSpeed * RandomEvents->GetSpeedMultiplier() * DiceBuffs->GetMultiplier(ERRDiceBuffStat::MoveSpeed);
+		: BaseWalkSpeed * VehicleSpeed * KitSpeed * RandomEvents->GetSpeedMultiplier() * DiceBuffs->GetMultiplier(ERRDiceBuffStat::MoveSpeed) * CloudSpeed;
+	// A plane flies as fast as it would drive
+	GetCharacterMovement()->MaxFlySpeed = GetCharacterMovement()->MaxWalkSpeed;
 	if (IsDashingToFormation())
 	{
 		GetCharacterMovement()->MaxWalkSpeed = FormationDashSpeed;
@@ -1530,9 +1672,31 @@ void ARRRandomCharacter::UpdateVehicleHandling()
 	{
 		const FRRVehicleHandling& Handling = Vehicle->GetHandling();
 		Movement->MaxAcceleration = Handling.Acceleration;
+		// An engine that pulls (round 90, the motorbike): hardest off the line, less and less toward top speed, so it winds
+		// up over about SpeedUpTime (with a(v) = a0 (1 - 0.8 v / top), a0 = 2 top / SpeedUpTime reaches top speed then)
+		if (Handling.SpeedUpTime > 0.f && Movement->MaxWalkSpeed > 0.f)
+		{
+			const float Top = Movement->MaxWalkSpeed;
+			const float Share = FMath::Clamp(GetVelocity().Size2D() / Top, 0.f, 1.f);
+			Movement->MaxAcceleration = 2.f * Top / Handling.SpeedUpTime * FMath::Max(0.2f, 1.f - 0.8f * Share);
+		}
 		Movement->GroundFriction = Handling.Grip;
 		Movement->BrakingDecelerationWalking = Handling.Braking;
+		Movement->BrakingDecelerationFlying = Handling.Braking;
 		Movement->RotationRate.Yaw = Handling.TurnRate;
+	}
+	// A plane's pilot flies (where the movement is decided; others get the mode replicated); out of it, back to falling
+	const bool bPiloting = IsPiloting();
+	if ((HasAuthority() || IsLocallyControlled()) && bAlive)
+	{
+		if (bPiloting && Movement->MovementMode != MOVE_Flying)
+		{
+			Movement->SetMovementMode(MOVE_Flying);
+		}
+		else if (!bPiloting && Movement->MovementMode == MOVE_Flying)
+		{
+			Movement->SetMovementMode(MOVE_Falling);
+		}
 	}
 	else if (IsDashingToFormation())
 	{
@@ -1550,7 +1714,8 @@ void ARRRandomCharacter::UpdateVehicleHandling()
 	}
 	// Shooting on foot, the brawler keeps facing where it shoots and strafes (the aiming runs go every way);
 	// otherwise it turns to where it goes
-	Movement->bOrientRotationToMovement = Vehicle || bDrivingRobot || IsDashingToFormation() || (!bThirdPerson && !WantsAimPose());
+	// (A plane turns itself the way it flies, level: UpdatePlaneFlight; turning to its movement would tip it up and down)
+	Movement->bOrientRotationToMovement = !bPiloting && (Vehicle || bDrivingRobot || IsDashingToFormation() || (!bThirdPerson && !WantsAimPose()));
 	ApplyThirdPersonRotation();
 	// Up on the deck or in the seat (the body's own offset otherwise; knocked out it is a ragdoll and left alone)
 	if (bAlive && !bClimbing)
@@ -1641,6 +1806,24 @@ void ARRRandomCharacter::ToggleRide()
 		Near->Board(this);
 		return;
 	}
+	// In a cannon there is no getting out
+	if (IsRidingCannon())
+	{
+		return;
+	}
+	// A plane: put down on the ground (it goes), or bailed out of in the air
+	if (IsPiloting())
+	{
+		if (IsPlaneLanded())
+		{
+			GetOffVehicle();
+		}
+		else
+		{
+			BailOut();
+		}
+		return;
+	}
 	if (Vehicle)
 	{
 		GetOffVehicle();
@@ -1648,6 +1831,33 @@ void ARRRandomCharacter::ToggleRide()
 	}
 	if (!bAlive || bClimbing || bFlying || bGiant || ARRRandomGameState::IsPlayLocked(this))
 	{
+		return;
+	}
+	// A human cannon or a plane station in reach first: they are what F is for there (the players'; a bot's F is for
+	// vehicles and seats, and bots don't fly); with both in reach, the nearer
+	// (round 92: in a battle royale the bots fly and get shot about too: ARRRandomAIController::UpdateBattleTravel)
+	const bool bMayLaunch = IsPlayerControlled() || ARRRandomGameState::IsBattleRoyale(this);
+	ARRRandomCannon* Cannon = bMayLaunch ? ARRRandomCannon::FindInReach(this) : nullptr;
+	ARRRandomPlaneStation* Station = bMayLaunch ? ARRRandomPlaneStation::FindInReach(this) : nullptr;
+	if (Cannon && Station)
+	{
+		if (FVector::Dist2D(Cannon->GetActorLocation(), GetActorLocation()) < FVector::Dist2D(Station->GetActorLocation(), GetActorLocation()))
+		{
+			Station = nullptr;
+		}
+		else
+		{
+			Cannon = nullptr;
+		}
+	}
+	if (Cannon)
+	{
+		Cannon->Fire(this);
+		return;
+	}
+	if (Station)
+	{
+		Station->StartRoll(this);
 		return;
 	}
 	if (ARRRandomVehicle* Ride = FindVehicleInReach())
@@ -1810,8 +2020,10 @@ void ARRRandomCharacter::GetOffVehicle()
 		Parked->Dismount();
 		Vehicle = nullptr;
 	}
-	// Step off beside it (right, or left if that is blocked); a knocked-out rider falls where it is
-	if (bAlive)
+	// Step off beside it (right, or left if that is blocked); a knocked-out rider falls where it is, and one out of a plane
+	// in the air drops from where it was
+	const bool bOutOfPlaneAloft = Parked->IsPlane() && !IsPlaneLanded();
+	if (bAlive && !bOutOfPlaneAloft)
 	{
 		const float Step = Parked->GetHalfWidth() + GetCapsuleComponent()->GetScaledCapsuleRadius() + 10.f;
 		for (const float Side : { 1.f, -1.f })
@@ -1826,7 +2038,7 @@ void ARRRandomCharacter::GetOffVehicle()
 
 bool ARRRandomCharacter::CanSprint() const
 {
-	return bAlive && !Vehicle && !Robot && !bClimbing && !IsUsingUltimate() && !IsDashingToFormation()
+	return bAlive && !Vehicle && !Robot && !bClimbing && !IsUsingUltimate() && !IsDashingToFormation() && !IsRidingCannon()
 		&& GetCharacterMovement()->MaxWalkSpeed > 0.f;
 }
 
@@ -1849,6 +2061,11 @@ float ARRRandomCharacter::GetSprintShare() const
 
 bool ARRRandomCharacter::IsInFlight() const
 {
+	// Shot out of a cannon: flying, whatever the movement says (it is carried along the arc)
+	if (IsCannonFlying())
+	{
+		return bAlive;
+	}
 	const UCharacterMovementComponent* Movement = GetCharacterMovement();
 	if (Vehicle || !bAlive || !Movement || !Movement->IsFalling())
 	{
@@ -1945,9 +2162,13 @@ void ARRRandomCharacter::UpdateCamera(float DeltaSeconds)
 	SightsBlend = FMath::FInterpTo(SightsBlend, IsAimingDownSights() ? 1.f : 0.f, DeltaSeconds, SightsSpeed);
 	// In flight the player's own camera pulls back, so the climb shows and there is more to see from up there
 	const URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(GetCharacterMovement());
-	const bool bInFlight = !Vehicle && GetCharacterMovement()->IsFalling() && (bFlying || (RandomMovement && RandomMovement->bGliding));
+	// (out of a cannon and flying a plane too)
+	const bool bInFlight = IsCannonFlying() || IsPiloting() || (!Vehicle && GetCharacterMovement()->IsFalling() && (bFlying || (RandomMovement && RandomMovement->bGliding)));
 	FlightCameraPull = FMath::FInterpTo(FlightCameraPull, bInFlight ? 1.f : 0.f, DeltaSeconds, FlightCameraPullRate);
 	SprintCameraBlend = FMath::FInterpTo(SprintCameraBlend, IsSprinting() && !bInFlight ? 1.f : 0.f, DeltaSeconds, SprintCameraRate);
+	// Round 91: rushing through the air (out of a cannon, or a ride leaping off a jump ramp) the view widens, so the speed shows
+	const bool bRushing = IsCannonFlying() || (Vehicle && !IsPiloting() && GetCharacterMovement()->IsFalling() && GetVelocity().Size2D() > RushCameraMinSpeed);
+	RushCameraBlend = FMath::FInterpTo(RushCameraBlend, bRushing ? 1.f : 0.f, DeltaSeconds, bRushing ? RushCameraInRate : RushCameraOutRate);
 	// In the star robot: framed round something that big. Combining it: watching it come together (where it stands is
 	// kept, so the view can ease back once it is done)
 	RobotCameraPull = FMath::FInterpTo(RobotCameraPull, IsInRobot() ? 1.f : 0.f, DeltaSeconds, RobotCameraPullRate);
@@ -2006,7 +2227,8 @@ void ARRRandomCharacter::UpdateCamera(float DeltaSeconds)
 		CameraBoom->TargetArmLength = ArmLength;
 		CameraBoom->SocketOffset = Socket;
 		CameraBoom->TargetOffset = Pivot;
-		TopDownCamera->SetFieldOfView(FMath::Lerp(ShoulderFieldOfView, SightsFieldOfView, SightsBlend) + ShoulderFlightFieldOfView * FlightCameraPull);
+		TopDownCamera->SetFieldOfView(FMath::Lerp(ShoulderFieldOfView, SightsFieldOfView, SightsBlend) + ShoulderFlightFieldOfView * FlightCameraPull
+			+ RushFieldOfView * RushCameraBlend);
 		ApplyClashCamera();
 		return;
 	}
@@ -2080,7 +2302,8 @@ void ARRRandomCharacter::ApplyThirdPersonRotation()
 bool ARRRandomCharacter::IsDespairing() const
 {
 	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
-	return DefeatAnimations.Num() > 0 && bAlive && State && State->IsMatchOver() && Team != State->GetWinningTeam() && State->GetMVP() != this;
+	// (a lost defense: the MVP slumps with the rest)
+	return DefeatAnimations.Num() > 0 && bAlive && State && State->IsMatchOver() && Team != State->GetWinningTeam() && (State->GetMVP() != this || State->IsDefense());
 }
 
 bool ARRRandomCharacter::IsCelebrating() const
@@ -2089,7 +2312,7 @@ bool ARRRandomCharacter::IsCelebrating() const
 	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
 	// The winners in the dance line once there; without one, the winners and the MVP where they stand
 	return VictoryAnimation && bAlive && State && State->IsMatchOver()
-		&& (bHasFormation ? bInFormation : (Team == State->GetWinningTeam() || State->GetMVP() == this));
+		&& (bHasFormation ? bInFormation : (Team == State->GetWinningTeam() || (State->GetMVP() == this && !State->IsDefense())));
 }
 
 void ARRRandomCharacter::PlayBodyAnimation(UAnimSequence* Animation, bool bLoop, float PlayRate)
@@ -2185,7 +2408,11 @@ FVector ARRRandomCharacter::FaceToward(const FVector& TargetLocation)
 	{
 		Direction = GetActorForwardVector().GetSafeNormal2D();
 	}
-	SetActorRotation(Direction.Rotation());
+	// A pilot shoots from its seat: the plane keeps flying its own way
+	if (!IsPiloting())
+	{
+		SetActorRotation(Direction.Rotation());
+	}
 	return Direction;
 }
 
@@ -2212,6 +2439,20 @@ bool ARRRandomCharacter::FireAt(const FVector& TargetLocation)
 	// Client: run the cooldown here so holding the button sends one request per shot, and let the server shoot.
 	// Ammo comes back replicated; the server reloads an empty magazine by itself.
 	const float Now = GetWorld()->GetTimeSeconds();
+	// Flying a plane with a gun of its own: that gun's pace (no magazine)
+	if (IsPiloting() && Vehicle->GetHandling().Gun != ERRPlaneGun::Pilot)
+	{
+		float Interval, Damage, Scale, Speed;
+		uint8 Tier;
+		ARRRandomVehicle::GetGunStats(Vehicle->GetHandling().Gun, Interval, Damage, Scale, Speed, Tier);
+		if (!bAlive || Now < NextFireTime)
+		{
+			return false;
+		}
+		NextFireTime = Now + Interval / DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackSpeed);
+		ServerFireAt(TargetLocation);
+		return true;
+	}
 	// Running (Shift) the gun is down: no shots till the run stops
 	if (!bAlive || !ProjectileClass || bReloading || bClimbing || IsSprinting() || IsDriving() || Ammo <= 0 || Now < NextFireTime)
 	{
@@ -2293,6 +2534,11 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 		}
 		return false;
 	}
+	// A plane's own gun (the wooden plane's pilot shoots its own, below)
+	if (IsPiloting() && Vehicle->GetHandling().Gun != ERRPlaneGun::Pilot)
+	{
+		return ShootPlaneGun(TargetLocation, CooldownSlack);
+	}
 	// The driver's hands are on the wheel (the one in the rear seat still shoots)
 	if (!bAlive || !ProjectileClass || bReloading || bClimbing || IsSprinting() || IsDriving() || IsUsingUltimate() || Now + CooldownSlack < NextFireTime
 		|| ARRRandomGameState::IsPlayLocked(this))
@@ -2340,6 +2586,12 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 		Projectile->bPoke = Weapon.bFoamFinger;
 		Projectile->HitEffect = Weapon.GetHitEffect();
 		Projectile->Tier = Weapon.bFoamFinger ? ERRWeaponTier::Common : Weapon.Tier;
+		// A CANNON's shell smashes what it hits and digs a cell of ground (round 89); the other guns' shots only stop
+		if (Projectile->HitEffect == ERRHitEffect::Cannon)
+		{
+			Projectile->WreckRadius = CannonWreckRadius;
+			Projectile->WreckDig = 1;
+		}
 		Projectile->FinishSpawning(SpawnTransform);
 	}
 	return true;
@@ -2403,7 +2655,8 @@ bool ARRRandomCharacter::GetShotStart(const FVector& TargetLocation, FTransform&
 	{
 		const AActor* Other = Hit.GetActor();
 		const ARRRandomStarRobot* TeamRobot = Cast<ARRRandomStarRobot>(Other);
-		if (!Cast<ARRRandomProjectile>(Other) && !(TeamRobot && TeamRobot->GetTeam() == Team))
+		// (nor the plane it flies)
+		if (!Cast<ARRRandomProjectile>(Other) && !(TeamRobot && TeamRobot->GetTeam() == Team) && !(Other && Other == Vehicle))
 		{
 			return false;
 		}
@@ -2753,6 +3006,11 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 	{
 		return Robot->IsDamageProxy(this) ? Robot->TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser) : 0.f;
 	}
+	// A plane's pilot: the plane takes the hit
+	if (IsPiloting())
+	{
+		return Vehicle->TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+	}
 
 	// A fox's clone's shots are only for show; the clone itself goes up in smoke at the first real hit
 	if (Attacker && Attacker->IsDecoy())
@@ -2843,6 +3101,9 @@ void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharact
 		FlingVelocity = RamImpact.GetSafeNormal2D() * Speed + FVector(0.f, 0.f, FlingLift);
 	}
 	SetTrustClientMovement(false);
+	// Out of a cannon's arc (every machine ends it as it hears)
+	CannonRide = nullptr;
+	bBailedOut = false;
 	// Out of the star robot (or its combining is off)
 	if (Robot)
 	{
@@ -2957,7 +3218,7 @@ void ARRRandomCharacter::ApplyStandingBody()
 		EndFling();
 	}
 	// Size is left alone while knocked out, so the ragdoll isn't rescaled mid-fall; back to normal here
-	SetActorScale3D(FVector(bGiant ? GiantScale : 1.f));
+	SetActorScale3D(FVector((bGiant ? GiantScale : 1.f) * VillainBodyScale));
 
 	USkeletalMeshComponent* BodyMesh = GetMesh();
 	BodyMesh->SetSimulatePhysics(false);
@@ -2996,4 +3257,480 @@ void ARRRandomCharacter::Respawn()
 	LastCombatTime = -UE_BIG_NUMBER;
 	NextFireTime = 0.f;
 	bAlive = true;
+}
+
+namespace
+{
+	// Taking off in a plane: it climbs by itself this long first, clear of the station
+	constexpr float PlaneTakeoffTime = 0.9f;
+	// A plane turns to face the way it flies from this speed (slower, it keeps its heading)
+	constexpr float PlaneTurnMinSpeed = 60.f;
+	// Its bottom (the pilot's capsule's) this close over the ground counts as landed
+	constexpr float PlaneLandedGap = 30.f;
+	// Bailing out: thrown up and a little ahead, then gliding down
+	constexpr float BailLift = 700.f;
+	constexpr float BailAhead = 250.f;
+	// A remote flier's cannon ride lasts this much longer on the server than the flight, so its own landing comes first
+	constexpr float RemoteCannonSlack = 0.4f;
+	// Landing on a cannon's pad shoves anyone this close aside, this hard (out, up), without hurting them
+	constexpr float CannonShoveRadius = 260.f;
+	const FVector2D CannonShove(450.f, 250.f);
+	// Hitting something on the way (after this share of the arc: the start is in the barrel) ends the arc; it falls on at
+	// this share of its speed
+	constexpr float CannonArcGrace = 0.04f;
+	constexpr float CannonKnockedSpeed = 0.25f;
+}
+
+bool ARRRandomCharacter::IsDriving() const
+{
+	return Vehicle && !bPassenger && !Vehicle->IsPlane();
+}
+
+bool ARRRandomCharacter::IsPiloting() const
+{
+	return Vehicle && !bPassenger && Vehicle->IsPlane();
+}
+
+bool ARRRandomCharacter::CanBoardPlane() const
+{
+	return bAlive && !bDecoy && !Vehicle && !Robot && !bClimbing && !bGiant && !bFlying && !IsUsingUltimate() && !IsRidingCannon()
+		&& !ARRRandomGameState::IsPlayLocked(this);
+}
+
+bool ARRRandomCharacter::BoardPlane(ARRRandomVehicle* Plane)
+{
+	if (!HasAuthority() || !Plane || !Plane->IsPlane() || !CanBoardPlane() || Plane->Mount(this) != 0)
+	{
+		return false;
+	}
+	Vehicle = Plane;
+	bPassenger = false;
+	bBailedOut = false;
+	ApplyRide();
+	ForceNetUpdate();
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s takes off in a %s now."), *GetName(), Plane->GetHandling().Name);
+	return true;
+}
+
+void ARRRandomCharacter::BailOut()
+{
+	if (!HasAuthority() || !IsPiloting())
+	{
+		return;
+	}
+	const FVector Ahead = GetActorForwardVector().GetSafeNormal2D();
+	GetOffVehicle();
+	bBailedOut = true;
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	Movement->SetMovementMode(MOVE_Falling);
+	LaunchCharacter(Ahead * BailAhead + FVector(0.f, 0.f, BailLift), true, true);
+	ForceNetUpdate();
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s bails out."), *GetName());
+}
+
+bool ARRRandomCharacter::IsPlaneLanded() const
+{
+	const FVector Feet = GetActorLocation() - FVector(0.f, 0.f, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRPlaneLanded), false, this);
+	if (Vehicle)
+	{
+		Params.AddIgnoredActor(Vehicle);
+	}
+	FHitResult Ground;
+	return GetWorld()->LineTraceSingleByChannel(Ground, Feet + FVector(0.f, 0.f, 10.f), Feet - FVector(0.f, 0.f, PlaneLandedGap), ECC_Visibility, Params);
+}
+
+void ARRRandomCharacter::UpdatePlaneFlight(float DeltaSeconds)
+{
+	if (!IsPiloting())
+	{
+		PilotedPlane = nullptr;
+		return;
+	}
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (PilotedPlane.Get() != Vehicle)
+	{
+		PilotedPlane = Vehicle;
+		PlaneBoardTime = Now;
+	}
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (IsLocallyControlled())
+	{
+		// Up with jump, down with Ctrl, hovering with neither; climbing by itself just after taking off
+		float Lift = (bPlaneRiseHeld ? 1.f : 0.f) - (bPlaneDescendHeld ? 1.f : 0.f);
+		if (Now - PlaneBoardTime < PlaneTakeoffTime)
+		{
+			Lift = 1.f;
+		}
+		if (Lift != 0.f)
+		{
+			AddMovementInput(FVector::UpVector, Lift);
+		}
+		// Level, turning (at the plane's own rate) to face the way it flies
+		const FVector Flat = Movement->Velocity * FVector(1.f, 1.f, 0.f);
+		if (Flat.Size() > PlaneTurnMinSpeed)
+		{
+			const float Yaw = FMath::FixedTurn(GetActorRotation().Yaw, Flat.Rotation().Yaw, Vehicle->GetHandling().TurnRate * DeltaSeconds);
+			SetActorRotation(FRotator(0.f, Yaw, 0.f));
+		}
+	}
+	// Kept in the map's flight area: under its ceiling and back in over its sides
+	FBox Area;
+	if ((IsLocallyControlled() || HasAuthority()) && GetFlightArea(Area))
+	{
+		const FVector Where = GetActorLocation();
+		const float Feet = Where.Z - GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+		FVector& Velocity = Movement->Velocity;
+		Velocity.X = Where.X < Area.Min.X ? FMath::Max<FVector::FReal>(Velocity.X, FlightEdgePush) : Where.X > Area.Max.X ? FMath::Min<FVector::FReal>(Velocity.X, -FlightEdgePush) : Velocity.X;
+		Velocity.Y = Where.Y < Area.Min.Y ? FMath::Max<FVector::FReal>(Velocity.Y, FlightEdgePush) : Where.Y > Area.Max.Y ? FMath::Min<FVector::FReal>(Velocity.Y, -FlightEdgePush) : Velocity.Y;
+		if (Feet > Area.Max.Z)
+		{
+			Velocity.Z = FMath::Min<FVector::FReal>(Velocity.Z, -FlightEdgePush);
+		}
+	}
+}
+
+bool ARRRandomCharacter::ShootPlaneGun(const FVector& TargetLocation, float CooldownSlack)
+{
+	UWorld* World = GetWorld();
+	const float Now = World->GetTimeSeconds();
+	if (!bAlive || !ProjectileClass || !IsPiloting() || Vehicle->IsCrashing() || ARRRandomGameState::IsPlayLocked(this) || Now + CooldownSlack < NextFireTime)
+	{
+		return false;
+	}
+	const ERRPlaneGun PlaneGun = Vehicle->GetHandling().Gun;
+	float Interval, Damage, Scale, Speed;
+	uint8 Tier;
+	ARRRandomVehicle::GetGunStats(PlaneGun, Interval, Damage, Scale, Speed, Tier);
+	TArray<FVector> Muzzles;
+	Vehicle->GetGunMuzzles(Muzzles);
+	if (Muzzles.Num() == 0)
+	{
+		return false;
+	}
+	NextFireTime = Now + Interval / DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackSpeed);
+	LastCombatTime = Now;
+	// The two guns in turn, each straight at the target (or straight ahead, at one behind the plane)
+	const FVector Muzzle = Muzzles[PlaneGunSide % Muzzles.Num()];
+	PlaneGunSide = (PlaneGunSide + 1) % Muzzles.Num();
+	FVector Direction = (TargetLocation - Muzzle).GetSafeNormal();
+	if (FVector::DotProduct(Direction, Vehicle->GetActorForwardVector()) <= 0.f || Direction.IsNearlyZero())
+	{
+		Direction = Vehicle->GetActorForwardVector();
+	}
+	const float Radius = ProjectileClass->GetDefaultObject<ARRRandomProjectile>()->GetRadius() * Scale;
+	const FTransform Spawn(Direction.Rotation(), Muzzle + Direction * Radius, FVector(Scale));
+	if (ARRRandomProjectile* Projectile = World->SpawnActorDeferred<ARRRandomProjectile>(ProjectileClass, Spawn, this, this, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+	{
+		Projectile->DamageMultiplier = DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackPower) * Damage;
+		Projectile->MaxRange = GetShotRange();
+		Projectile->SetSpeedMultiplier(Speed);
+		Projectile->HitEffect = PlaneGun == ERRPlaneGun::Laser ? ERRHitEffect::Blaster : ERRHitEffect::Smg;
+		Projectile->Tier = static_cast<ERRWeaponTier>(Tier);
+		Projectile->FinishSpawning(Spawn);
+	}
+	return true;
+}
+
+bool ARRRandomCharacter::IsCannonFlying() const
+{
+	return CannonTime >= ARRRandomCannon::LoadTime;
+}
+
+void ARRRandomCharacter::StartCannonRide(ARRRandomCannon* Cannon)
+{
+	if (!HasAuthority() || !Cannon || IsRidingCannon())
+	{
+		return;
+	}
+	CannonRide = Cannon;
+	CannonServerTime = 0.f;
+	BeginCannonRide();
+	// A remote flier moves itself along the arc; the server follows its position meanwhile (as in a climb)
+	if (!IsLocallyControlled())
+	{
+		SetTrustClientMovement(true);
+	}
+	ForceNetUpdate();
+}
+
+void ARRRandomCharacter::OnRep_CannonRide()
+{
+	if (CannonRide && CannonTime < 0.f)
+	{
+		BeginCannonRide();
+	}
+	else if (!CannonRide && CannonTime >= 0.f)
+	{
+		EndCannonRide(false);
+	}
+}
+
+void ARRRandomCharacter::BeginCannonRide()
+{
+	CannonTime = 0.f;
+	bCannonFired = false;
+	bCannonOffArc = false;
+	// In the barrel: out of sight, and the cannon itself not in the way of the way out
+	SetActorHiddenInGame(true);
+	GetCapsuleComponent()->IgnoreActorWhenMoving(CannonRide, true);
+	if (IsLocallyControlled())
+	{
+		UCharacterMovementComponent* Movement = GetCharacterMovement();
+		Movement->StopMovementImmediately();
+		Movement->DisableMovement();
+		SetActorLocation(CannonRide->GetMuzzleLocation());
+	}
+}
+
+void ARRRandomCharacter::UpdateCannonRide(float DeltaSeconds)
+{
+	if (CannonTime < 0.f)
+	{
+		return;
+	}
+	ARRRandomCannon* Cannon = CannonRide;
+	if (!Cannon)
+	{
+		EndCannonRide(false);
+		return;
+	}
+	CannonTime += DeltaSeconds;
+	CannonServerTime += DeltaSeconds;
+	const float HalfHeight = GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	// Loading: held in the barrel
+	if (CannonTime < ARRRandomCannon::LoadTime)
+	{
+		if (IsLocallyControlled())
+		{
+			SetActorLocation(Cannon->GetMuzzleLocation());
+		}
+		return;
+	}
+	// BOOM (the cannon's show): out of the barrel, facing the pad
+	if (!bCannonFired)
+	{
+		bCannonFired = true;
+		SetActorHiddenInGame(false);
+		CannonTrailLast = GetActorLocation();
+		if (IsLocallyControlled())
+		{
+			SetActorRotation(FRotator(0.f, (Cannon->GetPadLocation() - GetActorLocation()).Rotation().Yaw, 0.f));
+		}
+	}
+	const float FlightTime = Cannon->GetFlightTime();
+	const float Alpha = (CannonTime - ARRRandomCannon::LoadTime) / FlightTime;
+	if (Alpha < 1.f && !bCannonOffArc)
+	{
+		if (IsLocallyControlled())
+		{
+			// Along the arc, stopped by anything solid on the way (then it falls from there)
+			FHitResult Hit;
+			SetActorLocation(Cannon->GetArcPoint(Alpha, HalfHeight), true, &Hit);
+			Movement->Velocity = Cannon->GetArcVelocity(Alpha, HalfHeight);
+			if (Hit.bBlockingHit && Alpha > CannonArcGrace)
+			{
+				bCannonOffArc = true;
+				Movement->SetMovementMode(MOVE_Falling);
+				Movement->Velocity *= CannonKnockedSpeed;
+				UE_LOG(LogTemp, Log, TEXT("RRRandom: %s hits %s at %s, %.0f%% of the way to the pad."), *GetName(), *GetNameSafe(Hit.GetActor()), *Hit.ImpactPoint.ToString(), Alpha * 100.f);
+				EndCannonRide(false);
+				return;
+			}
+		}
+		// A contrail and rushing wind (round 91: the old stars and puffs read as smoke)
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			Effects->RushTrail(CannonTrailLast, GetActorLocation(), Cannon->GetArcVelocity(Alpha, HalfHeight), DeltaSeconds);
+		}
+		CannonTrailLast = GetActorLocation();
+		return;
+	}
+	// The way is over: a remote flier's server waits a little more, for that client's own landing
+	if (HasAuthority() && !IsLocallyControlled() && CannonServerTime < ARRRandomCannon::LoadTime + FlightTime + RemoteCannonSlack)
+	{
+		return;
+	}
+	EndCannonRide(!bCannonOffArc);
+}
+
+void ARRRandomCharacter::EndCannonRide(bool bLanded)
+{
+	if (CannonTime < 0.f)
+	{
+		return;
+	}
+	ARRRandomCannon* Cannon = CannonRide;
+	CannonTime = -1.f;
+	SetActorHiddenInGame(false);
+	if (Cannon)
+	{
+		GetCapsuleComponent()->IgnoreActorWhenMoving(Cannon, false);
+	}
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (IsLocallyControlled() && bAlive && Movement->MovementMode == MOVE_None)
+	{
+		// Down the last bit onto the pad, the arc's sideways speed mostly gone
+		Movement->SetMovementMode(MOVE_Falling);
+		Movement->Velocity = Movement->Velocity * FVector(0.15f, 0.15f, 0.f) - FVector(0.f, 0.f, 200.f);
+	}
+	const FVector Feet = GetActorLocation() - FVector(0.f, 0.f, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	if (bLanded && bAlive)
+	{
+		// THUD: dust out along the ground, a splash of stars, the word
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			Effects->Footstep(Feet, 1.8f);
+			Effects->StarImpact(Feet, GetActorForwardVector(), 1.5f, RRUI::Butter);
+		}
+		ARRRandomHUD::PopComicWord(this, TEXT("THUD!"), Feet + FVector(0.f, 0.f, 240.f), RRUI::Gold, 1.2f);
+	}
+	if (HasAuthority())
+	{
+		// Anyone standing on the pad is shoved aside (no harm done)
+		if (bLanded && bAlive)
+		{
+			for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+			{
+				ARRRandomCharacter* Other = *It;
+				const FVector Offset = (Other->GetActorLocation() - GetActorLocation()) * FVector(1.f, 1.f, 0.f);
+				if (Other == this || !Other->IsAlive() || Other->GetVehicle() || Other->GetRobot() || Offset.Size() > CannonShoveRadius
+					|| FMath::Abs(Other->GetActorLocation().Z - GetActorLocation().Z) > 200.f)
+				{
+					continue;
+				}
+				const FVector Away = Offset.IsNearlyZero() ? GetActorForwardVector() : Offset.GetSafeNormal();
+				Other->LaunchCharacter(Away * CannonShove.X + FVector(0.f, 0.f, CannonShove.Y), true, true);
+			}
+		}
+		CannonRide = nullptr;
+		if (!IsLocallyControlled())
+		{
+			// Keep trusting the client a little longer, until its first moves after the landing have arrived
+			ClientTrustRemaining = FMath::Max(ClimbTrustMargin, KINDA_SMALL_NUMBER);
+		}
+		ForceNetUpdate();
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s %s."), *GetName(), bLanded ? TEXT("lands on its cannon's pad") : TEXT("is out of the cannon's arc"));
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Defense villains (round 90)
+
+void ARRRandomCharacter::SetupVillain(float HealthScale, float Damage, float BodyScale, const FLinearColor& Tint, bool bBoss)
+{
+	VillainHealthScale = FMath::Max(0.1f, HealthScale);
+	VillainDamage = Damage;
+	VillainBodyScale = FMath::Max(0.3f, BodyScale);
+	VillainTint = Tint;
+	bVillainBoss = bBoss;
+	// Before begin play: it begins at its size and full health (ApplyKit has the toughness)
+	SetActorScale3D(FVector(VillainBodyScale));
+}
+
+float ARRRandomCharacter::GetVillainReach() const
+{
+	return VillainReach * VillainBodyScale;
+}
+
+float ARRRandomCharacter::GetSlamCooldown() const
+{
+	return FMath::Max(0.f, NextSlamTime - GetWorld()->GetTimeSeconds());
+}
+
+bool ARRRandomCharacter::VillainStrike(AActor* Target)
+{
+	UWorld* World = GetWorld();
+	const float Now = World->GetTimeSeconds();
+	if (!HasAuthority() || !IsVillain() || !bAlive || !Target || Now < NextStrikeTime || ARRRandomGameState::IsPlayLocked(this)
+		|| World->GetTimerManager().IsTimerActive(SlamTimer))
+	{
+		return false;
+	}
+	NextStrikeTime = Now + (Species == RRSpecies::Cat ? CatStrikeInterval : RatStrikeInterval);
+	// The bite (or claw) plays on every machine through the shot count, as a shot's firing animation does
+	LastShotTime = Now;
+	++ShotCount;
+	LastCombatTime = Now;
+	FaceToward(Target->GetActorLocation());
+	StrikeTarget = Target;
+	World->GetTimerManager().SetTimer(StrikeTimer, this, &ARRRandomCharacter::LandVillainStrike, VillainStrikeDelay, false);
+	return true;
+}
+
+void ARRRandomCharacter::LandVillainStrike()
+{
+	AActor* Target = StrikeTarget.Get();
+	StrikeTarget = nullptr;
+	if (!Target || !bAlive || ARRRandomGameState::IsPlayLocked(this))
+	{
+		return;
+	}
+	// Still in reach (it may have stepped back): the gap from this capsule's edge to the target's nearest point
+	const FVector Middle = GetActorLocation();
+	const float Radius = GetCapsuleComponent()->GetScaledCapsuleRadius();
+	if (ARRRandomVillainAI::GetGap(this, Target) > GetVillainReach() * 1.4f + 25.f)
+	{
+		return;
+	}
+	const FVector Direction = (Target->GetActorLocation() - Middle).GetSafeNormal2D();
+	FHitResult Hit;
+	Hit.ImpactPoint = Middle + Direction * Radius;
+	Hit.Location = Hit.ImpactPoint;
+	UGameplayStatics::ApplyPointDamage(Target, VillainDamage, Direction, Hit, GetController(), this, UDamageType::StaticClass());
+}
+
+bool ARRRandomCharacter::VillainSlam()
+{
+	UWorld* World = GetWorld();
+	const float Now = World->GetTimeSeconds();
+	if (!HasAuthority() || !bVillainBoss || !bAlive || Now < NextSlamTime || ARRRandomGameState::IsPlayLocked(this) || World->GetTimerManager().IsTimerActive(SlamTimer))
+	{
+		return false;
+	}
+	NextSlamTime = Now + SlamInterval;
+	NextStrikeTime = FMath::Max(NextStrikeTime, Now + SlamWindup + 0.4f);
+	// Up on its hind legs (the attack animation), then down on the ground
+	LastShotTime = Now;
+	++ShotCount;
+	World->GetTimerManager().SetTimer(SlamTimer, this, &ARRRandomCharacter::LandVillainSlam, SlamWindup, false);
+	return true;
+}
+
+void ARRRandomCharacter::LandVillainSlam()
+{
+	if (!bAlive || ARRRandomGameState::IsPlayLocked(this))
+	{
+		return;
+	}
+	const float Radius = SlamRadius * FMath::Max(1.f, VillainBodyScale * 0.6f);
+	const FVector Feet = GetActorLocation() - FVector(0.f, 0.f, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	MulticastVillainSlam(Feet, Radius);
+	// Everything of the other side round it (brawlers, the walls, the tower) takes the blow; the brawlers are pushed away
+	TArray<AActor*> Ignore = { this };
+	UGameplayStatics::ApplyRadialDamage(this, VillainDamage * SlamDamageShare, Feet + FVector(0.f, 0.f, 60.f), Radius, UDamageType::StaticClass(), Ignore, this, GetController(), true);
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		ARRRandomCharacter* Other = *It;
+		const FVector Offset = (Other->GetActorLocation() - GetActorLocation()) * FVector(1.f, 1.f, 0.f);
+		// (not those up on the castle wall)
+		if (Other->GetTeam() == Team || !Other->IsAlive() || Other->GetVehicle() || Other->GetRobot() || Offset.Size() > Radius
+			|| FMath::Abs(Other->GetActorLocation().Z - GetActorLocation().Z) > 250.f * VillainBodyScale)
+		{
+			continue;
+		}
+		const FVector Away = Offset.IsNearlyZero() ? GetActorForwardVector() : Offset.GetSafeNormal();
+		Other->LaunchCharacter(Away * SlamPush + FVector(0.f, 0.f, SlamPush * 0.5f), true, true);
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s slams the ground round it (radius %.0f)."), *GetName(), Radius);
+}
+
+void ARRRandomCharacter::MulticastVillainSlam_Implementation(FVector_NetQuantize Where, float Radius)
+{
+	if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+	{
+		Effects->TigerStrike(Where, Radius, FLinearColor(0.75f, 0.35f, 1.f));
+	}
+	ARRRandomHUD::PopComicWord(this, TEXT("SLAM!"), Where + FVector(0.f, 0.f, 260.f), FLinearColor(0.75f, 0.35f, 1.f), 1.4f);
 }

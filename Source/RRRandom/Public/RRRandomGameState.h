@@ -96,7 +96,99 @@ public:
 	/** Server only: Team starts counting down Seconds to its win (INDEX_NONE stops the count). */
 	void SetHold(int32 Team, float Seconds);
 
+	/**
+	 * Defense (ERRMatchRule::Defense, round 90): the stage, the wave under way (0 before the first, 1..WaveCount), whether the
+	 * break before the next one is on and when it ends, how many villains of the wave are still to come or standing, and
+	 * whether a boss is out. ARRRandomDefenseDirector keeps it up to date.
+	 */
+	bool IsDefense() const { return bDefense; }
+	static bool IsDefense(const UObject* WorldContext);
+	int32 GetDefenseStage() const { return DefenseStage; }
+	int32 GetWave() const { return Wave; }
+	static constexpr int32 WaveCount = 7;
+	bool IsWaveBreak() const { return bWaveBreak; }
+	/** Seconds until the next wave comes (the break, or the first wave's wait), on the server's clock. */
+	float GetWaveCountdown() const { return NextWaveTime - GetServerWorldTimeSeconds(); }
+	int32 GetVillainsLeft() const { return VillainsLeft; }
+	int32 GetWaveVillains() const { return WaveVillains; }
+	bool IsBossOut() const { return bBossOut; }
+
+	/** Server only. */
+	void SetDefense(int32 Stage) { bDefense = true; DefenseStage = Stage; }
+	void SetWave(int32 InWave, int32 InVillains) { Wave = InWave; WaveVillains = InVillains; VillainsLeft = InVillains; bWaveBreak = false; }
+	void SetWaveBreak(float InNextWaveTime) { bWaveBreak = true; NextWaveTime = InNextWaveTime; }
+	void SetVillainsLeft(int32 Left) { VillainsLeft = Left; }
+	void SetBossOut(bool bOut) { bBossOut = bOut; }
+
+	/**
+	 * The battle royale (ERRMatchRule::BattleRoyale, round 92): how many teams there are, and how many animal friends and
+	 * teams are still standing (the server counts: far away brawlers aren't on every machine). A team out is placed: the
+	 * number of teams still standing when its last one went down, plus one.
+	 */
+	bool IsBattleRoyale() const { return bBattleRoyale; }
+	static bool IsBattleRoyale(const UObject* WorldContext);
+	int32 GetBattleTeamCount() const { return BattleTeamCount; }
+	int32 GetAliveFriends() const { return AliveFriends; }
+	int32 GetAliveTeams() const { return AliveTeams; }
+	/** A team's place (1 for the winners), 0 while it still stands. */
+	int32 GetTeamPlace(int32 Team) const { return TeamPlaces.IsValidIndex(Team) ? TeamPlaces[Team] : 0; }
+
+	/** Server only. */
+	void SetBattleRoyale(int32 InTeamCount)
+	{
+		bBattleRoyale = true;
+		BattleTeamCount = InTeamCount;
+		TeamPlaces.Init(0, InTeamCount);
+	}
+	void SetAlive(int32 Friends, int32 Teams) { AliveFriends = Friends; AliveTeams = Teams; }
+	void SetTeamPlace(int32 Team, int32 Place)
+	{
+		if (TeamPlaces.IsValidIndex(Team))
+		{
+			TeamPlaces[Team] = Place;
+		}
+	}
+
 private:
+	UPROPERTY(Replicated)
+	bool bBattleRoyale = false;
+
+	UPROPERTY(Replicated)
+	int32 BattleTeamCount = 0;
+
+	UPROPERTY(Replicated)
+	int32 AliveFriends = 0;
+
+	UPROPERTY(Replicated)
+	int32 AliveTeams = 0;
+
+	UPROPERTY(Replicated)
+	TArray<int32> TeamPlaces;
+
+	UPROPERTY(Replicated)
+	bool bDefense = false;
+
+	UPROPERTY(Replicated)
+	int32 DefenseStage = 0;
+
+	UPROPERTY(Replicated)
+	int32 Wave = 0;
+
+	UPROPERTY(Replicated)
+	bool bWaveBreak = false;
+
+	UPROPERTY(Replicated)
+	float NextWaveTime = 0.f;
+
+	UPROPERTY(Replicated)
+	int32 VillainsLeft = 0;
+
+	UPROPERTY(Replicated)
+	int32 WaveVillains = 0;
+
+	UPROPERTY(Replicated)
+	bool bBossOut = false;
+
 	UPROPERTY(Replicated)
 	bool bMeteorRush = false;
 

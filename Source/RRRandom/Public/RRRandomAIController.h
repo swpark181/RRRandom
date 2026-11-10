@@ -166,6 +166,8 @@ private:
 public:
 	/** The vehicle this bot is walking over to, so teammates don't all head for the same one. */
 	ARRRandomVehicle* GetVehicleTarget() const { return VehicleTarget.Get(); }
+	/** Round 92: the cannon or plane station this bot is heading for, so two don't make for the same one. */
+	const AActor* GetLaunchTarget() const { return LaunchTarget.Get(); }
 
 private:
 	TWeakObjectPtr<ARRRandomVehicle> VehicleTarget;
@@ -244,6 +246,34 @@ private:
 	int32 WedgeCount = 0;
 	FVector BadCoverSpot = FVector::ZeroVector;
 	float BadCoverTimer = 0.f;
+
+	// Round 92: the battle royale
+	/**
+	 * Where to head on the battle map (BattleGoal, at foot height): into the ring of safe ground when outside it (or outside
+	 * the next one while it closes soon: bRingUrgent), else a spot to roam to inside it, near where the bot is.
+	 */
+	void UpdateBattleGoal(const ARRRandomCharacter* Self, float DeltaSeconds);
+	/**
+	 * The long ways round the battle map: walking to a human cannon whose pad is much nearer the goal, or (a very long way) a
+	 * plane station, and in; flying the plane high over the roofs to the goal, down and off there (shooting on the way as
+	 * usual). True while it has the bot's attention (sets Wanted).
+	 */
+	bool UpdateBattleTravel(ARRRandomCharacter* Self, bool bInFight, FVector& Wanted, bool& bOnRoute, float DeltaSeconds);
+	/** Holds Shift on a long way on foot out of a fight (a player's sprint). */
+	void UpdateSprint(ARRRandomCharacter* Self, bool bInFight, const FVector& Move);
+	bool bBattle = false;
+	FVector BattleGoal = FVector::ZeroVector;
+	bool bHasBattleGoal = false;
+	bool bRingUrgent = false;
+	float BattleGoalTimer = 0.f;
+	float BattleLookTimer = 0.f;
+	/** Into the ring: the nearest the bot has come to its spot, and how long since it came any nearer (another spot then). */
+	float RingBest = UE_BIG_NUMBER;
+	float RingStuckTimer = 0.f;
+	float RingAngle = 0.f;
+	TWeakObjectPtr<AActor> LaunchTarget;
+	float LaunchTimer = 0.f;
+	float TownTimer = 0.f;
 
 	/** Meteor Rush (UpdateRushGoal): where to go, whether there is anywhere, keeping the ore safe, until the next look. */
 	FVector RushGoal = FVector::ZeroVector;

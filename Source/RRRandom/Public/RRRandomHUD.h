@@ -59,7 +59,33 @@ public:
 	/** The enabled results or pause menu button under a screen point (None when there is none). */
 	ERRResultsButton GetResultsButtonAt(const FVector2D& ScreenPoint) const;
 
+	/**
+	 * A comic word popping up over a spot in the world on this machine's screen (BOOM!, THUD!, POOF!), drawn like the
+	 * meteor's: big, settling, drifting up and fading in a white starburst. Cosmetic: every machine pops its own.
+	 */
+	static void PopComicWord(const UObject* WorldContext, const FString& Text, const FVector& Where, const FLinearColor& Color, float Size = 1.f);
+
 private:
+	/** One comic word: on its burst at the time it popped (this machine's clock), its color, size and the burst's tilt. */
+	void DrawComicWord(const FString& Text, const FVector& Where, float Start, const FLinearColor& Color, float Size, float Tilt);
+	struct FComicWord
+	{
+		FString Text;
+		FVector Where = FVector::ZeroVector;
+		float Start = 0.f;
+		FLinearColor Color = FLinearColor::White;
+		float Size = 1.f;
+		float Tilt = 0.f;
+	};
+	TArray<FComicWord> ComicWords;
+	void DrawComicWords();
+	/**
+	 * The human cannons and plane stations (round 88): a pulsing ring round each cannon's pad where it can be seen, and the
+	 * station's state over it (charging up, its plane out).
+	 */
+	void DrawCannonsAndStations(const ARRRandomCharacter* Viewer);
+	/** Flying a plane: its name and hull over the ammo panel, and the keys for up, down and out. */
+	void DrawPlanePanel(const ARRRandomCharacter& Viewer);
 	void DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer);
 	void DrawAmmoBar(const ARRRandomCharacter& Brawler, float Left, float Top, float Width, float Height);
 	/** Draws the buff chips ending just above Bottom and returns the new top edge. */
@@ -102,6 +128,28 @@ private:
 	/** Draws the gun's name chip ending at Right; nothing for the starting pistol. */
 	void DrawWeaponChip(const struct FRRWeapon& Weapon, float Right, float CenterY);
 	void DrawScore();
+	/** Defense (round 90): the stage, the wave and what is left of it (or the break's countdown), the tower's health, a boss warning. */
+	void DrawDefenseStatus(const ARRRandomGameState& State);
+	/** The battle royale (round 92): who and how many teams are still standing, the ring's time, and outside it a warning with the way back in. */
+	void DrawBattleStatus(const ARRRandomGameState& State, const ARRRandomCharacter* Viewer);
+	/** Out for good in a battle royale: OUT, my team's place once it is out, who this screen is watching. */
+	void DrawBattleOut(const ARRRandomCharacter& Viewer);
+	/**
+	 * Round 93, in the battle royale's cotton candy cloud (this screen's camera outside the ring): a pink haze, soft puffs
+	 * drifting across, pink and white sugar crystals floating and twinkling, sugar frosting the screen's corners; more of
+	 * all of it deeper in. Under the rest of the HUD.
+	 */
+	void DrawCottonCloud();
+	/**
+	 * Round 93, the oracle dice: the giant die tumbling then showing my roll, every team's sum with the lowest ringed,
+	 * who is struck; then while its meteors fall a line under the ring's and TARGET over the one they fall round.
+	 */
+	void DrawOracle(const ARRRandomCharacter* Viewer);
+	/** A die's face (a white rounded square, pips; the 1 in pink), Size across. */
+	void DrawDieFace(const FVector2D& Center, float Size, int32 Face, float Alpha);
+	/** 0 .. 1: how much of the cotton candy cloud shows on this screen, easing in and out. */
+	float CloudShown = 0.f;
+	float CloudDepthShown = 0.f;
 	/**
 	 * Meteor Rush: over each meteor's landing spot a marker counting down (an arrow at the screen's edge pointing to it when
 	 * it is off the screen), then ORE! while it throws its ore.
@@ -178,6 +226,18 @@ private:
 	FBox2D MapBounds = FBox2D(ForceInit);
 	TArray<FColor> MapBase;
 	int32 MapCoverCount = INDEX_NONE;
+	/** Dice Town's map version the minimap was last built from (holes, what fell, lava; round 89). */
+	int32 MapTownVersion = 0;
+	/** Round 92 (the battle map): pixels a side (more: the corner map shows a window of it), each tile's map version the
+	 * pixels were made from, whether the texture holds them yet, and the world square the map being drawn shows. */
+	int32 MapPixels = 288;
+	TArray<int32> MapTileVersions;
+	bool bMapUploaded = false;
+	FBox2D MapView = FBox2D(ForceInit);
+	/** The battle map's pixels from its tiles (all of them, or only these), shaded where a step drops down the screen. */
+	bool BuildBattleMinimap(const TArray<const class ARRRandomDiceTown*>* OnlyTiles);
+	/** The ring of safe ground on the map: now (white), and where it closes to (sky, dashed). */
+	void DrawZoneOnMap(const FBox2D& Rect, TFunctionRef<FVector2D(const FVector&)> ToScreen);
 	float MapRefreshTimer = 0.f;
 	bool bMapExpanded = false;
 	/** Where the corner map was last drawn (the square around its circle). */

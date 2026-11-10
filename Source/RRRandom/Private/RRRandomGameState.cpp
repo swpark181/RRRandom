@@ -30,6 +30,33 @@ void ARRRandomGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ARRRandomGameState, HoldTeam);
 	DOREPLIFETIME(ARRRandomGameState, HoldEndTime);
 	DOREPLIFETIME(ARRRandomGameState, HoldLength);
+	DOREPLIFETIME(ARRRandomGameState, bDefense);
+	DOREPLIFETIME(ARRRandomGameState, DefenseStage);
+	DOREPLIFETIME(ARRRandomGameState, Wave);
+	DOREPLIFETIME(ARRRandomGameState, bWaveBreak);
+	DOREPLIFETIME(ARRRandomGameState, NextWaveTime);
+	DOREPLIFETIME(ARRRandomGameState, VillainsLeft);
+	DOREPLIFETIME(ARRRandomGameState, WaveVillains);
+	DOREPLIFETIME(ARRRandomGameState, bBossOut);
+	DOREPLIFETIME(ARRRandomGameState, bBattleRoyale);
+	DOREPLIFETIME(ARRRandomGameState, BattleTeamCount);
+	DOREPLIFETIME(ARRRandomGameState, AliveFriends);
+	DOREPLIFETIME(ARRRandomGameState, AliveTeams);
+	DOREPLIFETIME(ARRRandomGameState, TeamPlaces);
+}
+
+bool ARRRandomGameState::IsBattleRoyale(const UObject* WorldContext)
+{
+	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	const ARRRandomGameState* State = World ? World->GetGameState<ARRRandomGameState>() : nullptr;
+	return State && State->bBattleRoyale;
+}
+
+bool ARRRandomGameState::IsDefense(const UObject* WorldContext)
+{
+	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	const ARRRandomGameState* State = World ? World->GetGameState<ARRRandomGameState>() : nullptr;
+	return State && State->bDefense;
 }
 
 bool ARRRandomGameState::IsMeteorRush(const UObject* WorldContext)

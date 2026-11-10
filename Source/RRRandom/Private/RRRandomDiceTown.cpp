@@ -1,9 +1,24 @@
 #include "RRRandomDiceTown.h"
+#include "RRRandomBattleRoyale.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomDefense.h"
+#include "RRRandomEffects.h"
+#include "RRRandomHUD.h"
+#include "RRRandomLava.h"
 #include "RRRandomMapFloor.h"
+#include "RRRandomUIStyle.h"
 #include "RRRandomWreckage.h"
 #include "EngineUtils.h"
+#include "Misc/Paths.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/PointLightComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
+#include "Kismet/GameplayStatics.h"
+#include "NavigationSystem.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -14,6 +29,7 @@
 #include "Math/RandomStream.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "Net/UnrealNetwork.h"
 #include "UObject/UObjectGlobals.h"
 #include "Algo/Reverse.h"
 
@@ -24,15 +40,14 @@ namespace
 	constexpr float FloorSearchUp = 500.f;
 	constexpr float FloorSearchDown = 3000.f;
 
-	// The grid: cells -HalfCells .. HalfCells - 1 each way from the middle, levels LevelMin .. LevelMax. Level L is the
-	// block from (L - 1) x 100 to L x 100 above the floor: level 0's top is the floor
-	constexpr int32 HalfCells = 88;
-	constexpr int32 GridCells = HalfCells * 2;
+	// The grid: cells -HalfCells .. HalfCells - 1 each way from the middle (the town's 88; members, since a battle map tile
+	// is smaller: round 92), levels LevelMin .. LevelMax. Level L is the block from (L - 1) x 100 to L x 100 above the
+	// floor: level 0's top is the floor
+	constexpr int32 TownHalfCells = 88;
 	constexpr int32 LevelMin = -3;
 	constexpr int32 LevelMax = 30;
 	constexpr int32 GridLevels = LevelMax - LevelMin + 1;
 	constexpr uint8 HiddenSolid = 255;
-	constexpr float MapHalf = HalfCells * BlockSize;
 
 	// The island: a rounded square (a superellipse) about this far out, wobbling a little
 	constexpr float RimBase = 8450.f;
@@ -44,6 +59,36 @@ namespace
 	constexpr int32 Story = 6;
 	constexpr int32 OpeningWidth = 3;
 	constexpr int32 OpeningHeight = 4;
+
+	// Round 91, reflections and light here and there: the plaza's polished tiles, the dice's glossy plastic and the puddles'
+	// mirror (M_BTBlock "Roughness"; the other blocks keep 0.6); about this many puddles on the roads (each 2-3 discs this
+	// wide, on road cells with open sky this far apart); the star lamps' warm light (candelas, reach); the sun's shafts
+	constexpr float PlazaRoughness = 0.12f;
+	constexpr float DiceRoughness = 0.22f;
+	constexpr float PuddleRoughness = 0.02f;
+	constexpr int32 PuddleCount = 34;
+	const FVector2D PuddleSize(110.f, 230.f);
+	constexpr int32 PuddleSpacing = 6;
+	// (dark, so what it mirrors is what shows)
+	const FColor PuddleColor(34, 46, 70);
+	constexpr float LampLightIntensity = 80.f;
+	// Shop awnings' neon tubes (M_BTBlock "Glow")
+	const FColor NeonColors[] = { FColor(255, 90, 190), FColor(70, 230, 255), FColor(120, 255, 170), FColor(255, 220, 90) };
+	constexpr float NeonGlow = 3.f;
+	constexpr float LampLightReach = 900.f;
+	// Round 94: the big buildings' Tripo cover models (char-pipeline/input/props94, ue_import_props.py), by ARRRandomDiceTown::
+	// ECoverModel (each keeps its own proportions: AddCoverModel)
+	const TCHAR* const CoverModelNames[] = { TEXT(""), TEXT("SM_BCCrate"), TEXT("SM_BCShelf"), TEXT("SM_BCCounter"), TEXT("SM_BCSofa"), TEXT("SM_BCPlanter"),
+		TEXT("SM_BCVending"), TEXT("SM_BCLockers"), TEXT("SM_BCDesk"), TEXT("SM_BCBookshelf"), TEXT("SM_BCCafeTable"), TEXT("SM_BCConveyor"), TEXT("SM_BCMachine"), TEXT("SM_BCTeddy"), TEXT("/Game/Vehicles/SM_Car"), TEXT("SM_BCKiosk"), TEXT("SM_BCAirCon"), TEXT("SM_BCWaterTank") };
+	// The yaw of each model's front as it comes in: Tripo's models face -Y in Blender, which is +Y once in Unreal (checked
+	// with RRGoCover: at -90 the vending machines and shelves showed their backs)
+	constexpr float CoverModelFrontYaw = 90.f;
+	// Round 94: the big buildings' ceiling lamps (a light at every other panel)
+	const FColor IndoorLampColor(255, 244, 214);
+	constexpr float IndoorLightIntensity = 55.f;
+	constexpr float IndoorLightReach = 1500.f;
+	const FLinearColor LampLightColor(1.f, 0.82f, 0.5f);
+	constexpr float SunShaftBloomScale = 0.35f;
 
 	// Districts, in cells from the middle (Chebyshev distance: the larger of |x| and |y|)
 	constexpr float PlazaEdge = 13.f;
@@ -67,6 +112,25 @@ namespace
 	constexpr int32 GroundSeed = 3601;
 	constexpr int32 LayoutSeed = 3602;
 	constexpr int32 SkySeed = 3603;
+
+	// Round 89. The ground is three layers (levels 0 to -2); a crater digging through all three breaks into the mantle
+	// under the island: the bottom layer stays (the lava's bed) and the lava wells up. A dig reaches this far round where a
+	// wreck meets the floor at most, so craters stay craters.
+	constexpr int32 GroundBottom = -2;
+	constexpr int32 BreachDepth = 3;
+	constexpr float DigReachMax = 320.f;
+	constexpr float DigReachMin = 50.f;
+	// A part of a building coming down: falling this fast (a cartoon fall, a little quicker than real), tipping this far by
+	// the time it lands, animating this many looks at most; a hit and a shove on who is under it
+	constexpr float FallGravity = 2600.f;
+	constexpr float FallTipDegrees = 9.f;
+	constexpr int32 FallMaxPieces = 4000;
+	constexpr int32 FallRubble = 90;
+	constexpr float CrashDamage = 30.f;
+	constexpr float CrashShove = 650.f;
+	// What mends grows back from the bottom up: each level up waits this much longer, at most this long
+	constexpr float RegrowStep = 0.07f;
+	constexpr float RegrowMaxDelay = 1.2f;
 
 	TAutoConsoleVariable<float> CVarSaturation(TEXT("rr.DiceTown.Saturation"), 1.f,
 		TEXT("Dice Town's colors: 1 as made, higher deeper, lower paler. Live."));
@@ -103,6 +167,7 @@ namespace
 	const FColor TeamTint[] = { FColor(120, 190, 255), FColor(255, 130, 140) };
 	const FColor MapSky(190, 220, 255);
 	const FColor MapWater(90, 170, 240);
+	const FColor MapLava(240, 70, 40);
 
 	/** A building's colors: walls downstairs and upstairs, trim (corners, bands, landings), roof, window frames. */
 	struct FStyle
@@ -206,16 +271,90 @@ ARRRandomDiceTown::ARRRandomDiceTown()
 
 FBox2D ARRRandomDiceTown::GetMapBounds() const
 {
+	// (a battle map tile: the whole island's square round the map's middle)
+	const FVector2D Center = FVector2D(GetActorLocation().X, GetActorLocation().Y) - TileOffset;
+	const float Half = IsBattleTile() ? (BattleTile.Reach * 2 + 1) * BattleTile.Cells * BlockSize * 0.5f : MapHalf * RimScale;
+	return FBox2D(Center - FVector2D(Half), Center + FVector2D(Half));
+}
+
+FBox2D ARRRandomDiceTown::GetGroundBounds() const
+{
+	if (!IsBattleTile())
+	{
+		return GetMapBounds();
+	}
 	const FVector2D Center(GetActorLocation().X, GetActorLocation().Y);
 	return FBox2D(Center - FVector2D(MapHalf), Center + FVector2D(MapHalf));
+}
+
+ARRRandomDiceTown* ARRRandomDiceTown::FindAt(const UObject* WorldContext, const FVector& WorldLocation)
+{
+	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	if (!World)
+	{
+		return nullptr;
+	}
+	ARRRandomDiceTown* Best = nullptr;
+	double BestDistance = UE_BIG_NUMBER;
+	const FVector2D Spot(WorldLocation.X, WorldLocation.Y);
+	for (TActorIterator<ARRRandomDiceTown> It(World); It; ++It)
+	{
+		if (!It->IsBuilt())
+		{
+			continue;
+		}
+		const FBox2D Ground = It->GetGroundBounds();
+		if (Ground.IsInside(Spot))
+		{
+			return *It;
+		}
+		const double Distance = Ground.ComputeSquaredDistanceToPoint(Spot);
+		if (Distance < BestDistance)
+		{
+			BestDistance = Distance;
+			Best = *It;
+		}
+	}
+	return Best;
+}
+
+void ARRRandomDiceTown::FindTouching(const UObject* WorldContext, const FBox& Box, float Margin, TArray<ARRRandomDiceTown*>& OutTowns)
+{
+	OutTowns.Reset();
+	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	if (!World)
+	{
+		return;
+	}
+	const FBox2D Flat(FVector2D(Box.Min.X - Margin, Box.Min.Y - Margin), FVector2D(Box.Max.X + Margin, Box.Max.Y + Margin));
+	for (TActorIterator<ARRRandomDiceTown> It(World); It; ++It)
+	{
+		if (It->IsBuilt() && It->GetGroundBounds().Intersect(Flat))
+		{
+			OutTowns.Add(*It);
+		}
+	}
 }
 
 FBox ARRRandomDiceTown::GetFlightArea() const
 {
 	// Over the whole island, the feet up to well over its tallest structure (the dice mountain, the keeps, the roofs), so a flyer
 	// can land on any of them and look about over them; the rim's tall hidden wall keeps flyers over the island
+	// (a battle map tile: the whole map's, as high as its highest tile's)
+	if (IsBattleTile())
+	{
+		if (const ARRRandomBattleMap* Battle = ARRRandomBattleMap::Get(this))
+		{
+			return Battle->GetFlightArea();
+		}
+	}
 	const FBox2D Map = GetMapBounds();
 	return FBox(FVector(Map.Min, FloorZ - 1000.f), FVector(Map.Max, FloorZ + TopLevel * BlockSize + FlightHeadroom));
+}
+
+float ARRRandomDiceTown::GetTileFlightTop() const
+{
+	return FloorZ + TopLevel * BlockSize + FlightHeadroom;
 }
 
 bool ARRRandomDiceTown::IsInGrid(int32 X, int32 Y, int32 Level) const
@@ -258,11 +397,12 @@ void ARRRandomDiceTown::Fill(const FFrame& Frame, int32 U0, int32 V0, int32 U1, 
 	}
 }
 
-uint8 ARRRandomDiceTown::MakeLook(const FColor& Body, const FColor& Accent, bool bDie, bool bUnderMesh)
+uint8 ARRRandomDiceTown::MakeLook(const FColor& Body, const FColor& Accent, bool bDie, bool bUnderMesh, bool bGloss)
 {
 	for (int32 Index = 0; Index < Looks.Num(); ++Index)
 	{
-		if (Looks[Index].Body == Body && Looks[Index].Accent == Accent && Looks[Index].bDie == bDie && Looks[Index].bUnderMesh == bUnderMesh)
+		if (Looks[Index].Body == Body && Looks[Index].Accent == Accent && Looks[Index].bDie == bDie && Looks[Index].bUnderMesh == bUnderMesh
+			&& Looks[Index].bGloss == bGloss)
 		{
 			return uint8(Index + 1);
 		}
@@ -272,7 +412,7 @@ uint8 ARRRandomDiceTown::MakeLook(const FColor& Body, const FColor& Accent, bool
 		UE_LOG(LogTemp, Warning, TEXT("RRRandom: dice town ran out of looks."));
 		return 1;
 	}
-	Looks.Add({ Body, Accent, bDie, bUnderMesh });
+	Looks.Add({ Body, Accent, bDie, bUnderMesh, bGloss });
 	return uint8(Looks.Num());
 }
 
@@ -280,13 +420,13 @@ float ARRRandomDiceTown::RimRadius(float Theta) const
 {
 	const float C = FMath::Abs(FMath::Cos(Theta));
 	const float S = FMath::Abs(FMath::Sin(Theta));
-	const float Square = RimBase / FMath::Pow(FMath::Pow(C, RimPower) + FMath::Pow(S, RimPower), 1.f / RimPower);
+	const float Square = RimBase * RimScale / FMath::Pow(FMath::Pow(C, RimPower) + FMath::Pow(S, RimPower), 1.f / RimPower);
 	return Square + 110.f * FMath::Sin(3.f * Theta + 1.f) + 70.f * FMath::Sin(7.f * Theta + 2.f);
 }
 
 bool ARRRandomDiceTown::IsOnIsland(int32 X, int32 Y) const
 {
-	const FVector2D Local = CellCenter(FIntPoint(X, Y));
+	const FVector2D Local = IslandSpot(X, Y);
 	return Local.Size() < RimRadius(FMath::Atan2(Local.Y, Local.X)) - 50.f;
 }
 
@@ -302,6 +442,14 @@ FVector ARRRandomDiceTown::At(const FVector2D& Local, float Height) const
 
 bool ARRRandomDiceTown::IsRoad(int32 X, int32 Y) const
 {
+	if (DefenseStage > 0)
+	{
+		return IsDefenseRoad(X, Y);
+	}
+	if (IsBattleTile())
+	{
+		return IsBattleRoad(X, Y);
+	}
 	const float CX = X + 0.5f;
 	const float CY = Y + 0.5f;
 	const float Distance = Cheb(X, Y);
@@ -319,7 +467,12 @@ FIntRect ARRRandomDiceTown::Footprint(const FFrame& Frame, int32 U0, int32 V0, i
 bool ARRRandomDiceTown::IsFree(const FIntRect& Rect) const
 {
 	const FIntRect Mirrored(-Rect.Max.X, -Rect.Max.Y, -Rect.Min.X, -Rect.Min.Y);
-	if (Rect.Intersect(Mirrored))
+	if (IsSymmetric() && Rect.Intersect(Mirrored))
+	{
+		return false;
+	}
+	// (a battle map tile: inside its own grid, a cell in from its edge, so nothing reaches into the next tile)
+	if (IsBattleTile() && (Rect.Min.X < -HalfCells + 1 || Rect.Min.Y < -HalfCells + 1 || Rect.Max.X > HalfCells - 1 || Rect.Max.Y > HalfCells - 1))
 	{
 		return false;
 	}
@@ -329,7 +482,7 @@ bool ARRRandomDiceTown::IsFree(const FIntRect& Rect) const
 		{
 			// Two cells in from the rim, off the roads and the plaza
 			if (!IsOnIsland(X, Y) || !IsOnIsland(X + 2, Y) || !IsOnIsland(X - 2, Y) || !IsOnIsland(X, Y + 2) || !IsOnIsland(X, Y - 2)
-				|| IsRoad(X, Y) || Cheb(X, Y) < PlazaEdge)
+				|| IsRoad(X, Y) || (!IsBattleTile() && Cheb(X, Y) < PlazaEdge))
 			{
 				return false;
 			}
@@ -337,7 +490,8 @@ bool ARRRandomDiceTown::IsFree(const FIntRect& Rect) const
 	}
 	for (const FIntRect& Other : Reserved)
 	{
-		if (Rect.Intersect(Other) || Mirrored.Intersect(Other))
+		// (a defense stage isn't the same both ways round: only the rect itself)
+		if (Rect.Intersect(Other) || (IsSymmetric() && Mirrored.Intersect(Other)))
 		{
 			return false;
 		}
@@ -348,7 +502,10 @@ bool ARRRandomDiceTown::IsFree(const FIntRect& Rect) const
 void ARRRandomDiceTown::Reserve(const FIntRect& Rect)
 {
 	Reserved.Add(Rect);
-	Reserved.Add(FIntRect(-Rect.Max.X, -Rect.Max.Y, -Rect.Min.X, -Rect.Min.Y));
+	if (IsSymmetric())
+	{
+		Reserved.Add(FIntRect(-Rect.Max.X, -Rect.Max.Y, -Rect.Min.X, -Rect.Min.Y));
+	}
 }
 
 void ARRRandomDiceTown::Both(const FFrame& Frame, TFunctionRef<void(const FFrame&)> Place)
@@ -730,6 +887,715 @@ void ARRRandomDiceTown::AddBuilding(const FFrame& Frame, int32 W, int32 D, int32
 	}
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Round 94: big buildings to fight inside
+
+FIntPoint ARRRandomDiceTown::GetBigBuildingSize(EBigBuilding Kind)
+{
+	switch (Kind)
+	{
+	case EBigBuilding::Mall: return FIntPoint(36, 28);
+	case EBigBuilding::Factory: return FIntPoint(32, 22);
+	case EBigBuilding::School: return FIntPoint(34, 14);
+	default: return FIntPoint(30, 24);
+	}
+}
+
+const TCHAR* ARRRandomDiceTown::GetBigBuildingName(EBigBuilding Kind)
+{
+	switch (Kind)
+	{
+	case EBigBuilding::Mall: return TEXT("mall");
+	case EBigBuilding::Factory: return TEXT("factory");
+	case EBigBuilding::School: return TEXT("school");
+	default: return TEXT("garage");
+	}
+}
+
+void ARRRandomDiceTown::AddRamp(const FFrame& Frame, int32 U, int32 V, int32 DirU, int32 DirV, int32 AcrossU, int32 AcrossV, int32 Width, int32 Base, int32 Rise, int32 Run, const FColor& Color)
+{
+	// Ramps keep their own levels, Lift included (as stairs do)
+	Base += Lift;
+	const FIntPoint Start = Frame.Cell(U, V);
+	const FIntPoint DirCell = Frame.Dir(DirU, DirV);
+	const FIntPoint AcrossCell = Frame.Dir(AcrossU, AcrossV);
+	// Nothing over it (the floor above gets its hole)
+	for (int32 K = 0; K < Run; ++K)
+	{
+		for (int32 W = 0; W < Width; ++W)
+		{
+			const FIntPoint Cell = Start + DirCell * K + AcrossCell * W;
+			StairCells.Add(Cell);
+			for (int32 Level = Base + 1; Level <= Base + Rise + Headroom; ++Level)
+			{
+				Set(Cell.X, Cell.Y, Level - Lift, 0);
+			}
+		}
+	}
+	// The deck: a slab whose top runs from the floor at the start to the floor Rise up at the far end (a little longer, to
+	// meet both), drawn and solid
+	const FVector2D Dir(DirCell.X, DirCell.Y);
+	const FVector2D Across(AcrossCell.X, AcrossCell.Y);
+	const FVector2D Edge = CellCenter(Start) - Dir * (BlockSize * 0.5f) + Across * ((Width - 1) * BlockSize * 0.5f);
+	const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Dir.Y, Dir.X));
+	const float Length = Run * BlockSize;
+	const float Height = Rise * BlockSize;
+	const float Slope = FMath::Sqrt(Length * Length + Height * Height);
+	const float Pitch = FMath::RadiansToDegrees(FMath::Atan2(Height, Length));
+	const float Thick = BlockSize * 0.5f;
+	// (the slab's middle: half way up its top, then half its thickness in under it)
+	const FVector2D Middle = Edge + Dir * (Length * 0.5f + Height / Slope * Thick * 0.5f);
+	const float MiddleZ = Base * BlockSize + Height * 0.5f - Length / Slope * Thick * 0.5f;
+	const FTransform Deck(FRotator(Pitch, Yaw, 0.f), At(Middle, MiddleZ), FVector((Slope + 40.f) / BlockSize, Width, Thick / BlockSize));
+	AddColored(Steps, Deck, Shade(Color, 0.9f), Color);
+	Solid->AddInstance(Deck, true);
+}
+
+bool ARRRandomDiceTown::AddCoverModel(ECoverModel Model, const FFrame& Frame, int32 W, int32 D, int32 S, int32 U0, int32 V0, int32 U1, int32 V1, int32 Height,
+	uint8 Hidden)
+{
+	UInstancedStaticMeshComponent* Instances = CoverModels.IsValidIndex(int32(Model) - 1) ? CoverModels[int32(Model) - 1].Get() : nullptr;
+	if (!Instances || !Instances->GetStaticMesh())
+	{
+		return false;
+	}
+	// The model's own box (pivot at the middle of its foot): its X across its front, Y front to back
+	const FVector Size = Instances->GetStaticMesh()->GetBoundingBox().GetSize().ComponentMax(FVector(1.f));
+	// The block along its longer side, the models in a row along it (crates also stacked one a level), each turned to face
+	// into the building, across the row. A model keeps its own proportions (the user: never stretched to the cells), scaled
+	// evenly to the block's height (what it hides behind); as many fit along the row as its own width gives, and the hidden
+	// cells are only those under a model (the middle of the cell inside its foot), so it may stand a little past them
+	const int32 LenU = FMath::Abs(U1 - U0) + 1;
+	const int32 LenV = FMath::Abs(V1 - V0) + 1;
+	const bool bAlongU = LenU >= LenV;
+	const int32 Long = bAlongU ? LenU : LenV;
+	const int32 Stack = Model == ECoverModel::Crate ? FMath::Max(1, Height) : 1;
+	const float Tall = Height * BlockSize / Stack;
+	const float Even = Tall / Size.Z;
+	const float Wide = Size.X * Even / BlockSize;
+	const float Deep = Size.Y * Even / BlockSize;
+	// (a landmark stands alone: the mall's kiosk, the teddy pile, a roof's water tank)
+	const bool bSingle = Model == ECoverModel::Kiosk || Model == ECoverModel::Teddy || Model == ECoverModel::WaterTank;
+	const int32 Tiles = bSingle ? 1 : FMath::Max(1, FMath::RoundToInt(Long / Wide));
+	const float MidU = (U0 + U1) * 0.5f;
+	const float MidV = (V0 + V1) * 0.5f;
+	const FIntPoint Face = bAlongU ? Frame.Dir(0, MidV < D * 0.5f ? 1 : -1) : Frame.Dir(MidU < W * 0.5f ? 1 : -1, 0);
+	const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(float(Face.Y), float(Face.X))) - CoverModelFrontYaw;
+	const float Each = float(Long) / Tiles;
+	const int32 AlongLo = bAlongU ? FMath::Min(U0, U1) : FMath::Min(V0, V1);
+	const int32 AcrossLo = bAlongU ? FMath::Min(V0, V1) : FMath::Min(U0, U1);
+	const int32 AcrossHi = bAlongU ? FMath::Max(V0, V1) : FMath::Max(U0, U1);
+	const float Across = bAlongU ? MidV : MidU;
+	// The cells (of the block) whose middles are within Half of Middle, or the nearest one if none is
+	auto CellsUnder = [](float Middle, float Half, int32 Lo, int32 Hi, int32& OutFrom, int32& OutTo)
+	{
+		OutFrom = FMath::Max(Lo, FMath::CeilToInt(Middle - Half));
+		OutTo = FMath::Min(Hi, FMath::FloorToInt(Middle + Half));
+		if (OutFrom > OutTo)
+		{
+			OutFrom = OutTo = FMath::Clamp(FMath::RoundToInt(Middle), Lo, Hi);
+		}
+	};
+	// (a crate turned a quarter on every other level: its foot is the wider of the two)
+	const float FootAlong = (Model == ECoverModel::Crate && Stack > 1 ? FMath::Max(Wide, Deep) : Wide) * 0.5f;
+	const float FootAcross = (Model == ECoverModel::Crate && Stack > 1 ? FMath::Max(Wide, Deep) : Deep) * 0.5f;
+	int32 AcrossFrom = 0, AcrossTo = 0;
+	CellsUnder(Across, FootAcross, AcrossLo, AcrossHi, AcrossFrom, AcrossTo);
+	for (int32 Tile = 0; Tile < Tiles; ++Tile)
+	{
+		const float Along = AlongLo - 0.5f + (Tile + 0.5f) * Each;
+		for (int32 Level = 0; Level < Stack; ++Level)
+		{
+			const FVector Where = FrameSpot(Frame, bAlongU ? Along : MidU, bAlongU ? MidV : Along, S * Story * BlockSize + Level * Tall);
+			Instances->AddInstance(FTransform(FRotator(0.f, Yaw + (Model == ECoverModel::Crate ? Level * 90.f : 0.f), 0.f), Where, FVector(Even)), true);
+		}
+		int32 AlongFrom = 0, AlongTo = 0;
+		CellsUnder(Along, FootAlong, AlongLo, AlongLo + Long - 1, AlongFrom, AlongTo);
+		const FIntPoint Low = bAlongU ? FIntPoint(AlongFrom, AcrossFrom) : FIntPoint(AcrossFrom, AlongFrom);
+		const FIntPoint High = bAlongU ? FIntPoint(AlongTo, AcrossTo) : FIntPoint(AcrossTo, AlongTo);
+		Fill(Frame, Low.X, Low.Y, High.X, High.Y, S * Story + 1, S * Story + Height, Hidden);
+		// (for the bots: the cells it fills are the cover)
+		const FIntPoint A = Frame.Cell(Low.X, Low.Y);
+		const FIntPoint B = Frame.Cell(High.X, High.Y);
+		CoverPieces.Add({ At((CellCenter(A) + CellCenter(B)) * 0.5f, S * Story * BlockSize),
+			FVector2D((FMath::Abs(A.X - B.X) + 1) * BlockSize * 0.5f, (FMath::Abs(A.Y - B.Y) + 1) * BlockSize * 0.5f) });
+	}
+	return true;
+}
+
+bool ARRRandomDiceTown::GetCoverModelSpot(int32 Model, FVector& OutWhere, float& OutFrontYaw) const
+{
+	const UInstancedStaticMeshComponent* Instances = CoverModels.IsValidIndex(Model - 1) ? CoverModels[Model - 1].Get() : nullptr;
+	FTransform Transform;
+	if (!Instances || Instances->GetInstanceCount() == 0 || !Instances->GetInstanceTransform(0, Transform, true))
+	{
+		return false;
+	}
+	OutWhere = Transform.GetLocation();
+	OutFrontYaw = Transform.Rotator().Yaw + CoverModelFrontYaw;
+	return true;
+}
+
+void ARRRandomDiceTown::AddBigBuilding(const FFrame& Frame, EBigBuilding Kind, int32 Seed)
+{
+	FRandomStream Stream(Seed);
+	const FIntPoint Size = GetBigBuildingSize(Kind);
+	const int32 W = Size.X;
+	const int32 D = Size.Y;
+	FStyle Colors = Styles[Stream.RandRange(0, UE_ARRAY_COUNT(Styles) - 1)];
+	if (Colors.Trim == White)
+	{
+		Colors.Trim = Blend(Colors.High, White, 0.55f);
+	}
+	if (Colors.Frame == White)
+	{
+		Colors.Frame = Blend(Colors.Roof, White, 0.3f);
+	}
+	const bool bGarage = Kind == EBigBuilding::Garage;
+	const int32 Stories = Kind == EBigBuilding::Mall || Kind == EBigBuilding::School ? 3 : 2;
+	const int32 Top = Stories * Story;
+	const uint8 TrimLook = Plain(Colors.Trim);
+	const uint8 FrameLook = Plain(Colors.Frame);
+	const uint8 StoneLook = Plain(Stone);
+	const uint8 SlabLook = MakeLook(Ceiling, Wood);
+	const uint8 FloorLook = Kind == EBigBuilding::Mall ? MakeLook(PlazaCream, PlazaPink, false, false, true)
+		: Kind == EBigBuilding::School ? MakeLook(Wood, WoodDark) : MakeLook(Stone, Blend(Stone, White, 0.4f));
+	const uint8 InnerLook = Plain(Blend(Colors.Low, White, 0.45f));
+	// The cover, blocks for now: crates and shelves (full), counters and sofas (half), desks and tables (low)
+	const uint8 FullLook = MakeLook(WoodDark, Wood);
+	const uint8 HalfLook = MakeLook(Pink, Cream);
+	const uint8 LowLook = MakeLook(Lemon, Cream);
+	const uint8 RailLook = MakeLook(Blend(Sky, White, 0.55f), White);
+	const uint8 MachineLook = MakeLook(Lavender, Sky);
+	const uint8 BeltLook = MakeLook(FColor(96, 92, 120), Lemon);
+	const uint8 LockerLook = MakeLook(Sky, White);
+	const uint8 ShelfLook = MakeLook(WoodDark, Lemon);
+	const FColor StairColor = Colors.Trim;
+
+	// The shell, story by story: walls round the edge (a garage: a low wall and a post every 6 cells), each floor's slab
+	for (int32 S = 0; S < Stories; ++S)
+	{
+		const uint8 WallLook = Plain(S == 0 ? Colors.Low : Colors.High);
+		const int32 Base = S * Story;
+		for (int32 U = 0; U < W; ++U)
+		{
+			for (int32 V = 0; V < D; ++V)
+			{
+				const bool bEdgeU = U == 0 || U == W - 1;
+				const bool bEdgeV = V == 0 || V == D - 1;
+				const FIntPoint Cell = Frame.Cell(U, V);
+				if (S == 0)
+				{
+					Set(Cell.X, Cell.Y, 0, FloorLook);
+				}
+				if (bEdgeU || bEdgeV)
+				{
+					const int32 Along = bEdgeV ? U : V;
+					const bool bPost = (bEdgeU && bEdgeV) || Along % 6 == 0;
+					const int32 WallTop = bGarage && !bPost ? Base + 1 : Base + Story;
+					for (int32 Level = Base + 1; Level <= WallTop; ++Level)
+					{
+						const bool bTrim = (bEdgeU && bEdgeV) || Level == Base + Story || (bGarage && bPost);
+						Set(Cell.X, Cell.Y, Level, S == 0 && Level == 1 ? StoneLook : bTrim ? TrimLook : WallLook);
+					}
+					if (bGarage)
+					{
+						Set(Cell.X, Cell.Y, Base + Story, SlabLook);
+					}
+				}
+				else
+				{
+					Set(Cell.X, Cell.Y, Base + Story, SlabLook);
+				}
+			}
+		}
+	}
+	// A parapet all round the roof
+	for (int32 U = 0; U < W; ++U)
+	{
+		for (int32 V = 0; V < D; ++V)
+		{
+			if (U == 0 || U == W - 1 || V == 0 || V == D - 1)
+			{
+				Fill(Frame, U, V, U, V, Top + 1, Top + 1, TrimLook);
+			}
+		}
+	}
+
+	// Doors (4 wide; the factory's big ones 6; the garage's a gap in its low wall for cars) and windows all round
+	struct FDoor
+	{
+		int32 Side;
+		int32 Start;
+		int32 Width;
+		int32 Height;
+	};
+	TArray<FDoor> Doors;
+	switch (Kind)
+	{
+	case EBigBuilding::Mall: Doors = { { 2, 16, 4, 4 }, { 3, 12, 4, 4 }, { 1, 12, 4, 4 }, { 0, 20, 4, 4 } }; break;
+	case EBigBuilding::Factory: Doors = { { 2, 22, 6, 5 }, { 1, 13, 6, 5 }, { 3, 15, 3, 4 } }; break;
+	case EBigBuilding::School: Doors = { { 3, 5, 4, 4 }, { 1, 5, 4, 4 }, { 2, 15, 4, 4 } }; break;
+	default: Doors = { { 2, 19, 10, 5 }, { 3, 8, 4, 5 } }; break;
+	}
+	if (!bGarage)
+	{
+		for (int32 S = 0; S < Stories; ++S)
+		{
+			const int32 Base = S * Story;
+			for (int32 Side = 0; Side < 4; ++Side)
+			{
+				const int32 Length = Side % 2 == 0 ? W : D;
+				const int32 Count = FMath::Max(1, (Length - 2) / 5);
+				const int32 Span = Count * OpeningWidth + (Count - 1) * 2;
+				const int32 First = FMath::Max(1, (Length - Span) / 2);
+				for (int32 Index = 0; Index < Count; ++Index)
+				{
+					const int32 Start = First + Index * 5;
+					if (Start + OpeningWidth > Length - 1)
+					{
+						continue;
+					}
+					bool bOverDoor = false;
+					for (const FDoor& Door : Doors)
+					{
+						bOverDoor |= S == 0 && Door.Side == Side && Start < Door.Start + Door.Width + 1 && Door.Start < Start + OpeningWidth + 1;
+					}
+					if (!bOverDoor)
+					{
+						CutOpening(Frame, W, D, Side, Start, OpeningWidth, Base + 2, Base + 1 + OpeningHeight, FrameLook);
+					}
+				}
+			}
+		}
+	}
+	for (const FDoor& Door : Doors)
+	{
+		CutOpening(Frame, W, D, Door.Side, Door.Start, Door.Width, 1, Door.Height, FrameLook);
+	}
+
+	// Building blocks, story S (floor F counts from the ground's 0: the slab under story F). Cover and pillars are listed
+	// for the bots (CoverPieces: the middle on its floor, the half size)
+	auto NoteCover = [&](int32 S, int32 U0, int32 V0, int32 U1, int32 V1)
+	{
+		const FIntPoint A = Frame.Cell(U0, V0);
+		const FIntPoint B = Frame.Cell(U1, V1);
+		const FVector2D Middle = (CellCenter(A) + CellCenter(B)) * 0.5f;
+		const FVector2D Extent((FMath::Abs(A.X - B.X) + 1) * BlockSize * 0.5f, (FMath::Abs(A.Y - B.Y) + 1) * BlockSize * 0.5f);
+		CoverPieces.Add({ At(Middle, S * Story * BlockSize), Extent });
+	};
+	// (with a Tripo model: the blocks hidden under it, still solid)
+	auto Cover = [&](int32 S, int32 U0, int32 V0, int32 U1, int32 V1, int32 Height, uint8 Look, ECoverModel Model = ECoverModel::None)
+	{
+		const bool bModel = Model != ECoverModel::None && CoverModels.IsValidIndex(int32(Model) - 1) && CoverModels[int32(Model) - 1];
+		// (the model fills only the cells it stands on; without one, the whole block)
+		if (!bModel || !AddCoverModel(Model, Frame, W, D, S, U0, V0, U1, V1, Height, HiddenLook(Looks[Look - 1].Body)))
+		{
+			Fill(Frame, U0, V0, U1, V1, S * Story + 1, S * Story + Height, Look);
+			NoteCover(S, U0, V0, U1, V1);
+		}
+	};
+	auto Wall = [&](int32 S, int32 U0, int32 V0, int32 U1, int32 V1)
+	{
+		Fill(Frame, U0, V0, U1, V1, S * Story + 1, S * Story + Story - 1, InnerLook);
+	};
+	auto Gap = [&](int32 S, int32 U0, int32 V0, int32 U1, int32 V1)
+	{
+		Fill(Frame, U0, V0, U1, V1, S * Story + 1, S * Story + OpeningHeight, 0);
+	};
+	auto Hole = [&](int32 F, int32 U0, int32 V0, int32 U1, int32 V1)
+	{
+		Fill(Frame, U0, V0, U1, V1, F * Story, F * Story, 0);
+	};
+	auto Rail = [&](int32 F, int32 U0, int32 V0, int32 U1, int32 V1)
+	{
+		Fill(Frame, U0, V0, U1, V1, F * Story + 1, F * Story + 1, RailLook);
+	};
+	auto Pillar = [&](int32 S, int32 U, int32 V)
+	{
+		Fill(Frame, U, V, U + 1, V + 1, S * Story + 1, S * Story + Story - 1, TrimLook);
+		NoteCover(S, U, V, U + 1, V + 1);
+	};
+	// Switchback stairs in a well 4 lanes wide and 6 steps long (8 with a landing at each end): the even flights up lanes
+	// 0-1, the odd ones back up lanes 2-3; each railed round its hole on the floor it arrives at, but where it arrives (the
+	// next flight clears the rail over its own steps)
+	auto Stairwell = [&](int32 U0, int32 V0, int32 Flights, bool bAlongU)
+	{
+		auto Local = [&](int32 Lane, int32 K) { return bAlongU ? FIntPoint(U0 + K, V0 + Lane) : FIntPoint(U0 + Lane, V0 + K); };
+		for (int32 F = 0; F < Flights; ++F)
+		{
+			const bool bEven = F % 2 == 0;
+			const int32 Lane0 = bEven ? 0 : 2;
+			const FIntPoint From = Local(Lane0, bEven ? 0 : 5);
+			if (bAlongU)
+			{
+				AddStairs(Frame, From.X, From.Y, bEven ? 1 : -1, 0, 0, 1, 2, F * Story, Story, StairColor);
+			}
+			else
+			{
+				AddStairs(Frame, From.X, From.Y, 0, bEven ? 1 : -1, 1, 0, 2, F * Story, Story, StairColor);
+			}
+			const int32 StartEnd = bEven ? -1 : 6;
+			const int32 Arrival = bEven ? 6 : -1;
+			for (int32 K = -1; K <= 6; ++K)
+			{
+				for (int32 Lane = Lane0 - 1; Lane <= Lane0 + 2; ++Lane)
+				{
+					const bool bHole = K >= 0 && K <= 5 && Lane >= Lane0 && Lane <= Lane0 + 1;
+					const bool bRing = K == StartEnd || Lane == Lane0 - 1 || Lane == Lane0 + 2;
+					const FIntPoint Cell = Local(Lane, K);
+					const bool bEdge = Cell.X <= 0 || Cell.X >= W - 1 || Cell.Y <= 0 || Cell.Y >= D - 1;
+					if (!bHole && bRing && K != Arrival && !bEdge)
+					{
+						Rail(F + 1, Cell.X, Cell.Y, Cell.X, Cell.Y);
+					}
+				}
+			}
+		}
+	};
+
+	switch (Kind)
+	{
+	case EBigBuilding::Mall:
+	{
+		// The atrium: open from the 2nd floor to the roof, a bridge across it on the 2nd, railed all round; pillars at its
+		// corners on every floor; switchback stairs in two corners and an escalator up from the court
+		Hole(1, 12, 9, 15, 18);
+		Hole(1, 20, 9, 23, 18);
+		Hole(2, 12, 9, 23, 18);
+		Rail(1, 12, 8, 23, 8);
+		Rail(1, 12, 19, 20, 19);
+		Rail(1, 23, 19, 23, 19);
+		Rail(1, 11, 9, 11, 18);
+		Rail(1, 24, 9, 24, 18);
+		Rail(1, 16, 9, 16, 18);
+		Rail(1, 19, 9, 19, 18);
+		Rail(2, 12, 8, 23, 8);
+		Rail(2, 12, 19, 23, 19);
+		Rail(2, 11, 9, 11, 18);
+		Rail(2, 24, 9, 24, 18);
+		Stairwell(2, 3, 3, false);
+		Stairwell(30, 19, 2, false);
+		AddStairs(Frame, 21, 25, 0, -1, 1, 0, 2, 0, Story, Colors.Roof);
+		Rail(1, 20, 20, 20, 25);
+		Rail(1, 23, 20, 23, 25);
+		Rail(1, 21, 26, 22, 26);
+		for (int32 S = 0; S < 3; ++S)
+		{
+			Pillar(S, 10, 7);
+			Pillar(S, 24, 7);
+			Pillar(S, 10, 19);
+			Pillar(S, 24, 19);
+		}
+		// 1st floor: a kiosk in the court (it cuts the 36 m from door to door), counters round it, shelves, two shops
+		Cover(0, 16, 12, 19, 15, 3, FullLook, ECoverModel::Kiosk);
+		Cover(0, 13, 10, 15, 10, 1, HalfLook, ECoverModel::Counter);
+		Cover(0, 20, 10, 22, 10, 1, HalfLook, ECoverModel::Counter);
+		Cover(0, 13, 17, 15, 17, 1, HalfLook, ECoverModel::Counter);
+		Cover(0, 20, 17, 22, 17, 1, HalfLook, ECoverModel::Counter);
+		Cover(0, 3, 11, 3, 17, 2, ShelfLook, ECoverModel::Shelf);
+		Cover(0, 6, 11, 6, 17, 2, ShelfLook, ECoverModel::Shelf);
+		Cover(0, 12, 24, 12, 24, 1, HalfLook, ECoverModel::Planter);
+		Cover(0, 29, 13, 29, 13, 1, HalfLook, ECoverModel::Planter);
+		Cover(0, 15, 23, 16, 23, 1, HalfLook, ECoverModel::Crate);
+		Wall(0, 27, 1, 27, 9);
+		Gap(0, 27, 4, 27, 5);
+		Wall(0, 27, 10, 34, 10);
+		Cover(0, 30, 2, 33, 2, 2, ShelfLook, ECoverModel::Shelf);
+		Cover(0, 29, 7, 32, 7, 1, HalfLook, ECoverModel::Counter);
+		Wall(0, 1, 20, 9, 20);
+		Gap(0, 4, 20, 5, 20);
+		Wall(0, 10, 21, 10, 26);
+		Cover(0, 2, 24, 4, 24, 1, HalfLook, ECoverModel::Sofa);
+		Cover(0, 6, 24, 7, 25, 2, FullLook, ECoverModel::Crate);
+		// 2nd: shops along the back, sofas round the balcony, a vending machine
+		Wall(1, 10, 1, 10, 5);
+		Wall(1, 10, 6, 26, 6);
+		Gap(1, 15, 6, 16, 6);
+		Gap(1, 22, 6, 23, 6);
+		Wall(1, 26, 1, 26, 5);
+		Cover(1, 12, 2, 14, 2, 1, HalfLook, ECoverModel::Counter);
+		Cover(1, 19, 2, 21, 2, 1, HalfLook, ECoverModel::Counter);
+		Cover(1, 23, 3, 23, 4, 1, HalfLook, ECoverModel::Crate);
+		Cover(1, 13, 22, 15, 22, 1, HalfLook, ECoverModel::Sofa);
+		Cover(1, 16, 23, 18, 23, 1, HalfLook, ECoverModel::Sofa);
+		Cover(1, 8, 13, 8, 15, 1, HalfLook, ECoverModel::Sofa);
+		Cover(1, 27, 13, 27, 15, 1, HalfLook, ECoverModel::Sofa);
+		Cover(1, 34, 12, 34, 13, 2, FullLook, ECoverModel::Vending);
+		Cover(1, 8, 3, 9, 4, 2, FullLook, ECoverModel::Crate);
+		Cover(1, 25, 22, 26, 23, 2, FullLook, ECoverModel::Crate);
+		Cover(1, 30, 4, 30, 4, 1, HalfLook, ECoverModel::Planter);
+		// 3rd: a food court, the kitchen, arcade machines, sofas
+		for (const int32 U : { 27, 31 })
+		{
+			for (const int32 V : { 3, 7, 11 })
+			{
+				Cover(2, U, V, U + 1, V + 1, 1, LowLook, ECoverModel::CafeTable);
+			}
+		}
+		Cover(2, 28, 14, 31, 15, 2, FullLook, ECoverModel::Shelf);
+		Cover(2, 2, 12, 2, 12, 2, MachineLook, ECoverModel::Vending);
+		Cover(2, 2, 15, 2, 15, 2, MachineLook, ECoverModel::Vending);
+		Cover(2, 2, 18, 2, 18, 2, MachineLook, ECoverModel::Vending);
+		Cover(2, 14, 22, 16, 22, 1, HalfLook, ECoverModel::Sofa);
+		Cover(2, 19, 23, 21, 23, 1, HalfLook, ECoverModel::Sofa);
+		Cover(2, 9, 22, 10, 23, 2, FullLook, ECoverModel::Crate);
+		break;
+	}
+	case EBigBuilding::Factory:
+	{
+		// One tall hall (no 2nd floor) under an L of mezzanine along the back and the left, railed at its edge, a flight up
+		// to each arm
+		Hole(1, 6, 6, W - 2, D - 2);
+		Rail(1, 5, 5, W - 2, 5);
+		Rail(1, 5, 6, 5, D - 2);
+		AddStairs(Frame, 28, 11, 0, -1, 1, 0, 3, 0, Story, StairColor);
+		Fill(Frame, 28, 5, 30, 5, Story + 1, Story + 1, 0);
+		AddStairs(Frame, 11, 17, -1, 0, 0, 1, 3, 0, Story, StairColor);
+		Fill(Frame, 5, 17, 5, 19, Story + 1, Story + 1, 0);
+		// The hall: two conveyor lines (half), machines under the mezzanine and by the wall, crate stacks, a heap of teddies
+		Cover(0, 6, 8, 21, 9, 1, BeltLook, ECoverModel::Conveyor);
+		Cover(0, 6, 14, 17, 15, 1, BeltLook, ECoverModel::Conveyor);
+		Cover(0, 24, 2, 27, 4, 2, MachineLook, ECoverModel::Machine);
+		Cover(0, 24, 9, 27, 11, 2, MachineLook, ECoverModel::Machine);
+		Cover(0, 2, 6, 3, 7, 2, FullLook, ECoverModel::Crate);
+		Cover(0, 20, 18, 21, 19, 2, FullLook, ECoverModel::Crate);
+		Cover(0, 13, 18, 14, 19, 2, FullLook, ECoverModel::Crate);
+		Cover(0, 20, 11, 21, 12, 2, FullLook, ECoverModel::Crate);
+		Cover(0, 12, 4, 12, 4, 1, HalfLook, ECoverModel::Crate);
+		Cover(0, 3, 11, 3, 12, 1, HalfLook, ECoverModel::Crate);
+		Cover(0, 13, 11, 15, 12, 1, HalfLook, ECoverModel::Teddy);
+		Cover(0, 26, 16, 27, 16, 1, HalfLook, ECoverModel::Crate);
+		// The mezzanine: crates and the control room
+		Cover(1, 10, 2, 11, 2, 1, HalfLook, ECoverModel::Crate);
+		Cover(1, 20, 2, 21, 2, 1, HalfLook, ECoverModel::Crate);
+		Cover(1, 2, 12, 2, 13, 1, HalfLook, ECoverModel::Crate);
+		Cover(1, 2, 8, 3, 9, 2, FullLook, ECoverModel::Crate);
+		Cover(1, 14, 1, 17, 3, 2, MachineLook, ECoverModel::Machine);
+		break;
+	}
+	case EBigBuilding::School:
+	{
+		// A corridor 4 wide (rows 5-8) the whole length; classrooms along the back (one library on the 3rd), a lobby, a room
+		// and a store along the front; switchback stairs at both ends
+		Stairwell(2, 1, 3, true);
+		Stairwell(26, 9, 2, true);
+		for (int32 S = 0; S < 3; ++S)
+		{
+			Wall(S, 9, 4, 32, 4);
+			Gap(S, 11, 4, 12, 4);
+			Gap(S, 19, 4, 20, 4);
+			Gap(S, 27, 4, 28, 4);
+			Wall(S, 9, 1, 9, 3);
+			if (S < 2)
+			{
+				Wall(S, 17, 1, 17, 3);
+				Wall(S, 25, 1, 25, 3);
+			}
+			Wall(S, 1, 9, 24, 9);
+			Gap(S, 6, 9, 7, 9);
+			Gap(S, 22, 9, 23, 9);
+			if (S == 0)
+			{
+				Gap(S, 13, 9, 20, 9);
+			}
+			else
+			{
+				Gap(S, 15, 9, 16, 9);
+			}
+			Wall(S, 12, 10, 12, 12);
+			Wall(S, 21, 10, 21, 12);
+			Wall(S, 24, 10, 24, 12);
+		}
+		// Desks (low) and teacher's desks (half) in the classrooms, lockers and vending machines breaking up the corridor
+		for (int32 S = 0; S < 3; ++S)
+		{
+			for (const int32 Room : { 10, 18, 26 })
+			{
+				if (S == 2)
+				{
+					continue;
+				}
+				for (const int32 Step : { 1, 3, 5 })
+				{
+					Cover(S, Room + Step, 1, Room + Step, 1, 1, LowLook, ECoverModel::Desk);
+				}
+				Cover(S, Room + 4, 3, Room + 5, 3, 1, HalfLook, ECoverModel::Desk);
+			}
+			for (const int32 U : { 2, 4, 9 })
+			{
+				Cover(S, U, 11, U, 11, 1, LowLook, ECoverModel::Desk);
+			}
+			Cover(S, 2, 12, 3, 12, 1, HalfLook, ECoverModel::Desk);
+		}
+		Cover(0, 14, 12, 14, 12, 1, HalfLook, ECoverModel::Planter);
+		Cover(0, 19, 12, 19, 12, 1, HalfLook, ECoverModel::Planter);
+		Cover(0, 16, 12, 17, 12, 2, FullLook, ECoverModel::Bookshelf);
+		Cover(0, 13, 5, 15, 5, 2, LockerLook, ECoverModel::Lockers);
+		Cover(0, 19, 5, 19, 5, 2, MachineLook, ECoverModel::Vending);
+		Cover(1, 6, 8, 8, 8, 2, LockerLook, ECoverModel::Lockers);
+		Cover(1, 21, 5, 23, 5, 2, LockerLook, ECoverModel::Lockers);
+		Cover(1, 29, 5, 29, 5, 2, MachineLook, ECoverModel::Vending);
+		Cover(1, 14, 11, 14, 11, 1, LowLook, ECoverModel::Desk);
+		Cover(1, 17, 11, 17, 11, 1, LowLook, ECoverModel::Desk);
+		Cover(1, 18, 12, 19, 12, 1, HalfLook, ECoverModel::Desk);
+		Cover(2, 12, 8, 14, 8, 2, LockerLook, ECoverModel::Lockers);
+		Cover(2, 22, 5, 22, 5, 2, MachineLook, ECoverModel::Vending);
+		for (const int32 U : { 13, 16, 22, 25, 30 })
+		{
+			Cover(2, U, 1, U, 3, 2, ShelfLook, ECoverModel::Bookshelf);
+		}
+		Cover(2, 18, 2, 19, 2, 1, LowLook, ECoverModel::CafeTable);
+		Cover(2, 14, 11, 15, 11, 1, HalfLook, ECoverModel::Sofa);
+		Cover(2, 17, 11, 17, 11, 1, LowLook, ECoverModel::Desk);
+		break;
+	}
+	default:
+	{
+		// Open decks round pillars, a ramp up to the 2nd and another on to the roof, switchback stairs in a corner, cars
+		Stairwell(1, 15, 2, false);
+		Rail(1, 25, 22, 28, 22);
+		Rail(2, 20, 10, 20, 21);
+		Rail(2, 25, 10, 25, 21);
+		Rail(2, 21, 9, 24, 9);
+		AddRamp(Frame, 25, 21, 0, -1, 1, 0, 4, 0, Story, 12, Colors.Trim);
+		AddRamp(Frame, 21, 10, 0, 1, 1, 0, 4, Story, Story, 12, Colors.Trim);
+		for (int32 S = 0; S < 2; ++S)
+		{
+			for (const int32 U : { 5, 12, 18 })
+			{
+				for (const int32 V : { 5, 11, 17 })
+				{
+					Pillar(S, U, V);
+				}
+			}
+		}
+		static const FColor CarColors[] = { FColor(255, 118, 170), FColor(92, 182, 255), FColor(255, 214, 70), FColor(88, 214, 160), FColor(176, 132, 255) };
+		auto Car = [&](int32 S, int32 U0, int32 V0, int32 U1, int32 V1)
+		{
+			const FColor Paint = CarColors[Stream.RandRange(0, UE_ARRAY_COUNT(CarColors) - 1)];
+			Cover(S, U0, V0, U1, V1, 1, MakeLook(Paint, White), ECoverModel::Car);
+		};
+		Car(0, 2, 1, 3, 4);
+		Car(0, 9, 1, 10, 4);
+		Car(0, 15, 1, 16, 4);
+		Car(0, 9, 14, 10, 17);
+		Car(0, 15, 14, 16, 17);
+		Car(1, 2, 8, 5, 9);
+		Car(1, 9, 1, 10, 4);
+		Car(1, 15, 14, 16, 17);
+		Car(1, 8, 14, 11, 15);
+		Cover(2, 3, 3, 5, 5, 3, FullLook, ECoverModel::WaterTank);
+		Cover(2, 11, 10, 12, 11, 2, MachineLook, ECoverModel::AirCon);
+		Cover(2, 17, 15, 18, 16, 2, MachineLook, ECoverModel::AirCon);
+		Car(2, 9, 1, 10, 4);
+		Car(2, 14, 4, 17, 5);
+		Car(2, 7, 17, 10, 18);
+		break;
+	}
+	}
+
+	// Ceiling lamps: a glowing panel every 8 cells under each ceiling with room under it (the neon blocks: shown up close
+	// only), and at every other one a soft light without shadows, warm white
+	for (int32 S = 0; S < Stories && Neon; ++S)
+	{
+		const int32 LampTop = S * Story + Story;
+		int32 Lamps = 0;
+		for (int32 U = 4; U < W - 2; U += 8)
+		{
+			for (int32 V = 4; V < D - 2; V += 8)
+			{
+				const FIntPoint Cell = Frame.Cell(U, V);
+				if (Get(Cell.X, Cell.Y, LampTop) == 0 || Get(Cell.X, Cell.Y, LampTop - 1) != 0)
+				{
+					continue;
+				}
+				AddColored(Neon, FTransform(FRotator::ZeroRotator, At(CellCenter(Cell), (LampTop - 1) * BlockSize - 6.f), FVector(1.4f, 1.4f, 0.12f)),
+					IndoorLampColor, IndoorLampColor);
+				if (Lamps++ % 2 == 0)
+				{
+					UPointLightComponent* Light = NewObject<UPointLightComponent>(this, NAME_None, RF_Transient);
+					Light->SetupAttachment(RootComponent);
+					Light->SetUsingAbsoluteLocation(true);
+					Light->SetIntensityUnits(ELightUnits::Candelas);
+					Light->SetIntensity(IndoorLightIntensity);
+					Light->SetAttenuationRadius(IndoorLightReach);
+					Light->SetLightColor(FLinearColor(IndoorLampColor));
+					Light->SetCastShadows(false);
+					Light->RegisterComponent();
+					Light->SetWorldLocation(At(CellCenter(Cell), (LampTop - 1) * BlockSize - 60.f));
+					Light->SetVisibility(bDetailShown);
+					LampLights.Add(Light);
+				}
+			}
+		}
+	}
+}
+
+bool ARRRandomDiceTown::PlaceBigBuilding(EBigBuilding Kind, FRandomStream& Stream)
+{
+	const FIntPoint Size = GetBigBuildingSize(Kind);
+	// Where to try its middle: round the middle of each quarter of the tile (between the avenue round it and the street
+	// across it), nudged up to 12 cells each way (a cell at a time), any way round; in a shuffled order. A quick look at what is reserved and the tile's edge first: the full check looks at every cell
+	const int32 Quarter = (HalfCells - int32(RRBattle::AvenueHalf) + int32(RRBattle::StreetHalf)) / 2;
+	TArray<TPair<FIntPoint, int32>> Tries;
+	for (const int32 SX : { -1, 1 })
+	{
+		for (const int32 SY : { -1, 1 })
+		{
+			for (int32 NX = -12; NX <= 12; ++NX)
+			{
+				for (int32 NY = -12; NY <= 12; ++NY)
+				{
+					for (int32 Turn = 0; Turn < 4; ++Turn)
+					{
+						Tries.Add(TPair<FIntPoint, int32>(FIntPoint(SX * Quarter + NX, SY * Quarter + NY), Turn));
+					}
+				}
+			}
+		}
+	}
+	for (int32 Index = Tries.Num() - 1; Index > 0; --Index)
+	{
+		Tries.Swap(Index, Stream.RandRange(0, Index));
+	}
+	for (const TPair<FIntPoint, int32>& Try : Tries)
+	{
+		FFrame Frame;
+		Frame.Turn = Try.Value;
+		Frame.Origin = FIntPoint::ZeroValue;
+		const FIntRect Around = Footprint(Frame, 0, 0, Size.X - 1, Size.Y - 1, 0);
+		Frame.Origin = Try.Key - (Around.Min + Around.Max) / 2;
+		const FIntRect Rect = Footprint(Frame, 0, 0, Size.X - 1, Size.Y - 1, 1);
+		if (Rect.Min.X < -HalfCells + 1 || Rect.Min.Y < -HalfCells + 1 || Rect.Max.X > HalfCells - 1 || Rect.Max.Y > HalfCells - 1)
+		{
+			continue;
+		}
+		bool bClear = true;
+		for (const FIntRect& Other : Reserved)
+		{
+			bClear &= !Rect.Intersect(Other);
+		}
+		if (!bClear)
+		{
+			continue;
+		}
+		if (!IsFree(Rect))
+		{
+			continue;
+		}
+		Reserve(Rect);
+		AddBigBuilding(Frame, Kind, Stream.RandRange(0, 1 << 30));
+		// A spot inside on the ground floor, clear on every floor, for the cheat that goes there
+		static const FIntPoint Inside[] = { FIntPoint(18, 23), FIntPoint(25, 15), FIntPoint(16, 6), FIntPoint(8, 9) };
+		BigBuildingSpots.Add(At(CellCenter(Frame.Cell(Inside[int32(Kind)].X, Inside[int32(Kind)].Y)), 0.f));
+		BigBuildingsBuilt += FString::Printf(TEXT("%s%s"), BigBuildingsBuilt.IsEmpty() ? TEXT("") : TEXT(", "), GetBigBuildingName(Kind));
+		return true;
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: no room for a %s on battle tile (%d, %d)."), GetBigBuildingName(Kind), BattleTile.X, BattleTile.Y);
+	return false;
+}
+
 void ARRRandomDiceTown::AddTower(const FFrame& Frame, int32 Style)
 {
 	// Four legs, a platform 6 blocks up with crenels, and a flight up to it from the front
@@ -820,6 +1686,8 @@ void ARRRandomDiceTown::AddDie(const FIntPoint& Cell, int32 Level, int32 Size, i
 	const FVector2D Middle = CellCenter(Cell) + FVector2D((Size - 1) * BlockSize * 0.5f);
 	const FRotator Turn(90.f * (Kind / 6 % 4 == 3 ? 1 : 0), 90.f * (Kind / 6 % 4), 90.f * (Kind / 24 % 2));
 	AddColored(DieBlocks, FTransform(Turn, At(Middle, (Level + Lift - 1) * BlockSize + Size * BlockSize * 0.5f), FVector(Size * 0.98f)), Bodies[Pick], Pips[Pick]);
+	// Remembered: a wreck takes it whole (round 89)
+	GiantDice.Add({ FIntVector(Cell.X, Cell.Y, Level + Lift), Size, DieBlocks->GetInstanceCount() - 1, Bodies[Pick], Pips[Pick] });
 }
 
 void ARRRandomDiceTown::AddHill(const FFrame& Frame, int32 W, int32 D, int32 Levels)
@@ -945,11 +1813,45 @@ void ARRRandomDiceTown::BeginPlay()
 		}
 	}
 	Build();
+	// Its lava, each machine its own (round 89)
+	if (GetWorld()->IsGameWorld())
+	{
+		SetUpLightEffects();
+		FActorSpawnParameters Params;
+		Params.Owner = this;
+		Lava = GetWorld()->SpawnActor<ARRRandomLava>(ARRRandomLava::StaticClass(), FTransform::Identity, Params);
+	}
 }
 
 void ARRRandomDiceTown::Build()
 {
 	UWorld* World = GetWorld();
+	// A defense stage (round 90) is a smaller island: half the town's width, two thirds, then all of it
+	static const float StageScales[] = { 1.f, 0.5f, 2.f / 3.f, 1.f };
+	RimScale = StageScales[FMath::Clamp(DefenseStage, 0, 3)];
+	HalfCells = TownHalfCells;
+	TileOffset = FVector2D::ZeroVector;
+	SkyScale = 1.f;
+	// A battle map tile (round 92): a grid of its own size, standing at its place on the island; the island's rim is the
+	// whole map's (as much bigger as the map is wider than the town), and so is the sky round it
+	if (IsBattleTile())
+	{
+		HalfCells = FMath::Max(8, BattleTile.Cells / 2);
+		TileOffset = FVector2D(BattleTile.X, BattleTile.Y) * float(BattleTile.Cells) * BlockSize;
+		const float IslandHalf = (BattleTile.Reach * 2 + 1) * BattleTile.Cells * BlockSize * 0.5f;
+		RimScale = IslandHalf / (TownHalfCells * BlockSize);
+		SkyScale = RimScale;
+	}
+	GridCells = HalfCells * 2;
+	MapHalf = HalfCells * BlockSize;
+	Reserved.Reset();
+	BigBuildingSpots.Reset();
+	CoverPieces.Reset();
+	BigBuildingsBuilt.Reset();
+	LampLights.Reset();
+	Stairs.Reset();
+	StairCells.Reset();
+	DefenseGates.Reset();
 	// Loaded here rather than in the constructor, so the editor's tools still run before the assets are imported. Made by
 	// char-pipeline/scripts/blender_block_town.py and ue_import_block_town.py
 	BlockMesh = LoadMesh(TEXT("SM_BTBlock"));
@@ -963,14 +1865,28 @@ void ARRRandomDiceTown::Build()
 		return;
 	}
 
-	// The floor under the actor: the town stands on it and hides it (its own ground blocks are solid too)
-	UPrimitiveComponent* Floor = RRMapFloor::Find(this, FloorSearchUp, FloorSearchDown, FloorZ);
-	if (!Floor)
+	// The floor under the actor: the town stands on it and hides it (its own ground blocks are solid too). A battle map
+	// tile stands at the map's floor height (the battle map hides the level's floor: most tiles have none under them)
+	if (IsBattleTile())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("RRRandom: no floor under the dice town at %s."), *GetActorLocation().ToString());
-		return;
+		FloorZ = BattleTile.FloorZ;
 	}
-	Floor->SetVisibility(false);
+	else
+	{
+		UPrimitiveComponent* Floor = RRMapFloor::Find(this, FloorSearchUp, FloorSearchDown, FloorZ);
+		if (!Floor)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("RRRandom: no floor under the dice town at %s."), *GetActorLocation().ToString());
+			return;
+		}
+		Floor->SetVisibility(false);
+		// Nor does anything stand on it in play: the town's own ground is solid, and its craters (round 89) go down past the
+		// floor's height
+		if (GetWorld()->IsGameWorld())
+		{
+			Floor->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		}
+	}
 
 	// The dreamier pass (round 47): on unless -RRTownClassic asks for the town as it was (and only with its shapes imported)
 	PuffMesh = LoadMesh(TEXT("SM_BTPuff"));
@@ -981,6 +1897,28 @@ void ARRRandomDiceTown::Build()
 
 	Blocks = MakeInstances(BlockMesh, nullptr, false, 6);
 	DieBlocks = MakeInstances(DieMesh, nullptr, false, 6);
+	// Round 91 (reflections here and there): the plaza's tiles polished, the dice a glossy plastic, and puddles on the
+	// roads mirror smooth, so the sky and the town show in them (Lumen reflections, DefaultEngine.ini)
+	GlossBlocks = MakeInstances(BlockMesh, nullptr, false, 6);
+	const auto Finish = [this](UInstancedStaticMeshComponent* Instances, float Roughness, float PixelStrength)
+	{
+		for (int32 Slot = 0; Instances && Slot < Instances->GetNumMaterials(); ++Slot)
+		{
+			UMaterialInstanceDynamic* Dynamic = UMaterialInstanceDynamic::Create(Instances->GetMaterial(Slot), this);
+			Dynamic->SetScalarParameterValue(TEXT("Roughness"), Roughness);
+			Dynamic->SetScalarParameterValue(TEXT("PixelStrength"), PixelStrength);
+			Instances->SetMaterial(Slot, Dynamic);
+		}
+	};
+	Finish(GlossBlocks, PlazaRoughness, 0.04f);
+	Finish(DieBlocks, DiceRoughness, 0.05f);
+	if (UStaticMesh* Disc = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder")))
+	{
+		Puddles = MakeInstances(Disc, LoadMaterial(TEXT("M_BTBlock")), false, 6);
+		Puddles->CastShadow = false;
+		Finish(Puddles, PuddleRoughness, 0.f);
+	}
+	PuddleDiscs.Reset();
 	Steps = MakeInstances(BlockMesh, nullptr, false, 6);
 	Underside = MakeInstances(BlockMesh, nullptr, false, 6);
 	Water = MakeInstances(BlockMesh, WaterMaterial, false, 6);
@@ -995,6 +1933,11 @@ void ARRRandomDiceTown::Build()
 		UMaterialInstanceDynamic* MoonGlow = UMaterialInstanceDynamic::Create(LoadMaterial(TEXT("M_BTBlock")), this);
 		MoonGlow->SetScalarParameterValue(TEXT("Glow"), 0.45f);
 		Decor = MakeInstances(BlockMesh, nullptr, false, 6);
+		UMaterialInstanceDynamic* NeonGlowing = UMaterialInstanceDynamic::Create(LoadMaterial(TEXT("M_BTBlock")), this);
+		NeonGlowing->SetScalarParameterValue(TEXT("Glow"), NeonGlow);
+		NeonGlowing->SetScalarParameterValue(TEXT("PixelStrength"), 0.f);
+		Neon = MakeInstances(BlockMesh, NeonGlowing, false, 6);
+		Neon->CastShadow = false;
 		Stars = MakeInstances(StarMesh, StarGlow, false, 6);
 		Stars->CastShadow = false;
 		Moons = MakeInstances(MoonMesh, MoonGlow, false, 6);
@@ -1033,6 +1976,22 @@ void ARRRandomDiceTown::Build()
 			PropTrees.Reset();
 		}
 	}
+	// Round 94: the big buildings' Tripo cover models (any that are missing stay blocks)
+	CoverModels.Reset();
+	if (IsBattleTile())
+	{
+		for (int32 Model = 1; Model < int32(ECoverModel::Count); ++Model)
+		{
+			const TCHAR* Name = CoverModelNames[Model];
+			UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("%s.%s"), Name[0] == TEXT('/') ? Name : *(FString(TEXT("/Game/Environment/DiceTown/Props/")) + Name), *FPaths::GetBaseFilename(Name)));
+			UInstancedStaticMeshComponent* Instances = Mesh ? MakeInstances(Mesh, nullptr, false, 0) : nullptr;
+			if (Instances)
+			{
+				Instances->CastShadow = true;
+			}
+			CoverModels.Add(Instances);
+		}
+	}
 	// Everything solid: hidden boxes, merged from the grid, plus the stairs' slabs
 	Solid = MakeInstances(Cube, nullptr, true, 0);
 	Solid->SetVisibility(false);
@@ -1046,27 +2005,77 @@ void ARRRandomDiceTown::Build()
 	RimWalls->SetCollisionResponseToAllChannels(ECR_Ignore);
 	RimWalls->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
 	RimWalls->SetCanEverAffectNavigation(true);
-	const FVector2D Center(GetActorLocation().X, GetActorLocation().Y);
-	for (int32 Segment = 0; Segment < RimWallSegments; ++Segment)
+	// (a battle map tile: round the whole island's middle, only the stretch of rim over its own square, in as many more
+	// segments as the rim is longer)
+	const FVector2D Center = FVector2D(GetActorLocation().X, GetActorLocation().Y) - TileOffset;
+	const int32 Segments = FMath::RoundToInt(RimWallSegments * FMath::Max(1.f, RimScale));
+	for (int32 Segment = 0; Segment < Segments; ++Segment)
 	{
-		const float Theta = UE_TWO_PI * Segment / RimWallSegments;
+		const float Theta = UE_TWO_PI * Segment / Segments;
 		const float Out = RimRadius(Theta) - 40.f;
-		const float Length = UE_TWO_PI * (Out + 100.f) / RimWallSegments * 1.2f;
+		const float Length = UE_TWO_PI * (Out + 100.f) / Segments * 1.2f;
+		const FVector2D Where(FMath::Cos(Theta) * (Out + 50.f), FMath::Sin(Theta) * (Out + 50.f));
+		if (IsBattleTile() && (FMath::Abs(Where.X - TileOffset.X) > MapHalf || FMath::Abs(Where.Y - TileOffset.Y) > MapHalf))
+		{
+			continue;
+		}
 		RimWalls->AddInstance(FTransform(FRotator(0.f, FMath::RadiansToDegrees(Theta), 0.f),
-			FVector(Center.X + FMath::Cos(Theta) * (Out + 50.f), Center.Y + FMath::Sin(Theta) * (Out + 50.f), FloorZ + RimWallHeight * 0.5f - 300.f),
+			FVector(Center.X + Where.X, Center.Y + Where.Y, FloorZ + RimWallHeight * 0.5f - 300.f),
 			FVector(1.f, Length / BlockSize, RimWallHeight / BlockSize)), true);
 	}
 
 	Grid.SetNumZeroed(GridCells * GridCells * GridLevels);
-	LayOut();
+	GiantDice.Reset();
+	bFoundAnchored = false;
+	DugDepth.Reset();
+	LavaColumns.Reset();
+	Falling.Reset();
+	if (IsBattleTile())
+	{
+		LayOutBattle();
+	}
+	else if (DefenseStage > 0)
+	{
+		LayOutDefense();
+	}
+	else
+	{
+		LayOut();
+	}
 	MakeBlocks();
 	MakeCollision();
 	MakeWalkGraph();
 	MakeUnderside();
-	MakeSky();
-	if (bDream)
+	if (BuildsSky())
 	{
-		MakeDreamSky();
+		// A battle map's sky goes in blocks of its own, shown whatever the middle tile's streaming (its trees as blocks)
+		TObjectPtr<UInstancedStaticMeshComponent> TownBlocks = Blocks;
+		TObjectPtr<UInstancedStaticMeshComponent> TownDice = DieBlocks;
+		TArray<TObjectPtr<UInstancedStaticMeshComponent>> TownTrees;
+		if (IsBattleTile())
+		{
+			SkyBlocks = MakeInstances(BlockMesh, nullptr, false, 6);
+			SkyDice = MakeInstances(DieMesh, nullptr, false, 6);
+			Blocks = SkyBlocks;
+			DieBlocks = SkyDice;
+			TownTrees = MoveTemp(PropTrees);
+			PropTrees.Reset();
+		}
+		MakeSky();
+		if (bDream)
+		{
+			MakeDreamSky();
+		}
+		if (IsBattleTile())
+		{
+			Blocks = TownBlocks;
+			DieBlocks = TownDice;
+			PropTrees = MoveTemp(TownTrees);
+		}
+	}
+	if (IsBattleTile())
+	{
+		MakeFarLook();
 	}
 
 	// Every material here as a dynamic instance, so the console can tune the colors live (Tick)
@@ -1094,6 +2103,11 @@ void ARRRandomDiceTown::Build()
 	}
 
 	bBuilt = true;
+	// A battle map tile starts out of the scene (its far look shown): the battle map streams in the ones near the view
+	if (IsBattleTile())
+	{
+		SetDetailShown(false);
+	}
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town %d blocks, %d dice, %d steps, %d water, %d underside, %d cloud boxes, %d solid boxes, %d stairs, %d walk nodes (%d roamable), %d looks."),
 		Blocks->GetInstanceCount(), DieBlocks->GetInstanceCount(), Steps->GetInstanceCount(), Water->GetInstanceCount(), Underside->GetInstanceCount(),
 		Clouds->GetInstanceCount(), Solid->GetInstanceCount(), Stairs.Num(), Nodes.Num(), Roamable.Num(), Looks.Num());
@@ -1139,8 +2153,9 @@ void ARRRandomDiceTown::LayOut()
 	const uint8 DeepLook = Plain(DirtDeep);
 	const uint8 PaveLookA = MakeLook(Stone, PaveA);
 	const uint8 PaveLookB = MakeLook(Stone, PaveB);
-	const uint8 PlazaLookA = MakeLook(Stone, PlazaPink);
-	const uint8 PlazaLookB = MakeLook(Stone, PlazaCream);
+	// (round 91: polished, the sky and the town show in them)
+	const uint8 PlazaLookA = MakeLook(Stone, PlazaPink, false, false, true);
+	const uint8 PlazaLookB = MakeLook(Stone, PlazaCream, false, false, true);
 	for (int32 X = -HalfCells; X < HalfCells; ++X)
 	{
 		for (int32 Y = -HalfCells; Y < HalfCells; ++Y)
@@ -1483,6 +2498,7 @@ void ARRRandomDiceTown::LayOut()
 	{
 		AddStarLamps();
 	}
+	AddPuddles();
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town placed %d downtown, %d canal and %d cottage buildings, %d towers, %d + %d + %d cover (each half)."),
 		Downtown, Canal, Cottages, Towers, Inner, Middle, Outer);
 	if (bDream)
@@ -1491,11 +2507,434 @@ void ARRRandomDiceTown::LayOut()
 	}
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Defense stages (round 90)
+
+namespace
+{
+	// The roads out to the gates in the order the gates open: across from each other first, then the cross, then the
+	// diagonals (degrees from +X toward +Y)
+	constexpr float LaneAngles[RRDefense::MaxGates] = { 0.f, 180.f, 90.f, 270.f, 45.f, 225.f, 135.f, 315.f };
+	// Each road this many cells either side of its middle line; the plaza inside the castle wall, the wall's footprint and the
+	// ring road round it outside (cells, Chebyshev)
+	constexpr float LaneHalf = 3.f;
+	constexpr float CastleIn = RRDefense::WallRingCells;
+	constexpr float CastleOut = RRDefense::WallRingCells + RRDefense::WallThickCells;
+	constexpr float RingRoadIn = CastleOut;
+	constexpr float RingRoadOut = CastleOut + 5.f;
+	// Houses and the rest stand this far out at least (cells)
+	constexpr float DefenseBuildFrom = RingRoadOut + 2.f;
+	// A gate stands this many cells in from the rim, its villains starting a few cells further in
+	constexpr float GateFromRim = 6.f;
+	constexpr float GateStartIn = 3.f;
+	const FColor GatePillar(92, 60, 120);
+	const FColor GateTop(255, 214, 70);
+}
+
+void ARRRandomDiceTown::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(ARRRandomDiceTown, DefenseStage);
+	DOREPLIFETIME(ARRRandomDiceTown, BattleTile);
+}
+
+FVector2D ARRRandomDiceTown::GetLaneWay(int32 Lane)
+{
+	const float Radians = FMath::DegreesToRadians(LaneAngles[FMath::Clamp(Lane, 0, RRDefense::MaxGates - 1)]);
+	return FVector2D(FMath::Cos(Radians), FMath::Sin(Radians));
+}
+
+bool ARRRandomDiceTown::IsDefenseRoad(int32 X, int32 Y) const
+{
+	const float Distance = Cheb(X, Y);
+	if (Distance < RingRoadIn)
+	{
+		return false;
+	}
+	if (Distance < RingRoadOut)
+	{
+		return true;
+	}
+	const FVector2D Local(X + 0.5f, Y + 0.5f);
+	for (int32 Lane = 0; Lane < RRDefense::MaxGates; ++Lane)
+	{
+		const FVector2D Way = GetLaneWay(Lane);
+		if (FVector2D::DotProduct(Local, Way) > 0.f && FMath::Abs(FVector2D::CrossProduct(Local, Way)) < LaneHalf)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void ARRRandomDiceTown::GetDefenseGates(TArray<FVector>& OutGates) const
+{
+	OutGates.Reset();
+	for (const FVector2D& Gate : DefenseGates)
+	{
+		OutGates.Add(At(Gate, 0.f));
+	}
+}
+
+bool ARRRandomDiceTown::IsCastle(int32 X, int32 Y) const
+{
+	return DefenseStage > 0 && Cheb(X, Y) < CastleOut;
+}
+
+float ARRRandomDiceTown::GetDefenseRingRadius() const
+{
+	return (RRDefense::WallRingCells + 0.5f) * BlockSize;
+}
+
+float ARRRandomDiceTown::GetDefenseRimRadius() const
+{
+	return RimBase * RimScale;
+}
+
+void ARRRandomDiceTown::LayOutDefense()
+{
+	const int32 Stage = FMath::Clamp(DefenseStage, 1, 3);
+	FRandomStream Layout(LayoutSeed + 100 * Stage);
+	// How much room there is round the ring, against the whole town's
+	const float Area = RimScale * RimScale;
+
+	// Ground: grass, the paved roads and ring road, the plaza's pink and cream checker inside the ring
+	const uint8 GrassLookA = MakeLook(Dirt, GrassA);
+	const uint8 GrassLookB = MakeLook(Dirt, GrassB);
+	const uint8 GrassLookLime = MakeLook(Dirt, GrassLime);
+	const uint8 DirtLook = Plain(Dirt);
+	const uint8 DeepLook = Plain(DirtDeep);
+	const uint8 PaveLookA = MakeLook(Stone, PaveA);
+	const uint8 PaveLookB = MakeLook(Stone, PaveB);
+	// (round 91: polished, the sky and the town show in them)
+	const uint8 PlazaLookA = MakeLook(Stone, PlazaPink, false, false, true);
+	const uint8 PlazaLookB = MakeLook(Stone, PlazaCream, false, false, true);
+	for (int32 X = -HalfCells; X < HalfCells; ++X)
+	{
+		for (int32 Y = -HalfCells; Y < HalfCells; ++Y)
+		{
+			if (!IsOnIsland(X, Y))
+			{
+				continue;
+			}
+			const bool bChecker = ((X + Y) & 1) == 0;
+			const uint32 Roll = CellHash(X, Y, GroundSeed) % 100;
+			uint8 Top = Roll < 8 ? GrassLookLime : Roll < 55 ? GrassLookA : GrassLookB;
+			if (Cheb(X, Y) < CastleIn)
+			{
+				Top = bChecker ? PlazaLookA : PlazaLookB;
+			}
+			else if (Cheb(X, Y) < CastleOut)
+			{
+				Top = PaveLookB;
+			}
+			else if (IsDefenseRoad(X, Y))
+			{
+				Top = bChecker ? PaveLookA : PaveLookB;
+			}
+			Set(X, Y, -2, DeepLook);
+			Set(X, Y, -1, DirtLook);
+			Set(X, Y, 0, Top);
+		}
+	}
+	// The plaza and the ring are kept clear (the tower, the walls, the friends' start, the cannons and stations)
+	Reserve(FIntRect(-int32(RingRoadOut) - 1, -int32(RingRoadOut) - 1, int32(RingRoadOut) + 1, int32(RingRoadOut) + 1));
+	// The castle wall round the plaza: cream stone WallLevels high and WallThickCells thick (low, to shoot down from), a walkway
+	// on top (its top blocks lilac), battlements on every other cell of its outer edge; the east and west gateways cut through
+	// it open to the sky between pink posts a level taller (the gate doors fill them). Unbreakable (IsCastle). Inside, a flight
+	// of stairs up to the walkway on either side of each wall's middle.
+	const int32 WallTop = RRDefense::WallLevels;
+	const uint8 WallStone = MakeLook(Shade(Cream, 0.86f), Cream);
+	const uint8 WallWalk = MakeLook(Shade(Cream, 0.86f), Blend(Lavender, White, 0.45f));
+	const uint8 WallMerlon = MakeLook(Shade(Lavender, 0.85f), Lavender);
+	const uint8 GatePost = MakeLook(Shade(Pink, 0.85f), Pink);
+	const uint8 GateCap = MakeLook(Shade(Pink, 0.85f), Lemon);
+	auto IsGateway = [](int32 X, int32 Y, float Reach)
+	{
+		return FMath::Abs(Y + 0.5f) < Reach && FMath::Abs(X + 0.5f) >= CastleIn;
+	};
+	for (int32 X = -int32(CastleOut); X < int32(CastleOut); ++X)
+	{
+		for (int32 Y = -int32(CastleOut); Y < int32(CastleOut); ++Y)
+		{
+			const float Ring = Cheb(X, Y);
+			if (Ring < CastleIn || Ring >= CastleOut || IsGateway(X, Y, RRDefense::GateHalfCells))
+			{
+				continue;
+			}
+			// The posts either side of a gateway: a level over the walkway, capped in lemon
+			if (IsGateway(X, Y, RRDefense::GateHalfCells + 1))
+			{
+				Fill(FFrame(), X, Y, X, Y, 1, WallTop + 1, GatePost);
+				Set(X, Y, WallTop + 2, GateCap);
+				continue;
+			}
+			for (int32 Level = 1; Level <= WallTop; ++Level)
+			{
+				Set(X, Y, Level, Level == WallTop ? WallWalk : WallStone);
+			}
+			// The battlements: on the outer row, every other cell
+			if (Ring >= CastleOut - 1.f && ((X + Y) & 1) == 0)
+			{
+				Set(X, Y, WallTop + 1, WallMerlon);
+			}
+		}
+	}
+	for (int32 Turn = 0; Turn < 4; ++Turn)
+	{
+		const FFrame Side = FFrame::Around(Turn);
+		// Running out toward the wall from the plaza, arriving on the walkway
+		AddStairs(Side, int32(CastleIn) - WallTop, 6, 1, 0, 0, 1, 2, 0, WallTop, Cream);
+		AddStairs(Side, int32(CastleIn) - WallTop, -8, 1, 0, 0, 1, 2, 0, WallTop, Cream);
+	}
+	// Room kept for the outer jump ramp and the run-up to it (ARRRandomJumpRamp, north of the castle)
+	const int32 RampCellX = FMath::FloorToInt(RRDefense::OuterRampX / BlockSize);
+	Reserve(FIntRect(RampCellX - 3, int32(RingRoadOut) - 1, RampCellX + 3, FMath::CeilToInt(RRDefense::OuterRampFootY / BlockSize) + 6));
+	// and its mirror on the south side, for the outer plane station
+	Reserve(FIntRect(RampCellX - 4, -FMath::CeilToInt(RRDefense::OuterRampFootY / BlockSize) - 6, RampCellX + 4, -int32(RingRoadOut) + 1));
+
+	// The gates: on each road a few cells in from the rim, two pillars and a beam over the road, villain purple with a
+	// cheese-yellow top; the villains come in just inside
+	const uint8 Pillar = MakeLook(GatePillar, Shade(GatePillar, 1.2f));
+	const uint8 Beam = MakeLook(Shade(GatePillar, 0.85f), GateTop);
+	auto CellAt = [](const FVector2D& Spot) { return FIntPoint(FMath::FloorToInt(Spot.X), FMath::FloorToInt(Spot.Y)); };
+	for (int32 Lane = 0; Lane < RRDefense::MaxGates; ++Lane)
+	{
+		const FVector2D Way = GetLaneWay(Lane);
+		const FVector2D Across(-Way.Y, Way.X);
+		const float Theta = FMath::Atan2(Way.Y, Way.X);
+		const float GateOut = RimRadius(Theta) / BlockSize - GateFromRim;
+		DefenseGates.Add(Way * (GateOut - GateStartIn) * BlockSize);
+		for (const float Side : { -1.f, 1.f })
+		{
+			const FIntPoint Foot = CellAt(Way * GateOut + Across * Side * (LaneHalf + 1.f));
+			for (int32 DX = 0; DX < 2; ++DX)
+			{
+				for (int32 DY = 0; DY < 2; ++DY)
+				{
+					for (int32 Level = 1; Level <= 7; ++Level)
+					{
+						Set(Foot.X + DX, Foot.Y + DY, Level, Level == 7 ? Beam : Pillar);
+					}
+				}
+			}
+			Reserve(FIntRect(Foot.X - 1, Foot.Y - 1, Foot.X + 3, Foot.Y + 3));
+		}
+		for (float Step = -LaneHalf - 1.f; Step <= LaneHalf + 2.f; Step += 0.5f)
+		{
+			for (int32 Deep = 0; Deep < 2; ++Deep)
+			{
+				const FIntPoint Cell = CellAt(Way * (GateOut + Deep) + Across * Step);
+				Set(Cell.X, Cell.Y, 8, Beam);
+			}
+			const FIntPoint Top = CellAt(Way * GateOut + Across * Step);
+			Set(Top.X, Top.Y, 9, (FMath::FloorToInt(Step * 2.f) & 1) ? Beam : Pillar);
+		}
+	}
+
+	auto AllIn = [](const FIntRect& Rect, TFunctionRef<bool(int32, int32)> Zone)
+	{
+		for (int32 X = Rect.Min.X; X < Rect.Max.X; ++X)
+		{
+			for (int32 Y = Rect.Min.Y; Y < Rect.Max.Y; ++Y)
+			{
+				if (!Zone(X, Y))
+				{
+					return false;
+				}
+			}
+		}
+		return true;
+	};
+	auto Outside = [](int32 X, int32 Y) { return Cheb(X, Y) >= DefenseBuildFrom; };
+	const int32 Reach = FMath::CeilToInt(RimBase * RimScale / BlockSize) + 2;
+	auto RandomFrame = [&]()
+	{
+		FFrame Frame;
+		Frame.Turn = Layout.RandRange(0, 3);
+		Frame.Origin = FIntPoint(Layout.RandRange(-Reach, Reach), Layout.RandRange(-Reach, Reach));
+		Frame.bRed = Layout.FRand() < 0.5f;
+		return Frame;
+	};
+
+	// The dreamier pass: from stage 2 a rainbow of dice over each of the four straight roads, halfway out; on stage 3 a
+	// mountain of giant dice in two of the quarters
+	int32 Arches = 0;
+	int32 Mountains = 0;
+	if (bDream && Stage >= 2)
+	{
+		const int32 Out = FMath::RoundToInt((RingRoadOut + (RimBase * RimScale / BlockSize - GateFromRim)) * 0.5f);
+		const FIntPoint Ways[] = { FIntPoint(1, 0), FIntPoint(0, 1), FIntPoint(-1, 0), FIntPoint(0, -1) };
+		for (int32 Turn = 0; Turn < 4; ++Turn)
+		{
+			// Its U runs across the road
+			FFrame Arch;
+			Arch.Origin = Ways[Turn] * Out;
+			Arch.Turn = Turn == 0 || Turn == 2 ? 1 : 0;
+			Reserve(Footprint(Arch, -12, 0, 11, 1, 1));
+			AddDiceArch(Arch);
+			++Arches;
+		}
+	}
+	if (bDream && Stage >= 3)
+	{
+		for (int32 Try = 0; Try < 6000 && Mountains < 2; ++Try)
+		{
+			const FFrame Frame = RandomFrame();
+			const FIntRect Rect = Footprint(Frame, -1, -5, 12, 12, 1);
+			if (AllIn(Rect, Outside) && IsFree(Rect))
+			{
+				Reserve(Rect);
+				AddDiceMountain(Frame);
+				++Mountains;
+			}
+		}
+	}
+
+	// Houses between the roads (the bigger the stage, the more and the taller), a giant die house or two from stage 2
+	int32 DieHouses = 0;
+	if (bDream && Stage >= 2)
+	{
+		for (int32 Try = 0; Try < 8000 && DieHouses < Stage - 1; ++Try)
+		{
+			const FFrame Frame = RandomFrame();
+			const FIntRect Rect = Footprint(Frame, -1, -1, 14, 14, 1);
+			if (AllIn(Rect, Outside) && IsFree(Rect))
+			{
+				Reserve(Rect);
+				AddDieHouse(Frame, Layout.RandRange(0, 1 << 30));
+				++DieHouses;
+			}
+		}
+	}
+	int32 Buildings = 0;
+	const int32 WantBuildings = FMath::RoundToInt(30.f * Area);
+	const float TwoStoryChance = Stage == 1 ? 0.3f : Stage == 2 ? 0.6f : 0.8f;
+	for (int32 Try = 0; Try < 20000 && Buildings < WantBuildings; ++Try)
+	{
+		const int32 W = Layout.RandRange(7, 11);
+		const int32 D = Layout.RandRange(7, 12);
+		const int32 Stories = Layout.FRand() < TwoStoryChance ? 2 : 1;
+		const bool bFlat = Stories > 1 && Layout.FRand() < 0.4f;
+		const int32 Style = Layout.RandRange(0, UE_ARRAY_COUNT(Styles) - 1);
+		const int32 Seed = Layout.RandRange(0, 1 << 30);
+		const FFrame Frame = RandomFrame();
+		const FIntRect Rect = Footprint(Frame, -1, -1, W + 1, D + 1, 1);
+		if (!AllIn(Rect, Outside) || !IsFree(Rect))
+		{
+			continue;
+		}
+		Reserve(Rect);
+		AddBuilding(Frame, W, D, Stories, bFlat, Style, Seed);
+		++Buildings;
+	}
+	// Watchtowers by the roads, for a look down them
+	int32 Towers = 0;
+	for (int32 Try = 0; Try < 8000 && Towers < Stage + 1; ++Try)
+	{
+		const FFrame Frame = RandomFrame();
+		const FIntRect Rect = Footprint(Frame, 0, -Story - 1, 3, 3, 1);
+		if (!AllIn(Rect, Outside) || !IsFree(Rect))
+		{
+			continue;
+		}
+		Reserve(Rect);
+		AddTower(Frame, Layout.RandRange(0, UE_ARRAY_COUNT(Styles) - 1));
+		++Towers;
+	}
+	// Trees
+	int32 Trees = 0;
+	const int32 WantTrees = FMath::RoundToInt(90.f * Area);
+	for (int32 Try = 0; Try < 20000 && Trees < WantTrees; ++Try)
+	{
+		const FIntPoint Cell(Layout.RandRange(-Reach, Reach), Layout.RandRange(-Reach, Reach));
+		int32 Kind = Layout.RandRange(0, 1);
+		const int32 Seed = Layout.RandRange(0, 1 << 30);
+		if (bDream)
+		{
+			const int32 Roll = Layout.RandRange(0, 99);
+			Kind = Roll < 34 ? Kind : Roll < 66 ? 2 : Roll < 84 ? 3 : 4;
+		}
+		const int32 Room = Kind == 0 ? 1 : Kind == 3 ? 3 : 2;
+		const FIntRect Rect(Cell.X - Room - 1, Cell.Y - Room - 1, Cell.X + Room + 2, Cell.Y + Room + 2);
+		if (!AllIn(Rect, Outside) || !IsFree(Rect))
+		{
+			continue;
+		}
+		Reserve(Rect);
+		AddTree(Cell, Kind, Seed);
+		++Trees;
+	}
+	// Cover beside the roads: block walls, hedges, crates and dice, to fight the villains from as they come
+	auto DieAt = [this](const FFrame& Frame, int32 U, int32 V, int32 Level, int32 Size, int32 DieKind)
+	{
+		const FIntPoint A = Frame.Cell(U, V);
+		const FIntPoint B = Frame.Cell(U + Size - 1, V + Size - 1);
+		AddDie(FIntPoint(FMath::Min(A.X, B.X), FMath::Min(A.Y, B.Y)), Level, Size, DieKind);
+	};
+	int32 Cover = 0;
+	const int32 WantCover = FMath::RoundToInt(80.f * Area) + 10;
+	for (int32 Try = 0; Try < 20000 && Cover < WantCover; ++Try)
+	{
+		const FFrame Where = RandomFrame();
+		const int32 Piece = Layout.RandRange(0, 4);
+		const int32 Kind = Layout.RandRange(0, 47);
+		const int32 Tall = Layout.RandRange(1, 2);
+		const FColor Color = Styles[Layout.RandRange(0, UE_ARRAY_COUNT(Styles) - 1)].Low;
+		const FIntRect Rect = Footprint(Where, 0, 0, Piece == 0 ? 3 : 1, Piece == 0 ? 0 : 1, 1);
+		if (!AllIn(Rect, [](int32 X, int32 Y) { return Cheb(X, Y) >= RingRoadOut; }) || !IsFree(Rect))
+		{
+			continue;
+		}
+		Reserve(Rect);
+		switch (Piece)
+		{
+		case 0:
+			Fill(Where, 0, 0, 3, 0, 1, 2, MakeLook(Shade(Color, 0.85f), Color));
+			break;
+		case 1:
+			if (Marshmallows)
+			{
+				const FColor Green = Leaves[Kind % 3];
+				Fill(Where, 0, 0, 1, 1, 1, Tall, HiddenLook(Green));
+				AddColored(Marshmallows, FTransform(FRotator(0.f, FrameYaw(Where), 0.f), FrameSpot(Where, 0.5f, 0.5f, Tall * 50.f), FVector(2.15f, 2.15f, Tall * 1.05f)), Shade(Green, 0.9f), Blend(Green, White, 0.15f));
+				AddColored(Marshmallows, FTransform(FRotator(0.f, FrameYaw(Where) + 20.f, 0.f), FrameSpot(Where, 0.15f, 0.25f, Tall * BlockSize + 10.f), FVector(1.2f, 1.1f, 0.75f)), Green, Blend(Green, White, 0.25f));
+				break;
+			}
+			Fill(Where, 0, 0, 1, 1, 1, Tall, MakeLook(Shade(Leaves[0], 0.8f), Leaves[Kind % 3]));
+			break;
+		case 2:
+			Fill(Where, 0, 0, 1, 1, 1, 1, MakeLook(WoodDark, Wood));
+			Fill(Where, 0, 0, 0, 0, 2, Tall + 1, MakeLook(WoodDark, Wood));
+			break;
+		case 3:
+			DieAt(Where, 0, 0, 1, 2, Kind);
+			break;
+		default:
+			DieAt(Where, 0, 0, 1, 1, Kind);
+			DieAt(Where, 1, 1, 1, 1, Kind + 1);
+			DieAt(Where, 1, 0, 1, 1, Kind + 2);
+			DieAt(Where, 1, 0, 2, 1, Kind + 3);
+			break;
+		}
+		++Cover;
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: defense stage %d (x%.2f): %d gates, %d buildings, %d die houses, %d towers, %d trees, %d cover, %d arches, %d dice mountains."),
+		Stage, RimScale, DefenseGates.Num(), Buildings, DieHouses, Towers, Trees, Cover, Arches, Mountains);
+	AddPuddles();
+}
+
 void ARRRandomDiceTown::MakeBlocks()
 {
 	// A block wherever one shows (a face against an empty cell), each a shade lighter or darker at random; the bottom of
 	// the ground shows only past the edge of the cone of blocks under it
 	constexpr float UnderShare = 0.92f;
+	// (a battle map tile: past its edge is the next tile's ground, so the ground's sides there don't show; a block under a
+	// model hides nothing: the floor under a Tripo cover model shows)
+	auto Filled = [this](int32 X, int32 Y, int32 Level)
+	{
+		return HidesFace(X, Y, Level) || IsNeighborGround(X, Y, Level);
+	};
 	for (int32 Level = LevelMin; Level <= LevelMax; ++Level)
 	{
 		for (int32 Y = -HalfCells; Y < HalfCells; ++Y)
@@ -1507,16 +2946,16 @@ void ARRRandomDiceTown::MakeBlocks()
 				{
 					continue;
 				}
-				bool bShows = !Get(X + 1, Y, Level) || !Get(X - 1, Y, Level) || !Get(X, Y + 1, Level) || !Get(X, Y - 1, Level) || !Get(X, Y, Level + 1);
+				bool bShows = !Filled(X + 1, Y, Level) || !Filled(X - 1, Y, Level) || !Filled(X, Y + 1, Level) || !Filled(X, Y - 1, Level) || !HidesFace(X, Y, Level + 1);
 				if (!bShows)
 				{
 					if (Level > -2)
 					{
-						bShows = !Get(X, Y, Level - 1);
+						bShows = !HidesFace(X, Y, Level - 1);
 					}
 					else
 					{
-						const FVector2D Local = CellCenter(FIntPoint(X, Y));
+						const FVector2D Local = IslandSpot(X, Y);
 						bShows = Local.Size() > RimRadius(FMath::Atan2(Local.Y, Local.X)) * UnderShare - 200.f;
 					}
 				}
@@ -1638,12 +3077,13 @@ void ARRRandomDiceTown::MakeUnderside()
 {
 	// Under the island an upside-down cone of big blocks (two cells across), each layer a little smaller: earth, then
 	// peach, pink and lilac toward the point, a die here and there; only the blocks that show
+	// (a battle map tile: its own square of the cone under the whole island)
 	constexpr int32 LayerCount = 12;
 	constexpr float Big = BlockSize * 2.f;
-	constexpr int32 HalfBig = HalfCells / 2;
+	const int32 HalfBig = HalfCells / 2;
 	auto Inside = [this](int32 BX, int32 BY, int32 Layer)
 	{
-		const FVector2D Local((BX + 0.5f) * Big, (BY + 0.5f) * Big);
+		const FVector2D Local = FVector2D((BX + 0.5f) * Big, (BY + 0.5f) * Big) + TileOffset;
 		const float Share = 0.92f - 0.075f * (Layer - 1);
 		return Share > 0.f && Local.Size() < RimRadius(FMath::Atan2(Local.Y, Local.X)) * Share - Big * 0.5f;
 	};
@@ -1688,25 +3128,28 @@ void ARRRandomDiceTown::MakeSky()
 {
 	// A sea of block clouds under and round the island (bigger and higher further out, closing the horizon), puffs up high,
 	// a pixel rainbow beyond each end, and little floating islands out of reach
+	// (a battle map's sky, SkyScale: spread as much further out, the far clouds as much bigger, more puffs up high)
 	FRandomStream Air(SkySeed);
 	const FVector2D Center(GetActorLocation().X, GetActorLocation().Y);
+	const float Spread = SkyScale;
 	for (int32 Index = 0; Index < 150; ++Index)
 	{
 		const float Theta = Air.FRandRange(0.f, UE_TWO_PI);
 		const float Far = FMath::Sqrt(Air.FRand());
-		const float Out = FMath::Lerp(9500.f, 40000.f, Far);
-		const float Size = FMath::Lerp(1400.f, 6000.f, Far) * Air.FRandRange(0.8f, 1.2f);
-		const float Z = FMath::Lerp(-2400.f, 400.f, FMath::Square(Far));
+		const float Out = FMath::Lerp(9500.f, 40000.f, Far) * Spread;
+		const float Size = FMath::Lerp(1400.f, 6000.f, Far) * Air.FRandRange(0.8f, 1.2f) * FMath::Lerp(1.f, Spread, Far);
+		const float Z = FMath::Lerp(-2400.f, 400.f, FMath::Square(Far)) * FMath::Lerp(1.f, Spread * 0.6f, Far);
 		AddCloud(FVector(Center.X + FMath::Cos(Theta) * Out, Center.Y + FMath::Sin(Theta) * Out, FloorZ + Z), Size, Air);
 	}
-	for (int32 Index = 0; Index < 14; ++Index)
+	const int32 HighPuffs = FMath::RoundToInt(14 * Spread * Spread);
+	for (int32 Index = 0; Index < HighPuffs; ++Index)
 	{
 		const float Theta = Air.FRandRange(0.f, UE_TWO_PI);
-		const float Out = Air.FRandRange(4000.f, 16000.f);
+		const float Out = Air.FRandRange(4000.f, 16000.f) * Spread;
 		AddCloud(FVector(Center.X + FMath::Cos(Theta) * Out, Center.Y + FMath::Sin(Theta) * Out, FloorZ + Air.FRandRange(2600.f, 5000.f)), Air.FRandRange(500.f, 1000.f), Air);
 	}
-	AddRainbow(FVector(Center.X + 15000.f, Center.Y - 3000.f, FloorZ - 2500.f), FVector(0.f, 1.f, 0.f), 7600.f);
-	AddRainbow(FVector(Center.X - 15000.f, Center.Y + 3000.f, FloorZ - 2500.f), FVector(0.f, -1.f, 0.f), 7600.f);
+	AddRainbow(FVector(Center.X + 15000.f * Spread, Center.Y - 3000.f, FloorZ - 2500.f), FVector(0.f, 1.f, 0.f), 7600.f);
+	AddRainbow(FVector(Center.X - 15000.f * Spread, Center.Y + 3000.f, FloorZ - 2500.f), FVector(0.f, -1.f, 0.f), 7600.f);
 
 	// Little floating islands, each with a tree
 	struct FSkyIsland
@@ -1719,7 +3162,7 @@ void ARRRandomDiceTown::MakeSky()
 		{ FVector2D(12500.f, 6500.f), 1600.f, 4 }, { FVector2D(-12500.f, -6500.f), 1600.f, 4 } };
 	for (const FSkyIsland& Isle : Isles)
 	{
-		const FVector Middle(Center + Isle.Where, FloorZ + Isle.Height);
+		const FVector Middle(Center + Isle.Where * Spread, FloorZ + Isle.Height);
 		for (int32 Layer = 0; Layer < Isle.Radius; ++Layer)
 		{
 			const int32 Reach = Isle.Radius - Layer;
@@ -2144,6 +3587,13 @@ void ARRRandomDiceTown::AddAwning(const FFrame& Frame, int32 Start, int32 Width,
 	{
 		AddColored(Decor, FTransform(FRotator(0.f, OutYaw, 0.f), FrameSpot(Frame, float(U), -1.92f, 405.f), FVector(0.18f, 0.5f, 0.22f)), Color, Color);
 	}
+	// Round 91: a neon tube along the awning's edge, one candy neon color per shop (it glows even at noon, and lights the
+	// shop front a little through Lumen)
+	if (Neon)
+	{
+		const FColor Tube = NeonColors[FMath::Abs(Frame.Origin.X * 7 + Frame.Origin.Y * 13 + Start) % UE_ARRAY_COUNT(NeonColors)];
+		AddColored(Neon, FTransform(FRotator(0.f, OutYaw, 0.f), FrameSpot(Frame, Start + (Width - 1) * 0.5f, -2.02f, 392.f), FVector(0.07f, float(Width), 0.07f)), Tube, Tube);
+	}
 }
 
 void ARRRandomDiceTown::AddStarLamps()
@@ -2205,12 +3655,86 @@ void ARRRandomDiceTown::AddStarLamps()
 					}
 					AddFloater(Stars, At(CellCenter(Where), 3 * BlockSize + 80.f), FRotator(0.f, Road == 0 ? 0.f : 90.f, 0.f), 1.3f, StarYellow, StarYellow,
 						8.f, 60.f, 0.f, 0.f, 0.f, float(T + Side));
+					// Round 91: a real lamp, lighting the road round it warm
+					UPointLightComponent* Light = NewObject<UPointLightComponent>(this, NAME_None, RF_Transient);
+					Light->SetupAttachment(RootComponent);
+					Light->SetUsingAbsoluteLocation(true);
+					Light->SetIntensityUnits(ELightUnits::Candelas);
+					Light->SetIntensity(LampLightIntensity);
+					Light->SetAttenuationRadius(LampLightReach);
+					Light->SetLightColor(LampLightColor);
+					Light->SetCastShadows(false);
+					Light->RegisterComponent();
+					Light->SetWorldLocation(At(CellCenter(Where), 3 * BlockSize + 60.f));
+					LampLights.Add(Light);
 				}
 				++Placed;
 			}
 		}
 	}
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town dream pass placed %d star lamps (each half)."), Placed);
+}
+
+void ARRRandomDiceTown::AddPuddles()
+{
+	if (!Puddles)
+	{
+		return;
+	}
+	// Road cells with open sky, off the plaza and the stairs, a few cells apart, picked the same way on every machine
+	// (a battle map tile: fewer, its own seed)
+	FRandomStream Stream(GroundSeed + 91 + (IsBattleTile() ? BattleTile.Seed : 0));
+	const int32 Want = IsBattleTile() ? 8 : PuddleCount;
+	TArray<FIntPoint> Placed;
+	for (int32 Try = 0; Try < Want * 40 && Placed.Num() < Want; ++Try)
+	{
+		const FIntPoint Cell(Stream.RandRange(-HalfCells, HalfCells - 1), Stream.RandRange(-HalfCells, HalfCells - 1));
+		if (!IsOnIsland(Cell.X, Cell.Y) || !IsRoad(Cell.X, Cell.Y) || (!IsBattleTile() && Cheb(Cell.X, Cell.Y) < PlazaEdge + 2) || !Get(Cell.X, Cell.Y, 0)
+			|| !IsClearAbove(Cell.X, Cell.Y, 1, 4) || StairCells.Contains(Cell))
+		{
+			continue;
+		}
+		if (Placed.ContainsByPredicate([&Cell](const FIntPoint& Other) { return FMath::Max(FMath::Abs(Other.X - Cell.X), FMath::Abs(Other.Y - Cell.Y)) < PuddleSpacing; }))
+		{
+			continue;
+		}
+		Placed.Add(Cell);
+		// Two or three flat discs overlapping into a blob, just over the paving (the engine cylinder: 100 across, 100 high)
+		TArray<TPair<int32, FTransform>>& Discs = PuddleDiscs.FindOrAdd(Cell);
+		const int32 Count = Stream.RandRange(2, 3);
+		for (int32 Disc = 0; Disc < Count; ++Disc)
+		{
+			const float Size = Stream.FRandRange(PuddleSize.X, PuddleSize.Y);
+			const FVector2D Offset(Stream.FRandRange(-45.f, 45.f), Stream.FRandRange(-45.f, 45.f));
+			const FTransform Where(FRotator(0.f, Stream.FRandRange(0.f, 180.f), 0.f), At(CellCenter(Cell) + Offset, 0.6f + Disc * 0.05f),
+				FVector(Size / 100.f, Size * Stream.FRandRange(0.6f, 0.9f) / 100.f, 0.004f));
+			AddColored(Puddles, Where, PuddleColor, PuddleColor);
+			Discs.Add({ Puddles->GetInstanceCount() - 1, Where });
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town round 91 lights: %d puddles, %d star lamp lights."), Placed.Num(), LampLights.Num());
+}
+
+void ARRRandomDiceTown::SetUpLightEffects()
+{
+	// The sun's light shafts (bloom streaming from it when it's in view past the rooftops), and a sky light that keeps up
+	// with the sky, so the polished tiles, puddles and glossy vehicles have the sky to show
+	for (TActorIterator<ADirectionalLight> It(GetWorld()); It; ++It)
+	{
+		if (UDirectionalLightComponent* Sun = Cast<UDirectionalLightComponent>(It->GetLightComponent()))
+		{
+			Sun->bEnableLightShaftBloom = true;
+			Sun->BloomScale = SunShaftBloomScale;
+			Sun->MarkRenderStateDirty();
+		}
+	}
+	for (TActorIterator<ASkyLight> It(GetWorld()); It; ++It)
+	{
+		if (USkyLightComponent* SkyLighting = It->GetLightComponent())
+		{
+			SkyLighting->SetRealTimeCaptureEnabled(true);
+		}
+	}
 }
 
 void ARRRandomDiceTown::AddFloater(UInstancedStaticMeshComponent* Instances, const FVector& Base, const FRotator& Turn, float Scale, const FColor& Body, const FColor& Accent,
@@ -2271,7 +3795,9 @@ void ARRRandomDiceTown::MakeDreamSky()
 	const FVector2D Center(GetActorLocation().X, GetActorLocation().Y);
 
 	// A floor of pale cloud far below, instead of the dark ground showing under the cloud sea
-	AddColored(Clouds, FTransform(FRotator::ZeroRotator, FVector(Center, FloorZ - 6500.f), FVector(20000.f, 20000.f, 4.f)), FColor(168, 210, 255), FColor(168, 210, 255));
+	// (a battle map's sky reaches as much further: SkyScale)
+	const float Spread = SkyScale;
+	AddColored(Clouds, FTransform(FRotator::ZeroRotator, FVector(Center, FloorZ - 6500.f * FMath::Sqrt(Spread)), FVector(20000.f * Spread, 20000.f * Spread, 4.f)), FColor(168, 210, 255), FColor(168, 210, 255));
 
 	// A rainbow of dice in a vertical plane: seven bands on a half circle across Across from Base
 	auto DiceArc = [this](const FVector& Base, const FVector& Across, float Radius)
@@ -2353,13 +3879,15 @@ void ARRRandomDiceTown::MakeDreamSky()
 	for (const float Sign : { -1.f, 1.f })
 	{
 		// Two islands off each team's end, joined by a rainbow of dice
-		const FVector A(Center.X + Sign * 10600.f, Center.Y + Sign * 6600.f, FloorZ + 600.f);
-		const FVector B(Center.X + Sign * 10600.f, Center.Y + Sign * 1400.f, FloorZ + 600.f);
+		// (a battle map: out past its rim, the pair as far apart as in the town)
+		const float IsleOut = 10600.f * Spread + (Spread > 1.f ? 3000.f : 0.f);
+		const FVector A(Center.X + Sign * IsleOut, Center.Y + Sign * 6600.f, FloorZ + 600.f);
+		const FVector B(Center.X + Sign * IsleOut, Center.Y + Sign * 1400.f, FloorZ + 600.f);
 		Isle(A, 6, Sign > 0.f ? 11 : 12);
 		Isle(B, 5, Sign > 0.f ? 13 : 14);
 		DiceArc((A + B) * 0.5f + FVector(0.f, 0.f, BlockSize * 0.5f), (B - A).GetSafeNormal(), (B - A).Size() * 0.5f - BlockSize * 3.f);
 		// A crescent moon high beyond them, stars round it
-		const FVector Moon(Center.X + Sign * 21000.f, Center.Y - Sign * 7000.f, FloorZ + 7600.f);
+		const FVector Moon(Center.X + Sign * 21000.f * Spread, Center.Y - Sign * 7000.f * Spread, FloorZ + 7600.f * FMath::Sqrt(Spread));
 		const float MoonYaw = FMath::RadiansToDegrees(FMath::Atan2(Center.Y - Moon.Y, Center.X - Moon.X));
 		AddColored(Moons, FTransform(FRotator(0.f, MoonYaw, -18.f), Moon, FVector(42.f)), MoonYellow, MoonYellow);
 		for (int32 Index = 0; Index < 7; ++Index)
@@ -2386,7 +3914,7 @@ void ARRRandomDiceTown::MakeDreamSky()
 	{
 		const bool bFar = Index >= 10;
 		const float Theta = Air.FRandRange(0.f, UE_TWO_PI);
-		const float Out = bFar ? Air.FRandRange(9300.f, 13000.f) : Air.FRandRange(1600.f, 7600.f);
+		const float Out = (bFar ? Air.FRandRange(9300.f, 13000.f) : Air.FRandRange(1600.f, 7600.f)) * Spread;
 		const float Height = bFar ? Air.FRandRange(-600.f, 2600.f) : Air.FRandRange(2100.f, 3600.f);
 		const float Size = bFar ? Air.FRandRange(2.f, 4.5f) : Air.FRandRange(1.2f, 2.4f);
 		const int32 Pick = Air.RandRange(0, UE_ARRAY_COUNT(DieBodies) - 1);
@@ -2400,7 +3928,7 @@ void ARRRandomDiceTown::MakeDreamSky()
 	for (int32 Index = 0; Index < 10; ++Index)
 	{
 		const float Theta = Air.FRandRange(0.f, UE_TWO_PI);
-		const float Out = Air.FRandRange(2000.f, 11000.f);
+		const float Out = Air.FRandRange(2000.f, 11000.f) * Spread;
 		const float Height = Air.FRandRange(2600.f, 4600.f);
 		const float Size = Air.FRandRange(1.8f, 3.2f);
 		Pair([&](const FVector2D& Local, float Phase)
@@ -2465,15 +3993,31 @@ void ARRRandomDiceTown::MakeWalkGraph()
 	}
 	NodeStart[GridCells * GridCells] = Nodes.Num();
 
-	// The ground anyone can reach from the plaza's edge
-	const int32 Seed = FindNode(At(CellCenter(FIntPoint(0, -12)), 0.f), 2);
-	if (Seed == INDEX_NONE)
-	{
-		return;
-	}
+	// The ground anyone can reach from the plaza's edge (a battle map tile: from any of its roads)
 	TBitArray<> Seen(false, Nodes.Num());
-	TArray<int32> Queue = { Seed };
-	Seen[Seed] = true;
+	TArray<int32> Queue;
+	if (IsBattleTile())
+	{
+		for (int32 Index = 0; Index < Nodes.Num(); ++Index)
+		{
+			const FWalkNode& Node = Nodes[Index];
+			if (Node.Z == 0.f && Node.StairDir == FIntPoint::ZeroValue && IsRoad(Node.Cell.X, Node.Cell.Y))
+			{
+				Seen[Index] = true;
+				Queue.Add(Index);
+			}
+		}
+	}
+	else
+	{
+		const int32 Seed = FindNode(At(CellCenter(FIntPoint(0, -12)), 0.f), 2);
+		if (Seed == INDEX_NONE)
+		{
+			return;
+		}
+		Queue.Add(Seed);
+		Seen[Seed] = true;
+	}
 	for (int32 Head = 0; Head < Queue.Num(); ++Head)
 	{
 		ForEachLink(Queue[Head], [&](int32 Next, float)
@@ -2736,13 +4280,24 @@ bool ARRRandomDiceTown::FindPath(const FVector& From, const FVector& To, TArray<
 
 FVector ARRRandomDiceTown::GetRandomWalkSpot(FRandomStream& Stream, float Radius) const
 {
-	for (int32 Try = 0; Try < 40 && Roamable.Num() > 0; ++Try)
+	for (int32 Try = 0; Try < 60 && Roamable.Num() > 0; ++Try)
 	{
 		const FWalkNode& Node = Nodes[Roamable[Stream.RandRange(0, Roamable.Num() - 1)]];
-		if (CellCenter(Node.Cell).Size() <= Radius)
+		if (CellCenter(Node.Cell).Size() > Radius)
 		{
-			return At(CellCenter(Node.Cell), Node.Z);
+			continue;
 		}
+		// Not where the ground it stood on is broken, nor in a crater's lava (round 89: meteors, falling stars)
+		const int32 Level = FMath::RoundToInt(Node.Z / BlockSize);
+		if (Node.StairDir == FIntPoint::ZeroValue && !IsFilled(Node.Cell.X, Node.Cell.Y, Level))
+		{
+			continue;
+		}
+		if (LavaColumns.Contains((Node.Cell.Y + HalfCells) * GridCells + (Node.Cell.X + HalfCells)) || DugDepth.Contains((Node.Cell.Y + HalfCells) * GridCells + (Node.Cell.X + HalfCells)))
+		{
+			continue;
+		}
+		return At(CellCenter(Node.Cell), Node.Z);
 	}
 	return At(CellCenter(FIntPoint(0, -12)), 0.f);
 }
@@ -2770,9 +4325,14 @@ void ARRRandomDiceTown::Tick(float DeltaSeconds)
 			}
 		}
 	}
-	if (Floaters.Num() > 0)
+	// (a battle map tile streamed out keeps its lamp stars still: they are out of the scene)
+	if (Floaters.Num() > 0 && (bDetailShown || BuildsSky()))
 	{
 		AnimateFloaters(GetWorld()->GetTimeSeconds());
+	}
+	if (Falling.Num() > 0)
+	{
+		TickFalling(DeltaSeconds);
 	}
 	// The town's colors (every material's "Saturation" and "Brightness"), when the console values change
 	const float Saturation = CVarSaturation.GetValueOnGameThread();
@@ -2830,13 +4390,18 @@ FTransform ARRRandomDiceTown::GetCellTransform(int32 X, int32 Y, int32 Level) co
 	return FTransform(FRotator::ZeroRotator, At(CellCenter(FIntPoint(X, Y)), (Level - 0.5f) * BlockSize));
 }
 
+UInstancedStaticMeshComponent* ARRRandomDiceTown::GetBlockSet(bool bDie, bool bGloss) const
+{
+	return bDie ? DieBlocks.Get() : bGloss && GlossBlocks ? GlossBlocks.Get() : Blocks.Get();
+}
+
 void ARRRandomDiceTown::AddCellBlock(int32 X, int32 Y, int32 Level)
 {
 	const FLook& Look = Looks[Grid[GridIndex(X, Y, Level)] - 1];
 	const float Jitter = 0.95f + 0.1f * float(CellHash(X, Y, Level) % 1000) / 1000.f;
-	UInstancedStaticMeshComponent* Instances = Look.bDie ? DieBlocks.Get() : Blocks.Get();
+	UInstancedStaticMeshComponent* Instances = GetBlockSet(Look.bDie, Look.bGloss);
 	AddColored(Instances, GetCellTransform(X, Y, Level), Shade(Look.Body, Jitter), Shade(Look.Accent, Jitter));
-	CellBlocks.Add(GridIndex(X, Y, Level), { Look.bDie, Instances->GetInstanceCount() - 1, true });
+	CellBlocks.Add(GridIndex(X, Y, Level), { Look.bDie, Instances->GetInstanceCount() - 1, true, Look.bGloss && !Look.bDie });
 }
 
 bool ARRRandomDiceTown::IsFilled(int32 X, int32 Y, int32 Level) const
@@ -2847,6 +4412,16 @@ bool ARRRandomDiceTown::IsFilled(int32 X, int32 Y, int32 Level) const
 	}
 	const int32 Index = GridIndex(X, Y, Level);
 	return Grid[Index] != 0 && !(Broken.IsValidIndex(Index) && Broken[Index]);
+}
+
+bool ARRRandomDiceTown::HidesFace(int32 X, int32 Y, int32 Level) const
+{
+	if (!IsFilled(X, Y, Level))
+	{
+		return false;
+	}
+	const uint8 Value = Grid[GridIndex(X, Y, Level)];
+	return Value == HiddenSolid || !Looks[Value - 1].bUnderMesh;
 }
 
 bool ARRRandomDiceTown::Touches(const FRRWreck& Wreck, const FBox& Box) const
@@ -2869,8 +4444,9 @@ bool ARRRandomDiceTown::Touches(const FRRWreck& Wreck, const FBox& Box) const
 
 void ARRRandomDiceTown::RefreshCellBlock(int32 X, int32 Y, int32 Level, bool bGrow, TArray<FRRRegrow>& OutRegrow)
 {
-	// (The island's underside keeps its own rule in MakeBlocks; wrecks never come near it)
-	if (!IsInGrid(X, Y, Level) || Level < -1)
+	// Down to the ground's bottom layer (a crater's floor); the island's underside keeps its own rule in MakeBlocks, so the
+	// bottom layer's underneath doesn't count
+	if (!IsInGrid(X, Y, Level) || Level < GroundBottom)
 	{
 		return;
 	}
@@ -2880,8 +4456,9 @@ void ARRRandomDiceTown::RefreshCellBlock(int32 X, int32 Y, int32 Level, bool bGr
 	{
 		return;
 	}
-	const bool bWant = !Broken[Index] && (!IsFilled(X + 1, Y, Level) || !IsFilled(X - 1, Y, Level) || !IsFilled(X, Y + 1, Level) || !IsFilled(X, Y - 1, Level)
-		|| !IsFilled(X, Y, Level + 1) || !IsFilled(X, Y, Level - 1));
+	const bool bBelowOpen = Level > GroundBottom && !HidesFace(X, Y, Level - 1);
+	const bool bWant = !Broken[Index] && (!HidesFace(X + 1, Y, Level) || !HidesFace(X - 1, Y, Level) || !HidesFace(X, Y + 1, Level) || !HidesFace(X, Y - 1, Level)
+		|| !HidesFace(X, Y, Level + 1) || bBelowOpen);
 	FCellBlock* Block = CellBlocks.Find(Index);
 	if (!Block)
 	{
@@ -2897,12 +4474,12 @@ void ARRRandomDiceTown::RefreshCellBlock(int32 X, int32 Y, int32 Level, bool bGr
 		return;
 	}
 	Block->bShown = bWant;
-	UInstancedStaticMeshComponent* Instances = Block->bDie ? DieBlocks.Get() : Blocks.Get();
+	UInstancedStaticMeshComponent* Instances = GetBlockSet(Block->bDie, Block->bGloss);
 	const FTransform Where = GetCellTransform(X, Y, Level);
 	Instances->UpdateInstanceTransform(Block->Index, bWant ? Where : Shrunk(Where), true, false, false);
 	if (bWant && bGrow)
 	{
-		OutRegrow.Add({ Instances, Block->Index, Where });
+		OutRegrow.Add({ Instances, Block->Index, Where, FMath::Min(RegrowMaxDelay, (Level - GroundBottom) * RegrowStep) });
 	}
 }
 
@@ -2912,6 +4489,7 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 	{
 		return;
 	}
+	const double StartTime = FPlatformTime::Seconds();
 	if (Broken.Num() != Grid.Num())
 	{
 		Broken.Init(false, Grid.Num());
@@ -2923,7 +4501,7 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 		return FIntVector(FMath::FloorToInt((World.X - Middle.X) / BlockSize), FMath::FloorToInt((World.Y - Middle.Y) / BlockSize),
 			FMath::FloorToInt((World.Z - FloorZ) / BlockSize) + 1);
 	};
-	auto CellOf = [](int32 Index)
+	auto CellOf = [this](int32 Index)
 	{
 		return FIntVector(Index % GridCells - HalfCells, Index / GridCells % GridCells - HalfCells, Index / (GridCells * GridCells) + LevelMin);
 	};
@@ -2937,6 +4515,11 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 	TArray<int32> NowCells;
 	auto Break = [&](int32 Index)
 	{
+		// (a defense stage's castle stands whatever hits it)
+		if (IsCastle(Index % GridCells - HalfCells, Index / GridCells % GridCells - HalfCells))
+		{
+			return;
+		}
 		if (!Now[Index])
 		{
 			Now[Index] = true;
@@ -2997,6 +4580,10 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 	{
 		Owners.Add(Trees);
 	}
+	for (UInstancedStaticMeshComponent* Models : CoverModels)
+	{
+		Owners.Add(Models);
+	}
 	Owners.RemoveAll([](const UInstancedStaticMeshComponent* Instances) { return !Instances || !Instances->GetStaticMesh(); });
 	for (UInstancedStaticMeshComponent* Instances : Owners)
 	{
@@ -3033,6 +4620,190 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 			}
 		}
 	}
+	// Round 89. The giant dice: one a wreck reaches goes whole, its cells with it
+	TSet<int32> DiceHit;
+	for (int32 Die = 0; Die < GiantDice.Num(); ++Die)
+	{
+		const FGiantDie& Giant = GiantDice[Die];
+		const FVector Low = At(CellCenter(FIntPoint(Giant.Low.X, Giant.Low.Y)) - FVector2D(BlockSize * 0.5f), (Giant.Low.Z - 1) * BlockSize);
+		if (!IsHit(FBox(Low, Low + FVector(Giant.Size * BlockSize))))
+		{
+			continue;
+		}
+		DiceHit.Add(Die);
+		WantGone.FindOrAdd(DieBlocks).Add(Giant.Instance);
+		for (int32 DX = 0; DX < Giant.Size; ++DX)
+		{
+			for (int32 DY = 0; DY < Giant.Size; ++DY)
+			{
+				for (int32 Level = Giant.Low.Z; Level < Giant.Low.Z + Giant.Size; ++Level)
+				{
+					if (IsInGrid(Giant.Low.X + DX, Giant.Low.Y + DY, Level))
+					{
+						Break(GridIndex(Giant.Low.X + DX, Giant.Low.Y + DY, Level));
+					}
+				}
+			}
+		}
+	}
+
+	// The ground: what each wreck that reaches the floor digs adds up column by column (blow after blow digs deeper), then
+	// no column more than a layer deeper than any beside it (a crater is a bowl of steps a jump climbs out of). Three
+	// layers is all the ground there is: a column dug that deep has broken through to the mantle (its bottom layer stays
+	// as the lava's bed). The same on every machine: whole cells and the same list of wrecks.
+	auto ColumnOf = [this](int32 X, int32 Y) { return (Y + HalfCells) * GridCells + (X + HalfCells); };
+	auto ColumnCell = [this](int32 Column) { return FIntPoint(Column % GridCells - HalfCells, Column / GridCells - HalfCells); };
+	TMap<int32, int32> Depth;
+	for (const FRRWreck& Wreck : InWrecks)
+	{
+		if (Wreck.Dig == 0)
+		{
+			continue;
+		}
+		// How far round it reaches across the floor: a column all of its width, a ball as wide as it is where it cuts the floor
+		const float Over = Wreck.bColumn ? 0.f : FMath::Min(Wreck.From.Z, Wreck.To.Z) - FloorZ;
+		if (Over > Wreck.Radius)
+		{
+			continue;
+		}
+		const float Reach = FMath::Clamp(Over > 0.f ? FMath::Sqrt(FMath::Square(Wreck.Radius) - FMath::Square(Over)) : Wreck.Radius, DigReachMin, DigReachMax);
+		const FVector A(Wreck.From.X, Wreck.From.Y, 0.f);
+		const FVector B(Wreck.To.X, Wreck.To.Y, 0.f);
+		const FIntVector LowCell = CellAt(A.ComponentMin(B) - FVector(Reach));
+		const FIntVector HighCell = CellAt(A.ComponentMax(B) + FVector(Reach));
+		for (int32 Y = FMath::Max(-HalfCells, LowCell.Y); Y <= FMath::Min(HalfCells - 1, HighCell.Y); ++Y)
+		{
+			for (int32 X = FMath::Max(-HalfCells, LowCell.X); X <= FMath::Min(HalfCells - 1, HighCell.X); ++X)
+			{
+				const FVector2D Spot = FVector2D(Middle) + CellCenter(FIntPoint(X, Y));
+				if (IsOnIsland(X, Y) && !IsCastle(X, Y) && FMath::PointDistToSegment(FVector(Spot, 0.f), A, B) <= Reach)
+				{
+					int32& Dug = Depth.FindOrAdd(ColumnOf(X, Y));
+					Dug = FMath::Min(BreachDepth, Dug + Wreck.Dig);
+				}
+			}
+		}
+	}
+	for (bool bLowered = true; bLowered; )
+	{
+		bLowered = false;
+		for (TPair<int32, int32>& Pair : Depth)
+		{
+			const FIntPoint Cell = ColumnCell(Pair.Key);
+			int32 Shallowest = Pair.Value;
+			for (const FIntPoint& Step : { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) })
+			{
+				const int32* Next = Depth.Find(ColumnOf(Cell.X + Step.X, Cell.Y + Step.Y));
+				Shallowest = FMath::Min(Shallowest, Next ? *Next : 0);
+			}
+			if (Pair.Value > Shallowest + 1)
+			{
+				Pair.Value = Shallowest + 1;
+				bLowered = true;
+			}
+		}
+	}
+	for (const TPair<int32, int32>& Pair : Depth)
+	{
+		const FIntPoint Cell = ColumnCell(Pair.Key);
+		for (int32 Level = 0; Level > FMath::Max(GroundBottom, -Pair.Value); --Level)
+		{
+			if (Grid[GridIndex(Cell.X, Cell.Y, Level)] != 0)
+			{
+				Break(GridIndex(Cell.X, Cell.Y, Level));
+			}
+		}
+	}
+	// Lava: every dug column joined (side by side) to one broken through
+	TSet<int32> LavaNow;
+	TArray<int32> LavaQueue;
+	for (const TPair<int32, int32>& Pair : Depth)
+	{
+		if (Pair.Value >= BreachDepth)
+		{
+			LavaNow.Add(Pair.Key);
+			LavaQueue.Add(Pair.Key);
+		}
+	}
+	for (int32 Head = 0; Head < LavaQueue.Num(); ++Head)
+	{
+		const FIntPoint Cell = ColumnCell(LavaQueue[Head]);
+		for (const FIntPoint& Step : { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) })
+		{
+			const int32 Next = ColumnOf(Cell.X + Step.X, Cell.Y + Step.Y);
+			if (Depth.Contains(Next) && !LavaNow.Contains(Next))
+			{
+				LavaNow.Add(Next);
+				LavaQueue.Add(Next);
+			}
+		}
+	}
+
+	// What is no longer held up from the ground falls: everything solid that hangs together with the ground, through
+	// cells side by side or one on another, stands (and whatever stood on nothing as built, the dream sky's pieces);
+	// the rest comes down
+	TBitArray<> Held;
+	if (!bFoundAnchored)
+	{
+		bFoundAnchored = true;
+		const TBitArray<> Nothing(false, Grid.Num());
+		FindHeldUp(Nothing, Held);
+		Anchored.Init(false, Grid.Num());
+		int32 Count = 0;
+		for (int32 Index = 0; Index < Grid.Num(); ++Index)
+		{
+			if (Grid[Index] != 0 && !Held[Index])
+			{
+				Anchored[Index] = true;
+				++Count;
+			}
+		}
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town: %d blocks stand on nothing as built (they never fall)."), Count);
+	}
+	FindHeldUp(Now, Held);
+	TBitArray<> FallenNow(false, Grid.Num());
+	TArray<int32> NewlyFallen;
+	for (int32 Index = (1 - LevelMin) * GridCells * GridCells; Index < Grid.Num(); ++Index)
+	{
+		if (Grid[Index] != 0 && !Now[Index] && !Held[Index])
+		{
+			FallenNow[Index] = true;
+			Break(Index);
+			if (!(Fallen.IsValidIndex(Index) && Fallen[Index]))
+			{
+				NewlyFallen.Add(Index);
+			}
+		}
+	}
+	// The giant dice that fall go whole with their cells
+	TSet<int32> DiceFalling;
+	for (int32 Die = 0; Die < GiantDice.Num(); ++Die)
+	{
+		const FGiantDie& Giant = GiantDice[Die];
+		if (IsInGrid(Giant.Low.X, Giant.Low.Y, Giant.Low.Z) && FallenNow[GridIndex(Giant.Low.X, Giant.Low.Y, Giant.Low.Z)])
+		{
+			WantGone.FindOrAdd(DieBlocks).Add(Giant.Instance);
+			DiceFalling.Add(Giant.Instance);
+		}
+	}
+	// Flights of stairs whose foot stood on something that went
+	for (const FStair& Stair : Stairs)
+	{
+		const int32 Foot = IsInGrid(Stair.Start.X, Stair.Start.Y, Stair.Base) ? GridIndex(Stair.Start.X, Stair.Start.Y, Stair.Base) : INDEX_NONE;
+		if (Foot == INDEX_NONE || Grid[Foot] == 0 || !Now[Foot])
+		{
+			continue;
+		}
+		for (int32 Step = Stair.StepFirst; Step < Stair.StepFirst + Stair.StepCount; ++Step)
+		{
+			WantGone.FindOrAdd(Steps).Add(Step);
+		}
+		for (int32 Slab = Stair.SolidFirst; Slab < Stair.SolidFirst + Stair.SolidCount; ++Slab)
+		{
+			WantGone.FindOrAdd(Solid).Add(Slab);
+		}
+	}
+
 	for (UInstancedStaticMeshComponent* Instances : Owners)
 	{
 		const TSet<int32>* Already = WantGone.Find(Instances);
@@ -3044,7 +4815,30 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 				continue;
 			}
 			bool bOver = false;
-			ForCellsIn(BoundsOf(Instances, Index), [&](int32 Cell) { bOver |= Now[Cell] && IsUnderMesh(Cell); });
+			const FBox Box = BoundsOf(Instances, Index);
+			ForCellsIn(Box, [&](int32 Cell) { bOver |= Now[Cell] && IsUnderMesh(Cell); });
+			// (Round 89) Or what it rests on is mostly gone: a roof whose walls came down, a lamp on dug ground
+			if (!bOver)
+			{
+				int32 Under = 0;
+				int32 UnderGone = 0;
+				const FIntVector Low = CellAt(Box.Min + FVector(10.f));
+				const FIntVector High = CellAt(Box.Max - FVector(10.f));
+				const int32 Level = CellAt(Box.Min + FVector(0.f, 0.f, 20.f)).Z - 1;
+				for (int32 Y = FMath::Max(-HalfCells, Low.Y); Y <= FMath::Min(HalfCells - 1, High.Y) && Level >= LevelMin; ++Y)
+				{
+					for (int32 X = FMath::Max(-HalfCells, Low.X); X <= FMath::Min(HalfCells - 1, High.X); ++X)
+					{
+						const int32 Cell = GridIndex(X, Y, Level);
+						if (Grid[Cell] != 0)
+						{
+							++Under;
+							UnderGone += Now[Cell] ? 1 : 0;
+						}
+					}
+				}
+				bOver = Under > 0 && UnderGone * 2 > Under;
+			}
 			if (bOver)
 			{
 				More.Add(Index);
@@ -3069,6 +4863,11 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 	}
 	for (const FStair& Stair : Stairs)
 	{
+		// (a castle's stairs stand)
+		if (IsCastle(Stair.Start.X, Stair.Start.Y))
+		{
+			continue;
+		}
 		bool bHit = false;
 		for (int32 Step = Stair.StepFirst; Step < Stair.StepFirst + Stair.StepCount && !bHit; ++Step)
 		{
@@ -3108,13 +4907,30 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 		if (!Broken[Index])
 		{
 			Changed.Add(Index);
+			// What falls breaks up where it lands, a giant die in its own colors
+			if (FallenNow[Index] || Grid[Index] == HiddenSolid)
+			{
+				continue;
+			}
 			const FIntVector Cell = CellOf(Index);
 			const FLook& Look = Looks[Grid[Index] - 1];
 			OutBroken.Add({ GetCellTransform(Cell.X, Cell.Y, Cell.Z).GetLocation(), FLinearColor(Look.Body), FLinearColor(Look.Accent), 1.f });
 		}
 	}
+	// The blocks of what falls just now, as they stand (before they are hidden): they come down as one piece (StartFalling)
+	TArray<FFallingPiece> FallingBlocks;
+	for (const int32 Index : NewlyFallen)
+	{
+		const FCellBlock* Block = CellBlocks.Find(Index);
+		if (Block && Block->bShown)
+		{
+			const FIntVector Cell = CellOf(Index);
+			FallingBlocks.Add({ GetBlockSet(Block->bDie, Block->bGloss), Block->Index, GetCellTransform(Cell.X, Cell.Y, Cell.Z), Index });
+		}
+	}
 	Broken = MoveTemp(Now);
 	BrokenCells = MoveTemp(NowCells);
+	Fallen = MoveTemp(FallenNow);
 
 	// The blocks drawn: each changed cell and its neighbors (bared or buried again)
 	TSet<int32> Refresh;
@@ -3139,6 +4955,10 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 	{
 		Blocks->MarkRenderStateDirty();
 		DieBlocks->MarkRenderStateDirty();
+		if (GlossBlocks)
+		{
+			GlossBlocks->MarkRenderStateDirty();
+		}
 	}
 
 	// What stops: each merged box with a broken cell in it goes under the island, and boxes merged again from what's left
@@ -3251,7 +5071,12 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 		CutBoxes.Add(Box, MoveTemp(Left));
 	}
 
-	// Models gone now, and back once no wreck reaches them
+	// Models gone now, and back once no wreck reaches them (from the bottom up, a little at a time)
+	TMap<int32, int32> DieOfInstance;
+	for (int32 Die = 0; Die < GiantDice.Num(); ++Die)
+	{
+		DieOfInstance.Add(GiantDice[Die].Instance, Die);
+	}
 	TSet<UInstancedStaticMeshComponent*> Touched;
 	for (TPair<UInstancedStaticMeshComponent*, TMap<int32, FTransform>>& Pair : Gone)
 	{
@@ -3264,13 +5089,15 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 				Instances->UpdateInstanceTransform(It.Key(), It.Value(), true, false, true);
 				if (Instances != Solid)
 				{
-					OutRegrow.Add({ Instances, It.Key(), It.Value() });
+					const float Up = (It.Value().GetLocation().Z - FloorZ) / BlockSize - GroundBottom;
+					OutRegrow.Add({ Instances, It.Key(), It.Value(), FMath::Clamp(Up * RegrowStep, 0.f, RegrowMaxDelay) });
 				}
 				Touched.Add(Instances);
 				It.RemoveCurrent();
 			}
 		}
 	}
+	TMap<UInstancedStaticMeshComponent*, TMap<int32, FTransform>> NewlyGone;
 	for (const TPair<UInstancedStaticMeshComponent*, TSet<int32>>& Pair : WantGone)
 	{
 		TMap<int32, FTransform>& Mine = Gone.FindOrAdd(Pair.Key);
@@ -3283,6 +5110,22 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 				Mine.Add(Index, Was);
 				Pair.Key->UpdateInstanceTransform(Index, Pair.Key == Solid ? Stowed(Was) : Shrunk(Was), true, false, true);
 				Touched.Add(Pair.Key);
+				if (Pair.Key != Solid)
+				{
+					NewlyGone.FindOrAdd(Pair.Key).Add(Index, Was);
+				}
+				// A giant die smashed (not one coming down): rubble in its colors from all over it
+				const int32* Die = Pair.Key == DieBlocks ? DieOfInstance.Find(Index) : nullptr;
+				if (Die && !DiceFalling.Contains(Index))
+				{
+					const FGiantDie& Giant = GiantDice[*Die];
+					const float Half = Giant.Size * BlockSize * 0.5f;
+					for (int32 Bit = 0; Bit < 6 + Giant.Size * 3; ++Bit)
+					{
+						OutBroken.Add({ Was.GetLocation() + FVector(FMath::FRandRange(-Half, Half), FMath::FRandRange(-Half, Half), FMath::FRandRange(-Half, Half)),
+							FLinearColor(Giant.Body), FLinearColor(Giant.Pips), 1.3f });
+					}
+				}
 			}
 		}
 	}
@@ -3303,15 +5146,1299 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 		WreckSolid->ClearInstances();
 		WreckSolid->AddInstances(All, false, true, false);
 	}
+	// The navmesh is made from these boxes: told afresh, or the tiles under a cut ground box (one runs across several
+	// tiles) come back with nothing in them (round 89: the ground digs)
+	if (GetWorld()->IsGameWorld() && (DirtyBoxes.Num() > 0 || Touched.Contains(Solid.Get())))
+	{
+		UNavigationSystemV1::UpdateComponentInNavOctree(*Solid);
+		if (WreckSolid)
+		{
+			UNavigationSystemV1::UpdateComponentInNavOctree(*WreckSolid);
+		}
+	}
 	for (UInstancedStaticMeshComponent* Instances : Touched)
 	{
 		Instances->MarkRenderStateDirty();
 	}
+	// What falls just now comes down (on every machine; the server's landings hurt)
+	if (NewlyFallen.Num() > 0)
+	{
+		StartFalling(NewlyFallen, FallingBlocks, NewlyGone);
+	}
+
+	// The lava: the columns flooded now, what broke through just now (a fountain for each patch of it); the server
+	// tells the wreckage the pool is big
+	const bool bLavaChanged = LavaNow.Num() != LavaColumns.Num() || LavaNow.Difference(LavaColumns).Num() > 0;
+	bool bDepthChanged = Depth.Num() != DugDepth.Num();
+	for (const TPair<int32, int32>& Pair : Depth)
+	{
+		const int32* Was = DugDepth.Find(Pair.Key);
+		bDepthChanged |= !Was || *Was != Pair.Value;
+	}
+	if (bLavaChanged || (bDepthChanged && LavaNow.Num() > 0))
+	{
+		TArray<FRRLavaColumn> Flooded;
+		FBox Pool(ForceInit);
+		for (const int32 Column : LavaNow)
+		{
+			const FIntPoint Cell = ColumnCell(Column);
+			const FVector Spot = At(CellCenter(Cell), -FMath::Min(Depth[Column], -GroundBottom) * BlockSize);
+			Flooded.Add({ Cell, FVector2D(Spot), float(Spot.Z) });
+			Pool += Spot;
+		}
+		// The breakthroughs new just now: a fountain in the middle of each patch of them
+		TArray<FVector> Breaches;
+		TSet<int32> Seen;
+		for (const int32 Column : LavaNow)
+		{
+			if (Seen.Contains(Column) || Depth[Column] < BreachDepth || LavaColumns.Contains(Column))
+			{
+				continue;
+			}
+			TArray<int32> Patch = { Column };
+			Seen.Add(Column);
+			FVector2D Sum(0.f);
+			for (int32 Head = 0; Head < Patch.Num(); ++Head)
+			{
+				const FIntPoint Cell = ColumnCell(Patch[Head]);
+				Sum += CellCenter(Cell);
+				for (const FIntPoint& Step : { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) })
+				{
+					const int32 Next = ColumnOf(Cell.X + Step.X, Cell.Y + Step.Y);
+					const int32* NextDepth = Depth.Find(Next);
+					if (NextDepth && *NextDepth >= BreachDepth && !Seen.Contains(Next) && !LavaColumns.Contains(Next))
+					{
+						Seen.Add(Next);
+						Patch.Add(Next);
+					}
+				}
+			}
+			Breaches.Add(At(Sum / Patch.Num(), -LavaBelowFloor));
+		}
+		if (Lava)
+		{
+			Lava->SetColumns(Flooded, FloorZ - LavaBelowFloor, Breaches);
+		}
+		if (HasAuthority() && LavaNow.Difference(LavaColumns).Num() > 0)
+		{
+			Pool.Min.Z = FloorZ + GroundBottom * BlockSize - BlockSize;
+			Pool.Max.Z = FloorZ + BlockSize;
+			NewBigAreas.Add(Pool.ExpandBy(FVector(BlockSize * 0.5f, BlockSize * 0.5f, 0.f)));
+		}
+	}
+
+	// The minimap: the columns where anything changed or the lava came or went
+	TSet<int32> MapColumns;
+	for (const int32 Index : Changed)
+	{
+		const FIntVector Cell = CellOf(Index);
+		MapColumns.Add(ColumnOf(Cell.X, Cell.Y));
+	}
+	MapColumns.Append(LavaNow.Difference(LavaColumns));
+	MapColumns.Append(LavaColumns.Difference(LavaNow));
+	DugDepth = MoveTemp(Depth);
+	LavaColumns = MoveTemp(LavaNow);
+	for (const int32 Column : MapColumns)
+	{
+		const FIntPoint Cell = ColumnCell(Column);
+		RefreshMapColumn(Cell.X, Cell.Y);
+	}
+	if (MapColumns.Num() > 0)
+	{
+		++MapVersion;
+	}
+
 	int32 GoneCount = 0;
 	for (const TPair<UInstancedStaticMeshComponent*, TMap<int32, FTransform>>& Pair : Gone)
 	{
 		GoneCount += Pair.Value.Num();
 	}
-	UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town wrecks: %d in force, %d blocks broken (%d just now, %d mended), %d boxes cut into %d, %d models gone."),
-		InWrecks.Num(), BrokenCells.Num(), OutBroken.Num(), Mended.Num(), CutBoxes.Num(), WreckSolid ? WreckSolid->GetInstanceCount() : 0, GoneCount);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town wrecks: %d in force, %d blocks broken (%d just now, %d mended), %d boxes cut into %d, %d models gone, %d giant dice hit, %d dug columns, %d lava, %d falling now (%d fallen), %.1f ms."),
+		InWrecks.Num(), BrokenCells.Num(), OutBroken.Num(), Mended.Num(), CutBoxes.Num(), WreckSolid ? WreckSolid->GetInstanceCount() : 0, GoneCount,
+		DiceHit.Num(), DugDepth.Num(), LavaColumns.Num(), NewlyFallen.Num(), Fallen.CountSetBits(), (FPlatformTime::Seconds() - StartTime) * 1000.0);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Falling, lava and the minimap (round 89)
+
+FIntPoint ARRRandomDiceTown::GetCellAt(const FVector& WorldLocation) const
+{
+	const FVector Middle = GetActorLocation();
+	return FIntPoint(FMath::FloorToInt((WorldLocation.X - Middle.X) / BlockSize), FMath::FloorToInt((WorldLocation.Y - Middle.Y) / BlockSize));
+}
+
+bool ARRRandomDiceTown::GetLavaAt(const FVector& WorldLocation, float& OutTop) const
+{
+	const FIntPoint Cell = GetCellAt(WorldLocation);
+	if (Cell.X < -HalfCells || Cell.X >= HalfCells || Cell.Y < -HalfCells || Cell.Y >= HalfCells
+		|| !LavaColumns.Contains((Cell.Y + HalfCells) * GridCells + (Cell.X + HalfCells)))
+	{
+		return false;
+	}
+	OutTop = FloorZ - LavaBelowFloor;
+	return !Lava || Lava->IsRisenAt(Cell);
+}
+
+bool ARRRandomDiceTown::ConsumeBigAreas(TArray<FBox>& OutAreas)
+{
+	OutAreas = MoveTemp(NewBigAreas);
+	NewBigAreas.Reset();
+	return OutAreas.Num() > 0;
+}
+
+void ARRRandomDiceTown::RefreshMapColumn(int32 X, int32 Y)
+{
+	const int32 Index = (Y + HalfCells) * GridCells + (X + HalfCells);
+	if (!MapColors.IsValidIndex(Index) || !IsOnIsland(X, Y))
+	{
+		return;
+	}
+	// Round 91: a puddle goes with the paving under it (dug out, or lava) and comes back with it
+	if (const TArray<TPair<int32, FTransform>>* Discs = Puddles ? PuddleDiscs.Find(FIntPoint(X, Y)) : nullptr)
+	{
+		const bool bShow = IsFilled(X, Y, 0) && !DugDepth.Contains(Index) && !LavaColumns.Contains(Index);
+		for (const TPair<int32, FTransform>& Disc : *Discs)
+		{
+			Puddles->UpdateInstanceTransform(Disc.Key, bShow ? Disc.Value : Shrunk(Disc.Value), true, true, false);
+		}
+	}
+	if (LavaColumns.Contains(Index))
+	{
+		MapColors[Index] = MapLava;
+		MapLevels[Index] = 0;
+		return;
+	}
+	MapColors[Index] = MapSky;
+	MapLevels[Index] = -1;
+	for (int32 Level = LevelMax; Level >= LevelMin; --Level)
+	{
+		if (!IsFilled(X, Y, Level))
+		{
+			continue;
+		}
+		const uint8 Value = Grid[GridIndex(X, Y, Level)];
+		// (A dug crater shows its earth; a canal its water, as built)
+		MapColors[Index] = Value == HiddenSolid ? White : DugDepth.Contains(Index) ? Looks[Value - 1].Body : Level < 0 ? MapWater : Looks[Value - 1].Accent;
+		MapLevels[Index] = int8(FMath::Clamp(Level, 0, 20));
+		break;
+	}
+	if (StairCells.Contains(FIntPoint(X, Y)) && !DugDepth.Contains(Index))
+	{
+		MapColors[Index] = Cream;
+		MapLevels[Index] = int8(FMath::Max(1, int32(MapLevels[Index])));
+	}
+}
+
+void ARRRandomDiceTown::FindHeldUp(const TBitArray<>& BrokenNow, TBitArray<>& OutHeld) const
+{
+	// A flood out from the ground (and what stood on nothing as built) through solid cells side by side and one on another
+	OutHeld.Init(false, Grid.Num());
+	TArray<int32> Queue;
+	Queue.Reserve(400000);
+	auto IsSolid = [&](int32 Index) { return Grid[Index] != 0 && !BrokenNow[Index]; };
+	const int32 GroundEnd = (1 - LevelMin) * GridCells * GridCells;
+	for (int32 Index = 0; Index < GroundEnd; ++Index)
+	{
+		if (IsSolid(Index))
+		{
+			OutHeld[Index] = true;
+			Queue.Add(Index);
+		}
+	}
+	if (bFoundAnchored)
+	{
+		for (TConstSetBitIterator<> It(Anchored); It; ++It)
+		{
+			if (IsSolid(It.GetIndex()) && !OutHeld[It.GetIndex()])
+			{
+				OutHeld[It.GetIndex()] = true;
+				Queue.Add(It.GetIndex());
+			}
+		}
+	}
+	const int32 Plane = GridCells * GridCells;
+	for (int32 Head = 0; Head < Queue.Num(); ++Head)
+	{
+		const int32 Index = Queue[Head];
+		const int32 X = Index % GridCells;
+		const int32 Y = Index / GridCells % GridCells;
+		const int32 Layer = Index / Plane;
+		auto Visit = [&](int32 Next)
+		{
+			if (!OutHeld[Next] && IsSolid(Next))
+			{
+				OutHeld[Next] = true;
+				Queue.Add(Next);
+			}
+		};
+		if (X > 0) { Visit(Index - 1); }
+		if (X < GridCells - 1) { Visit(Index + 1); }
+		if (Y > 0) { Visit(Index - GridCells); }
+		if (Y < GridCells - 1) { Visit(Index + GridCells); }
+		if (Layer > 0) { Visit(Index - Plane); }
+		if (Layer < GridLevels - 1) { Visit(Index + Plane); }
+	}
+}
+
+void ARRRandomDiceTown::StartFalling(const TArray<int32>& Cells, const TArray<FFallingPiece>& BlockPieces, const TMap<UInstancedStaticMeshComponent*, TMap<int32, FTransform>>& NewlyGone)
+{
+	auto CellOf = [this](int32 Index)
+	{
+		return FIntVector(Index % GridCells - HalfCells, Index / GridCells % GridCells - HalfCells, Index / (GridCells * GridCells) + LevelMin);
+	};
+	// The parts that hang together, each a piece of its own
+	TSet<int32> Left(Cells);
+	TMap<int32, int32> PartOf;
+	TArray<TArray<int32>> Parts;
+	for (const int32 Start : Cells)
+	{
+		if (!Left.Contains(Start))
+		{
+			continue;
+		}
+		TArray<int32>& Part = Parts.AddDefaulted_GetRef();
+		Part.Add(Start);
+		Left.Remove(Start);
+		for (int32 Head = 0; Head < Part.Num(); ++Head)
+		{
+			const FIntVector Cell = CellOf(Part[Head]);
+			for (const FIntVector& Step : { FIntVector(1, 0, 0), FIntVector(-1, 0, 0), FIntVector(0, 1, 0), FIntVector(0, -1, 0), FIntVector(0, 0, 1), FIntVector(0, 0, -1) })
+			{
+				const FIntVector Next = Cell + Step;
+				if (IsInGrid(Next.X, Next.Y, Next.Z) && Left.Remove(GridIndex(Next.X, Next.Y, Next.Z)) > 0)
+				{
+					Part.Add(GridIndex(Next.X, Next.Y, Next.Z));
+				}
+			}
+		}
+		for (const int32 Index : Part)
+		{
+			PartOf.Add(Index, Parts.Num() - 1);
+		}
+	}
+	const int32 First = Falling.Num();
+	for (const TArray<int32>& Part : Parts)
+	{
+		FFalling& Piece = Falling.AddDefaulted_GetRef();
+		FIntVector Low(TNumericLimits<int32>::Max());
+		FIntVector High(TNumericLimits<int32>::Min());
+		TSet<FIntPoint> Footprint;
+		for (const int32 Index : Part)
+		{
+			const FIntVector Cell = CellOf(Index);
+			Low = Low.ComponentMin(Cell);
+			High = High.ComponentMax(Cell);
+			Footprint.Add(FIntPoint(Cell.X, Cell.Y));
+		}
+		Piece.Footprint = Footprint.Array();
+		// It lands on the highest thing still standing under it
+		int32 Land = GroundBottom - 1;
+		for (const FIntPoint& Spot : Piece.Footprint)
+		{
+			for (int32 Level = Low.Z - 1; Level > Land; --Level)
+			{
+				if (IsFilled(Spot.X, Spot.Y, Level))
+				{
+					Land = Level;
+					break;
+				}
+			}
+		}
+		const FVector2D Mid2D = (CellCenter(FIntPoint(Low.X, Low.Y)) + CellCenter(FIntPoint(High.X, High.Y))) * 0.5f;
+		Piece.Pivot = At(Mid2D, (Low.Z - 1) * BlockSize);
+		Piece.LandZ = FloorZ + Land * BlockSize;
+		Piece.Drop = FMath::Max(30.f, Piece.Pivot.Z - Piece.LandZ);
+		Piece.Duration = FMath::Clamp(FMath::Sqrt(2.f * Piece.Drop / FallGravity), 0.3f, 1.f);
+		// It tips one way or another as it comes down (the same way on every machine)
+		const float Angle = float(CellHash(Low.X, Low.Y, Low.Z) % 360);
+		Piece.TipAxis = FVector(FMath::Cos(FMath::DegreesToRadians(Angle)), FMath::Sin(FMath::DegreesToRadians(Angle)), 0.f);
+		if (HasAuthority())
+		{
+			const FVector Corner = At(CellCenter(FIntPoint(Low.X, Low.Y)) - FVector2D(BlockSize * 0.5f), Land * BlockSize);
+			NewBigAreas.Add(FBox(Corner, At(CellCenter(FIntPoint(High.X, High.Y)) + FVector2D(BlockSize * 0.5f), High.Z * BlockSize)));
+		}
+	}
+	// Its looks: its blocks, the giant dice and the models standing in it (roofs, trees, lamps)
+	auto Add = [&](int32 Part, const FFallingPiece& Look)
+	{
+		if (Falling[First + Part].Pieces.Num() < FallMaxPieces)
+		{
+			Falling[First + Part].Pieces.Add(Look);
+		}
+	};
+	for (const FFallingPiece& Look : BlockPieces)
+	{
+		if (const int32* Part = PartOf.Find(Look.Cell))
+		{
+			Add(*Part, Look);
+		}
+	}
+	for (const TPair<UInstancedStaticMeshComponent*, TMap<int32, FTransform>>& Pair : NewlyGone)
+	{
+		for (const TPair<int32, FTransform>& Model : Pair.Value)
+		{
+			// The cell its bottom stands in (a die's lowest, a roof's eaves)
+			const FBox Box = Pair.Key->GetStaticMesh() ? Pair.Key->GetStaticMesh()->GetBoundingBox().TransformBy(Model.Value) : FBox(Model.Value.GetLocation(), Model.Value.GetLocation());
+			const FIntPoint Spot = GetCellAt(Box.GetCenter());
+			const int32 Level = FMath::FloorToInt((Box.Min.Z + 20.f - FloorZ) / BlockSize) + 1;
+			for (int32 Try = Level; Try >= Level - 1; --Try)
+			{
+				if (!IsInGrid(Spot.X, Spot.Y, Try))
+				{
+					continue;
+				}
+				if (const int32* Part = PartOf.Find(GridIndex(Spot.X, Spot.Y, Try)))
+				{
+					Add(*Part, { Pair.Key, Model.Key, Model.Value, INDEX_NONE });
+					break;
+				}
+			}
+		}
+	}
+	for (int32 Index = First; Index < Falling.Num(); ++Index)
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town: %d blocks lose their hold and come down %.0f (%d looks)."), Parts[Index - First].Num(), Falling[Index].Drop, Falling[Index].Pieces.Num());
+	}
+}
+
+void ARRRandomDiceTown::TickFalling(float DeltaSeconds)
+{
+	TSet<UInstancedStaticMeshComponent*> Dirty;
+	for (int32 Index = Falling.Num() - 1; Index >= 0; --Index)
+	{
+		FFalling& Piece = Falling[Index];
+		Piece.Age += DeltaSeconds;
+		if (Piece.Age >= Piece.Duration)
+		{
+			LandFalling(Piece);
+			for (const FFallingPiece& Look : Piece.Pieces)
+			{
+				if (UInstancedStaticMeshComponent* Instances = Look.Instances.Get())
+				{
+					Dirty.Add(Instances);
+				}
+			}
+			Falling.RemoveAtSwap(Index);
+			continue;
+		}
+		// Down like a dropped thing, tipping a little more as it goes
+		const float Share = Piece.Age / Piece.Duration;
+		const FQuat Tip(Piece.TipAxis, FMath::DegreesToRadians(FallTipDegrees) * Share);
+		const FVector Down(0.f, 0.f, -Piece.Drop * Share * Share);
+		for (const FFallingPiece& Look : Piece.Pieces)
+		{
+			UInstancedStaticMeshComponent* Instances = Look.Instances.Get();
+			if (!Instances)
+			{
+				continue;
+			}
+			const FTransform Now(Tip * Look.Was.GetRotation(), Piece.Pivot + Tip.RotateVector(Look.Was.GetLocation() - Piece.Pivot) + Down, Look.Was.GetScale3D());
+			Instances->UpdateInstanceTransform(Look.Index, Now, true, false, false);
+			Dirty.Add(Instances);
+		}
+	}
+	for (UInstancedStaticMeshComponent* Instances : Dirty)
+	{
+		Instances->MarkRenderStateDirty();
+	}
+}
+
+void ARRRandomDiceTown::LandFalling(FFalling& Piece)
+{
+	// Gone for good (unless it mended while it fell), the rubble from where its looks hit the floor
+	const FQuat Tip(Piece.TipAxis, FMath::DegreesToRadians(FallTipDegrees));
+	TArray<FRRBrokenBit> Bits;
+	const int32 Every = FMath::Max(1, Piece.Pieces.Num() / FallRubble);
+	for (int32 Look = 0; Look < Piece.Pieces.Num(); ++Look)
+	{
+		const FFallingPiece& Fell = Piece.Pieces[Look];
+		UInstancedStaticMeshComponent* Instances = Fell.Instances.Get();
+		if (!Instances)
+		{
+			continue;
+		}
+		const TMap<int32, FTransform>* Mine = Gone.Find(Instances);
+		const bool bStillGone = Fell.Cell != INDEX_NONE ? Broken.IsValidIndex(Fell.Cell) && Broken[Fell.Cell] : Mine && Mine->Contains(Fell.Index);
+		Instances->UpdateInstanceTransform(Fell.Index, bStillGone ? Shrunk(Fell.Was) : Fell.Was, true, false, false);
+		if (!bStillGone || Look % Every != 0)
+		{
+			continue;
+		}
+		FLinearColor Body(1.f, 0.6f, 0.75f);
+		FLinearColor Accent = FLinearColor::White;
+		const int32 Floats = Instances->NumCustomDataFloats;
+		if (Floats >= 6 && Instances->PerInstanceSMCustomData.IsValidIndex(Fell.Index * Floats + 5))
+		{
+			const float* Data = &Instances->PerInstanceSMCustomData[Fell.Index * Floats];
+			Body = FLinearColor(Data[0], Data[1], Data[2]);
+			Accent = FLinearColor(Data[3], Data[4], Data[5]);
+		}
+		const FVector Landed = Piece.Pivot + Tip.RotateVector(Fell.Was.GetLocation() - Piece.Pivot) - FVector(0.f, 0.f, Piece.Drop);
+		Bits.Add({ Landed, Body, Accent, float(FMath::Clamp(Fell.Was.GetScale3D().GetMax(), 0.8, 2.0)) });
+	}
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		if (ARRRandomWreckage* Wreckage = ARRRandomWreckage::Find(this))
+		{
+			Wreckage->ThrowRubble(Bits);
+		}
+		// Dust bursting out along the floor round it, and the word
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			const int32 Puffs = FMath::Min(6, Piece.Footprint.Num());
+			for (int32 Puff = 0; Puff < Puffs; ++Puff)
+			{
+				const FIntPoint& Spot = Piece.Footprint[(Puff * Piece.Footprint.Num()) / Puffs];
+				Effects->Footstep(At(CellCenter(Spot), Piece.LandZ - FloorZ), 1.6f);
+			}
+			Effects->DiceLandBurst(FVector(Piece.Pivot.X, Piece.Pivot.Y, Piece.LandZ + 60.f), 60.f);
+		}
+		ARRRandomHUD::PopComicWord(this, TEXT("CRASH!"), FVector(Piece.Pivot.X, Piece.Pivot.Y, Piece.LandZ + 380.f), RRUI::Gold, 1.6f);
+	}
+	// Server: whoever is under it is hit and shoved out from under it
+	if (!HasAuthority())
+	{
+		return;
+	}
+	const TSet<FIntPoint> Under(Piece.Footprint);
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		ARRRandomCharacter* Who = *It;
+		const FVector Where = Who->GetActorLocation();
+		const float Feet = Where.Z - Who->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+		if (!Who->IsAlive() || !Under.Contains(GetCellAt(Where)) || Feet < Piece.LandZ - 60.f || Feet > Piece.LandZ + 450.f)
+		{
+			continue;
+		}
+		UGameplayStatics::ApplyDamage(Who, CrashDamage, nullptr, this, UDamageType::StaticClass());
+		const FVector Out = ((Where - Piece.Pivot) * FVector(1.f, 1.f, 0.f)).GetSafeNormal();
+		Who->LaunchCharacter((Out.IsNearlyZero() ? FVector::ForwardVector : Out) * CrashShove + FVector(0.f, 0.f, 350.f), true, true);
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s is under a falling building."), *Who->GetName());
+	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Battle map tiles (round 92): the battle royale's map is a square of these (ARRRandomBattleMap)
+
+namespace
+{
+	constexpr int32 BattleLayoutSeed = 9200;
+	// Lamps along the avenues: every this many cells, on this tile's +X and +Y edges only (each avenue gets one row)
+	constexpr int32 BattleLampSpacing = 18;
+	// The far look's blocks: the tile's rooftops in columns this many cells a side, merged where alike
+	constexpr int32 FarCells = 4;
+}
+
+bool ARRRandomDiceTown::IsBattleRoad(int32 X, int32 Y) const
+{
+	const float CX = X + 0.5f;
+	const float CY = Y + 0.5f;
+	// The avenues along the tile's edges (the next tile paves the rest of each)
+	const float Edge = HalfCells - RRBattle::AvenueHalf;
+	if (FMath::Abs(CX) > Edge || FMath::Abs(CY) > Edge)
+	{
+		return true;
+	}
+	if (FMath::Abs(CX) >= RRBattle::StreetHalf && FMath::Abs(CY) >= RRBattle::StreetHalf)
+	{
+		return false;
+	}
+	// The streets across the middle, except inside a castle's wall or on the plaza (they have their own paving)
+	const ERRDistrict District = ERRDistrict(BattleTile.District);
+	if ((District == ERRDistrict::Castle && Cheb(X, Y) < RRBattle::CastleOut) || (District == ERRDistrict::Plaza && Cheb(X, Y) < RRBattle::PlazaEdge))
+	{
+		return false;
+	}
+	return true;
+}
+
+bool ARRRandomDiceTown::IsNeighborGround(int32 X, int32 Y, int32 Level) const
+{
+	return IsBattleTile() && Level <= 0 && Level >= GroundBottom && (X < -HalfCells || X >= HalfCells || Y < -HalfCells || Y >= HalfCells) && IsOnIsland(X, Y);
+}
+
+TArray<UPrimitiveComponent*> ARRRandomDiceTown::GetDetailComponents() const
+{
+	TArray<UPrimitiveComponent*> Out;
+	const UInstancedStaticMeshComponent* Sets[] = { Blocks.Get(), DieBlocks.Get(), GlossBlocks.Get(), Puddles.Get(), Steps.Get(), Water.Get(), Decor.Get(),
+		Neon.Get(), Roofs.Get(), Marshmallows.Get(), Poles.Get() };
+	for (const UInstancedStaticMeshComponent* Set : Sets)
+	{
+		if (Set)
+		{
+			Out.Add(const_cast<UInstancedStaticMeshComponent*>(Set));
+		}
+	}
+	for (UInstancedStaticMeshComponent* Trees : PropTrees)
+	{
+		if (Trees)
+		{
+			Out.Add(Trees);
+		}
+	}
+	for (UInstancedStaticMeshComponent* Models : CoverModels)
+	{
+		if (Models)
+		{
+			Out.Add(Models);
+		}
+	}
+	// (the middle tile's stars include the sky's: always shown)
+	if (Stars && !BuildsSky())
+	{
+		Out.Add(Stars);
+	}
+	return Out;
+}
+
+void ARRRandomDiceTown::SetDetailShown(bool bShown)
+{
+	if (bDetailShown == bShown || !IsBattleTile())
+	{
+		return;
+	}
+	bDetailShown = bShown;
+	// Out of the scene (a hidden primitive isn't added to it: nothing drawn, no shadows, nothing for Lumen), and back
+	for (UPrimitiveComponent* Component : GetDetailComponents())
+	{
+		Component->SetVisibility(bShown);
+	}
+	for (UPointLightComponent* Light : LampLights)
+	{
+		if (Light)
+		{
+			Light->SetVisibility(bShown);
+		}
+	}
+	if (FarLook)
+	{
+		FarLook->SetVisibility(!bShown);
+	}
+}
+
+int32 ARRRandomDiceTown::GetDetailInstanceCount() const
+{
+	int32 Count = 0;
+	for (UPrimitiveComponent* Component : GetDetailComponents())
+	{
+		if (const UInstancedStaticMeshComponent* Instances = Cast<UInstancedStaticMeshComponent>(Component))
+		{
+			Count += Instances->GetInstanceCount();
+		}
+	}
+	return Count;
+}
+
+int32 ARRRandomDiceTown::GetFarInstanceCount() const
+{
+	return FarLook ? FarLook->GetInstanceCount() : 0;
+}
+
+void ARRRandomDiceTown::MakeFarLook()
+{
+	// Each 4 x 4 cells as one column up to the highest thing standing in them, in its top's color (the minimap's), the
+	// sides a shade darker; then columns side by side alike (as high, much the same color) merged into one stretched block.
+	// No shadows, no collision: seen from afar only, while the tile's detail is out of the scene.
+	FarLook = MakeInstances(BlockMesh, nullptr, false, 6);
+	FarLook->CastShadow = false;
+	FarLook->SetVisibility(!bDetailShown);
+	const int32 Groups = GridCells / FarCells;
+	TArray<int32> GroupLevel;
+	TArray<FColor> GroupColor;
+	GroupLevel.Init(-100, Groups * Groups);
+	GroupColor.Init(FColor::Black, Groups * Groups);
+	for (int32 GY = 0; GY < Groups; ++GY)
+	{
+		for (int32 GX = 0; GX < Groups; ++GX)
+		{
+			int32 Best = -100;
+			FColor Color = FColor::Black;
+			for (int32 DY = 0; DY < FarCells; ++DY)
+			{
+				for (int32 DX = 0; DX < FarCells; ++DX)
+				{
+					const int32 Index = (GY * FarCells + DY) * GridCells + GX * FarCells + DX;
+					// (off the island: -1, nothing there)
+					if (MapLevels.IsValidIndex(Index) && MapLevels[Index] >= 0 && MapLevels[Index] > Best)
+					{
+						Best = MapLevels[Index];
+						Color = MapColors[Index];
+					}
+				}
+			}
+			GroupLevel[GY * Groups + GX] = Best;
+			GroupColor[GY * Groups + GX] = Color;
+		}
+	}
+	// Alike: as high, and the same color to 32 steps a channel (so grass of either shade merges)
+	auto Key = [&](int32 Index)
+	{
+		const FColor& C = GroupColor[Index];
+		return (GroupLevel[Index] + 8) * 32768 + (C.R / 32) * 1024 + (C.G / 32) * 32 + C.B / 32;
+	};
+	auto IsGround = [&](int32 Index) { return GroupLevel[Index] >= 0; };
+	TBitArray<> Done(false, Groups * Groups);
+	for (int32 GY = 0; GY < Groups; ++GY)
+	{
+		for (int32 GX = 0; GX < Groups; ++GX)
+		{
+			const int32 Start = GY * Groups + GX;
+			if (Done[Start] || !IsGround(Start))
+			{
+				continue;
+			}
+			const int32 Wanted = Key(Start);
+			int32 GX1 = GX;
+			while (GX1 + 1 < Groups && !Done[GY * Groups + GX1 + 1] && IsGround(GY * Groups + GX1 + 1) && Key(GY * Groups + GX1 + 1) == Wanted)
+			{
+				++GX1;
+			}
+			int32 GY1 = GY;
+			for (bool bGrow = true; bGrow && GY1 + 1 < Groups; )
+			{
+				for (int32 I = GX; I <= GX1 && bGrow; ++I)
+				{
+					const int32 Next = (GY1 + 1) * Groups + I;
+					bGrow = !Done[Next] && IsGround(Next) && Key(Next) == Wanted;
+				}
+				GY1 += bGrow ? 1 : 0;
+			}
+			for (int32 J = GY; J <= GY1; ++J)
+			{
+				for (int32 I = GX; I <= GX1; ++I)
+				{
+					Done[J * Groups + I] = true;
+				}
+			}
+			// From the ground's bottom (level -2) up to the top of the highest level
+			const float Bottom = (GroundBottom - 1) * BlockSize;
+			const float Top = GroupLevel[Start] * BlockSize;
+			const FVector2D Low = CellCenter(FIntPoint(GX * FarCells - HalfCells, GY * FarCells - HalfCells)) - FVector2D(BlockSize * 0.5f);
+			const FVector2D High = CellCenter(FIntPoint(GX1 * FarCells + FarCells - 1 - HalfCells, GY1 * FarCells + FarCells - 1 - HalfCells)) + FVector2D(BlockSize * 0.5f);
+			const FColor& Color = GroupColor[Start];
+			AddColored(FarLook, FTransform(FRotator::ZeroRotator, At((Low + High) * 0.5f, (Bottom + Top) * 0.5f),
+				FVector((High.X - Low.X) / BlockSize, (High.Y - Low.Y) / BlockSize, (Top - Bottom) / BlockSize)), Shade(Color, 0.82f), Color);
+		}
+	}
+}
+
+void ARRRandomDiceTown::LayOutBattle()
+{
+	const ERRDistrict District = ERRDistrict(FMath::Min<uint8>(BattleTile.District, uint8(ERRDistrict::Count) - 1));
+	FRandomStream Layout(BattleLayoutSeed + BattleTile.Seed);
+	const int32 Half = HalfCells;
+	const float Edge = HalfCells - RRBattle::AvenueHalf;
+
+	// Ground: grass (now and then lime), paving on the roads, the plaza's pink and cream checker, a castle's courtyard
+	const uint8 GrassLookA = MakeLook(Dirt, GrassA);
+	const uint8 GrassLookB = MakeLook(Dirt, GrassB);
+	const uint8 GrassLookLime = MakeLook(Dirt, GrassLime);
+	const uint8 DirtLook = Plain(Dirt);
+	const uint8 DeepLook = Plain(DirtDeep);
+	const uint8 PaveLookA = MakeLook(Stone, PaveA);
+	const uint8 PaveLookB = MakeLook(Stone, PaveB);
+	// (the avenues' middle line, along the tile's edge: a lemon dash every other pair of cells)
+	const uint8 LaneLook = MakeLook(Stone, Blend(Lemon, White, 0.35f));
+	const uint8 PlazaLookA = MakeLook(Stone, PlazaPink, false, false, true);
+	const uint8 PlazaLookB = MakeLook(Stone, PlazaCream, false, false, true);
+	const uint8 CourtLookA = MakeLook(Stone, Blend(PaveA, Lavender, 0.25f));
+	const uint8 CourtLookB = MakeLook(Stone, Blend(PaveB, Cream, 0.4f));
+	int32 OnIsland = 0;
+	for (int32 X = -Half; X < Half; ++X)
+	{
+		for (int32 Y = -Half; Y < Half; ++Y)
+		{
+			if (!IsOnIsland(X, Y))
+			{
+				continue;
+			}
+			++OnIsland;
+			const FIntPoint Global = GlobalCell(X, Y);
+			const bool bChecker = ((X + Y) & 1) == 0;
+			const uint32 Roll = CellHash(Global.X, Global.Y, GroundSeed) % 100;
+			uint8 Top = Roll < 8 ? GrassLookLime : Roll < 55 ? GrassLookA : GrassLookB;
+			if (District == ERRDistrict::Plaza && Cheb(X, Y) < RRBattle::PlazaEdge)
+			{
+				Top = bChecker ? PlazaLookA : PlazaLookB;
+			}
+			else if (District == ERRDistrict::Castle && Cheb(X, Y) < RRBattle::CastleOut)
+			{
+				Top = bChecker ? CourtLookA : CourtLookB;
+			}
+			else if (IsRoad(X, Y))
+			{
+				Top = bChecker ? PaveLookA : PaveLookB;
+				// The cells either side of the tile's edge are an avenue's middle: a dash along it, every other pair
+				const bool bEdgeX = X == Half - 1 || X == -Half;
+				const bool bEdgeY = Y == Half - 1 || Y == -Half;
+				if ((bEdgeX && !bEdgeY && ((Global.Y / 2) & 1) == 0) || (bEdgeY && !bEdgeX && ((Global.X / 2) & 1) == 0))
+				{
+					Top = LaneLook;
+				}
+			}
+			Set(X, Y, -2, DeepLook);
+			Set(X, Y, -1, DirtLook);
+			Set(X, Y, 0, Top);
+		}
+	}
+	// How much of the tile is ground (a tile at the rim is partly sky): the counts below shrink with it
+	const float Share = float(OnIsland) / float(GridCells * GridCells);
+	auto Want = [Share](int32 Count) { return FMath::Max(Count > 0 ? 1 : 0, FMath::RoundToInt(Count * Share)); };
+	if (OnIsland == 0)
+	{
+		return;
+	}
+
+	auto AllIn = [](const FIntRect& Rect, TFunctionRef<bool(int32, int32)> Zone)
+	{
+		for (int32 X = Rect.Min.X; X < Rect.Max.X; ++X)
+		{
+			for (int32 Y = Rect.Min.Y; Y < Rect.Max.Y; ++Y)
+			{
+				if (!Zone(X, Y))
+				{
+					return false;
+				}
+			}
+		}
+		return true;
+	};
+	auto Anywhere = [](int32, int32) { return true; };
+	auto RandomFrame = [&]()
+	{
+		FFrame Frame;
+		Frame.Turn = Layout.RandRange(0, 3);
+		Frame.Origin = FIntPoint(Layout.RandRange(-Half + 2, Half - 3), Layout.RandRange(-Half + 2, Half - 3));
+		Frame.bRed = Layout.FRand() < 0.5f;
+		return Frame;
+	};
+	auto Sub = [](const FFrame& Parent, int32 U, int32 V, int32 Turn)
+	{
+		FFrame Frame;
+		Frame.Origin = Parent.Cell(U, V);
+		Frame.Turn = (Parent.Turn + Turn) & 3;
+		Frame.bRed = Parent.bRed;
+		return Frame;
+	};
+	auto DieAt = [this](const FFrame& Frame, int32 U, int32 V, int32 Level, int32 Size, int32 Kind)
+	{
+		const FIntPoint A = Frame.Cell(U, V);
+		const FIntPoint B = Frame.Cell(U + Size - 1, V + Size - 1);
+		AddDie(FIntPoint(FMath::Min(A.X, B.X), FMath::Min(A.Y, B.Y)), Level, Size, Kind);
+	};
+	auto PlaceBuildings = [&](int32 Count, int32 Tries, TFunctionRef<bool(int32, int32)> Zone, int32 MinW, int32 MaxW, int32 MinD, int32 MaxD, float TwoStoryChance, float FlatChance)
+	{
+		int32 Placed = 0;
+		for (int32 Try = 0; Try < Tries && Placed < Count; ++Try)
+		{
+			const int32 W = Layout.RandRange(MinW, MaxW);
+			const int32 D = Layout.RandRange(MinD, MaxD);
+			const int32 Stories = Layout.FRand() < TwoStoryChance ? 2 : 1;
+			const bool bFlat = Stories > 1 && Layout.FRand() < FlatChance;
+			const int32 Style = Layout.RandRange(0, UE_ARRAY_COUNT(Styles) - 1);
+			const int32 Seed = Layout.RandRange(0, 1 << 30);
+			const FFrame Frame = RandomFrame();
+			const FIntRect Rect = Footprint(Frame, -1, -1, W + 1, D + 1, 1);
+			if (!AllIn(Rect, Zone) || !IsFree(Rect))
+			{
+				continue;
+			}
+			Reserve(Rect);
+			AddBuilding(Frame, W, D, Stories, bFlat, Style, Seed);
+			++Placed;
+		}
+		return Placed;
+	};
+	auto PlaceTowers = [&](int32 Count, TFunctionRef<bool(int32, int32)> Zone)
+	{
+		int32 Placed = 0;
+		for (int32 Try = 0; Try < 4000 && Placed < Count; ++Try)
+		{
+			const FFrame Frame = RandomFrame();
+			const FIntRect Rect = Footprint(Frame, 0, -Story - 1, 3, 3, 1);
+			if (!AllIn(Rect, Zone) || !IsFree(Rect))
+			{
+				continue;
+			}
+			Reserve(Rect);
+			AddTower(Frame, Layout.RandRange(0, UE_ARRAY_COUNT(Styles) - 1));
+			++Placed;
+		}
+		return Placed;
+	};
+	auto PlaceTrees = [&](int32 Count, int32 Tries, TFunctionRef<bool(int32, int32)> Zone)
+	{
+		int32 Placed = 0;
+		for (int32 Try = 0; Try < Tries && Placed < Count; ++Try)
+		{
+			const FIntPoint Cell(Layout.RandRange(-Half + 3, Half - 4), Layout.RandRange(-Half + 3, Half - 4));
+			int32 Kind = Layout.RandRange(0, 1);
+			const int32 Seed = Layout.RandRange(0, 1 << 30);
+			if (bDream)
+			{
+				const int32 Roll = Layout.RandRange(0, 99);
+				Kind = Roll < 34 ? Kind : Roll < 66 ? 2 : Roll < 84 ? 3 : 4;
+			}
+			const int32 Room = Kind == 0 ? 1 : Kind == 3 ? 3 : 2;
+			const FIntRect Rect(Cell.X - Room - 1, Cell.Y - Room - 1, Cell.X + Room + 2, Cell.Y + Room + 2);
+			if (!AllIn(Rect, Zone) || !IsFree(Rect))
+			{
+				continue;
+			}
+			Reserve(Rect);
+			AddTree(Cell, Kind, Seed);
+			++Placed;
+		}
+		return Placed;
+	};
+	auto PlaceCover = [&](int32 Count, int32 Tries, TFunctionRef<bool(int32, int32)> Zone)
+	{
+		int32 Placed = 0;
+		for (int32 Try = 0; Try < Tries && Placed < Count; ++Try)
+		{
+			const FFrame Where = RandomFrame();
+			const int32 Piece = Layout.RandRange(0, 4);
+			const int32 Kind = Layout.RandRange(0, 47);
+			const int32 Tall = Layout.RandRange(1, 2);
+			const FColor Color = Styles[Layout.RandRange(0, UE_ARRAY_COUNT(Styles) - 1)].Low;
+			const FIntRect Rect = Footprint(Where, 0, 0, Piece == 0 ? 3 : 1, Piece == 0 ? 0 : 1, 1);
+			if (!AllIn(Rect, Zone) || !IsFree(Rect))
+			{
+				continue;
+			}
+			Reserve(Rect);
+			switch (Piece)
+			{
+			case 0:
+				Fill(Where, 0, 0, 3, 0, 1, 2, MakeLook(Shade(Color, 0.85f), Color));
+				break;
+			case 1:
+				if (Marshmallows)
+				{
+					const FColor Green = Leaves[Kind % 3];
+					Fill(Where, 0, 0, 1, 1, 1, Tall, HiddenLook(Green));
+					AddColored(Marshmallows, FTransform(FRotator(0.f, FrameYaw(Where), 0.f), FrameSpot(Where, 0.5f, 0.5f, Tall * 50.f), FVector(2.15f, 2.15f, Tall * 1.05f)), Shade(Green, 0.9f), Blend(Green, White, 0.15f));
+					AddColored(Marshmallows, FTransform(FRotator(0.f, FrameYaw(Where) + 20.f, 0.f), FrameSpot(Where, 0.15f, 0.25f, Tall * BlockSize + 10.f), FVector(1.2f, 1.1f, 0.75f)), Green, Blend(Green, White, 0.25f));
+					break;
+				}
+				Fill(Where, 0, 0, 1, 1, 1, Tall, MakeLook(Shade(Leaves[0], 0.8f), Leaves[Kind % 3]));
+				break;
+			case 2:
+				Fill(Where, 0, 0, 1, 1, 1, 1, MakeLook(WoodDark, Wood));
+				Fill(Where, 0, 0, 0, 0, 2, Tall + 1, MakeLook(WoodDark, Wood));
+				break;
+			case 3:
+				DieAt(Where, 0, 0, 1, 2, Kind);
+				break;
+			default:
+				DieAt(Where, 0, 0, 1, 1, Kind);
+				DieAt(Where, 1, 1, 1, 1, Kind + 1);
+				DieAt(Where, 1, 0, 1, 1, Kind + 2);
+				DieAt(Where, 1, 0, 2, 1, Kind + 3);
+				break;
+			}
+			++Placed;
+		}
+		return Placed;
+	};
+	auto PlaceDieHouse = [&](int32 Tries, TFunctionRef<bool(int32, int32)> Zone)
+	{
+		for (int32 Try = 0; Try < Tries; ++Try)
+		{
+			const FFrame Frame = RandomFrame();
+			const int32 Seed = Layout.RandRange(0, 1 << 30);
+			const FIntRect Rect = Footprint(Frame, -1, -1, 14, 14, 1);
+			if (AllIn(Rect, Zone) && IsFree(Rect))
+			{
+				Reserve(Rect);
+				AddDieHouse(Frame, Seed);
+				return 1;
+			}
+		}
+		return 0;
+	};
+	// A rainbow of dice over the street across the middle (its U across the street), if there is room for its feet
+	auto PlaceArch = [&](int32 V)
+	{
+		if (!bDream)
+		{
+			return 0;
+		}
+		FFrame Arch;
+		Arch.Origin = FIntPoint(0, V);
+		const FIntRect Rect = Footprint(Arch, -12, 0, 11, 1, 1);
+		bool bRoom = Rect.Min.X > -Half + 1 && Rect.Max.X < Half - 1 && Rect.Min.Y > -Half + 1 && Rect.Max.Y < Half - 1;
+		for (const FIntRect& Other : Reserved)
+		{
+			bRoom = bRoom && !Rect.Intersect(Other);
+		}
+		for (int32 X = Rect.Min.X; X < Rect.Max.X && bRoom; ++X)
+		{
+			bRoom = IsOnIsland(X, Rect.Min.Y) && IsOnIsland(X, Rect.Max.Y);
+		}
+		if (!bRoom)
+		{
+			return 0;
+		}
+		Reserve(Rect);
+		AddDiceArch(Arch);
+		return 1;
+	};
+
+	int32 Buildings = 0;
+	int32 Towers = 0;
+	int32 Trees = 0;
+	int32 Cover = 0;
+	int32 Extras = 0;
+	switch (District)
+	{
+	case ERRDistrict::Plaza:
+	{
+		// The middle: a giant die on two tiers, ramps up all four sides, small dice round the edge (as in the town)
+		const FFrame Middle = FFrame();
+		Fill(Middle, -8, -8, 7, 7, 1, 1, MakeLook(Shade(Lavender, 0.85f), Lavender));
+		Fill(Middle, -5, -5, 4, 4, 2, 2, MakeLook(Shade(Pink, 0.85f), Pink));
+		AddDie(FIntPoint(-3, -3), 3, 6, 0);
+		for (int32 Turn = 0; Turn < 4; ++Turn)
+		{
+			const FFrame Side = FFrame::Around(Turn);
+			AddStairs(Side, -1, -9, 0, 1, 1, 0, 2, 0, 1, Cream);
+			AddStairs(Side, -1, -6, 0, 1, 1, 0, 2, 1, 1, Cream);
+			DieAt(Side, -11, -11, 1, 2, 1 + Turn);
+			DieAt(Side, -11, -6, 1, 1, 7 + Turn * 6);
+			DieAt(Side, -6, -11, 1, 1, 9 + Turn * 6);
+		}
+		Reserve(FIntRect(-int32(RRBattle::PlazaEdge) - 1, -int32(RRBattle::PlazaEdge) - 1, int32(RRBattle::PlazaEdge) + 1, int32(RRBattle::PlazaEdge) + 1));
+		Extras += PlaceArch(30) + PlaceArch(-32);
+		Extras += bDream ? PlaceDieHouse(6000, Anywhere) : 0;
+		Buildings = PlaceBuildings(Want(16), 12000, Anywhere, 9, 12, 9, 12, 0.85f, 0.45f);
+		Towers = PlaceTowers(Want(2), Anywhere);
+		Cover = PlaceCover(Want(20), 4000, Anywhere);
+		Trees = PlaceTrees(Want(10), 4000, Anywhere);
+		break;
+	}
+	case ERRDistrict::Downtown:
+	{
+		// Streets of houses and shops close together: mostly two stories, flat roofs to fight from, crates and walls between
+		// Round 94: first a big building to fight inside (the test map: a mall and a school)
+		if (BattleTile.Reach <= 1)
+		{
+			PlaceBigBuilding(EBigBuilding::Mall, Layout);
+			PlaceBigBuilding(EBigBuilding::School, Layout);
+		}
+		else
+		{
+			const float Roll = Layout.FRand();
+			PlaceBigBuilding(Roll < 0.3f ? EBigBuilding::Mall : Roll < 0.7f ? EBigBuilding::School : EBigBuilding::Garage, Layout);
+		}
+		Extras += PlaceArch(Layout.FRand() < 0.5f ? 28 : -30);
+		Extras += bDream && Layout.FRand() < 0.6f ? PlaceDieHouse(6000, Anywhere) : 0;
+		Buildings = PlaceBuildings(Want(22), 16000, Anywhere, 8, 12, 8, 12, 0.8f, 0.5f);
+		Towers = PlaceTowers(Want(3), Anywhere);
+		Cover = PlaceCover(Want(26), 5000, Anywhere);
+		Trees = PlaceTrees(Want(8), 3000, Anywhere);
+		break;
+	}
+	case ERRDistrict::Castle:
+	{
+		// The wall: cream stone CastleWallLevels high, three thick, a lilac walkway on top, battlements on every other cell of
+		// its outer edge; a gateway where each street runs through it, open to the sky between pink posts a level taller.
+		// Inside, a flight up to the walkway either side of each wall's middle, and the keep (a two story house, a flat roof
+		// with a parapet) in a paved courtyard.
+		const int32 WallTop = RRBattle::CastleWallLevels;
+		const float In = RRBattle::CastleIn;
+		const float Out = RRBattle::CastleOut;
+		const uint8 WallStone = MakeLook(Shade(Cream, 0.86f), Cream);
+		const uint8 WallWalk = MakeLook(Shade(Cream, 0.86f), Blend(Lavender, White, 0.45f));
+		const uint8 WallMerlon = MakeLook(Shade(Lavender, 0.85f), Lavender);
+		const uint8 GatePost = MakeLook(Shade(Pink, 0.85f), Pink);
+		const uint8 GateCap = MakeLook(Shade(Pink, 0.85f), Lemon);
+		auto IsGateway = [](int32 X, int32 Y, float Reach)
+		{
+			return FMath::Abs(Y + 0.5f) < Reach || FMath::Abs(X + 0.5f) < Reach;
+		};
+		for (int32 X = -int32(Out); X < int32(Out); ++X)
+		{
+			for (int32 Y = -int32(Out); Y < int32(Out); ++Y)
+			{
+				const float Ring = Cheb(X, Y);
+				if (Ring < In || Ring >= Out || IsGateway(X, Y, RRBattle::StreetHalf) || !IsOnIsland(X, Y))
+				{
+					continue;
+				}
+				if (IsGateway(X, Y, RRBattle::StreetHalf + 1.f))
+				{
+					Fill(FFrame(), X, Y, X, Y, 1, WallTop + 1, GatePost);
+					Set(X, Y, WallTop + 2, GateCap);
+					continue;
+				}
+				for (int32 Level = 1; Level <= WallTop; ++Level)
+				{
+					Set(X, Y, Level, Level == WallTop ? WallWalk : WallStone);
+				}
+				if (Ring >= Out - 1.f && ((X + Y) & 1) == 0)
+				{
+					Set(X, Y, WallTop + 1, WallMerlon);
+				}
+			}
+		}
+		for (int32 Turn = 0; Turn < 4; ++Turn)
+		{
+			const FFrame Side = FFrame::Around(Turn);
+			AddStairs(Side, int32(In) - WallTop, 6, 1, 0, 0, 1, 2, 0, WallTop, Cream);
+			AddStairs(Side, int32(In) - WallTop, -8, 1, 0, 0, 1, 2, 0, WallTop, Cream);
+		}
+		// The wall's band and the stairs' run kept clear; the keep in the middle
+		const int32 Band = int32(In) - WallTop - 2;
+		const int32 Rim = int32(Out) + 1;
+		Reserve(FIntRect(-Rim, -Rim, Rim, -Band));
+		Reserve(FIntRect(-Rim, Band, Rim, Rim));
+		Reserve(FIntRect(-Rim, -Band, -Band, Band));
+		Reserve(FIntRect(Band, -Band, Rim, Band));
+		FFrame Keep;
+		Keep.Origin = FIntPoint(-7, -7);
+		Keep.Turn = 0;
+		Reserve(Footprint(Keep, -1, -1, 15, 15, 0));
+		AddBuilding(Keep, 14, 14, 2, true, Layout.RandRange(0, UE_ARRAY_COUNT(Styles) - 1), Layout.RandRange(0, 1 << 30));
+		Buildings = 1;
+		// Outside the wall: cottages, trees and cover
+		auto OutsideWall = [](int32 X, int32 Y) { return Cheb(X, Y) >= RRBattle::CastleOut + 2.f; };
+		Buildings += PlaceBuildings(Want(9), 8000, OutsideWall, 7, 10, 7, 10, 0.35f, 0.3f);
+		Towers = PlaceTowers(Want(2), OutsideWall);
+		Trees = PlaceTrees(Want(24), 6000, OutsideWall);
+		Cover = PlaceCover(Want(22), 5000, OutsideWall);
+		break;
+	}
+	case ERRDistrict::Canal:
+	{
+		// A canal across each half (either side of the street across the middle, which stays a bridge), footbridges over it
+		const uint8 Deck = MakeLook(WoodDark, Wood);
+		for (const int32 V0 : { 16, -20 })
+		{
+			for (const int32 Sign : { -1, 1 })
+			{
+				const int32 From = Sign < 0 ? -int32(Edge) + 1 : int32(RRBattle::StreetHalf) + 1;
+				const int32 Length = int32(Edge) - 1 - int32(RRBattle::StreetHalf) - 1;
+				FFrame Canal;
+				Canal.Origin = FIntPoint(From, V0);
+				Reserve(FIntRect(From - 1, V0 - 1, From + Length + 1, V0 + 5));
+				AddCanal(Canal, Length, 4);
+				for (int32 Across = 6; Across + 3 < Length; Across += 14)
+				{
+					const FFrame Bridge = Sub(Canal, Across, 0, 0);
+					Reserve(Footprint(Bridge, 0, -2, 2, 5, 1));
+					AddStairs(Bridge, 0, -1, 0, 1, 1, 0, 3, 0, 1, Wood);
+					Fill(Bridge, 0, 0, 2, 3, 1, 1, Deck);
+					AddStairs(Bridge, 0, 4, 0, -1, 1, 0, 3, 0, 1, Wood);
+					++Extras;
+				}
+			}
+		}
+		// Round 94: now and then a big building beside the water (the test map: the garage)
+		{
+			const float Roll = BattleTile.Reach <= 1 ? 0.f : Layout.FRand();
+			if (Roll < 0.5f)
+			{
+				PlaceBigBuilding(Roll < 0.3f ? EBigBuilding::Garage : EBigBuilding::Factory, Layout);
+			}
+		}
+		Buildings = PlaceBuildings(Want(16), 12000, Anywhere, 8, 11, 8, 11, 0.7f, 0.3f);
+		Towers = PlaceTowers(Want(2), Anywhere);
+		Trees = PlaceTrees(Want(18), 5000, Anywhere);
+		Cover = PlaceCover(Want(20), 4000, Anywhere);
+		break;
+	}
+	case ERRDistrict::Park:
+	{
+		// A wood: a mountain of giant dice, a hill, trees thick everywhere, a few cottages, hedges
+		if (bDream)
+		{
+			for (int32 Try = 0; Try < 4000; ++Try)
+			{
+				const FFrame Frame = RandomFrame();
+				const FIntRect Rect = Footprint(Frame, -1, -5, 12, 12, 1);
+				if (IsFree(Rect))
+				{
+					Reserve(Rect);
+					AddDiceMountain(Frame);
+					++Extras;
+					break;
+				}
+			}
+		}
+		for (int32 Try = 0; Try < 3000; ++Try)
+		{
+			const FFrame Frame = RandomFrame();
+			const FIntRect Rect = Footprint(Frame, -1, -2, 18, 16, 1);
+			if (IsFree(Rect))
+			{
+				Reserve(Rect);
+				AddHill(Frame, 18, 16, 2);
+				++Extras;
+				break;
+			}
+		}
+		Buildings = PlaceBuildings(Want(5), 6000, Anywhere, 7, 9, 7, 9, 0.f, 0.f);
+		Trees = PlaceTrees(Want(70), 20000, Anywhere);
+		Cover = PlaceCover(Want(20), 4000, Anywhere);
+		break;
+	}
+	case ERRDistrict::Hills:
+	{
+		// Stepped hills, each with a watchtower on its top terrace (a look out over the town round it)
+		for (int32 Try = 0; Try < 6000 && Extras < 3; ++Try)
+		{
+			const FFrame Frame = RandomFrame();
+			const int32 W = 24;
+			const int32 D = 24;
+			const FIntRect Rect = Footprint(Frame, -1, -2, W, D + 1, 1);
+			if (!IsFree(Rect))
+			{
+				continue;
+			}
+			Reserve(Rect);
+			AddHill(Frame, W, D, 3);
+			Lift = 3;
+			AddTower(Sub(Frame, 10, 13, 0), Layout.RandRange(0, UE_ARRAY_COUNT(Styles) - 1));
+			Lift = 0;
+			++Extras;
+		}
+		Buildings = PlaceBuildings(Want(8), 8000, Anywhere, 7, 9, 7, 9, 0.2f, 0.f);
+		Towers = PlaceTowers(Want(1), Anywhere);
+		Trees = PlaceTrees(Want(30), 8000, Anywhere);
+		Cover = PlaceCover(Want(18), 4000, Anywhere);
+		break;
+	}
+	case ERRDistrict::Fort:
+	default:
+	{
+		// Round 94: a fort district first gets a toy factory, mostly (always on the test map)
+		if (District == ERRDistrict::Fort && (BattleTile.Reach <= 1 || Layout.FRand() < 0.7f))
+		{
+			PlaceBigBuilding(EBigBuilding::Factory, Layout);
+		}
+		// Walled compounds: a paved courtyard, a low wall round it (merlons every other cell, to climb and shoot over),
+		// gateways front and back, crates inside, a watchtower in a back corner
+		for (int32 Try = 0; Try < 8000 && Extras < 4; ++Try)
+		{
+			const FFrame Frame = RandomFrame();
+			const int32 W = Layout.RandRange(16, 22);
+			const int32 D = Layout.RandRange(14, 18);
+			const FIntRect Rect = Footprint(Frame, -1, -1, W, D, 1);
+			if (!IsFree(Rect))
+			{
+				continue;
+			}
+			Reserve(Rect);
+			const FColor Tint = Styles[Layout.RandRange(0, UE_ARRAY_COUNT(Styles) - 1)].High;
+			const uint8 CourtA = MakeLook(Stone, Blend(PaveA, Tint, 0.45f));
+			const uint8 CourtB = MakeLook(Stone, Blend(PaveB, Tint, 0.6f));
+			const uint8 Wall = MakeLook(Shade(Tint, 0.8f), Tint);
+			const uint8 Crate = MakeLook(WoodDark, Wood);
+			const int32 GateFrom = W / 2 - 2;
+			const int32 GateTo = W / 2 + 1;
+			for (int32 U = 0; U < W; ++U)
+			{
+				for (int32 V = 0; V < D; ++V)
+				{
+					const FIntPoint Cell = Frame.Cell(U, V);
+					Set(Cell.X, Cell.Y, 0, ((U + V) & 1) ? CourtA : CourtB);
+					const bool bWallEdge = U == 0 || U == W - 1 || V == 0 || V == D - 1;
+					const bool bGate = (V == 0 || V == D - 1) && U >= GateFrom && U <= GateTo;
+					if (bWallEdge && !bGate)
+					{
+						Set(Cell.X, Cell.Y, 1, Wall);
+						if (((U + V) & 1) == 0)
+						{
+							Set(Cell.X, Cell.Y, 2, Wall);
+						}
+					}
+				}
+			}
+			for (int32 Pile = 0; Pile < 4; ++Pile)
+			{
+				const int32 U = Layout.RandRange(3, W - 5);
+				const int32 V = Layout.RandRange(3, D - 8);
+				Fill(Frame, U, V, U + 1, V + 1, 1, 1, Crate);
+				if (Layout.FRand() < 0.5f)
+				{
+					Fill(Frame, U, V, U, V, 2, 2, Crate);
+				}
+			}
+			AddTower(Sub(Frame, 1, D - 5, 0), Layout.RandRange(0, UE_ARRAY_COUNT(Styles) - 1));
+			++Extras;
+		}
+		Buildings = PlaceBuildings(Want(6), 6000, Anywhere, 7, 10, 7, 10, 0.5f, 0.4f);
+		Towers = PlaceTowers(Want(2), Anywhere);
+		Trees = PlaceTrees(Want(16), 5000, Anywhere);
+		Cover = PlaceCover(Want(26), 5000, Anywhere);
+		break;
+	}
+	}
+
+	// Star lamps along the avenues on this tile's +X and +Y edges (the next tiles light the others), where there is room
+	int32 Lamps = 0;
+	if (bDream && Poles && Stars)
+	{
+		const uint8 PoleHidden = HiddenLook(FColor(255, 150, 196));
+		auto IsClear = [this](const FIntPoint& Cell)
+		{
+			if (!IsOnIsland(Cell.X, Cell.Y) || IsRoad(Cell.X, Cell.Y) || !Get(Cell.X, Cell.Y, 0) || StairCells.Contains(Cell))
+			{
+				return false;
+			}
+			for (int32 DX = -1; DX <= 1; ++DX)
+			{
+				for (int32 DY = -1; DY <= 1; ++DY)
+				{
+					for (int32 Level = 1; Level <= 6; ++Level)
+					{
+						if (Get(Cell.X + DX, Cell.Y + DY, Level))
+						{
+							return false;
+						}
+					}
+				}
+			}
+			return true;
+		};
+		const int32 Inner = int32(Edge) - 1;
+		for (int32 Along = -Inner + 4; Along <= Inner - 4; Along += BattleLampSpacing)
+		{
+			for (const FIntPoint& Cell : { FIntPoint(Inner, Along), FIntPoint(Along, Inner) })
+			{
+				if (!IsClear(Cell))
+				{
+					continue;
+				}
+				for (int32 Level = 1; Level <= 3; ++Level)
+				{
+					Set(Cell.X, Cell.Y, Level, PoleHidden);
+				}
+				for (int32 Band = 0; Band < 6; ++Band)
+				{
+					const FColor Stripe = Band % 2 ? FColor(255, 150, 196) : White;
+					AddColored(Poles, FTransform(FRotator::ZeroRotator, At(CellCenter(Cell), (Band + 0.5f) * 50.f), FVector(0.38f, 0.38f, 0.5f)), Stripe, Stripe);
+				}
+				AddColored(Poles, FTransform(FRotator::ZeroRotator, At(CellCenter(Cell), 10.f), FVector(0.8f, 0.8f, 0.2f)), White, White);
+				AddFloater(Stars, At(CellCenter(Cell), 3 * BlockSize + 80.f), FRotator::ZeroRotator, 1.3f, StarYellow, StarYellow, 8.f, 60.f, 0.f, 0.f, 0.f, float(Along));
+				UPointLightComponent* Light = NewObject<UPointLightComponent>(this, NAME_None, RF_Transient);
+				Light->SetupAttachment(RootComponent);
+				Light->SetUsingAbsoluteLocation(true);
+				Light->SetIntensityUnits(ELightUnits::Candelas);
+				Light->SetIntensity(LampLightIntensity);
+				Light->SetAttenuationRadius(LampLightReach);
+				Light->SetLightColor(LampLightColor);
+				Light->SetCastShadows(false);
+				Light->RegisterComponent();
+				Light->SetWorldLocation(At(CellCenter(Cell), 3 * BlockSize + 60.f));
+				LampLights.Add(Light);
+				++Lamps;
+			}
+		}
+	}
+	AddPuddles();
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: battle tile (%d, %d) %s: %.0f%% ground, %d buildings, %d towers, %d trees, %d cover, %d extras, %d lamps, big: %s."),
+		BattleTile.X, BattleTile.Y, RRBattle::GetDistrictName(District), Share * 100.f, Buildings, Towers, Trees, Cover, Extras, Lamps,
+		BigBuildingsBuilt.IsEmpty() ? TEXT("none") : *BigBuildingsBuilt);
 }

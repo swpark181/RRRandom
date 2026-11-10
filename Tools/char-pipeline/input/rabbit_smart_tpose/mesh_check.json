@@ -1,0 +1,21 @@
+{
+  "vertices": 8457,
+  "faces": 9340,
+  "face_types": {
+    "3": 2015,
+    "4": 7325
+  },
+  "render_triangles": 16665,
+  "height": 100.0,
+  "width": 88.37323,
+  "far_left_hand_y_range": [
+    41.76844,
+    48.510014
+  ],
+  "far_right_hand_y_range": [
+    41.76844,
+    48.510014
+  ],
+  "has_uv": true,
+  "rigged": false
+}

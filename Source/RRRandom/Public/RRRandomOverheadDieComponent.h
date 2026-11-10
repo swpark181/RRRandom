@@ -57,13 +57,13 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Dice")
 	float UltimateTurns = 6.f;
 
+	/** Rotation that turns the given face toward the camera, with its pips upright on screen (the plane station's die too). */
+	static FQuat FaceToward(int32 Face, const FQuat& Camera);
+
 protected:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-	/** Rotation that turns the given face toward the camera, with its pips upright on screen. */
-	static FQuat FaceToward(int32 Face, const FQuat& Camera);
-
 	/** RollCount of the roll being shown; a different count is a new throw. */
 	int32 ShownRoll = 0;
 	FVector SpinAxis = FVector::UpVector;

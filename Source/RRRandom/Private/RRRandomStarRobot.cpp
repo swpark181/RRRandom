@@ -1,4 +1,5 @@
 #include "RRRandomStarRobot.h"
+#include "RRRandomBattleRoyale.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomEffects.h"
 #include "RRRandomGameState.h"
@@ -98,6 +99,8 @@ namespace
 	// The sweeps cut this high over its feet (a low cover's height)
 	constexpr float SwordCutHeight = 90.f;
 	constexpr float SlamWreckRadius = 280.f;
+	// Each missile smashes this much of what it hits (round 89); only the slam digs into the ground
+	constexpr float MissileWreckRadius = 110.f;
 	// A bot in the ATTACK seat uses the sword this close and the missiles further off
 	constexpr float BotSwordRange = SwordReach * 1.1f;
 
@@ -613,12 +616,21 @@ bool ARRRandomStarRobot::FindGathered(const UObject* WorldContext, int32 InTeam,
 		return false;
 	}
 	OutCars[0] = OutCars[1] = OutCars[2] = nullptr;
+	// The team's own cars, or (round 92, the battle map's sets) any team's: the nearest of each part to whoever asks
+	const AActor* Asker = Cast<AActor>(WorldContext);
+	float Nearest[3] = { UE_BIG_NUMBER, UE_BIG_NUMBER, UE_BIG_NUMBER };
 	for (TActorIterator<ARRRandomVehicle> It(World); It; ++It)
 	{
 		const int32 Part = It->GetStarPart();
-		if (Part >= 0 && Part < 3 && It->GetStarTeam() == InTeam && !It->IsCombined() && !OutCars[Part])
+		if (Part < 0 || Part >= 3 || It->IsCombined() || (It->GetStarTeam() != InTeam && It->GetStarTeam() != RRBattle::AnyTeam))
+		{
+			continue;
+		}
+		const float Distance = Asker ? FVector::DistSquared2D(Asker->GetActorLocation(), It->GetActorLocation()) : 0.f;
+		if (!OutCars[Part] || Distance < Nearest[Part])
 		{
 			OutCars[Part] = *It;
+			Nearest[Part] = Distance;
 		}
 	}
 	if (!OutCars[0] || !OutCars[1] || !OutCars[2])
@@ -715,7 +727,7 @@ ARRRandomStarRobot* ARRRandomStarRobot::CheatAssemble(ARRRandomCharacter* Who, c
 	for (TActorIterator<ARRRandomVehicle> It(World); It; ++It)
 	{
 		const int32 Part = It->GetStarPart();
-		if (Part >= 0 && Part < 3 && It->GetStarTeam() == Who->GetTeam() && !It->IsCombined() && !Found[Part])
+		if (Part >= 0 && Part < 3 && (It->GetStarTeam() == Who->GetTeam() || It->GetStarTeam() == RRBattle::AnyTeam) && !It->IsCombined() && !Found[Part])
 		{
 			Found[Part] = *It;
 		}
@@ -1041,6 +1053,8 @@ void ARRRandomStarRobot::CrewAltFire(ARRRandomCharacter* Who, const FVector& Tar
 			Missile->SetSpeedMultiplier(MissileSpeed);
 			Missile->HitEffect = ERRHitEffect::Cannon;
 			Missile->Tier = ERRWeaponTier::Epic;
+			// Each smashes a little of what it hits (round 89)
+			Missile->WreckRadius = MissileWreckRadius;
 			Missile->FinishSpawning(SpawnTransform);
 		}
 	}
@@ -1093,7 +1107,7 @@ void ARRRandomStarRobot::SwingHits()
 	Solid.AddObjectTypesToQuery(ECC_WorldStatic);
 	Solid.AddObjectTypesToQuery(ECC_WorldDynamic);
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRobotSword), false, this);
-	const auto Smash = [&](const FVector& From, const FVector& To, float Radius)
+	const auto Smash = [&](const FVector& From, const FVector& To, float Radius, int32 Dig)
 	{
 		TArray<FHitResult> Hits;
 		World->LineTraceMultiByObjectType(Hits, From, To, Solid, Params);
@@ -1102,7 +1116,7 @@ void ARRRandomStarRobot::SwingHits()
 			const AActor* Struck = Hit.GetActor();
 			if (Hit.bBlockingHit && !Cast<APawn>(Struck) && !Cast<ARRRandomProjectile>(Struck) && !Cast<ARRRandomStarRobot>(Struck))
 			{
-				ARRRandomWreckage::Wreck(this, Hit.ImpactPoint, Hit.ImpactPoint, Radius, false);
+				ARRRandomWreckage::Wreck(this, Hit.ImpactPoint, Hit.ImpactPoint, Radius, false, Dig);
 				return;
 			}
 		}
@@ -1110,13 +1124,13 @@ void ARRRandomStarRobot::SwingHits()
 	if (Index == 2)
 	{
 		const FVector Landing = Feet + FRotator(0.f, Facing, 0.f).Vector() * SwordReach * 0.75f;
-		Smash(Landing + FVector(0.f, 0.f, RobotHeight), Landing + FVector(0.f, 0.f, SwordCutHeight * 0.5f), SlamWreckRadius);
+		Smash(Landing + FVector(0.f, 0.f, RobotHeight), Landing + FVector(0.f, 0.f, SwordCutHeight * 0.5f), SlamWreckRadius, 2);
 		return;
 	}
 	for (float Off = -SwingArc[Index]; Off <= SwingArc[Index] + 1.f; Off += SwingArc[Index] / 3.f)
 	{
 		const FVector Way = FRotator(0.f, Facing + Off, 0.f).Vector();
-		Smash(Feet + Way * HullRadius + FVector(0.f, 0.f, SwordCutHeight), Feet + Way * SwordReach + FVector(0.f, 0.f, SwordCutHeight), SwordWreckRadius);
+		Smash(Feet + Way * HullRadius + FVector(0.f, 0.f, SwordCutHeight), Feet + Way * SwordReach + FVector(0.f, 0.f, SwordCutHeight), SwordWreckRadius, 0);
 	}
 }
 

@@ -137,6 +137,20 @@ void URRRandomDiceBuffComponent::GiveUltimateDie()
 	}
 }
 
+void URRRandomDiceBuffComponent::AddCharge(bool bUltimate)
+{
+	if (!GetOwner()->HasAuthority())
+	{
+		return;
+	}
+	if (bUltimate && UltimateDieChance > 0.f)
+	{
+		GiveUltimateDie();
+		return;
+	}
+	++Charges;
+}
+
 void URRRandomDiceBuffComponent::ApplyRoll(const FRRDiceRoll& Roll)
 {
 	if (Roll.bUltimate)

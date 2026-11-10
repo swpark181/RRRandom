@@ -183,12 +183,17 @@ namespace
 	constexpr float SprintArmDrop = 42.f;
 	constexpr float SprintPoseInTime = 0.15f;
 	constexpr float SprintPoseOutTime = 0.12f;
+	// Walking (round 90): Mixamo's rifle walk holds the hands at the chest, which on the animal friends' big heads is right
+	// under the chin, so the small gun in the right fist sank into the head; the arms come down this far while walking
+	constexpr float WalkArmDrop = 30.f;
 }
 
 void URRRandomBodyAnimInstance::UpdateSprintPose(float DeltaSeconds)
 {
 	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetOwningActor());
-	const float Wanted = Brawler ? Brawler->GetSprintPoseShare() * (1.f - GetAimWeight()) : 0.f;
+	// (the weight is a share of SprintArmDrop: the walk's smaller drop is a smaller share)
+	const float Wanted = Brawler ? FMath::Max(Brawler->GetSprintPoseShare(), Brawler->GetWalkPoseShare() * WalkArmDrop / SprintArmDrop)
+		* (1.f - GetAimWeight()) : 0.f;
 	SprintWeight = FMath::FInterpConstantTo(SprintWeight, Wanted, DeltaSeconds, 1.f / (Wanted > SprintWeight ? SprintPoseInTime : SprintPoseOutTime));
 	if (SprintWeight <= 0.f)
 	{

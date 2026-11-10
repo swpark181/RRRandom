@@ -34,6 +34,13 @@ namespace
 
 	const FLinearColor Cream(1.f, 0.93f, 0.82f);
 	const FLinearColor Gold(1.f, 0.78f, 0.3f);
+
+	// The human cannon's contrail (RushTrail): this wide, lasting this long, starting this far behind the flier's middle;
+	// wind streaks a second
+	constexpr float CannonTrailWidth = 42.f;
+	constexpr float CannonTrailLife = 0.7f;
+	constexpr float CannonTrailBehind = 45.f;
+	constexpr float CannonWindRate = 60.f;
 	// Fire, hottest first
 	const FLinearColor FireYellow(1.f, 0.82f, 0.25f);
 	const FLinearColor FireOrange(1.f, 0.42f, 0.05f);
@@ -373,6 +380,74 @@ void ARRRandomEffects::FlightTrail(const FVector& Back, const FVector& Velocity,
 		Glow.Glow = 3.f;
 		Glow.Opacity = 0.6f;
 		Spawn(Glow);
+	}
+}
+
+void ARRRandomEffects::RushTrail(const FVector& From, const FVector& Head, const FVector& Velocity, float DeltaSeconds)
+{
+	const float Speed = Velocity.Size();
+	if (Speed < 1.f || DeltaSeconds <= 0.f)
+	{
+		return;
+	}
+	const FVector Way = Velocity / Speed;
+	const FRotator Along = Way.Rotation();
+	const FLinearColor Air(0.86f, 0.94f, 1.f);
+	// The contrail: soft pale ovals laid end to end along the way since last frame, starting a little behind the body,
+	// thinning to nothing as they age, so it trails off smoothly behind the flier
+	const FVector Tail = Way * CannonTrailBehind;
+	const FVector Path = Head - From;
+	const float Moved = Path.Size();
+	const int32 Pieces = FMath::Clamp(FMath::CeilToInt(Moved / 14.f), 1, 24);
+	const float Step = Moved / Pieces;
+	for (int32 Index = 0; Index < Pieces; ++Index)
+	{
+		const float Share = (Index + 0.5f) / Pieces;
+		FParticle Piece;
+		Piece.Shape = EShape::Ball;
+		Piece.Location = From + Path * Share - Tail;
+		Piece.Age = (1.f - Share) * DeltaSeconds;
+		Piece.Turn = Along;
+		Piece.FadeIn = 0.f;
+		const float Long = FMath::Max(Step * 2.6f, 20.f) / 100.f;
+		// A wide faint veil...
+		Piece.Life = CannonTrailLife;
+		Piece.StartSize = FVector(Long, CannonTrailWidth / 100.f, CannonTrailWidth / 100.f);
+		Piece.EndSize = FVector(Long, 0.02f, 0.02f);
+		Piece.Color = Air;
+		Piece.Glow = 0.9f;
+		Piece.Opacity = 0.32f;
+		Spawn(Piece);
+		// ...round a brighter thin core that goes sooner
+		Piece.Life = CannonTrailLife * 0.6f;
+		Piece.StartSize = FVector(Long, CannonTrailWidth * 0.3f / 100.f, CannonTrailWidth * 0.3f / 100.f);
+		Piece.EndSize = FVector(Long, 0.01f, 0.01f);
+		Piece.Color = FLinearColor::White;
+		Piece.Glow = 1.6f;
+		Piece.Opacity = 0.55f;
+		Spawn(Piece);
+	}
+	// Wind rushing past: thin short streaks round the body along the way, swept back
+	const FVector Side = FVector::CrossProduct(Way, FVector::UpVector).GetSafeNormal();
+	const FVector Over = FVector::CrossProduct(Side, Way);
+	for (int32 Index = CountThisFrame(CannonWindRate, DeltaSeconds); Index > 0; --Index)
+	{
+		const float Angle = FMath::FRandRange(0.f, UE_TWO_PI);
+		const float Out = FMath::FRandRange(35.f, 85.f);
+		FParticle Streak;
+		Streak.Shape = EShape::Ball;
+		Streak.Location = Head + (Side * FMath::Cos(Angle) + Over * FMath::Sin(Angle)) * Out + Way * FMath::FRandRange(-30.f, 50.f);
+		Streak.Velocity = -Way * Speed * 0.35f;
+		Streak.Life = FMath::FRandRange(0.1f, 0.18f);
+		const float Length = FMath::Clamp(Speed * 0.09f, 60.f, 230.f) / 100.f;
+		Streak.StartSize = FVector(Length, 0.03f, 0.03f);
+		Streak.EndSize = FVector(Length * 1.3f, 0.008f, 0.008f);
+		Streak.Turn = Along;
+		Streak.Color = Air;
+		Streak.Glow = 1.5f;
+		Streak.Opacity = 0.75f;
+		Streak.FadeIn = 0.02f;
+		Spawn(Streak);
 	}
 }
 
@@ -1307,6 +1382,81 @@ void ARRRandomEffects::FireBurst(const FVector& Where, float Size)
 	}
 	Spray(EShape::Star, Where, FMath::RoundToInt(24.f * Size), FVector::UpVector, 100.f, FVector2D(300.f, 800.f) * Size, FVector2D(5.f, 9.f),
 		FVector2D(0.6f, 1.f), FireYellow, 7.f, 250.f);
+}
+
+void ARRRandomEffects::LavaFountain(const FVector& Where, float Size)
+{
+	// A gush of candy-jam lava: a glowing column shooting up, fat blobs flung up and out that fall back (heavy), a ring
+	// running out over the crater, sparks
+	const FLinearColor Jam[] = { FLinearColor(1.f, 0.18f, 0.36f), FireOrange, FLinearColor(1.f, 0.86f, 0.32f) };
+	FParticle Column;
+	Column.Shape = EShape::Ball;
+	Column.Location = Where + FVector(0.f, 0.f, 120.f * Size);
+	Column.Velocity = FVector(0.f, 0.f, 500.f * Size);
+	Column.Drag = 3.f;
+	Column.Life = 0.55f;
+	Column.StartSize = FVector(0.8f * Size, 0.8f * Size, 2.5f * Size);
+	Column.EndSize = FVector(1.6f * Size, 1.6f * Size, 4.f * Size);
+	Column.Color = FireOrange;
+	Column.Glow = 5.f;
+	Column.Opacity = 0.8f;
+	Spawn(Column);
+	FParticle Ring;
+	Ring.Shape = EShape::Ring;
+	Ring.Location = Where + FVector(0.f, 0.f, 6.f);
+	Ring.Life = 0.6f;
+	Ring.StartSize = FVector(0.6f * Size, 0.6f * Size, 1.f);
+	Ring.EndSize = FVector(5.f * Size, 5.f * Size, 1.f);
+	Ring.Color = Jam[0];
+	Ring.Glow = 4.f;
+	Spawn(Ring);
+	for (int32 Index = FMath::RoundToInt(30.f * Size); Index > 0; --Index)
+	{
+		FParticle Blob;
+		Blob.Shape = EShape::Ball;
+		Blob.Location = Where + FVector(FMath::RandPointInCircle(40.f * Size), 20.f);
+		Blob.Velocity = FMath::VRandCone(FVector::UpVector, FMath::DegreesToRadians(38.f)) * FMath::FRandRange(600.f, 1150.f) * Size;
+		Blob.Gravity = 2200.f;
+		Blob.Life = FMath::FRandRange(0.8f, 1.2f);
+		const float Fat = FMath::FRandRange(0.35f, 0.75f) * Size;
+		Blob.StartSize = FVector(Fat, Fat, Fat * 1.3f);
+		Blob.EndSize = FVector(Fat * 0.5f);
+		Blob.Color = Jam[FMath::RandRange(0, UE_ARRAY_COUNT(Jam) - 1)];
+		Blob.Glow = 3.5f;
+		Blob.Spin = FRotator(FMath::FRandRange(-300.f, 300.f), FMath::FRandRange(-300.f, 300.f), 0.f);
+		Spawn(Blob);
+	}
+	Spray(EShape::Star, Where + FVector(0.f, 0.f, 60.f), FMath::RoundToInt(20.f * Size), FVector::UpVector, 60.f, FVector2D(400.f, 900.f) * Size,
+		FVector2D(5.f, 9.f), FVector2D(0.6f, 1.f), FireYellow, 7.f, 600.f);
+}
+
+void ARRRandomEffects::LavaBubble(const FVector& Where, float Size)
+{
+	// A bubble swelling on the lava and popping: a dome, a thin ring, a couple of drops and a spark drifting up
+	FParticle Dome;
+	Dome.Shape = EShape::Ball;
+	Dome.Location = Where;
+	Dome.Life = 0.45f;
+	Dome.FadeIn = 0.3f;
+	Dome.StartSize = FVector(0.15f * Size, 0.15f * Size, 0.08f * Size);
+	Dome.EndSize = FVector(0.45f * Size, 0.45f * Size, 0.3f * Size);
+	Dome.Color = FLinearColor(1.f, 0.62f, 0.2f);
+	Dome.Glow = 3.f;
+	Dome.Opacity = 0.9f;
+	Spawn(Dome);
+	FParticle Pop;
+	Pop.Shape = EShape::Ring;
+	Pop.Location = Where + FVector(0.f, 0.f, 2.f);
+	Pop.Life = 0.35f;
+	Pop.StartSize = FVector(0.2f * Size, 0.2f * Size, 1.f);
+	Pop.EndSize = FVector(0.8f * Size, 0.8f * Size, 1.f);
+	Pop.Color = FLinearColor(1.f, 0.86f, 0.32f);
+	Pop.Glow = 3.f;
+	Spawn(Pop);
+	Spray(EShape::Ball, Where + FVector(0.f, 0.f, 10.f), 2, FVector::UpVector, 30.f, FVector2D(150.f, 320.f) * Size, FVector2D(0.06f, 0.12f) * Size,
+		FVector2D(0.4f, 0.6f), FireOrange, 3.f, 900.f);
+	Spray(EShape::Star, Where + FVector(0.f, 0.f, 20.f), 1, FVector::UpVector, 20.f, FVector2D(60.f, 140.f), FVector2D(3.f, 5.f),
+		FVector2D(0.8f, 1.3f), FireYellow, 6.f, -40.f);
 }
 
 void ARRRandomEffects::Tick(float DeltaSeconds)
