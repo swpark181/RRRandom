@@ -145,10 +145,11 @@ msample = node(meteor, U.MaterialExpressionTextureSample, -1200, 0, texture=mete
 mx = op(meteor, U.MaterialExpressionMax, op(meteor, U.MaterialExpressionMax, msample, msample, -1000, -200, "R", "G"), msample, -850, -200, b_pin="B")
 mn = op(meteor, U.MaterialExpressionMin, op(meteor, U.MaterialExpressionMin, msample, msample, -1000, 200, "R", "G"), msample, -850, 200, b_pin="B")
 sat = op(meteor, U.MaterialExpressionSubtract, mx, mn, -700, 0)
-# Glass: bright and colorless. Keep = saturated or dark.
+# Glass: bright and colorless. Keep = saturated or dark. (Round 95, the Smart Mesh meteor: its glass is a faint blue,
+# 0.2-0.3 "saturated" in linear colour, so only the strongly saturated cracks count; the crust is kept as dark.)
 keep_sat = node(meteor, U.MaterialExpressionSmoothStep, -550, -100)
-mel.connect_material_expressions(const(meteor, 0.06, -700, -300), "", keep_sat, "Min")
-mel.connect_material_expressions(const(meteor, 0.14, -700, -250), "", keep_sat, "Max")
+mel.connect_material_expressions(const(meteor, 0.45, -700, -300), "", keep_sat, "Min")
+mel.connect_material_expressions(const(meteor, 0.55, -700, -250), "", keep_sat, "Max")
 mel.connect_material_expressions(sat, "", keep_sat, "Value")
 keep_dark = node(meteor, U.MaterialExpressionSmoothStep, -550, 150)
 mel.connect_material_expressions(const(meteor, 0.72, -700, 300), "", keep_dark, "Min")

@@ -9,6 +9,7 @@
 #include "RRRandomGameState.h"
 #include "RRRandomOracle.h"
 #include "RRRandomHUD.h"
+#include "RRRandomLoadout.h"
 #include "RRRandomMeteor.h"
 #include "RRRandomMovementComponent.h"
 #include "RRRandomOre.h"
@@ -120,6 +121,21 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 		LeaveAction = NewObject<UInputAction>(this, TEXT("IA_Leave"));
 		LeaveAction->ValueType = EInputActionValueType::Boolean;
 	}
+	// Round 97: the battle royale's bag (Tab) and its two hands (1, 2)
+	if (!BagAction)
+	{
+		BagAction = NewObject<UInputAction>(this, TEXT("IA_Bag"));
+		BagAction->ValueType = EInputActionValueType::Boolean;
+	}
+	if (HandActions.IsEmpty())
+	{
+		for (int32 Hand = 0; Hand < 2; ++Hand)
+		{
+			UInputAction* Action = NewObject<UInputAction>(this, *FString::Printf(TEXT("IA_Hand%d"), Hand + 1));
+			Action->ValueType = EInputActionValueType::Boolean;
+			HandActions.Add(Action);
+		}
+	}
 	if (!MapAction)
 	{
 		MapAction = NewObject<UInputAction>(this, TEXT("IA_Map"));
@@ -226,6 +242,9 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 	MappingContext->MapKey(TitleAction, EKeys::Escape);
 	MappingContext->MapKey(ConfirmAction, EKeys::Enter);
 	MappingContext->MapKey(MapAction, EKeys::M);
+	MappingContext->MapKey(BagAction, EKeys::Tab);
+	MappingContext->MapKey(HandActions[0], EKeys::One);
+	MappingContext->MapKey(HandActions[1], EKeys::Two);
 	MappingContext->MapKey(SprintAction, EKeys::LeftShift);
 	MappingContext->MapKey(SprintAction, EKeys::RightShift);
 	MappingContext->MapKey(DescendAction, EKeys::LeftControl);
@@ -331,6 +350,11 @@ void ARRRandomPlayerController::SetupInputComponent()
 	EnhancedInput->BindAction(FireAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnClick);
 	EnhancedInput->BindAction(ConfirmAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnConfirm);
 	EnhancedInput->BindAction(MapAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::RRMap);
+	EnhancedInput->BindAction(BagAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnBag);
+	for (int32 Hand = 0; Hand < HandActions.Num(); ++Hand)
+	{
+		EnhancedInput->BindAction(HandActions[Hand], ETriggerEvent::Started, this, &ARRRandomPlayerController::OnHand, Hand);
+	}
 	EnhancedInput->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ARRRandomPlayerController::OnMove);
 	EnhancedInput->BindAction(JumpAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnJump);
 	EnhancedInput->BindAction(JumpAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnStopJumping);
@@ -408,8 +432,11 @@ void ARRRandomPlayerController::PlayerTick(float DeltaTime)
 	if (bThirdPerson && IsLocalController())
 	{
 		const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+		// (round 97: and with the bag open, or the full map open in the get-ready time to pick where to start)
+		const ARRRandomHUD* CursorHud = Cast<ARRRandomHUD>(GetHUD());
 		const bool bWantCursor = bPauseMenuOpen || ARRRandomGameState::IsMatchOver(this) || bCursorFreed || !IsViewportFocused()
-			|| (Mine && Mine->GetUltimate() && Mine->GetUltimate()->KeepsOverview());
+			|| (Mine && Mine->GetUltimate() && Mine->GetUltimate()->KeepsOverview())
+			|| (CursorHud && (CursorHud->IsBagOpen() || (CursorHud->IsMapExpanded() && ARRRandomGameState::IsPrep(this))));
 		if (bShowMouseCursor != bWantCursor)
 		{
 			bShowMouseCursor = bWantCursor;
@@ -514,6 +541,12 @@ void ARRRandomPlayerController::OnClick()
 	{
 		return;
 	}
+	// The bag's panel open (round 97): its cards and buttons take the clicks
+	if (!bPauseMenuOpen && Hud->IsBagOpen())
+	{
+		const_cast<ARRRandomHUD*>(Hud)->HandleBagClick(FVector2D(MouseX, MouseY), false);
+		return;
+	}
 	// The map takes clicks on it (and any click while it fills the screen)
 	if (!bPauseMenuOpen && !ARRRandomGameState::IsMatchOver(this))
 	{
@@ -554,8 +587,13 @@ void ARRRandomPlayerController::RRMap()
 
 void ARRRandomPlayerController::OnEscape()
 {
-	// Esc closes the full-screen map first
+	// Esc closes the bag, then the full-screen map, first
 	ARRRandomHUD* Hud = Cast<ARRRandomHUD>(GetHUD());
+	if (Hud && Hud->IsBagOpen())
+	{
+		Hud->ToggleBag();
+		return;
+	}
 	if (Hud && Hud->IsMapExpanded())
 	{
 		Hud->ToggleMap();
@@ -681,8 +719,41 @@ void ARRRandomPlayerController::RRGun(const FString& Gun)
 	ServerCheatGun(Type);
 }
 
+void ARRRandomPlayerController::OnBag()
+{
+	ARRRandomHUD* Hud = Cast<ARRRandomHUD>(GetHUD());
+	const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	if (Hud && Mine && Mine->GetLoadout() && Mine->GetLoadout()->IsInUse() && !bPauseMenuOpen)
+	{
+		Hud->ToggleBag();
+	}
+}
+
+void ARRRandomPlayerController::OnHand(int32 Hand)
+{
+	ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	URRRandomLoadoutComponent* Bag = Mine ? Mine->GetLoadout() : nullptr;
+	if (Bag && Bag->IsInUse() && Mine->IsAlive() && !IsGameplayInputBlocked() && Hand != Bag->GetActiveHand())
+	{
+		Bag->ServerSelectHand(Hand);
+	}
+}
+
+void ARRRandomPlayerController::ServerPickStart_Implementation(int32 Spot)
+{
+	if (ARRRandomGameMode* Mode = GetWorld()->GetAuthGameMode<ARRRandomGameMode>())
+	{
+		Mode->PickTeamStart(this, Spot);
+	}
+}
+
 void ARRRandomPlayerController::OnCheatGun(int32 Type)
 {
+	// The battle royale (round 97): 1 and 2 are the hands; a gun cheat there takes Ctrl
+	if (ARRRandomGameState::IsBattleRoyale(this) && !(IsInputKeyDown(EKeys::LeftControl) || IsInputKeyDown(EKeys::RightControl)))
+	{
+		return;
+	}
 	// Ctrl+8 is the sword clash test's (OnCheatClashTestKey), not a gun's
 	if (Type == ClashTestGunKey && (IsInputKeyDown(EKeys::LeftControl) || IsInputKeyDown(EKeys::RightControl)))
 	{
@@ -1444,7 +1515,8 @@ void ARRRandomPlayerController::OnFire()
 	float MouseX;
 	float MouseY;
 	const ARRRandomHUD* MapHud = Cast<ARRRandomHUD>(GetHUD());
-	if (IsGameplayInputBlocked() || (!bThirdPerson && MapHud && GetMousePosition(MouseX, MouseY) && MapHud->IsPointOnMap(FVector2D(MouseX, MouseY))))
+	if (IsGameplayInputBlocked() || (!bThirdPerson && MapHud && GetMousePosition(MouseX, MouseY) && MapHud->IsPointOnMap(FVector2D(MouseX, MouseY)))
+		|| (MapHud && (MapHud->IsBagOpen() || (MapHud->IsMapExpanded() && ARRRandomGameState::IsPrep(this)))))
 	{
 		return;
 	}
@@ -1650,10 +1722,40 @@ void ARRRandomPlayerController::UpdateSprint()
 
 void ARRRandomPlayerController::OnAimStart()
 {
-	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()); RandomCharacter && bThirdPerson && !RandomCharacter->IsInRobot())
+	// The bag's panel open (round 97): the right button puts a gun in the second hand
+	float MouseX;
+	float MouseY;
+	if (ARRRandomHUD* Hud = Cast<ARRRandomHUD>(GetHUD()); Hud && Hud->IsBagOpen() && GetMousePosition(MouseX, MouseY))
 	{
+		Hud->HandleBagClick(FVector2D(MouseX, MouseY), true);
+		return;
+	}
+	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()); RandomCharacter && bThirdPerson && !RandomCharacter->IsInRobot() && !RandomCharacter->GetWeapon().bSword)
+	{
+		// (not with the light sword: its right button is its guard, the view stays wide)
 		RandomCharacter->SetAimingDownSights(true);
 	}
+	// The light sword (round 97): on guard, deflecting shots toward where I aim, while held (and focus lasts)
+	if (ARRRandomCharacter* Holder = Cast<ARRRandomCharacter>(GetPawn()); Holder && Holder->GetWeapon().bSword && !IsGameplayInputBlocked())
+	{
+		Holder->SetDeflecting(true, GetPointedTarget());
+	}
+}
+
+FVector ARRRandomPlayerController::GetPointedTarget() const
+{
+	if (bThirdPerson)
+	{
+		return GetCrosshairTarget();
+	}
+	FVector CursorOrigin;
+	FVector CursorDirection;
+	const APawn* Mine = GetPawn();
+	if (DeprojectMousePositionToWorld(CursorOrigin, CursorDirection))
+	{
+		return GetAimTarget(CursorOrigin, CursorDirection);
+	}
+	return Mine ? Mine->GetActorLocation() + Mine->GetActorForwardVector() * 2000.f : FVector::ZeroVector;
 }
 
 void ARRRandomPlayerController::OnAimStop()
@@ -1661,11 +1763,21 @@ void ARRRandomPlayerController::OnAimStop()
 	if (ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn()))
 	{
 		RandomCharacter->SetAimingDownSights(false);
+		// (asked whether or not the guard is known up here yet: a quick tap may not have come back)
+		if (RandomCharacter->IsDeflecting() || RandomCharacter->GetWeapon().bSword)
+		{
+			RandomCharacter->SetDeflecting(false, GetPointedTarget());
+		}
 	}
 }
 
 void ARRRandomPlayerController::OnAimHeld()
 {
+	// The light sword on guard: its deflects go where I aim now
+	if (ARRRandomCharacter* Holder = Cast<ARRRandomCharacter>(GetPawn()); Holder && Holder->IsDeflecting())
+	{
+		Holder->SetDeflectAim(GetPointedTarget());
+	}
 	// Aimed like the left button: the crosshair over the shoulder, else the cursor
 	ARRRandomCharacter* RandomCharacter = Cast<ARRRandomCharacter>(GetPawn());
 	if (!RandomCharacter || RandomCharacter->GetRobotSeat() != ERRRobotSeat::Attack || IsGameplayInputBlocked())
@@ -2328,4 +2440,138 @@ void ARRRandomPlayerController::ServerCheatGoTile_Implementation(int32 X, int32 
 	Mine->TeleportTo(Spot + FVector(0.f, 0.f, Mine->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 5.f), Mine->GetActorRotation(), false, true);
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, %s to tile (%d, %d) at %s."), *Mine->GetName(), X, Y, *Spot.ToString());
 #endif
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Round 97: console commands for the battle royale's bag and get-ready time (scripted tests)
+
+void ARRRandomPlayerController::RRRollMany(int32 Count)
+{
+	for (int32 Roll = 0; Roll < Count; ++Roll)
+	{
+		FTimerHandle Handle;
+		GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this]() { RRRoll(); }), 0.05f + Roll * 0.75f, false);
+	}
+}
+
+void ARRRandomPlayerController::RRBag()
+{
+	OnBag();
+}
+
+void ARRRandomPlayerController::RRHand(int32 Hand)
+{
+	OnHand(FMath::Clamp(Hand - 1, 0, 1));
+}
+
+void ARRRandomPlayerController::RRPickStart(int32 Spot)
+{
+	ServerPickStart(Spot);
+}
+
+void ARRRandomPlayerController::RRUpgradeAll()
+{
+	if (const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()); Mine && Mine->GetLoadout())
+	{
+		Mine->GetLoadout()->ServerCombineAll();
+	}
+}
+
+void ARRRandomPlayerController::RRGuard(float Seconds)
+{
+	// Aimed at the nearest opponent (a test's camera may not be my own, so the crosshair means nothing)
+	ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	if (!Mine)
+	{
+		return;
+	}
+	FVector Aim = Mine->GetActorLocation() + Mine->GetActorForwardVector() * 2000.f;
+	float Nearest = UE_BIG_NUMBER;
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		const float Distance = FVector::Dist(It->GetActorLocation(), Mine->GetActorLocation());
+		if (It->GetTeam() != Mine->GetTeam() && It->IsAlive() && Distance < Nearest)
+		{
+			Nearest = Distance;
+			Aim = It->GetActorLocation();
+		}
+	}
+	Mine->SetDeflecting(true, Aim);
+	TWeakObjectPtr<ARRRandomCharacter> WeakMine = Mine;
+	FTimerHandle Handle;
+	GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [WeakMine, Aim]()
+	{
+		if (WeakMine.IsValid())
+		{
+			WeakMine->SetDeflecting(false, Aim);
+		}
+	}), FMath::Max(0.1f, Seconds), false);
+}
+
+void ARRRandomPlayerController::RRIncoming(int32 Count, float Distance)
+{
+	ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	if (!Mine || !HasAuthority())
+	{
+		return;
+	}
+	ARRRandomCharacter* Shooter = nullptr;
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		if (It->IsAlive() && It->GetTeam() != Mine->GetTeam() && !It->IsDecoy()
+			&& (!Shooter || FVector::Dist(It->GetActorLocation(), Mine->GetActorLocation()) < FVector::Dist(Shooter->GetActorLocation(), Mine->GetActorLocation())))
+		{
+			Shooter = *It;
+		}
+	}
+	if (!Shooter)
+	{
+		return;
+	}
+	// (brought Distance in front of me, facing me, so the shots come in quick; Count 0 only brings it: a target)
+	const FVector Front = Mine->GetActorLocation() + Mine->GetActorForwardVector() * FMath::Max(150.f, Distance);
+	Shooter->TeleportTo(Front, (Mine->GetActorLocation() - Front).Rotation(), false, true);
+	TWeakObjectPtr<ARRRandomCharacter> WeakShooter = Shooter;
+	TWeakObjectPtr<ARRRandomCharacter> WeakMine = Mine;
+	for (int32 Shot = 0; Shot < Count; ++Shot)
+	{
+		FTimerHandle Handle;
+		GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [WeakShooter, WeakMine]()
+		{
+			if (WeakShooter.IsValid() && WeakMine.IsValid())
+			{
+				WeakShooter->EquipWeapon(FRRWeapon::Make(2, 3, WeakShooter->GetDefaultMagazineSize()));
+				WeakShooter->FireAt(WeakMine->GetActorLocation());
+			}
+		}), 0.05f + Shot * 0.45f, false);
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s fires %d shots at %s (RRIncoming). guard=%d facing=%.2f health=%.3f"),
+		*Shooter->GetName(), Count, *Mine->GetName(), Mine->IsDeflecting(), Mine->GetActorRotation().Yaw, Mine->GetHealth());
+	FTimerHandle Report;
+	GetWorldTimerManager().SetTimer(Report, FTimerDelegate::CreateWeakLambda(this, [WeakShooter, WeakMine]()
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: RRIncoming done: shooter health %.3f, mine %.3f."), WeakShooter.IsValid() ? WeakShooter->GetHealth() : -1.f, WeakMine.IsValid() ? WeakMine->GetHealth() : -1.f);
+	}), 0.05f + Count * 0.45f + 1.5f, false);
+}
+
+void ARRRandomPlayerController::RRGunTier(int32 Type, int32 Tier)
+{
+	ServerGunTier(Type, Tier);
+}
+
+void ARRRandomPlayerController::ServerGunTier_Implementation(int32 Type, int32 Tier)
+{
+	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		// (RRGun's numbers: 1 is the pistol, so the bag's types are one less)
+		Mine->EquipWeapon(FRRWeapon::MakeTiered(Type - 1, static_cast<ERRWeaponTier>(FMath::Clamp(Tier, 0, 3)), Mine->GetDefaultMagazineSize()));
+	}
+}
+
+void ARRRandomPlayerController::RRSights(int32 bOn)
+{
+	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		Mine->SetAimingDownSights(bOn != 0);
+	}
 }

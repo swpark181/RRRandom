@@ -24,6 +24,73 @@ struct FRRAimFrame
 	float Kick = 0.f;
 	/** Where the gun should point, in the mesh's own space: where the brawler faces. */
 	FVector Facing = FVector(0.f, 1.f, 0.f);
+	/** Final head/neck direction, after all weapon and locomotion layers. */
+	FVector GazeFacing = FVector(0.f, 1.f, 0.f);
+	float GazeWeight = 0.f;
+	/** Persistent world headings keep a logical aim turn from snapping the rendered body. */
+	bool bSeparateBody = false;
+	bool bCombatFacing = false;
+	float LowerYaw = 0.f, UpperYaw = 0.f, GazeYaw = 0.f;
+	float LowerTurn = 0.f, UpperTurn = 0.f;
+	float KeepLocomotion = 0.f, StrafeWeight = 0.f;
+};
+
+/**
+ * Round 97, the light sword's layer for one frame: the slash (from where its blow starts, quickened to the swing) and the
+ * held guard (deflecting), each with its weight, laid over the upper body (Spine and everything under it).
+ */
+struct FRRMeleeFrame
+{
+	const UAnimSequence* Slash = nullptr;
+	float SlashTime = 0.f;
+	float SlashWeight = 0.f;
+	const UAnimSequence* PreviousSlash = nullptr;
+	float PreviousSlashTime = 0.f;
+	float PreviousSlashWeight = 0.f;
+	float SlashBlend = 1.f;
+	float SwingStamp = -100.f;
+	const UAnimSequence* Guard = nullptr;
+	float GuardTime = 0.f;
+	float GuardWeight = 0.f;
+	FVector Facing = FVector(0.f, 1.f, 0.f);
+	bool bGuarding = false;
+	float LowerBodyWeight = 0.f;
+	bool bDedicated = false;
+	/** Reuse the phrase with each rig's proportions and existing calibrated hand axes. */
+	float BodyScale = 1.f;
+	FQuat RightHandFix = FRotator(14.3f, -77.5f, 137.7f).Quaternion();
+	float GripWeight = 0.f;
+	FVector GripOffset = FVector(0.f, 10.f, -7.f);
+	FQuat GripRotation = FQuat::Identity;
+	FVector EntryGripOffset = FVector::ZeroVector;
+	FQuat EntryGripRotation = FQuat::Identity;
+	float GripSwingStamp = -100.f;
+	/** Ground-up sword drive; absolute mesh-space yaw relative to the bind pose. */
+	float DriveWeight = 0.f;
+	float HipYaw = 0.f;
+	float ChestYaw = 0.f;
+	float ChestLean = 0.f;
+	float GripCarryYaw = 0.f;
+	float StanceLoad = 0.f;
+	float WeightShift = 0.f;
+	float EntryHipYaw = 0.f, EntryChestYaw = 0.f, EntryCarryYaw = 0.f;
+	float EntryChestLean = 0.f, EntryWeightShift = 0.f, EntryStanceLoad = 0.f;
+	float AttackAge = 0.f;
+	float AttackDuration = 0.35f;
+	float ParryWeight = 0.f, ParrySway = 0.f;
+	float ParryStamp = -100.f;
+	FVector ParryEntryGrip = FVector::ZeroVector;
+	FQuat ParryEntryRotation = FQuat::Identity;
+	float ParryEntryHip = 0.f, ParryEntryChest = 0.f, ParryEntryCarry = 0.f;
+	float ParryEntryLean = 0.f, ParryEntryLoad = 0.f, ParryEntryShift = 0.f, ParryEntryWeight = 0.f;
+	float FootPhase = 1.f;
+	bool bPlantEligible = false;
+	bool bPlantAttack = false;
+	float DeltaSeconds = 0.f;
+	FTransform MeshToWorld = FTransform::Identity;
+	FTransform SupportToWorld = FTransform::Identity;
+	uint32 SupportId = 0;
+	FVector FloorNormal = FVector::UpVector;
 };
 
 /** Plays the brawler's animations like the plain single-node instance, lays the aiming set over them, then bends the tail bones on top. */
@@ -39,10 +106,42 @@ struct FRRRandomBodyAnimInstanceProxy : public FAnimSingleNodeInstanceProxy
 	}
 
 	virtual void PreUpdate(UAnimInstance* InAnimInstance, float DeltaSeconds) override;
+	virtual void PreEvaluateAnimation(UAnimInstance* InAnimInstance) override;
 	virtual bool Evaluate(FPoseContext& Output) override;
 
 private:
 	void EvaluateAim(FPoseContext& Output) const;
+	void EvaluateGaze(FPoseContext& Output) const;
+	void EvaluateMovingLegs(FPoseContext& Output) const;
+	void EvaluateBodyFacing(FPoseContext& Output);
+	FQuat LastUpperWorld = FQuat::Identity;
+	bool bHasUpperHistory = false, bWasCombatFacing = false, bEaseUpperEntry = false;
+	float UpperEntryAge = 0.f;
+	/** Round 97: the light sword's slash and guard over the upper body. */
+	void EvaluateMelee(FPoseContext& Output) const;
+	void EvaluateSwordGrip(FPoseContext& Output) const;
+	void UpdateSwordContacts(const FPoseContext& Output);
+	void StoreSwordContacts(const FPoseContext& Output);
+	FTransform ContactFeet[2];
+	FTransform ContactToes[2];
+	FVector LandingToe = FVector::ZeroVector;
+	FQuat LandingFootRotation = FQuat::Identity;
+	FQuat LandingToeRotation = FQuat::Identity;
+	FQuat ContactFacing = FQuat::Identity;
+	FTransform LastFeetWorld[2], LastToesWorld[2];
+	FTransform RecoveryFeet[2], RecoveryToes[2], RecoveryGoals[2];
+	FQuat RecoveryFootRotations[2];
+	float RecoveryStartAge = 0.f;
+	bool bRecovering = false;
+	bool bGuardContacts = false;
+	FTransform LastMeshWorld = FTransform::Identity;
+	float ContactStamp = -100.f;
+	float ContactWeight = 0.f;
+	int32 ContactLeadFoot = 1;
+	uint32 ContactSupportId = 0;
+	bool bContactHistory = false;
+	bool bContactsValid = false;
+	FRRMeleeFrame Melee;
 	/** Turns the spine so the two hands (the gun between them) point along Aim.Facing, level. */
 	void PointGun(FPoseContext& Output) const;
 
@@ -96,36 +195,36 @@ public:
 
 	/** Of a turn, how much the tail stays behind (it keeps pointing where it did, then catches up). */
 	UPROPERTY(EditAnywhere, Category = "Tail", meta = (ClampMin = "0", ClampMax = "1"))
-	float TurnDrag = 0.7f;
+	float TurnDrag = 0.35f;
 
 	/** Swing in degrees per cm/s짼 of sideways speeding up (the tail trails the other way). */
 	UPROPERTY(EditAnywhere, Category = "Tail")
-	float SideAccelSwing = 0.006f;
+	float SideAccelSwing = 0.003f;
 
 	/** How fast the tail springs back to straight (oscillations per second) and how much it overshoots (0 none, 1 a lot). */
 	UPROPERTY(EditAnywhere, Category = "Tail", meta = (ClampMin = "0.1"))
-	float SpringFrequency = 1.4f;
+	float SpringFrequency = 1.1f;
 	UPROPERTY(EditAnywhere, Category = "Tail", meta = (ClampMin = "0", ClampMax = "1"))
-	float SpringBounce = 0.65f;
+	float SpringBounce = 0.25f;
 
 	/** Most the tail swings to a side, in degrees, all bones together. */
 	UPROPERTY(EditAnywhere, Category = "Tail")
-	float MaxSwing = 55.f;
+	float MaxSwing = 30.f;
 
 	/** Wag: side to side, in degrees at the tip and wags per second, standing and at WagRunSpeed. */
 	UPROPERTY(EditAnywhere, Category = "Tail")
-	FVector2D WagAmplitude = FVector2D(9.f, 14.f);
+	FVector2D WagAmplitude = FVector2D(8.f, 12.f);
 	UPROPERTY(EditAnywhere, Category = "Tail")
-	FVector2D WagFrequency = FVector2D(0.6f, 1.6f);
+	FVector2D WagFrequency = FVector2D(0.38f, 0.85f);
 	/** The wag runs down the tail, the tip this far behind the root (radians). */
 	UPROPERTY(EditAnywhere, Category = "Tail")
-	float WagDelay = 2.f;
+	float WagDelay = 1.45f;
 
 	/** Degrees the tail lifts at WagRunSpeed, plus a small bob with each step. */
 	UPROPERTY(EditAnywhere, Category = "Tail")
 	float RunLift = 14.f;
 	UPROPERTY(EditAnywhere, Category = "Tail")
-	float RunBob = 4.f;
+	float RunBob = 2.f;
 	UPROPERTY(EditAnywhere, Category = "Tail")
 	float WagRunSpeed = 600.f;
 
@@ -240,6 +339,33 @@ public:
 	const TArray<float>& GetTailSwing() const { return BoneSwing; }
 	const TArray<float>& GetTailLift() const { return BoneLift; }
 	const FRRAimFrame& GetAimFrame() const { return Aim; }
+	const FRRMeleeFrame& GetMeleeFrame() const { return Melee; }
+	/**
+	 * Round 97, the slash (Tripo text-to-motion "Sword Slash Attack" on the fox's Mixamo rig: its sweep is frames 12..22 of 47) played
+	 * from SlashFrom to SlashTo of its length (the wind-up and the recovery trimmed) over
+	 * SlashTime seconds after each swing, easing in and out; the guard eases in and out over GuardBlendTime.
+	 */
+	// (per combo blow, from their hand traces: 1st Tripo "Sword Slash Attack" right to left 12..22 of 47, 2nd "Backhand Slash
+	// Combo" its backhand left to right 27..36, 3rd "Diagonal Slash Strike" a low thrust rising up high right 9..27)
+	UPROPERTY(EditAnywhere, Category = "Sword")
+	float SlashFrom[3] = { 0.22f, 0.55f, 0.19f };
+	UPROPERTY(EditAnywhere, Category = "Sword")
+	float SlashTo[3] = { 0.52f, 0.79f, 0.58f };
+	/** The third blow (the finisher) takes this much longer. */
+	UPROPERTY(EditAnywhere, Category = "Sword")
+	float FinisherTimeShare = 1.25f;
+	UPROPERTY(EditAnywhere, Category = "Sword")
+	float SlashTime = 0.42f;
+	UPROPERTY(EditAnywhere, Category = "Sword")
+	float GuardBlendTime = 0.12f;
+	/** On guard, a shot knocked away plays the slash's blow this quickly over the guard (a parry). */
+	UPROPERTY(EditAnywhere, Category = "Sword")
+	float ParryTime = 0.28f;
+	/** The parry motion's flick, as a share of it ("Laser Sword Parry": up and in, frames 6..12 of 47, then back toward the guard). */
+	UPROPERTY(EditAnywhere, Category = "Sword")
+	float ParryFrom = 0.1f;
+	UPROPERTY(EditAnywhere, Category = "Sword")
+	float ParryTo = 0.4f;
 	float GetAimWeight() const { return Aim.Weight; }
 	float GetAimMoveWeight() const { return Aim.MoveWeight; }
 
@@ -253,6 +379,7 @@ private:
 	float SwingSpeed = 0.f;
 	float Lift = 0.f;
 	float WagPhase = 0.f;
+	float TailTime = 0.f, TailTrail = 0.f, TailPace = 0.f;
 	/** Fades the wag in and out (out once knocked out). */
 	float Life = 1.f;
 	bool bHasLast = false;
@@ -261,10 +388,15 @@ private:
 	TArray<float> BoneSwing;
 	TArray<float> BoneLift;
 	FRRAimFrame Aim;
+	bool bHasBodyHeading = false;
+	FVector LastBodyLocation = FVector::ZeroVector;
 	/** The run directions' mix, eased toward where the brawler is going. */
 	float TargetMoveWeights[4] = { 1.f, 0.f, 0.f, 0.f };
 
 	void UpdateAim(float DeltaSeconds);
+	/** Round 97: the light sword's layer (Melee) from the brawler's last swing and its guard. */
+	void UpdateMelee(float DeltaSeconds);
+	FRRMeleeFrame Melee;
 	/** The wing bones' turns for this frame (WingBends), from how the brawler is moving. */
 	void UpdateWings(float DeltaSeconds);
 	/** The flying pose's turns for this frame (FlightBends). */

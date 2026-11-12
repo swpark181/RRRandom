@@ -1,8 +1,10 @@
 # Runs inside a -game session (-ExecCmds="py <this>"): RR_SEQ is "seconds:command;..." from the start; "shot" takes a
 # HighResShot, "quit" quits, anything else is a console command for the player. Logs each step as GAMESEQ.
 # Driven by capture_game_seq.ps1 (round 71: riding checks for every animal friend, see the animal-friend skill).
-# Extras: nearmesh=<mesh part>[#n] (beside the nth vehicle with that mesh, 0 first), goto=x,y,yaw, walk=, bring=, place=,
+# Extras: nearmesh=<mesh part>[#n] (beside the nth vehicle with that mesh, 0 first), goto=x,y,yaw, gotoz=x,y,z,yaw, walk=, bring=, place=,
 # dump (brawlers and vehicles), mv, speed, z; "sidecam" fails in this engine version: use RRStudioCam instead.
+# Round 90-91: guncam=right|left|top|front,<dist> / guncam=body,<dist>,<yaw>,<height> (cameras on my held gun),
+# vehcam=<mesh part>,<yaw>,<dist>,<height> (round a parked vehicle), guncamoff / vehcamoff, fpsmark + fps=<label>.
 import os
 import time
 
@@ -30,6 +32,79 @@ def world():
     return found
 
 
+def veh_cam(w, pc):
+    # vehcam=<mesh part>,<yaw round from its front>,<distance>,<height>: every frame the studio camera's actor sits round
+    # the first vehicle with that mesh, looking at its middle (round 91: its lamps and paint)
+    v = state.get("vehcam")
+    if not v:
+        return
+    cam = state.get("cam_actor")
+    if cam is None:
+        unreal.SystemLibrary.execute_console_command(w, "RRStudioCam 0", pc)
+        unreal.SystemLibrary.execute_console_command(w, "RRStudioCamOff", pc)
+        cams = unreal.GameplayStatics.get_all_actors_of_class(w, unreal.CameraActor)
+        cam = cams[0] if cams else None
+        state["cam_actor"] = cam
+    target = state.get("vehcam_actor")
+    if target is None or not unreal.SystemLibrary.is_valid(target):
+        target = None
+        for a in unreal.GameplayStatics.get_all_actors_of_class(w, unreal.RRRandomVehicle):
+            if any(c.static_mesh and v[0] in c.static_mesh.get_name() for c in a.get_components_by_class(unreal.StaticMeshComponent)):
+                target = a
+                break
+        state["vehcam_actor"] = target
+    if not cam or not target:
+        return
+    middle = target.get_actor_location() + unreal.Vector(0.0, 0.0, 60.0)
+    yaw = target.get_actor_rotation().yaw + v[1]
+    pos = middle + unreal.MathLibrary.get_forward_vector(unreal.Rotator(0.0, 0.0, yaw)) * v[2] + unreal.Vector(0.0, 0.0, v[3])
+    cam.set_actor_location(pos, False, False)
+    cam.set_actor_rotation(unreal.MathLibrary.find_look_at_rotation(pos, middle), False)
+    if pc.get_view_target() != cam:
+        pc.set_view_target_with_blend(cam, 0.0)
+
+
+def gun_cam(w, pc):
+    # guncam=<side>,<distance>: every frame the studio camera's actor sits beside my held gun (side right, left, top or
+    # front of the gun itself), looking at the gun's middle, so the grip and the hand round it show (round 90 grip fitting)
+    g = state.get("guncam")
+    pawn = pc.get_controlled_pawn()
+    if not g or not pawn:
+        return
+    cam = state.get("cam_actor")
+    if cam is None:
+        unreal.SystemLibrary.execute_console_command(w, "RRStudioCam 0", pc)
+        unreal.SystemLibrary.execute_console_command(w, "RRStudioCamOff", pc)
+        cams = unreal.GameplayStatics.get_all_actors_of_class(w, unreal.CameraActor)
+        cam = cams[0] if cams else None
+        state["cam_actor"] = cam
+    guns = [c for c in pawn.get_components_by_class(unreal.StaticMeshComponent) if c.static_mesh and ("GunsR90" in c.static_mesh.get_path_name() or "Weapons97" in c.static_mesh.get_path_name())]
+    if not cam or not guns:
+        return
+    gun = guns[0]
+    xf = gun.get_world_transform()
+    middle = unreal.MathLibrary.transform_location(xf, unreal.Vector(30.0, 0.0, 25.0))
+    if g[0] == "body":
+        # guncam=body,<distance>,<yaw round from the front>,<height>: steady beside my animal friend (turning with it),
+        # looking at the gun
+        yaw = pawn.get_actor_rotation().yaw + g[2]
+        pos = pawn.get_actor_location() + unreal.MathLibrary.get_forward_vector(unreal.Rotator(0.0, 0.0, yaw)) * g[1] + unreal.Vector(0.0, 0.0, g[3])
+        # the camera stays level with the body, not the swinging gun: aim at a point between the gun and the chest
+        middle = middle * 0.7 + (pawn.get_actor_location() + unreal.Vector(0.0, 0.0, 10.0)) * 0.3
+        cam.set_actor_location(pos, False, False)
+        cam.set_actor_rotation(unreal.MathLibrary.find_look_at_rotation(pos, middle), False)
+        if pc.get_view_target() != cam:
+            pc.set_view_target_with_blend(cam, 0.0)
+        return
+    way = {"right": gun.get_right_vector(), "left": gun.get_right_vector() * -1.0, "top": gun.get_up_vector(),
+           "front": gun.get_forward_vector()}[g[0]]
+    pos = middle + way * g[1] + gun.get_up_vector() * (g[1] * 0.25 if g[0] != "top" else 0.0)
+    cam.set_actor_location(pos, False, False)
+    cam.set_actor_rotation(unreal.MathLibrary.find_look_at_rotation(pos, middle), False)
+    if pc.get_view_target() != cam:
+        pc.set_view_target_with_blend(cam, 0.0)
+
+
 def tick(dt):
     t = time.time() - start
     w = world()
@@ -38,6 +113,11 @@ def tick(dt):
     pc = unreal.GameplayStatics.get_player_controller(w, 0)
     if not pc or (not pc.get_controlled_pawn() and os.environ.get("RR_NOPAWN") != "1"):
         return
+    gun_cam(w, pc)
+    veh_cam(w, pc)
+    # fpsmark / fps=<label>: the average frame time since the mark (round 91, lighting costs)
+    state["fps_dt"] = state.get("fps_dt", 0.0) + dt
+    state["fps_n"] = state.get("fps_n", 0) + 1
     # walk=<x>,<y>,<seconds>: holds a movement input along world X/Y for a while
     if state.get("walk_until", 0) > t and pc.get_controlled_pawn():
         pc.get_controlled_pawn().add_movement_input(state["walk_dir"], 1.0, False)
@@ -104,6 +184,43 @@ def tick(dt):
                     pc.set_control_rotation(v.get_actor_rotation())
                     unreal.log(f"GAMESEQ near {v.get_name()} {loc}")
                     break
+        elif cmd.startswith("facecover="):
+            # Puts my animal friend this far from the nearest cover, facing it (facecover=1300): the star cars then park
+            # between, and the robot they make turns to face the cover
+            dist = float(cmd.split("=")[1])
+            pawn = pc.get_controlled_pawn()
+            here = pawn.get_actor_location()
+            covers = unreal.GameplayStatics.get_all_actors_of_class(w, unreal.RRRandomCover)
+            if covers:
+                near = min(covers, key=lambda c: (c.get_actor_location() - here).length())
+                at = near.get_actor_location()
+                way = unreal.Vector(at.x - here.x, at.y - here.y, 0.0)
+                way.normalize()
+                spot = unreal.Vector(at.x - way.x * dist, at.y - way.y * dist, here.z + 50.0)
+                yaw = unreal.MathLibrary.make_rot_from_x(way).yaw
+                pawn.set_actor_location(spot, False, True)
+                pawn.set_actor_rotation(unreal.Rotator(0.0, 0.0, yaw), True)
+                pc.set_control_rotation(unreal.Rotator(0.0, -15.0, yaw))
+                unreal.log(f"GAMESEQ facing cover {near.get_name()} at {at}")
+        elif cmd.startswith("front="):
+            # Stands the character with this name this far in front of the star robot, this far to its right
+            # (front=RRRandomCharacter_3,500,0)
+            name, ahead, side = (cmd.split("=")[1].split(",") + ["0"])[:3]
+            for r in unreal.GameplayStatics.get_all_actors_of_class(w, unreal.RRRandomStarRobot):
+                spot = r.get_actor_location() + r.get_actor_forward_vector() * float(ahead) + r.get_actor_right_vector() * float(side)
+                for c in unreal.GameplayStatics.get_all_actors_of_class(w, unreal.RRRandomCharacter):
+                    if c.get_name() == name:
+                        c.set_actor_location(spot + unreal.Vector(0.0, 0.0, 100.0), False, True)
+                        unreal.log(f"GAMESEQ in front {name}")
+        elif cmd.startswith("moveveh="):
+            # Moves the vehicle whose mesh name has this in it by (dx, dy), e.g. to split the star cars up so F rides one
+            # instead of combining them (moveveh=StarLegs,0,1500)
+            want, dx, dy = cmd.split("=")[1].split(",")
+            for v in unreal.GameplayStatics.get_all_actors_of_class(w, unreal.RRRandomVehicle):
+                if any(c.static_mesh and want in c.static_mesh.get_name() for c in v.get_components_by_class(unreal.StaticMeshComponent)):
+                    v.set_actor_location(v.get_actor_location() + unreal.Vector(float(dx), float(dy), 50.0), False, True)
+                    unreal.log(f"GAMESEQ moved {v.get_name()}")
+                    break
         elif cmd.startswith("walk="):
             x, y, secs = (float(v) for v in cmd.split("=")[1].split(","))
             state["walk_dir"] = unreal.Vector(x, y, 0.0)
@@ -120,6 +237,13 @@ def tick(dt):
             x, y, yaw = (float(v) for v in cmd.split("=")[1].split(","))
             pawn = pc.get_controlled_pawn()
             pawn.set_actor_location(unreal.Vector(x, y, 400.0), False, True)
+            pawn.set_actor_rotation(unreal.Rotator(0.0, 0.0, yaw), True)
+            pc.set_control_rotation(unreal.Rotator(0.0, -15.0, yaw))
+        elif cmd.startswith("gotoz="):
+            # Like goto, at a height (round 95: onto a hill top): gotoz=x,y,z,yaw
+            x, y, z, yaw = (float(v) for v in cmd.split("=")[1].split(","))
+            pawn = pc.get_controlled_pawn()
+            pawn.set_actor_location(unreal.Vector(x, y, z), False, True)
             pawn.set_actor_rotation(unreal.Rotator(0.0, 0.0, yaw), True)
             pc.set_control_rotation(unreal.Rotator(0.0, -15.0, yaw))
         elif cmd.startswith("place="):
@@ -146,6 +270,60 @@ def tick(dt):
                         c.get_controller().set_control_rotation(unreal.Rotator(0.0, -8.0, look.yaw))
                     pc.set_view_target_with_blend(c, 0.0)
                     unreal.log(f"GAMESEQ watching from {name} at {spot}")
+        elif cmd.startswith("frontcam="):
+            # Round 97: a fixed camera in front of my animal friend (ahead, to the side, up), looking back at it: its front,
+            # with what comes at it from ahead flying in past the camera (frontcam=520,180,110)
+            ahead, side, height = (float(v) for v in cmd.split("=")[1].split(","))
+            pawn = pc.get_controlled_pawn()
+            unreal.SystemLibrary.execute_console_command(w, "RRStudioCam 0", pc)
+            unreal.SystemLibrary.execute_console_command(w, "RRStudioCamOff", pc)
+            cams = unreal.GameplayStatics.get_all_actors_of_class(w, unreal.CameraActor)
+            if cams and pawn:
+                cam = cams[0]
+                base = pawn.get_actor_location()
+                spot = base + pawn.get_actor_forward_vector() * ahead + pawn.get_actor_right_vector() * side + unreal.Vector(0.0, 0.0, height)
+                cam.set_actor_location(spot, False, True)
+                cam.set_actor_rotation(unreal.MathLibrary.find_look_at_rotation(spot, base + unreal.Vector(0.0, 0.0, 20.0)), True)
+                pc.set_view_target_with_blend(cam, 0.0)
+                unreal.log(f"GAMESEQ frontcam at {spot}")
+        elif cmd.startswith("pathcam="):
+            # Round 97: a fixed camera beside the line ahead of my animal friend (side, height, ahead), looking at the spot that
+            # far ahead: frames me and a target in front of me together (pathcam=1100,250,450)
+            side, height, ahead = (float(v) for v in cmd.split("=")[1].split(","))
+            pawn = pc.get_controlled_pawn()
+            unreal.SystemLibrary.execute_console_command(w, "RRStudioCam 0", pc)
+            unreal.SystemLibrary.execute_console_command(w, "RRStudioCamOff", pc)
+            cams = unreal.GameplayStatics.get_all_actors_of_class(w, unreal.CameraActor)
+            if cams and pawn:
+                cam = cams[0]
+                base = pawn.get_actor_location()
+                fwd = pawn.get_actor_forward_vector()
+                right = pawn.get_actor_right_vector()
+                look = base + fwd * ahead
+                spot = look + right * side + unreal.Vector(0.0, 0.0, height)
+                cam.set_actor_location(spot, False, True)
+                cam.set_actor_rotation(unreal.MathLibrary.find_look_at_rotation(spot, look), True)
+                pc.set_view_target_with_blend(cam, 0.0)
+                unreal.log(f"GAMESEQ pathcam at {spot}")
+        elif cmd.startswith("guncam="):
+            parts = cmd.split("=")[1].split(",")
+            state["guncam"] = (parts[0],) + tuple(float(v) for v in parts[1:])
+        elif cmd.startswith("vehcam="):
+            parts = cmd.split("=")[1].split(",")
+            state["vehcam"] = (parts[0],) + tuple(float(x) for x in parts[1:])
+            state.pop("vehcam_actor", None)
+        elif cmd == "vehcamoff":
+            state.pop("vehcam", None)
+            pc.set_view_target_with_blend(pc.get_controlled_pawn(), 0.0)
+        elif cmd == "fpsmark":
+            state["fps_dt"], state["fps_n"] = 0.0, 0
+        elif cmd.startswith("fps="):
+            n = max(1, state.get("fps_n", 0))
+            ms = state.get("fps_dt", 0.0) / n * 1000.0
+            unreal.log(f"GAMESEQ fps {cmd.split('=')[1]} {1000.0 / max(ms, 0.001):.1f} fps ({ms:.2f} ms over {n} frames)")
+        elif cmd == "guncamoff":
+            state.pop("guncam", None)
+            pc.set_view_target_with_blend(pc.get_controlled_pawn(), 0.0)
         elif cmd == "maincam":
             pc.set_view_target_with_blend(pc.get_controlled_pawn(), 0.0)
         elif cmd == "mv":

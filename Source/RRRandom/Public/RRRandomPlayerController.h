@@ -135,6 +135,31 @@ public:
 	/** Rolls one stored die, as E does (console only, for scripted tests). */
 	UFUNCTION(Exec)
 	void RRRoll();
+	/** Round 97 (console, for scripted tests): rolls N dice one after another (a second apart); opens or closes the bag; switches
+	 * to a hand; picks a start spot (the get-ready time); upgrades all in the bag. */
+	UFUNCTION(Exec)
+	void RRRollMany(int32 Count = 30);
+	UFUNCTION(Exec)
+	void RRBag();
+	UFUNCTION(Exec)
+	void RRHand(int32 Hand = 1);
+	UFUNCTION(Exec)
+	void RRPickStart(int32 Spot = 0);
+	UFUNCTION(Exec)
+	void RRUpgradeAll();
+	/** Round 97 (console, for scripted tests): holds the light sword's guard this long, aimed at the nearest opponent. */
+	UFUNCTION(Exec)
+	void RRGuard(float Seconds = 3.f);
+	/** Round 97 (console, for tests): a gun of a type (RRGun's numbers) at a bag tier (0 common .. 3 legendary); the sights held on or off. */
+	UFUNCTION(Exec)
+	void RRGunTier(int32 Type = 7, int32 Tier = 0);
+	UFUNCTION(Exec)
+	void RRSights(int32 bOn = 1);
+	UFUNCTION(Server, Reliable)
+	void ServerGunTier(int32 Type, int32 Tier);
+	/** Round 97 (console, for scripted tests): the nearest opponent fires Count shots at me, a third of a second apart. */
+	UFUNCTION(Exec)
+	void RRIncoming(int32 Count = 6, float Distance = 900.f);
 
 	/** Presses F: rides, gets off, combines the star robot, gets in or out of it (console only, for scripted tests). */
 	UFUNCTION(Exec)
@@ -532,6 +557,20 @@ private:
 	void ServerCheatWin();
 	void OnCheatGun(int32 Type);
 
+	// Round 97, the battle royale's bag: Tab opens it (URRRandomLoadoutComponent, the HUD's panel: clicks put guns in the
+	// hands, combine them or throw them away), 1 and 2 switch hands; in the get-ready time a click on a spot of the full map
+	// (M) picks where my team wants to start
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> BagAction;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UInputAction>> HandActions;
+	void OnBag();
+	void OnHand(int32 Hand);
+public:
+	UFUNCTION(Server, Reliable)
+	void ServerPickStart(int32 Spot);
+private:
+
 	/** Seconds the view takes to blend to the results show. */
 	UPROPERTY(EditAnywhere, Category = "Results")
 	float ResultsBlendTime = 1.6f;
@@ -580,6 +619,8 @@ private:
 	void CenterMouse();
 	/** Third person: where the crosshair (the middle of the screen) points in the world. */
 	FVector GetCrosshairTarget() const;
+	/** Where I point: the crosshair over the shoulder, else the cursor on the ground (the light sword's deflects go there). */
+	FVector GetPointedTarget() const;
 	void OnMove(const FInputActionValue& Value);
 	void OnJump();
 	void OnStopJumping();

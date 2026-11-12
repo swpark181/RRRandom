@@ -10,6 +10,8 @@
 #include "RRRandomGameMode.h"
 #include "RRRandomGameState.h"
 #include "RRRandomOracle.h"
+#include "RRRandomLoadout.h"
+#include "RRRandomUltimateMeteor.h"
 #include "RRRandomMeteor.h"
 #include "RRRandomOre.h"
 #include "RRRandomProjectile.h"
@@ -21,6 +23,12 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "HAL/IConsoleManager.h"
 #include "NavigationSystem.h"
+
+namespace
+{
+	// Tests (round 95: do bots take a big hill's flights?): "x y z" sends every battle royale bot there instead of its own goal
+	TAutoConsoleVariable<FString> CVarBotTestGoal(TEXT("rr.BotTestGoal"), TEXT(""), TEXT("Battle royale bots all head for this spot, \"x y z\" (tests; empty: their own goals)."));
+}
 
 namespace
 {
@@ -195,6 +203,28 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		Self->StopJumping();
 		return;
 	}
+	// The battle royale's get-ready time (round 97): no fighting; the bot stands at its team's place on the plaza rolling its
+	// thirty weapon dice one after another, and keeps its bag in order as the guns come in
+	if (Self && ARRRandomGameState::IsPrep(this))
+	{
+		Self->StopJumping();
+		StopMovement();
+		if (Self->IsAlive())
+		{
+			DiceTimer -= DeltaSeconds;
+			if (DiceTimer <= 0.f && Self->GetDiceBuffs()->RollDice())
+			{
+				DiceTimer = Stream.FRandRange(0.3f, 1.2f);
+			}
+			URRRandomLoadoutComponent* Bag = Self->GetLoadout();
+			if (Bag && Bag->GetAddCount() != SeenBagAdds && !Self->GetDiceBuffs()->IsRolling())
+			{
+				SeenBagAdds = Bag->GetAddCount();
+				Bag->AutoManage();
+			}
+		}
+		return;
+	}
 	if (!Self || !Self->IsAlive())
 	{
 		Opponent = nullptr;
@@ -272,6 +302,12 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	if (bBattle)
 	{
 		PatrolGoal = bHasBattleGoal ? BattleGoal : Self->GetActorLocation();
+		TArray<FString> TestGoal;
+		CVarBotTestGoal.GetValueOnGameThread().ParseIntoArrayWS(TestGoal);
+		if (TestGoal.Num() == 3)
+		{
+			PatrolGoal = FVector(FCString::Atof(*TestGoal[0]), FCString::Atof(*TestGoal[1]), FCString::Atof(*TestGoal[2]));
+		}
 	}
 	else if (!Opponent.IsValid() && LastSeenTimer <= 0.f && bHasArenaCenter
 		&& (PatrolTimer <= 0.f || FVector::Dist2D(Self->GetActorLocation(), PatrolGoal) <= ArenaCenterArriveRadius))
@@ -339,6 +375,25 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	ShotTimer -= DeltaSeconds;
 
 	UpdateReload(Self, bCanSee && Distance <= Self->GetAttackRange());
+	// The light sword (round 97): shot at from further than a swing reaches, on guard (while focus lasts) to send the shots back
+	// at the shooter; down again up close (to swing) or out of focus
+	if (Self->GetWeapon().bSword && Target && bCanSee)
+	{
+		const bool bWant = Distance > FRRWeapon::SwordReach * 1.6f && UnderFireTimer > 0.f
+			&& Self->GetDeflectFocus() >= (Self->IsDeflecting() ? 0.3f : 1.5f);
+		if (bWant != Self->IsDeflecting())
+		{
+			Self->SetDeflecting(bWant, Target->GetActorLocation());
+		}
+		else if (bWant)
+		{
+			Self->SetDeflectAim(Target->GetActorLocation());
+		}
+	}
+	else if (Self->IsDeflecting())
+	{
+		Self->SetDeflecting(false, SelfLocation);
+	}
 	UpdateDice(Self, Distance, DeltaSeconds);
 	UpdateFlight(Self, Distance, DeltaSeconds);
 
@@ -1310,6 +1365,22 @@ void ARRRandomAIController::UpdateDice(ARRRandomCharacter* Self, float Distance,
 	{
 		return;
 	}
+	// The battle royale's bag (round 97): a new gun sorted into the hands, and the close gun in hand up close (not too often)
+	if (URRRandomLoadoutComponent* Bag = Self->GetLoadout(); Bag && Bag->IsInUse())
+	{
+		if (Bag->GetAddCount() != SeenBagAdds)
+		{
+			SeenBagAdds = Bag->GetAddCount();
+			Bag->AutoManage();
+		}
+		HandTimer -= DeltaSeconds;
+		const int32 Want = Bag->ChooseHandFor(Distance);
+		if (Want != Bag->GetActiveHand() && HandTimer <= 0.f)
+		{
+			Bag->SelectHand(Want);
+			HandTimer = 1.5f;
+		}
+	}
 	URRRandomDiceBuffComponent* Dice = Self->GetDiceBuffs();
 	if (Dice->GetCharges() <= 0)
 	{
@@ -1353,6 +1424,14 @@ namespace
 	constexpr float RoamTimeMin = 18.f;
 	constexpr float RoamTimeMax = 30.f;
 	constexpr float RoamArrive = 400.f;
+	// Round 96: now and then (this share of the roaming spots) a hill's top this near and inside the ring instead, held this
+	// long (the way there included)
+	constexpr float HillGoalChance = 0.4f;
+	constexpr float HillGoalReach = 7000.f;
+	constexpr float HillHoldMin = 35.f;
+	constexpr float HillHoldMax = 55.f;
+	// Round 97: the ultimate die's meteor is worth this long a way
+	constexpr float UltimateGoalReach = 8000.f;
 	// Rides for the long ways: a cannon this near whose pad cuts the way by this much at least; a plane station this
 	// near for a way this long; looked for this often
 	constexpr float CannonWalk = 2500.f;
@@ -1381,6 +1460,7 @@ void ARRRandomAIController::UpdateBattleGoal(const ARRRandomCharacter* Self, flo
 	if (!Zone || !Battle || Zone->GetPhase() <= 0)
 	{
 		bHasBattleGoal = false;
+		bHillGoal = false;
 		bRingUrgent = false;
 		return;
 	}
@@ -1403,6 +1483,7 @@ void ARRRandomAIController::UpdateBattleGoal(const ARRRandomCharacter* Self, flo
 		{
 			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s dodges the oracle's meteors (%.0f to go)."), *Self->GetName(), FVector2D::Distance(Here, Dodge));
 		}
+		bHillGoal = false;
 		bRingUrgent = false;
 		bHasBattleGoal = true;
 		BattleGoal = FVector(Dodge, FloorZ);
@@ -1438,6 +1519,7 @@ void ARRRandomAIController::UpdateBattleGoal(const ARRRandomCharacter* Self, flo
 		{
 			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s heads into the ring (%.0f to go)."), *Self->GetName(), FVector2D::Distance(Here, Spot));
 		}
+		bHillGoal = false;
 		bRingUrgent = true;
 		bHasBattleGoal = true;
 		BattleGoal = FVector(Spot, FloorZ);
@@ -1445,13 +1527,62 @@ void ARRRandomAIController::UpdateBattleGoal(const ARRRandomCharacter* Self, flo
 		return;
 	}
 	bRingUrgent = false;
+	// Round 97: the ultimate die's meteor, landing or landed in reach, for a bot that can take it
+	const ARRRandomUltimateMeteor* Meteor = ARRRandomUltimateMeteor::Get(this);
+	if (Meteor && ARRRandomUltimateMeteor::CanTake(Self) && Meteor->GetTimeToImpact() < 2.f
+		&& FVector2D::Distance(Here, FVector2D(Meteor->GetActorLocation())) < UltimateGoalReach)
+	{
+		if (!bUltimateGoal)
+		{
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s heads for the ultimate die (%.0f away)."), *Self->GetName(), FVector2D::Distance(Here, FVector2D(Meteor->GetActorLocation())));
+		}
+		bUltimateGoal = true;
+		bHillGoal = false;
+		bHasBattleGoal = true;
+		BattleGoal = Meteor->GetActorLocation();
+		BattleGoalTimer = 2.f;
+		return;
+	}
+	if (bUltimateGoal)
+	{
+		bUltimateGoal = false;
+		bHasBattleGoal = false;
+	}
 	// Roaming inside it: a spot not far off, drawn a little toward the ring's middle, kept inside the ring that matters
-	if (bHasBattleGoal && BattleGoalTimer > 0.f && FVector2D::Distance(Here, FVector2D(BattleGoal)) > RoamArrive)
+	// (a hill's top: kept till its time is up, there or on the way)
+	if (bHasBattleGoal && BattleGoalTimer > 0.f && (bHillGoal || FVector2D::Distance(Here, FVector2D(BattleGoal)) > RoamArrive))
 	{
 		return;
 	}
+	bHillGoal = false;
 	const FVector2D KeepCenter = bSoon ? Next : Center;
 	const float KeepRadius = (bSoon ? NextRadius : Radius) * RingInsideShare;
+	// Round 96: now and then a hill's top in reach and inside the ring (one of them at random: the floor under a pavilion's
+	// roof or the deck on it), to hold for a while
+	if (Stream.FRand() < HillGoalChance)
+	{
+		TArray<FVector, TInlineAllocator<8>> Tops;
+		for (TActorIterator<ARRRandomDiceTown> It(GetWorld()); It; ++It)
+		{
+			for (const FVector& Top : It->GetHillTops())
+			{
+				if (FVector2D::Distance(Here, FVector2D(Top)) < HillGoalReach && FVector2D::Distance(FVector2D(Top), KeepCenter) <= KeepRadius)
+				{
+					Tops.Add(Top);
+				}
+			}
+		}
+		if (Tops.Num() > 0)
+		{
+			const FVector Top = Tops[Stream.RandHelper(Tops.Num())];
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s heads for a hill's top (%.0f away, %.0f up)."), *Self->GetName(), FVector2D::Distance(Here, FVector2D(Top)), Top.Z - FloorZ);
+			bHillGoal = true;
+			bHasBattleGoal = true;
+			BattleGoal = Top;
+			BattleGoalTimer = Stream.FRandRange(HillHoldMin, HillHoldMax);
+			return;
+		}
+	}
 	FVector2D Spot = Here;
 	for (int32 Try = 0; Try < 12; ++Try)
 	{

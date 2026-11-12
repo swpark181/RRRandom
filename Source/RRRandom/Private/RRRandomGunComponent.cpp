@@ -1,5 +1,8 @@
 #include "RRRandomGunComponent.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomEffects.h"
+#include "Misc/PackageName.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
@@ -75,8 +78,42 @@ namespace
 		{ TEXT("/Game/Props/GunsR90/SM_Rifle.SM_Rifle"), 42.f, FVector(82.f, 0.f, 38.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator },
 		{ TEXT("/Game/Props/GunsR90/SM_Blaster.SM_Blaster"), 38.f, FVector(75.f, 0.f, 39.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator },
 		{ TEXT("/Game/Props/GunsR90/SM_Cannon.SM_Cannon"), 44.f, FVector(74.f, -1.f, 33.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator },
+		// Round 97 (Midjourney concepts in Tripo: A-3 orchid, B-1 peach, C-7 sky blue; Smart Mesh; blender_guns_r90.py; tip and
+		// grip as it reported): the sniper, the shotgun, the light sword (its
+		// hilt at the origin, the blade along +X). Until a model is in, FallbackLooks stands in.
+		{ TEXT("/Game/Props/Weapons97/SM_Sniper.SM_Sniper"), 54.f, FVector(83.f, -1.f, 7.f), FVector(-7.f, 0.f, 7.f), FRotator::ZeroRotator },
+		{ TEXT("/Game/Props/Weapons97/SM_Shotgun.SM_Shotgun"), 44.f, FVector(90.f, -11.f, 18.f), FVector(-1.f, 0.f, 14.f), FRotator::ZeroRotator },
+		{ TEXT("/Game/Props/Weapons97/SM_LightSword.SM_LightSword"), 72.f, FVector(82.f, -1.f, 0.f), FVector(-9.f, 0.f, 5.f), FRotator::ZeroRotator },
 	};
-	const TCHAR* GunNames[] = { TEXT("PISTOL"), TEXT("SMG"), TEXT("MINIGUN"), TEXT("RIFLE"), TEXT("BLASTER"), TEXT("CANNON") };
+	const TCHAR* GunNames[] = { TEXT("PISTOL"), TEXT("SMG"), TEXT("MINIGUN"), TEXT("RIFLE"), TEXT("BLASTER"), TEXT("CANNON"), TEXT("SNIPER"), TEXT("SHOTGUN"), TEXT("SWORD") };
+	/** A look whose model isn't in yet shows another's: the sniper the rifle, the shotgun the blaster, the sword the pistol. */
+	const int32 FallbackLooks[] = { 0, 1, 2, 3, 4, 5, 3, 4, 0 };
+	/**
+	 * The light sword's strokes (round 97): each blow of a combo this long (the third a quarter longer, as its body motion),
+	 * along its own arc in the body's frame, yaw (right +) and pitch (up +) at the start and the end of the sweep:
+	 * 1st right to left across the chest, 2nd back left to right a little higher, 3rd rising from low right up to high left.
+	 */
+	constexpr float SwordStrokeTime = 0.42f;
+	struct FSwordArc
+	{
+		float YawFrom;
+		float YawTo;
+		float PitchFrom;
+		float PitchTo;
+	};
+	const FSwordArc SwordArcs[] =
+	{
+		{ 80.f, -80.f, -8.f, -8.f },
+		{ -80.f, 80.f, 6.f, 6.f },
+		{ 45.f, -35.f, -50.f, 60.f },
+	};
+	/** Round 97: how much longer the blade grows at the middle of a stroke, and how long a parry's flick lasts. */
+	constexpr float SwordStretch = 0.45f;
+	constexpr float ParrySwingTime = 0.28f;
+	/** The blade's glowing core (round 97): along this much of the 100-long sword mesh, this thick (at normal size). */
+	constexpr float BladeStart = 12.f;
+	constexpr float BladeEnd = 80.f;
+	constexpr float BladeGlowWidth = 9.f;
 
 	/** The species' hand fixes as set live with RRGunHand (over FRRSpeciesLook's), until the game ends. */
 	TMap<int32, TPair<FVector, FRotator>> LiveHandFixes;
@@ -142,7 +179,8 @@ URRRandomGunComponent::URRRandomGunComponent()
 	for (const FRRGunLook& Look : GunLooks)
 	{
 		UStaticMesh* Mesh = nullptr;
-		if (Look.Path)
+		// (a model not made yet is left out quietly: round 97's until they are imported)
+		if (Look.Path && FPackageName::DoesPackageExist(FString(Look.Path).Left(FString(Look.Path).Find(TEXT(".")))))
 		{
 			ConstructorHelpers::FObjectFinderOptional<UStaticMesh> Finder(Look.Path);
 			Mesh = Finder.Get();
@@ -176,6 +214,7 @@ void URRRandomGunComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	}
 	if (!bShow)
 	{
+		UpdateBladeGlow(false, 1.f);
 		return;
 	}
 
@@ -188,7 +227,11 @@ void URRRandomGunComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	}
 	// The gun's own model (the rifle when its model is missing), or the foam finger
 	const bool bFinger = Brawler->GetWeapon().bFoamFinger && FoamFingerMesh;
-	const int32 Kind = static_cast<int32>(Brawler->GetWeapon().GetHitEffect());
+	int32 Kind = Brawler->GetWeapon().GetLookIndex();
+	if (!(GunMeshes.IsValidIndex(Kind) && GunMeshes[Kind]) && Kind < UE_ARRAY_COUNT(FallbackLooks))
+	{
+		Kind = FallbackLooks[Kind];
+	}
 	const bool bOwnLook = !bFinger && GunMeshes.IsValidIndex(Kind) && GunMeshes[Kind];
 	UStaticMesh* WantedMesh = bFinger ? FoamFingerMesh.Get() : (bOwnLook ? GunMeshes[Kind].Get() : RifleMesh.Get());
 	if (GetStaticMesh() != WantedMesh)
@@ -256,6 +299,124 @@ void URRRandomGunComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		}
 		HandLocation = Palm + Actor.TransformVectorNoScale(HoldOffset) * Size * (1.f - Stance);
 	}
+	// The LIGHT SWORD (round 97). The body motions (URRRandomBodyAnimInstance) move the arm; the blade itself is kept on a
+	// clean arc round the hand, so it reads as one sweeping stroke whatever the motion's wrist does:
+	// - each blow of the combo its own arc (SwordArcs): a short wind-up, a fast sweep, a follow-through, then back to the hold;
+	// - a parry on guard meets the shot where it reaches the blade (ParryPoint) and follows through toward the aim (where the
+	//   holder faces: it sends the shot there);
+	// - on guard between parries, the blade held level along the raised forearm, across the chest, pointing left.
+	// A glowing pink streak follows the tip through every stroke; the blade stretches out through it (SwordStretch).
+	const bool bSword = Brawler->GetWeapon().bSword;
+	const bool bTwoHanded = bSword && Brawler->HasDedicatedSwordMotion() && !Brawler->IsClimbing();
+	bool bSwinging = false;
+	float BladeStretch = 1.f;
+	// 0 .. 1 into a stroke (a parry's too: the guard gives way to it)
+	float StrokeWeight = 0.f;
+	bool bParryStroke = false;
+	if (bSword && !bTwoHanded)
+	{
+		const float SinceSwing = Brawler->GetTimeSinceShot();
+		const float SinceParry = Brawler->GetTimeSinceDeflect();
+		bParryStroke = Brawler->IsDeflecting() || SinceParry < SinceSwing;
+		const float Since = bParryStroke ? SinceParry : SinceSwing;
+		const int32 Step = FMath::Clamp(Brawler->GetComboStep(), 0, 2);
+		const float StrokeTime = bParryStroke ? ParrySwingTime : Brawler->GetSwordAttackDuration();
+		if (Since >= 0.f && Since < StrokeTime)
+		{
+			bSwinging = Since < StrokeTime;
+			const float Share = FMath::Clamp(Since / StrokeTime, 0.f, 1.f);
+			BladeStretch = 1.f + SwordStretch * FMath::Sin(PI * Share);
+			const FQuat Facing = Actor.GetRotation();
+			// The arc in the body's frame: yaw (right +) and pitch (up +), from the start to the end of the sweep
+			float YawFrom, YawTo, PitchFrom, PitchTo;
+			if (bParryStroke)
+			{
+				// Toward the shot (where it meets the blade), in the body's frame; through it, on round to the aim (ahead)
+				FVector ToShot = Facing.UnrotateVector(Brawler->GetParryPoint() - HandLocation);
+				if (ToShot.IsNearlyZero())
+				{
+					ToShot = FVector::ForwardVector;
+				}
+				const FRotator Shot = ToShot.Rotation();
+				const float Way = FMath::Abs(Shot.Yaw) < 20.f ? -1.f : -FMath::Sign(Shot.Yaw);
+				YawFrom = Shot.Yaw - Way * 50.f;
+				YawTo = FMath::Abs(Shot.Yaw) < 20.f ? Shot.Yaw + Way * 45.f : Way * 25.f;
+				PitchFrom = FMath::Clamp(Shot.Pitch, -30.f, 40.f) + 15.f;
+				PitchTo = 0.f;
+			}
+			else
+			{
+				const FSwordArc& Arc = SwordArcs[Step];
+				YawFrom = Arc.YawFrom;
+				YawTo = Arc.YawTo;
+				PitchFrom = Arc.PitchFrom;
+				PitchTo = Arc.PitchTo;
+			}
+			// A short wind-up held at the start, the sweep fast through the middle, the follow-through easing out
+			const float Sweep = FMath::SmoothStep(0.08f, 0.62f, Share);
+			const FRotator Along(FMath::Lerp(PitchFrom, PitchTo, Sweep), FMath::Lerp(YawFrom, YawTo, Sweep), 0.f);
+			const FVector Blade = Facing.RotateVector(Along.Vector());
+			const FQuat Stroke = FRotationMatrix::MakeFromXZ(Blade, Facing.GetUpVector()).ToQuat();
+			StrokeWeight = FMath::Min(1.f, Share / 0.08f) * FMath::Min(1.f, (1.f - Share) / 0.25f);
+			HandRotation = FQuat::Slerp(HandRotation, Stroke, StrokeWeight);
+			const FVector BladeTip = HandLocation + HandRotation.RotateVector(Tip * FVector(BladeStretch, 1.f, 1.f)) * Length / 100.f * Size;
+			if (bSwinging && bSwordTipKnown && DeltaTime > 0.f)
+			{
+				if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+				{
+					Effects->StarTail(LastSwordTip, BladeTip, 18.f * Size, 160.f * Size, FLinearColor(1.f, 0.45f, 0.85f), DeltaTime);
+				}
+			}
+			LastSwordTip = BladeTip;
+		}
+	}
+	// On guard (deflecting), like a laser-sword duellist: the blade held level along the raised forearm across the chest,
+	// pointing left and a little ahead and up, jolting up at each shot it turns away; giving way to each parry's stroke. The
+	// sword stays in the hand (the guard motion raises the arm)
+	GuardBlend = FMath::FInterpConstantTo(GuardBlend, bSword && Brawler->IsDeflecting() ? 1.f : 0.f, DeltaTime, 7.f);
+	if (bSword && !bTwoHanded && GuardBlend > 0.f)
+	{
+		const FQuat Facing = Actor.GetRotation();
+		const float Jolt = FMath::Max(0.f, 1.f - Brawler->GetTimeSinceDeflect() / 0.18f);
+		const float Breath = 0.03f * FMath::Sin(GetWorld()->GetTimeSeconds() * 2.4f);
+		const FVector Blade = (-Facing.GetRightVector() * 0.95f + Facing.GetForwardVector() * 0.22f + Facing.GetUpVector() * (0.14f + Breath + 0.35f * Jolt)).GetSafeNormal();
+		const FQuat Guard = FRotationMatrix::MakeFromXZ(Blade, Facing.GetUpVector()).ToQuat();
+		const float Weight = FMath::InterpEaseInOut(0.f, 1.f, GuardBlend, 2.f) * (1.f - (bParryStroke ? StrokeWeight : 0.f));
+		HandRotation = FQuat::Slerp(HandRotation, Guard, Weight);
+	}
+	if (bTwoHanded)
+	{
+		// Both palms are solved onto one hilt by the body layer. Follow those palms;
+		// an independent cosmetic sword arc would break the two-handed grip.
+		const FVector LeftPalm = Body->GetBoneIndex(TEXT("LeftHandIndex1")) != INDEX_NONE
+			? (Body->GetBoneLocation(LeftHandBone) + Body->GetBoneLocation(TEXT("LeftHandIndex1"))) * 0.5f
+			: Body->GetBoneLocation(LeftHandBone);
+		const FVector Blade = (Palm - LeftPalm).GetSafeNormal();
+		if (!Blade.IsNearlyZero())
+		{
+			HandRotation = FRotationMatrix::MakeFromXZ(Blade, Actor.GetRotation().GetUpVector()).ToQuat();
+			// Right fist near the emitter, left fist toward the pommel. Re-anchor AFTER
+			// choosing the rotation so the handle cannot orbit away from either hand.
+			HandLocation = Palm - HandRotation.RotateVector(FVector(-3.75f, 0.f, 5.f)) * Length / 100.f * Size;
+		}
+		const bool bParryTrail = Brawler->GetTimeSinceDeflect() < ARRRandomCharacter::DedicatedParryDuration
+			&& (Brawler->IsDeflecting() || Brawler->GetTimeSinceDeflect() < Brawler->GetTimeSinceShot());
+		bSwinging = (Brawler->GetTimeSinceShot() < Brawler->GetSwordAttackDuration() && !Brawler->IsDeflecting()) || bParryTrail;
+		const FVector BladeTip = HandLocation + HandRotation.RotateVector(Tip) * Length / 100.f * Size;
+		const float TipSpeed = DeltaTime > 0.f ? FVector::Dist(LastSwordTip, BladeTip) / DeltaTime : 0.f;
+		if (bSwinging && bSwordTipKnown && TipSpeed > 180.f * Size)
+		{
+			if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+			{
+				const float SpeedShare = FMath::Clamp(TipSpeed / (900.f * Size), 0.f, 1.f);
+				Effects->StarTail(LastSwordTip, BladeTip, FMath::Lerp(2.f, 7.f, SpeedShare) * Size,
+					FMath::Lerp(30.f, 85.f, SpeedShare) * Size, FLinearColor(1.f, 0.45f, 0.85f), DeltaTime);
+			}
+		}
+		LastSwordTip = BladeTip;
+	}
+	bSwordTipKnown = bSwinging;
+
 	if (CVarGunDebug.GetValueOnGameThread() > 0)
 	{
 		DrawDebugPoint(GetWorld(), Palm, 10.f, FColor::Red);
@@ -286,7 +447,9 @@ void URRRandomGunComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	// Its size, with the spit of the latest shot on top (a quick gun's each shorter: about its time between shots)
 	const FVector BaseScale(Length / 100.f * Size);
 	const float SpitTime = FMath::Clamp(Brawler->GetWeapon().FireIntervalMultiplier * SpitShare, SpitMinTime, SpitMaxTime);
-	SetWorldScale3D(BaseScale * GetSpitScale(Brawler->GetTimeSinceShot(), SpitTime));
+	// (a sword swings, it doesn't spit)
+	SetWorldScale3D(bSword ? BaseScale * FVector(BladeStretch, 1.f, 1.f) : BaseScale * GetSpitScale(Brawler->GetTimeSinceShot(), SpitTime));
+	UpdateBladeGlow(bSword, BladeStretch);
 
 	// Settled in the aiming pose: remember where this gun's muzzle is, from the brawler, for the shots
 	// (ARRRandomCharacter::ShootAt), so they leave the barrel even when the first one comes before the pose does
@@ -314,4 +477,66 @@ FVector URRRandomGunComponent::GetAimMuzzleOffset() const
 		return Brawler ? Brawler->GetMuzzleOffset() : FVector::ZeroVector;
 	}
 	return AimMuzzle * Brawler->GetActorScale3D().Z;
+}
+
+void URRRandomGunComponent::UpdateBladeGlow(bool bShow, float Stretch)
+{
+	// Round 97: the light sword's glowing core along its blade, like a laser sword's (a see-through glowing rod over the
+	// toy blade, stretching with it; pulsing a little brighter while on guard)
+	if (!bShow)
+	{
+		if (BladeGlow)
+		{
+			BladeGlow->SetVisibility(false);
+		}
+		return;
+	}
+	if (!BladeGlow && GetOwner())
+	{
+		BladeGlow = NewObject<UStaticMeshComponent>(GetOwner(), TEXT("BladeGlow"));
+		BladeGlow->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder")));
+		BladeGlow->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		BladeGlow->SetCanEverAffectNavigation(false);
+		BladeGlow->SetCastShadow(false);
+		BladeGlow->SetUsingAbsoluteLocation(true);
+		BladeGlow->SetUsingAbsoluteRotation(true);
+		BladeGlow->SetUsingAbsoluteScale(true);
+		BladeGlow->SetupAttachment(this);
+		BladeGlow->RegisterComponent();
+		if (UMaterialInterface* Glass = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/MeteorRush/M_MRGlass.M_MRGlass")))
+		{
+			BladeGlowMaterial = UMaterialInstanceDynamic::Create(Glass, this);
+			BladeGlowMaterial->SetVectorParameterValue(TEXT("Tint"), FLinearColor(0.45f, 0.9f, 1.f));
+			BladeGlowMaterial->SetScalarParameterValue(TEXT("EdgeOpacity"), 0.2f);
+			BladeGlowMaterial->SetScalarParameterValue(TEXT("Glow"), 6.f);
+			BladeGlow->SetMaterial(0, BladeGlowMaterial);
+		}
+	}
+	if (!BladeGlow)
+	{
+		return;
+	}
+	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetOwner());
+	const FTransform& Gun = GetComponentTransform();
+	const FVector From = Gun.TransformPosition(FVector(BladeStart, 0.f, 0.f));
+	const FVector To = Gun.TransformPosition(FVector(BladeEnd, 0.f, 0.f));
+	const float Long = FVector::Dist(From, To);
+	if (Long < 1.f)
+	{
+		BladeGlow->SetVisibility(false);
+		return;
+	}
+	const float Size = Brawler ? Brawler->GetActorScale3D().Z : 1.f;
+	const float Width = BladeGlowWidth * Size * (1.f + 0.25f * (Stretch - 1.f));
+	// (the engine cylinder is 100 across and 100 tall, round its middle, along its Z)
+	BladeGlow->SetWorldLocationAndRotation((From + To) * 0.5f, FRotationMatrix::MakeFromZ(To - From).ToQuat());
+	BladeGlow->SetWorldScale3D(FVector(Width / 100.f, Width / 100.f, Long / 100.f));
+	BladeGlow->SetOwnerNoSee(bOwnerNoSee);
+	BladeGlow->SetVisibility(IsVisible());
+	if (BladeGlowMaterial)
+	{
+		const float Now = GetWorld()->GetTimeSeconds();
+		const bool bGuard = Brawler && Brawler->IsDeflecting();
+		BladeGlowMaterial->SetScalarParameterValue(TEXT("Opacity"), (bGuard ? 0.55f : 0.4f) + 0.08f * FMath::Sin(Now * (bGuard ? 18.f : 6.f)) + 0.15f * (Stretch - 1.f));
+	}
 }

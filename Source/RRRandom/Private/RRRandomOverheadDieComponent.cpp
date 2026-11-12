@@ -135,10 +135,12 @@ void URRRandomOverheadDieComponent::TickComponent(float DeltaTime, ELevelTick Ti
 	const URRRandomDiceBuffComponent* Dice = Brawler ? Brawler->GetDiceBuffs() : nullptr;
 	// Turned toward this machine's own view, so each player reads the face head-on
 	const APlayerCameraManager* Camera = UGameplayStatics::GetPlayerCameraManager(this, 0);
+	const ARRRandomCharacter* Viewer = Cast<ARRRandomCharacter>(UGameplayStatics::GetPlayerPawn(this, 0));
+	const bool bFriendly = Brawler && Viewer && Brawler->GetTeam() == Viewer->GetTeam();
 	const float Age = Dice ? Dice->GetTimeSinceLastRoll() : UE_BIG_NUMBER;
 	const float SpinTime = Dice ? Dice->GetSpinTime() : 0.f;
-	// (an invisible opponent rolls unseen)
-	if (!Dice || !Camera || !Brawler->IsAlive() || Age >= SpinTime + HoldTime + ExitTime || Brawler->GetKit()->IsCloakedOnThisScreen())
+	// The floating roll/result is status information too; only this screen's own team sees it.
+	if (!bFriendly || !Dice || !Camera || !Brawler->IsAlive() || Age >= SpinTime + HoldTime + ExitTime || Brawler->GetKit()->IsCloakedOnThisScreen())
 	{
 		if (IsVisible())
 		{

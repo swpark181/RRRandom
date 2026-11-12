@@ -2,6 +2,7 @@
 #include "RRRandomCannon.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomDiceTown.h"
+#include "RRRandomDefense.h"
 #include "RRRandomGameState.h"
 #include "RRRandomMapFloor.h"
 #include "RRRandomOracle.h"
@@ -42,6 +43,8 @@ namespace
 	// Where the teams start: a ring this share of the island's radius out, each start on open ground near its spot
 	constexpr float StartRingShare = 0.62f;
 	constexpr float StartClear = 260.f;
+	// Round 97: the teams' places on the plaza during the get-ready time, this far round its middle
+	constexpr float PlazaStartRadius = 1050.f;
 
 	// The rides spread over the map: about this many of each per tile of ground; cannons shoot this far toward the middle
 	constexpr float BikesPerTile = 0.55f;
@@ -63,6 +66,72 @@ namespace
 	float TileSize()
 	{
 		return RRBattle::TileCells * 100.f;
+	}
+
+	// A landing must have a broad, level surface, clear space above it and no railing through the pad.
+	bool FindRaisedLanding(const ARRRandomBattleMap& Map, const FVector& Anchor, FVector& Out)
+	{
+		UWorld* World = Map.GetWorld();
+		const float Floor = Map.GetFloorZ();
+		const ARRRandomDiceTown* Tile = Map.GetTileAt(FVector2D(Anchor));
+		if (!Tile) { return false; }
+		const float Top = Tile->GetTileFlightTop();
+		const FCollisionQueryParams Params(SCENE_QUERY_STAT(BRLanding), false);
+		for (int32 Ring = 0; Ring <= 5; ++Ring)
+		{
+			const int32 Steps = Ring ? Ring * 8 : 1;
+			for (int32 I = 0; I < Steps; ++I)
+			{
+				const float Angle = 2.f * PI * I / Steps;
+				const FVector XY = Anchor + FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.f) * (Ring * 200.f);
+				FHitResult Center;
+				if (!World->LineTraceSingleByChannel(Center, FVector(XY.X, XY.Y, Top), FVector(XY.X, XY.Y, Floor + 500.f), ECC_Visibility, Params)
+					|| Center.ImpactNormal.Z < 0.98f || Center.ImpactPoint.Z > Floor + 2500.f) { continue; }
+				const FVector Spot = Center.ImpactPoint;
+				bool bFlat = true;
+				for (int32 X = -1; X <= 1 && bFlat; ++X)
+				{
+					for (int32 Y = -1; Y <= 1 && bFlat; ++Y)
+					{
+						const FVector Sample = Spot + FVector(X * 260.f, Y * 260.f, 0.f);
+						FHitResult Hit;
+						bFlat = World->LineTraceSingleByChannel(Hit, Sample + FVector(0.f, 0.f, 350.f), Sample - FVector(0.f, 0.f, 60.f), ECC_Visibility, Params)
+							&& Hit.ImpactNormal.Z > 0.98f && FMath::Abs(Hit.ImpactPoint.Z - Spot.Z) < 15.f;
+					}
+				}
+				if (!bFlat || World->OverlapBlockingTestByChannel(Spot + FVector(0.f, 0.f, 155.f), FQuat::Identity, ECC_Pawn,
+					FCollisionShape::MakeBox(FVector(250.f, 250.f, 140.f)), Params)) { continue; }
+				Out = Spot;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool IsRampRouteClear(const ARRRandomBattleMap& Map, const FVector& Foot, const FVector& To, const FVector& Forward, float Length)
+	{
+		// A straight, wide 10 m run-up, including space to board the parked motorcycle.
+		for (float Along = -1000.f; Along <= Length; Along += 250.f)
+		{
+			FVector Ground;
+			const FVector Want = Foot + Forward * Along;
+			if (!RRBattle::IsOnBattleIsland(Map.GetActorLocation(), Map.GetReach(), Want)
+				|| !Map.FindOpenGround(FVector2D(Want), 220.f, 0.f, Ground)) { return false; }
+		}
+		constexpr float HalfHeight = 110.f;
+		const FVector Start = Foot + Forward * (Length * 0.8f) + FVector(0.f, 0.f, ARRRandomJumpRamp::Rise * 0.8f + HalfHeight + 5.f);
+		const FVector End = To + FVector(0.f, 0.f, HalfHeight + 5.f);
+		const float Gravity = 1960.f; // Gravity changes time/speed, not this trajectory's shape.
+		float Time;
+		const FVector Velocity = ARRRandomJumpRamp::GetLandingVelocity(Start, End, Gravity, Time);
+		const auto At = [&](float T) { return Start + Velocity * T - FVector(0.f, 0.f, 0.5f * Gravity * T * T); };
+		const FCollisionShape Capsule = FCollisionShape::MakeCapsule(90.f, HalfHeight);
+		const FCollisionQueryParams Params(SCENE_QUERY_STAT(BRRampArc), false);
+		for (int32 I = 0; I < 60; ++I)
+		{
+			if (Map.GetWorld()->SweepTestByChannel(At(Time * I / 60.f), At(Time * (I + 1) / 60.f), FQuat::Identity, ECC_Pawn, Capsule, Params)) { return false; }
+		}
+		return true;
 	}
 }
 
@@ -349,6 +418,141 @@ void ARRRandomBattleMap::GetTeamStarts(int32 TeamCount, TArray<FVector>& OutStar
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: battle map team starts:%s."), *List);
 }
 
+void ARRRandomBattleMap::GetStartSpots(TArray<FVector>& OutSpots) const
+{
+	OutSpots.Reset();
+	const FVector2D Center(GetActorLocation().X, GetActorLocation().Y);
+	for (int32 Y = -Reach; Y <= Reach; ++Y)
+	{
+		for (int32 X = -Reach; X <= Reach; ++X)
+		{
+			if (X == 0 && Y == 0)
+			{
+				continue;
+			}
+			const FVector2D Want = Center + FVector2D(X, Y) * TileSize();
+			FVector Spot;
+			if (RRBattle::IsOnBattleIsland(GetActorLocation(), Reach, FVector(Want, 0.f)) && FindOpenGround(Want, StartClear, 3000.f, Spot)
+				&& RRBattle::IsOnBattleIsland(GetActorLocation(), Reach, Spot))
+			{
+				OutSpots.Add(Spot);
+			}
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: battle map start spots: %d."), OutSpots.Num());
+}
+
+void ARRRandomBattleMap::GetPlazaStarts(int32 TeamCount, TArray<FVector>& OutStarts) const
+{
+	OutStarts.Reset();
+	const FVector2D Center(GetActorLocation().X, GetActorLocation().Y);
+	for (int32 Team = 0; Team < TeamCount; ++Team)
+	{
+		const float Theta = UE_TWO_PI * Team / FMath::Max(1, TeamCount);
+		const FVector2D Want = Center + FVector2D(FMath::Cos(Theta), FMath::Sin(Theta)) * PlazaStartRadius;
+		FVector Spot;
+		if (!FindOpenGround(Want, 220.f, 700.f, Spot))
+		{
+			Spot = FVector(Want, GetFloorZ());
+		}
+		OutStarts.Add(Spot);
+	}
+}
+
+void ARRRandomBattleMap::SpawnHighRoutes(int32 DesiredEach, int32& OutCannons, int32& OutRamps, int32& OutBikes)
+{
+	struct FLanding { FVector Spot; const ARRRandomDiceTown* Tile; bool bHill; };
+	TArray<FLanding> Landings;
+	for (const TWeakObjectPtr<ARRRandomDiceTown>& WeakTile : Tiles)
+	{
+		const ARRRandomDiceTown* Tile = WeakTile.Get();
+		if (!Tile) { continue; }
+		for (int32 Kind = 0; Kind < 2; ++Kind)
+		{
+			for (const FVector& Anchor : Kind == 0 ? Tile->GetHillTops() : Tile->GetBigBuildingSpots())
+			{
+				FVector Spot;
+				if (FindRaisedLanding(*this, Anchor, Spot)
+					&& !Landings.ContainsByPredicate([&](const FLanding& Other) { return FVector::Dist2D(Spot, Other.Spot) < 1000.f; }))
+				{
+					Landings.Add({Spot, Tile, Kind == 0});
+				}
+			}
+		}
+	}
+	FRandomStream Order(Seed + 177013);
+	for (int32 I = Landings.Num() - 1; I > 0; --I) { Landings.Swap(I, Order.RandRange(0, I)); }
+	TArray<FVector> UsedStarts, UsedLandings;
+	for (int32 Type = 0; Type < 2; ++Type)
+	{
+		TSet<const ARRRandomDiceTown*> UsedTiles;
+		int32& Count = Type == 0 ? OutCannons : OutRamps;
+		for (int32 Kind = 0; Kind < 2; ++Kind)
+		{
+			const int32 Want = Kind == 0 ? FMath::DivideAndRoundUp(DesiredEach, 2) : DesiredEach;
+			for (const FLanding& Landing : Landings)
+			{
+				if (Count >= Want) { break; }
+				if (Landing.bHill != (Kind == 0) || UsedTiles.Contains(Landing.Tile)
+					|| UsedLandings.ContainsByPredicate([&](const FVector& Used) { return FVector::Dist2D(Used, Landing.Spot) < 1000.f; })) { continue; }
+				bool bPlaced = false;
+				const int32 Turn = Order.RandRange(0, 3);
+				for (float Distance : {2600.f, 3400.f, 4200.f})
+				{
+					for (int32 Direction = 0; Direction < 8 && !bPlaced; ++Direction)
+					{
+						const float Yaw = 90.f * (Direction % 4 + Turn) + (Direction >= 4 ? 45.f : 0.f);
+						const FVector WantFrom = Landing.Spot - FRotator(0.f, Yaw, 0.f).Vector() * Distance;
+						FVector From;
+						if (!FindOpenGround(FVector2D(WantFrom), 300.f, 400.f, From)
+							|| !RRBattle::IsOnBattleIsland(GetActorLocation(), Reach, From)
+							|| UsedStarts.ContainsByPredicate([&](const FVector& Used) { return FVector::Dist2D(Used, From) < 2200.f; })) { continue; }
+						const FVector Forward = (Landing.Spot - From).GetSafeNormal2D();
+						const FTransform Transform(Forward.Rotation(), From);
+						AActor* Route = nullptr;
+						if (Type == 0)
+						{
+							if (!ARRRandomCannon::IsLaunchClear(GetWorld(), From, Landing.Spot)) { continue; }
+							Route = ARRRandomCannon::SpawnSet(GetWorld(), From, Landing.Spot, OutCannons);
+						}
+						else
+						{
+							constexpr float RampLength = 500.f;
+							if (!IsRampRouteClear(*this, From, Landing.Spot, Forward, RampLength)) { continue; }
+							ARRRandomJumpRamp* Ramp = GetWorld()->SpawnActorDeferred<ARRRandomJumpRamp>(ARRRandomJumpRamp::StaticClass(), Transform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+							if (!Ramp) { continue; }
+							Ramp->SetupLanding(RampLength, Landing.Spot);
+							Ramp->FinishSpawning(Transform);
+							Route = Ramp;
+							const FTransform BikeAt(Forward.Rotation(), From - Forward * 750.f);
+							if (ARRRandomVehicle* Bike = GetWorld()->SpawnActorDeferred<ARRRandomVehicle>(ARRRandomVehicle::StaticClass(), BikeAt, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+							{
+								Bike->SetKind(ERRVehicleKind::Motorbike);
+								Bike->Tags.Add(TEXT("BR_RampBike"));
+								Bike->FinishSpawning(BikeAt);
+								++OutBikes;
+							}
+						}
+						if (!Route) { continue; }
+						Route->Tags.Add(Type == 0 ? FName(TEXT("BR_HighCannon")) : FName(TEXT("BR_HighRamp")));
+						Route->Tags.Add(Landing.bHill ? FName(TEXT("BR_Hill")) : FName(TEXT("BR_Roof")));
+						UsedStarts.Add(From);
+						UsedLandings.Add(Landing.Spot);
+						UsedTiles.Add(Landing.Tile);
+						UE_LOG(LogTemp, Log, TEXT("RRRandom: BR high route %s %d to %s tile (%d,%d): %s -> %s, gain %.0f."),
+							Type == 0 ? TEXT("cannon") : TEXT("ramp"), Count, Landing.bHill ? TEXT("hill") : TEXT("roof"),
+							Landing.Tile->GetBattleTile().X, Landing.Tile->GetBattleTile().Y, *From.ToCompactString(), *Landing.Spot.ToCompactString(), Landing.Spot.Z - From.Z);
+						++Count;
+						bPlaced = true;
+					}
+					if (bPlaced) { break; }
+				}
+			}
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: BR elevated access: %d clear destinations, %d cannons, %d ramps, %d approach bikes."), Landings.Num(), OutCannons, OutRamps, OutBikes);
+}
+
 void ARRRandomBattleMap::SpawnRides()
 {
 	UWorld* World = GetWorld();
@@ -374,8 +578,10 @@ void ARRRandomBattleMap::SpawnRides()
 		return Center;
 	};
 
+	// Give high ground deliberate approaches before scattering the remaining rides.
+	int32 Cannons = 0, Ramps = 0, Rides = 0;
+	SpawnHighRoutes(FMath::Max(2, FMath::RoundToInt(GroundTiles * 0.24f)), Cannons, Ramps, Rides);
 	// Kickboards, motorbikes and cars along the avenues and streets
-	int32 Rides = 0;
 	struct FKindCount
 	{
 		ERRVehicleKind Kind;
@@ -402,7 +608,6 @@ void ARRRandomBattleMap::SpawnRides()
 	}
 
 	// Human cannons: one-way, toward the middle (where the ring of safe ground ends up, sooner or later)
-	int32 Cannons = 0;
 	const int32 WantCannons = FMath::Max(2, FMath::RoundToInt(CannonsPerTile * GroundTiles));
 	for (int32 Try = 0; Try < WantCannons * 4 && Cannons < WantCannons; ++Try)
 	{
@@ -459,8 +664,8 @@ void ARRRandomBattleMap::SpawnRides()
 		}
 		++StarSets;
 	}
-	UE_LOG(LogTemp, Log, TEXT("RRRandom: battle map rides (%.1f tiles of ground): %d kickboards/motorbikes/cars, %d cannons, %d plane stations, %d star robot sets."),
-		GroundTiles, Rides, Cannons, Stations, StarSets);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: battle map rides (%.1f tiles of ground): %d kickboards/motorbikes/cars, %d cannons, %d elevated jump ramps, %d plane stations, %d star robot sets."),
+		GroundTiles, Rides, Cannons, Ramps, Stations, StarSets);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -838,7 +1043,7 @@ void ARRRandomBattleZone::Tick(float DeltaSeconds)
 
 void ARRRandomBattleZone::HurtOutside()
 {
-	if (ARRRandomGameState::IsPlayLocked(this))
+	if (ARRRandomGameState::IsAttackLocked(this))
 	{
 		return;
 	}

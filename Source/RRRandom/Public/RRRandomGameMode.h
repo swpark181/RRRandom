@@ -37,6 +37,8 @@ public:
 	virtual void StartPlay() override;
 	virtual APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot) override;
 	virtual void Logout(AController* Exiting) override;
+	/** Drops its timers: the timer manager is the game instance's and outlives this map (a quit or a map change). */
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/** Called by a brawler when it is knocked out. Attacker may be null; bFell when it fell off the arena. */
 	void OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRandomCharacter* Attacker, bool bFell = false);
@@ -69,6 +71,10 @@ public:
 	int32 GetTeamCount() const { return bBattleRoyale ? BattleTeamCount : 2; }
 	/** Cheat (RRZone): the ring skips ahead. */
 	void CheatZone();
+	/** The battle royale's get-ready time (round 97): a player's team wants to start at this spot (ARRRandomGameState::GetStartSpots). */
+	void PickTeamStart(AController* Who, int32 Spot);
+	/** The get-ready time, in seconds (-RRBRPrep=N; 0 skips it and starts as before round 97). */
+	static constexpr float DefaultPrepTime = 180.f;
 
 protected:
 	/** Seconds of countdown once the arena has loaded before anybody can move or shoot. */
@@ -223,6 +229,25 @@ private:
 	void SetUpBattleRoyale();
 	/** Moves every brawler already in (the host's own, placed as it logged in) to its team's start. */
 	void PlaceTeamsAtStarts();
+	/**
+	 * Round 97, the get-ready time: everyone starts on the middle plaza (TeamStarts round it), kept there (KeepOnPlaza); when it
+	 * ends the teams roll (RollTeamStarts: three dice each, the highest sum gets its pick first, the rest the nearest free spot
+	 * to theirs) and at play start every team appears at its spot (DeployTeams).
+	 */
+	void KeepOnPlaza();
+	void RollTeamStarts();
+	void DeployTeams();
+	/** Where the plaza is (the map's middle), how far from it the get-ready time lets anyone go, and how far apart two teams start. */
+	FVector PlazaCenter = FVector::ZeroVector;
+	static constexpr float PlazaReach = 2300.f;
+	static constexpr float StartSpotGap = 3000.f;
+	FTimerHandle PrepTimer;
+	FTimerHandle RollTimer;
+	FTimerHandle DeployTimer;
+	FRandomStream PrepStream;
+	/** Round 97: the ultimate dice falling one at a time (ARRRandomUltimateMeteor::UpdateSky), and when the next is due. */
+	FTimerHandle SkyTimer;
+	float NextUltimateDrop = 0.f;
 	/** Counts who is still standing; a team with nobody left is placed; one team left wins. */
 	void UpdateBattleStanding(ARRRandomCharacter* Victim);
 	/** A player joining a battle royale under way takes a standing bot's place (where it stands), or watches. */

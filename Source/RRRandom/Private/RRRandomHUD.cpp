@@ -154,6 +154,9 @@ void ARRRandomHUD::DrawHUD()
 	if (State && State->IsBattleRoyale())
 	{
 		DrawOracle(Viewer);
+		// Round 97: the get-ready time, the team roll, the ultimate die's meteor
+		DrawPrep(*State, Viewer);
+		DrawUltimateMeteor(Viewer);
 	}
 	DrawOnlinePanel();
 	if (Viewer)
@@ -169,6 +172,9 @@ void ARRRandomHUD::DrawHUD()
 			}
 			DrawRidePrompt(*Viewer);
 			DrawCrosshair(*Viewer);
+			DrawScope(*Viewer);
+			DrawHands(*Viewer);
+			DrawDeflectFocus(*Viewer);
 		}
 		else if (State && State->IsBattleRoyale())
 		{
@@ -187,6 +193,15 @@ void ARRRandomHUD::DrawHUD()
 	DrawOreFeedback(Viewer);
 	// Last, so the full-screen map covers the rest
 	DrawMinimap(Viewer);
+	// The bag's panel over it all (round 97)
+	if (bBagOpen && Viewer)
+	{
+		DrawBag(*Viewer);
+	}
+	else
+	{
+		BagHits.Reset();
+	}
 
 	const ARRRandomPlayerController* Controller = Cast<ARRRandomPlayerController>(PlayerOwner);
 	if (Controller && Controller->IsPauseMenuOpen())
@@ -214,8 +229,12 @@ void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRand
 	{
 		return;
 	}
-	DrawDamagePopups(Brawler, Viewer);
-	// An invisible opponent (the fox's own die) has nothing over it but the numbers of hits on it
+	const bool bIsAlly = Viewer && Brawler.GetTeam() == Viewer->GetTeam();
+	if (bIsAlly)
+	{
+		DrawDamagePopups(Brawler, Viewer);
+	}
+	// Cloaking and fog still hide the identity label as well as status information.
 	if (!Brawler.IsAlive() || Brawler.GetKit()->IsCloakedOnThisScreen())
 	{
 		return;
@@ -231,14 +250,25 @@ void ARRRandomHUD::DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRand
 
 	const float S = UIScale;
 	const bool bIsViewer = &Brawler == Viewer;
-	const bool bIsAlly = Viewer && Brawler.GetTeam() == Viewer->GetTeam();
 	const float BarWidth = HealthBarWidth * S;
 	const float Left = Head.X - BarWidth * 0.5f;
 	const float Top = Head.Y - OverheadLift * S;
 
-	// Health: a thin rounded bar, mint for the player, sky for allies, pink for opponents, with the number above it
+	// Opponents expose identity only: no health, damage numbers, equipment, dice or power/buff information.
+	// An absent viewer never grants access to a team's status information.
+	if (!bIsAlly)
+	{
+		const FString Label = FString::Printf(TEXT("T%d  %s"), Brawler.GetTeam() + 1, *CharacterLabel(Brawler, Viewer));
+		const float Size = 11.f * S;
+		const FVector2D Box = RRUI::MeasureText(Label, Size, EWeight::ExtraBold);
+		RRUI::DrawGlowText(Canvas, Label, FVector2D(Head.X - Box.X * 0.5f, Top - Box.Y), Size, EWeight::ExtraBold, RRUI::PinkDeep);
+		DrawFriendOrFoeMarker(Head.X, Top + 4.f * S, RRUI::PinkDeep);
+		return;
+	}
+
+	// Teammates' health: mint for the player, sky for allies, with the number above it.
 	const float HealthShare = FMath::Clamp(Brawler.GetHealth() / FMath::Max(1.f, Brawler.GetMaxHealth()), 0.f, 1.f);
-	const FLinearColor HealthColor = bIsViewer ? RRUI::MintDeep : (bIsAlly ? RRUI::SkyDeep : RRUI::PinkDeep);
+	const FLinearColor HealthColor = bIsViewer ? RRUI::MintDeep : RRUI::SkyDeep;
 	const FBox2D BarRect(FVector2D(Left, Top), FVector2D(Left + BarWidth, Top + HealthBarHeight * S));
 	RRUI::DrawPill(Canvas, BarRect.ExpandBy(FMath::Max(1.f, S)), WithAlpha(RRUI::Ink, 0.22f));
 	RRUI::DrawBar(Canvas, BarRect, HealthShare, Track, HealthColor);
@@ -1120,7 +1150,7 @@ void ARRRandomHUD::DrawOnlinePanel()
 #if !UE_BUILD_SHIPPING
 	RRUI::DrawGlowText(Canvas, TEXT("CHEATS · CTRL+0 STAR CARS · CTRL+8 CLASH TEST · F6 WIN · F7 GIANT · F8 FLY · F9 3RD PERSON · F10 GOD · U ULTIMATE DIE"), FVector2D(Left, Y), Size, EWeight::ExtraBold, RRUI::InkSoft, Tracking);
 	Y += Step;
-	RRUI::DrawGlowText(Canvas, TEXT("1-7 GUNS · PISTOL MINIGUN SMG RIFLE BLASTER CANNON FINGER"), FVector2D(Left, Y), Size, EWeight::ExtraBold, RRUI::InkSoft, Tracking);
+	RRUI::DrawGlowText(Canvas, ARRRandomGameState::IsBattleRoyale(this) ? TEXT("CTRL+1-9 GUNS · 1 2 HANDS · TAB BAG") : TEXT("1-9 GUNS · PISTOL MINIGUN SMG RIFLE BLASTER CANNON SNIPER SHOTGUN SWORD"), FVector2D(Left, Y), Size, EWeight::ExtraBold, RRUI::InkSoft, Tracking);
 	Y += Step;
 #endif
 	if (!Sessions->GetStatus().IsEmpty())
@@ -1985,7 +2015,7 @@ void ARRRandomHUD::DrawCrosshair(const ARRRandomCharacter& Brawler)
 {
 	const ARRRandomPlayerController* Controller = Cast<ARRRandomPlayerController>(GetOwningPlayerController());
 	// At the wheel the gun is put away: nothing to aim
-	if (!Controller || Brawler.IsDriving())
+	if (!Controller || Brawler.IsDriving() || Brawler.GetScopeBlend() > 0.5f)
 	{
 		MuzzleBlockedBlend = 0.f;
 		return;
@@ -2093,12 +2123,17 @@ void ARRRandomHUD::DrawStarRobot(const ARRRandomCharacter* Viewer, const ARRRand
 	const float S = UIScale;
 	const float Now = World->GetTimeSeconds();
 
-	// No robot yet: over the team's gathered cars, a pulsing sign
+	// The entire combine interaction, including the stars and sign, belongs only to a viewer who can use it now.
 	if (!Robot)
 	{
+		if (!Viewer || !Viewer->IsLocallyControlled() || !ARRRandomStarRobot::CanStartCombine(Viewer))
+		{
+			return;
+		}
 		ARRRandomVehicle* Cars[3];
 		FVector Center;
-		if (!ARRRandomStarRobot::FindGathered(this, Viewer ? Viewer->GetTeam() : 0, Cars, Center))
+		// Select the same nearby set as the actual interaction, rather than the set nearest the HUD actor's origin.
+		if (!ARRRandomStarRobot::FindGathered(Viewer, Viewer->GetTeam(), Cars, Center))
 		{
 			return;
 		}
@@ -2128,10 +2163,7 @@ void ARRRandomHUD::DrawStarRobot(const ARRRandomCharacter* Viewer, const ARRRand
 		const FString Sub = TEXT("READY TO COMBINE");
 		const FVector2D SubBox = RRUI::MeasureText(Sub, SubSize, EWeight::ExtraBold, SubSize * 0.15f);
 		RRUI::DrawText(Canvas, Sub, FVector2D(Middle.X - SubBox.X * 0.5f, Middle.Y + TitleBox.Y * 0.3f), SubSize, EWeight::ExtraBold, RRUI::Ink, SubSize * 0.15f);
-		if (Viewer && ARRRandomStarRobot::CanStartCombine(Viewer))
-		{
-			DrawKeyPrompt(Canvas, TEXT("COMBINE!"), Middle.X, Middle.Y + 56.f * S, S, RRUI::Ink);
-		}
+		DrawKeyPrompt(Canvas, TEXT("COMBINE!"), Middle.X, Middle.Y + 56.f * S, S, RRUI::Ink);
 		return;
 	}
 

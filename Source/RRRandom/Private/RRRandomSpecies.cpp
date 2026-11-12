@@ -154,6 +154,7 @@ const TArray<FRRSpeciesLook>& FRRSpeciesLook::GetAll()
 
 		FRRSpeciesLook& Look = Looks.AddDefaulted_GetRef();
 		Look.Mesh = Find<USkeletalMesh>(FString::Printf(TEXT("%sSK_%s.SK_%s"), *Folder, *Name, *Name));
+		Look.FurMesh = Find<USkeletalMesh>(FString::Printf(TEXT("%sSK_%sFur.SK_%sFur"), *Folder, *Name, *Name));
 		Look.Material = Find<UMaterialInterface>(FString::Printf(TEXT("%sM_%s.M_%s"), *Folder, *Name, *Name));
 		Look.Idle = Anim(TEXT("Idle"));
 		Look.Walk = Anim(TEXT("Walk"));
@@ -184,6 +185,24 @@ const TArray<FRRSpeciesLook>& FRRSpeciesLook::GetAll()
 		Look.Aim.Move[1] = Anim(TEXT("AimRunB"));
 		Look.Aim.Move[2] = Anim(TEXT("AimRunL"));
 		Look.Aim.Move[3] = Anim(TEXT("AimRunR"));
+		Look.SwordSlash = Anim(TEXT("SwordSlash"));
+		Look.SwordGuard = Anim(TEXT("SwordGuard"));
+		Look.SwordSlash2 = Anim(TEXT("SwordSlash2"));
+		Look.SwordSlash3 = Anim(TEXT("SwordSlash3"));
+		Look.SwordParry = Anim(TEXT("SwordParry"));
+		// Each playable rig gets its own retargeted copy of the connected phrase.
+		if (Species < RRSpecies::Count)
+		{
+			UAnimSequence* First = Anim(TEXT("SwordDedicated1"));
+			UAnimSequence* Second = Anim(TEXT("SwordDedicated2"));
+			UAnimSequence* Third = Anim(TEXT("SwordDedicated3"));
+			if (First && Second && Third)
+			{
+				Look.SwordSlash = First;
+				Look.SwordSlash2 = Second;
+				Look.SwordSlash3 = Third;
+			}
+		}
 		Look.MeshScale = Tuning.MeshScale;
 		Look.HipsHeight = Tuning.HipsHeight * Tuning.MeshScale;
 		Look.RideFit = Tuning.RideFit;

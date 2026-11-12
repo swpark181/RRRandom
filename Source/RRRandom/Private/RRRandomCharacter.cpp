@@ -25,6 +25,7 @@
 #include "RRRandomGameMode.h"
 #include "RRRandomGameState.h"
 #include "RRRandomKit.h"
+#include "RRRandomLoadout.h"
 #include "RRRandomMovementComponent.h"
 #include "RRRandomOre.h"
 #include "RRRandomOverheadDieComponent.h"
@@ -36,6 +37,7 @@
 #include "RRRandomDragonFlight.h"
 #include "RRRandomVehicle.h"
 #include "RRRandomWingsComponent.h"
+#include "RRRandomFurComponent.h"
 #include "Animation/AnimSequence.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -48,6 +50,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/RootMotionSource.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -61,6 +64,18 @@ namespace
 	constexpr float WalkAnimationThreshold = 10.f;
 	/** A CANNON's shell smashes the structures this close round where it hits (round 89). */
 	constexpr float CannonWreckRadius = 110.f;
+
+	bool IsInSwordGuardArc(const ARRRandomCharacter& Guard, const FVector& Position, const FVector& Velocity)
+	{
+		const FVector ToShot = Position - Guard.GetActorLocation();
+		const FVector Facing = Guard.GetActorForwardVector().GetSafeNormal2D();
+		const float MinDot = FMath::Cos(FMath::DegreesToRadians(ARRRandomCharacter::DeflectHalfAngle));
+		// A forward-travelling shot beside/behind the body is not inside the guard.
+		// Share this gate between anticipation, blade reach and body-hit deflection.
+		return FVector::DotProduct(ToShot.GetSafeNormal2D(), Facing) >= MinDot
+			&& FVector::DotProduct(-Velocity.GetSafeNormal2D(), Facing) >= MinDot
+			&& FVector::DotProduct(Velocity, ToShot) < 0.f;
+	}
 
 	// The body mesh's place on the capsule: feet at its bottom, turned to face +X
 	const FVector MeshFeet(0.f, 0.f, -96.f);
@@ -197,10 +212,17 @@ namespace
 	const FLinearColor AfterimageColor(1.f, 0.8f, 0.25f);
 	constexpr float HitFlashBrightness = 2.5f;
 	constexpr float HitFlashTime = 0.18f;
-	constexpr float HitBurstStrengths[] = { 1.f, 0.75f, 0.65f, 1.3f, 1.5f, 2.5f, 1.f, 2.5f };
+	// (round 97: then the sniper, the shotgun's pellets and the sword)
+	constexpr float HitBurstStrengths[] = { 1.f, 0.75f, 0.65f, 1.3f, 1.5f, 2.5f, 1.f, 2.5f, 2.f, 0.55f, 1.8f };
 	const FLinearColor HitBurstColors[] = { FLinearColor(1.f, 0.85f, 0.3f), FLinearColor(1.f, 0.6f, 0.25f), FLinearColor(1.f, 0.75f, 0.2f),
-		FLinearColor(0.4f, 0.8f, 1.f), FLinearColor(0.7f, 0.45f, 1.f), FLinearColor(1.f, 0.45f, 0.2f), FLinearColor(0.35f, 0.6f, 1.f), FLinearColor(0.8f, 0.6f, 1.f) };
+		FLinearColor(0.4f, 0.8f, 1.f), FLinearColor(0.7f, 0.45f, 1.f), FLinearColor(1.f, 0.45f, 0.2f), FLinearColor(0.35f, 0.6f, 1.f), FLinearColor(0.8f, 0.6f, 1.f),
+		FLinearColor(0.5f, 1.f, 0.85f), FLinearColor(1.f, 0.7f, 0.35f), FLinearColor(1.f, 0.45f, 0.85f) };
 	constexpr float SightsSpeed = 14.f;
+	// Round 97, the sniper's scope: eased in this fast, the camera at the eyes (this high over the middle, at normal size),
+	// the body hidden from this screen past this far in
+	constexpr float ScopeSpeed = 12.f;
+	constexpr float ScopeEyeHeight = 45.f;
+	constexpr float ScopeHideAt = 0.6f;
 	// The 90 degree camera 1400 away that this replaces; the arm grows so the same stretch of arena fits on screen
 	constexpr float FramingFieldOfView = 90.f;
 	constexpr float FramingArmLength = 1400.f;
@@ -329,6 +351,9 @@ ARRRandomCharacter::ARRRandomCharacter(const FObjectInitializer& ObjectInitializ
 	// Both bodies have their feet at the bottom of the capsule and face +X after this turn
 	USkeletalMeshComponent* BodyMesh = GetMesh();
 	BodyMesh->SetRelativeLocationAndRotation(MeshFeet, MeshTurn);
+	// Shell fur following the body's pose (only the species with SK_<Name>Fur get a mesh in it, UseLook)
+	Fur = CreateDefaultSubobject<URRRandomFurComponent>(TEXT("Fur"));
+	Fur->SetupAttachment(BodyMesh);
 	const bool bFox = SpeciesLooks.IsValidIndex(RRSpecies::Fox) && SpeciesLooks[RRSpecies::Fox].IsUsable();
 	if (bFox)
 	{
@@ -361,6 +386,8 @@ ARRRandomCharacter::ARRRandomCharacter(const FObjectInitializer& ObjectInitializ
 	OreCarry = CreateDefaultSubobject<URRRandomOreCarryComponent>(TEXT("OreCarry"));
 	OreCarry->SetupAttachment(RootComponent);
 	Kit = CreateDefaultSubobject<URRRandomKitComponent>(TEXT("Kit"));
+	// Round 97: the battle royale's bag of guns and two hands
+	Loadout = CreateDefaultSubobject<URRRandomLoadoutComponent>(TEXT("Loadout"));
 	OverheadDie = CreateDefaultSubobject<URRRandomOverheadDieComponent>(TEXT("OverheadDie"));
 	OverheadDie->SetupAttachment(RootComponent);
 	Wings = CreateDefaultSubobject<URRRandomWingsComponent>(TEXT("Wings"));
@@ -379,6 +406,10 @@ void ARRRandomCharacter::UseLook(const FRRSpeciesLook& Look)
 	USkeletalMeshComponent* BodyMesh = GetMesh();
 	BodyMesh->SetSkeletalMeshAsset(Look.Mesh);
 	BodyMesh->SetRelativeScale3D(FVector(Look.MeshScale));
+	if (Fur)
+	{
+		Fur->SetFur(Look.FurMesh, BodyMesh, Look.Material);
+	}
 	RideHipsHeight = Look.HipsHeight;
 	RideFit = Look.RideFit;
 	BodyBaseMaterial = Look.Material;
@@ -394,6 +425,12 @@ void ARRRandomCharacter::UseLook(const FRRSpeciesLook& Look)
 	VictoryAnimation = Look.Dances.Num() > 0 ? Look.Dances[0] : nullptr;
 	DefeatAnimations = Look.Slumps;
 	AimAnimations = Look.Aim;
+	SwordSlash = Look.SwordSlash;
+	SwordGuard = Look.SwordGuard;
+	SwordSlashes[0] = Look.SwordSlash;
+	SwordSlashes[1] = Look.SwordSlash2 ? Look.SwordSlash2.Get() : Look.SwordSlash.Get();
+	SwordSlashes[2] = Look.SwordSlash3 ? Look.SwordSlash3.Get() : Look.SwordSlash.Get();
+	SwordParry = Look.SwordParry;
 }
 
 void ARRRandomCharacter::SetSpecies(int32 NewSpecies)
@@ -591,8 +628,12 @@ void ARRRandomCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ARRRandomCharacter, Team);
 	DOREPLIFETIME(ARRRandomCharacter, Species);
 	DOREPLIFETIME_CONDITION(ARRRandomCharacter, bThirdPerson, COND_SkipOwner);
+	DOREPLIFETIME_CONDITION(ARRRandomCharacter, bAimingDownSights, COND_SkipOwner);
 	DOREPLIFETIME(ARRRandomCharacter, Health);
 	DOREPLIFETIME(ARRRandomCharacter, Weapon);
+	DOREPLIFETIME(ARRRandomCharacter, bDeflecting);
+	DOREPLIFETIME(ARRRandomCharacter, ComboStep);
+	DOREPLIFETIME_CONDITION(ARRRandomCharacter, DeflectFocus, COND_OwnerOnly);
 	DOREPLIFETIME(ARRRandomCharacter, Ammo);
 	DOREPLIFETIME(ARRRandomCharacter, bReloading);
 	DOREPLIFETIME_CONDITION(ARRRandomCharacter, ReloadRemaining, COND_OwnerOnly);
@@ -696,10 +737,17 @@ float ARRRandomCharacter::GetProjectileSpeed() const
 
 void ARRRandomCharacter::OnWeaponDie(int32 Face)
 {
-	if (bAlive)
+	if (!bAlive)
 	{
-		EquipWeapon(FRRWeapon::Roll(WeaponStream, Face, MaxAmmo));
+		return;
 	}
+	// The battle royale (round 97): into the bag, not straight into the hands
+	if (Loadout->IsInUse())
+	{
+		Loadout->AddRolled(Face);
+		return;
+	}
+	EquipWeapon(FRRWeapon::Roll(WeaponStream, Face, MaxAmmo));
 }
 
 void ARRRandomCharacter::OnGiantDie(int32 Face)
@@ -1010,9 +1058,27 @@ void ARRRandomCharacter::EquipWeapon(const FRRWeapon& NewWeapon)
 	ReloadRemaining = 0.f;
 }
 
+void ARRRandomCharacter::EquipWeaponWithAmmo(const FRRWeapon& NewWeapon, int32 InAmmo)
+{
+	EquipWeapon(NewWeapon);
+	if (InAmmo != INDEX_NONE)
+	{
+		Ammo = FMath::Clamp(InAmmo, 0, GetMaxAmmo());
+	}
+}
+
+void ARRRandomCharacter::DelayFire(float Seconds)
+{
+	NextFireTime = FMath::Max(NextFireTime, GetWorld()->GetTimeSeconds() + Seconds);
+}
+
 void ARRRandomCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (!bAlive || !Weapon.bSword || bDeflecting || IsDriving() || GetCharacterMovement()->IsFalling())
+	{
+		GetCharacterMovement()->RemoveRootMotionSource(FName(TEXT("SwordStep")));
+	}
 
 	UpdateDamagePopups(DeltaSeconds);
 	UpdateHitFlash(DeltaSeconds);
@@ -1046,6 +1112,24 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 		return;
 	}
 	UpdatePowerEffects(DeltaSeconds);
+	if (HasAuthority())
+	{
+		UpdateDeflect(DeltaSeconds);
+	}
+	// (on guard: the parry flick timed to meet the shots coming, on every screen; the server knocks them away at the blade)
+	if (bDeflecting && Weapon.bSword)
+	{
+		UpdateParryLook();
+		// On guard the body faces the aim (the holder's own machine for a player, the server for a bot): parries send shots there
+		if ((IsLocallyControlled() || (HasAuthority() && !IsPlayerControlled())) && !DeflectAim.IsNearlyZero())
+		{
+			FaceToward(DeflectAim);
+		}
+		if (HasAuthority())
+		{
+			DeflectInReach();
+		}
+	}
 	UpdateFormation(DeltaSeconds);
 	UpdateDashEffects(DeltaSeconds);
 	UpdateCannonRide(DeltaSeconds);
@@ -1176,6 +1260,7 @@ void ARRRandomCharacter::Jump()
 	const float Now = GetWorld()->GetTimeSeconds();
 	const bool bDoubleTap = bFlying && Now - JumpPressedTime <= DashDoubleTapTime;
 	JumpPressedTime = Now;
+	JumpPressedFeetZ = GetActorLocation().Z - GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
 	if (bDoubleTap && TryDash())
 	{
 		JumpPressedTime = -UE_BIG_NUMBER;
@@ -1220,7 +1305,8 @@ const AActor* ARRRandomCharacter::FindMap() const
 
 float ARRRandomCharacter::GetShotRange() const
 {
-	if (Weapon.bFoamFinger)
+	// (and a shotgun's pellets fizzle out at its attack range: round 97)
+	if (Weapon.bFoamFinger || Weapon.Pellets > 1)
 	{
 		return GetAttackRange();
 	}
@@ -1353,7 +1439,16 @@ bool ARRRandomCharacter::TryClimb()
 	FHitResult Top;
 	// (a defense villain only gets out of a crater: never up the castle wall)
 	const float ClimbHeight = IsVillain() ? VillainClimbHeight : MaxClimbHeight;
-	if (!World->LineTraceSingleByObjectType(Top, FVector(Over.X, Over.Y, FeetZ + ClimbHeight + 1.f), FVector(Over.X, Over.Y, FeetZ + MinClimbHeight), StaticOnly, Params)
+	// (round 96: over the feet where the jump began, while jumping: from a jump's top a climb reached over 3 m cliffs; and from
+	// open air only, a wall taller than the reach having the look-down start inside it)
+	const bool bJumping = GetCharacterMovement()->IsFalling() && World->GetTimeSeconds() - JumpPressedTime < ClimbJumpWindow;
+	const float ReachFromZ = bJumping ? FMath::Min(FeetZ, JumpPressedFeetZ) : FeetZ;
+	const FVector LookDown(Over.X, Over.Y, ReachFromZ + ClimbHeight + 1.f);
+	if (World->OverlapAnyTestByObjectType(LookDown, FQuat::Identity, StaticOnly, FCollisionShape::MakeSphere(2.f), Params))
+	{
+		return false;
+	}
+	if (!World->LineTraceSingleByObjectType(Top, LookDown, FVector(Over.X, Over.Y, FeetZ + MinClimbHeight), StaticOnly, Params)
 		|| Top.bStartPenetrating || Top.ImpactNormal.Z < GetCharacterMovement()->GetWalkableFloorZ())
 	{
 		return false;
@@ -1367,6 +1462,8 @@ bool ARRRandomCharacter::TryClimb()
 	}
 
 	const FVector WallFacing = (-Wall.ImpactNormal).GetSafeNormal2D();
+	UE_LOG(LogTemp, Verbose, TEXT("RRRandom: %s climbs from %s (feet) onto %s (wall normal %s, by %s)."), *GetName(), *FVector(Location.X, Location.Y, FeetZ).ToCompactString(),
+		*Top.ImpactPoint.ToCompactString(), *Wall.ImpactNormal.ToCompactString(), Top.GetComponent() ? *Top.GetComponent()->GetName() : TEXT("?"));
 	StartClimb(Destination, WallFacing);
 	if (!HasAuthority())
 	{
@@ -1516,11 +1613,12 @@ void ARRRandomCharacter::StopJumping()
 	}
 }
 
-void ARRRandomCharacter::StartRampLeap(float GravityMultiplier)
+void ARRRandomCharacter::StartRampLeap(float GravityMultiplier, bool bCushionedLanding)
 {
 	if (RampLeapGravity <= 0.f && GravityMultiplier > 0.f)
 	{
 		RampLeapGravity = GravityMultiplier;
+		bRampCushionedLanding = bCushionedLanding;
 		GetCharacterMovement()->GravityScale *= GravityMultiplier;
 	}
 }
@@ -1535,6 +1633,9 @@ void ARRRandomCharacter::Landed(const FHitResult& Hit)
 	{
 		GetCharacterMovement()->GravityScale /= RampLeapGravity;
 		RampLeapGravity = 0.f;
+		// The rooftop cushion absorbs the boost, so a rider can steer instead of skidding off the far edge.
+		if (bRampCushionedLanding) { GetCharacterMovement()->Velocity = GetCharacterMovement()->Velocity.GetClampedToMaxSize2D(250.f); }
+		bRampCushionedLanding = false;
 	}
 	if (HasAuthority())
 	{
@@ -1646,8 +1747,10 @@ void ARRRandomCharacter::UpdateWalkSpeed()
 	// The battle royale's cotton candy cloud: sticky, slower the deeper in (on foot or riding; every machine the same)
 	const ARRRandomBattleZone* Zone = ARRRandomGameState::IsBattleRoyale(this) ? ARRRandomBattleZone::Get(this) : nullptr;
 	const float CloudSpeed = Zone ? Zone->GetSpeedShareAt(GetActorLocation()) : 1.f;
+	// Round 97: light on its feet with the light sword in hand (on foot)
+	const float SwordSpeed = !Vehicle && Weapon.bSword ? FRRWeapon::SwordMoveShare : 1.f;
 	GetCharacterMovement()->MaxWalkSpeed = IsUsingUltimate() ? 0.f
-		: BaseWalkSpeed * VehicleSpeed * KitSpeed * RandomEvents->GetSpeedMultiplier() * DiceBuffs->GetMultiplier(ERRDiceBuffStat::MoveSpeed) * CloudSpeed;
+		: BaseWalkSpeed * VehicleSpeed * KitSpeed * RandomEvents->GetSpeedMultiplier() * DiceBuffs->GetMultiplier(ERRDiceBuffStat::MoveSpeed) * CloudSpeed * SwordSpeed;
 	// A plane flies as fast as it would drive
 	GetCharacterMovement()->MaxFlySpeed = GetCharacterMovement()->MaxWalkSpeed;
 	if (IsDashingToFormation())
@@ -1715,7 +1818,6 @@ void ARRRandomCharacter::UpdateVehicleHandling()
 	// Shooting on foot, the brawler keeps facing where it shoots and strafes (the aiming runs go every way);
 	// otherwise it turns to where it goes
 	// (A plane turns itself the way it flies, level: UpdatePlaneFlight; turning to its movement would tip it up and down)
-	Movement->bOrientRotationToMovement = !bPiloting && (Vehicle || bDrivingRobot || IsDashingToFormation() || (!bThirdPerson && !WantsAimPose()));
 	ApplyThirdPersonRotation();
 	// Up on the deck or in the seat (the body's own offset otherwise; knocked out it is a ragdoll and left alone)
 	if (bAlive && !bClimbing)
@@ -2078,7 +2180,7 @@ bool ARRRandomCharacter::IsInFlight() const
 void ARRRandomCharacter::UpdateLocomotionAnimation()
 {
 	// On a vehicle the legs stand still; it does the moving
-	const float Speed = Vehicle ? 0.f : GetVelocity().Size2D();
+	const float Speed = GetAnimationMoveSpeed();
 	// Shooting, the anim instance lays the aiming set over this; without it the standing fire animation stands in
 	const bool bShooting = FireAnimation && IsAiming() && !AimAnimations.IsComplete();
 	// In flight or a jump the legs don't walk: the idle under the flying or jumping pose (URRRandomBodyAnimInstance)
@@ -2160,6 +2262,23 @@ void ARRRandomCharacter::UpdateCamera(float DeltaSeconds)
 	}
 	ThirdPersonBlend = bThirdPerson ? 1.f : 0.f;
 	SightsBlend = FMath::FInterpTo(SightsBlend, IsAimingDownSights() ? 1.f : 0.f, DeltaSeconds, SightsSpeed);
+	// Round 97, the sniper's scope: into it with the sights (third person, a gun with a scope); the body hidden from this
+	// screen once well in
+	ScopeBlend = FMath::FInterpTo(ScopeBlend, IsAimingDownSights() && Weapon.ScopeZoom > 0.f && bAlive && !Vehicle ? 1.f : 0.f, DeltaSeconds, ScopeSpeed);
+	if (ScopeBlend < 0.01f)
+	{
+		ScopeBlend = 0.f;
+	}
+	if ((ScopeBlend > ScopeHideAt) != bScopeHidesBody)
+	{
+		bScopeHidesBody = ScopeBlend > ScopeHideAt;
+		TArray<UPrimitiveComponent*> Parts;
+		GetComponents<UPrimitiveComponent>(Parts);
+		for (UPrimitiveComponent* Part : Parts)
+		{
+			Part->SetOwnerNoSee(bScopeHidesBody);
+		}
+	}
 	// In flight the player's own camera pulls back, so the climb shows and there is more to see from up there
 	const URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(GetCharacterMovement());
 	// (out of a cannon and flying a plane too)
@@ -2224,11 +2343,15 @@ void ARRRandomCharacter::UpdateCamera(float DeltaSeconds)
 			const FRotator Wanted(CombinePitch, ToCombine.Rotation().Yaw, 0.f);
 			Controller->SetControlRotation(FMath::RInterpTo(Controller->GetControlRotation(), Wanted, DeltaSeconds, CombineTurnRate));
 		}
+		// Through the sniper's scope: the camera at the eyes, the view ScopeZoom times closer than the plain sights
+		ArmLength = FMath::Lerp(ArmLength, 0.f, ScopeBlend);
+		Socket = FMath::Lerp(Socket, FVector(0.f, 0.f, ScopeEyeHeight * Body), ScopeBlend);
 		CameraBoom->TargetArmLength = ArmLength;
 		CameraBoom->SocketOffset = Socket;
 		CameraBoom->TargetOffset = Pivot;
-		TopDownCamera->SetFieldOfView(FMath::Lerp(ShoulderFieldOfView, SightsFieldOfView, SightsBlend) + ShoulderFlightFieldOfView * FlightCameraPull
-			+ RushFieldOfView * RushCameraBlend);
+		const float ScopeFieldOfView = FMath::RadiansToDegrees(2.f * FMath::Atan(FMath::Tan(FMath::DegreesToRadians(SightsFieldOfView * 0.5f)) / FMath::Max(1.f, Weapon.ScopeZoom)));
+		TopDownCamera->SetFieldOfView(FMath::Lerp(FMath::Lerp(ShoulderFieldOfView, SightsFieldOfView, SightsBlend) + ShoulderFlightFieldOfView * FlightCameraPull
+			+ RushFieldOfView * RushCameraBlend, ScopeFieldOfView, ScopeBlend));
 		ApplyClashCamera();
 		return;
 	}
@@ -2290,13 +2413,30 @@ void ARRRandomCharacter::SetThirdPerson(bool bOn)
 void ARRRandomCharacter::ServerSetThirdPerson_Implementation(bool bOn)
 {
 	bThirdPerson = bOn;
+	bAimingDownSights = false;
 	ApplyThirdPersonRotation();
+}
+
+void ARRRandomCharacter::SetAimingDownSights(bool bOn)
+{
+	bAimingDownSights = bOn && bThirdPerson && !Weapon.bSword;
+	ApplyThirdPersonRotation();
+	if (!HasAuthority()) { ServerSetAimingDownSights(bOn); }
+}
+
+void ARRRandomCharacter::ServerSetAimingDownSights_Implementation(bool bOn)
+{
+	SetAimingDownSights(bOn);
 }
 
 void ARRRandomCharacter::ApplyThirdPersonRotation()
 {
-	// In third person the brawler faces where the camera looks (strafing); on a vehicle it still turns the way it drives
-	bUseControllerRotationYaw = bThirdPerson && !Vehicle && !Robot && !IsDashingToFormation();
+	const bool bCombat = WantsAimFacing();
+	// Free movement follows the combined movement vector, including diagonals.
+	// A guard uses its explicit aim point; the controller must not overwrite it.
+	bUseControllerRotationYaw = bThirdPerson && !Vehicle && !Robot && !IsDashingToFormation() && bCombat && !bDeflecting;
+	GetCharacterMovement()->bOrientRotationToMovement = !IsPiloting()
+		&& (Vehicle || (Robot && RobotSeat == ERRRobotSeat::Move) || IsDashingToFormation() || !bCombat);
 }
 
 bool ARRRandomCharacter::IsDespairing() const
@@ -2381,7 +2521,17 @@ bool ARRRandomCharacter::IsAiming() const
 bool ARRRandomCharacter::WantsAimPose() const
 {
 	// The foam finger has its own pose (URRRandomGunComponent); a climber's hands are on the wall, a driver's on the wheel
-	return AimAnimations.IsComplete() && bAlive && !bClimbing && !IsDriving() && !Weapon.bFoamFinger && IsAiming() && !IsCelebrating();
+	// (nor the light sword with its own motions: round 97, URRRandomBodyAnimInstance's sword layer)
+	return AimAnimations.IsComplete() && bAlive && !bClimbing && !IsDriving() && !Weapon.bFoamFinger && !(Weapon.bSword && SwordSlash)
+		&& (IsAiming() || IsAimingDownSights()) && !IsCelebrating();
+}
+
+bool ARRRandomCharacter::WantsAimFacing() const
+{
+	const float Hold = Weapon.bSword ? GetSwordAttackDuration() * (1.f + 0.3f / 0.56f) : FireAnimationHold;
+	return bAlive && !bClimbing && !IsDriving() && !Robot && !IsDashingToFormation() && !IsRidingCannon()
+		&& !IsCelebrating() && !IsDespairing()
+		&& (bDeflecting || IsAimingDownSights() || GetTimeSinceShot() < Hold);
 }
 
 float ARRRandomCharacter::GetAimPoseWeight() const
@@ -2393,11 +2543,80 @@ float ARRRandomCharacter::GetAimPoseWeight() const
 void ARRRandomCharacter::OnRep_ShotCount()
 {
 	LastShotTime = GetWorld()->GetTimeSeconds();
+	ApplyThirdPersonRotation();
 }
 
 float ARRRandomCharacter::GetFireInterval() const
 {
-	return FireInterval * Weapon.FireIntervalMultiplier / DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackSpeed);
+	// Dedicated cuts run 1.6x faster, including the actual input cooldown.
+	const float SwordPace = Weapon.bSword && HasDedicatedSwordMotion() ? (0.56f / 1.6f) / 0.39f : 1.f;
+	return FireInterval * Weapon.FireIntervalMultiplier * SwordPace / DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackSpeed);
+}
+
+bool ARRRandomCharacter::HasDedicatedSwordMotion() const
+{
+	return SwordSlash && SwordSlash->GetName().Contains(TEXT("SwordDedicated"));
+}
+
+float ARRRandomCharacter::GetSwordBodyScale() const
+{
+	return RideHipsHeight / FMath::Max(19.8f * static_cast<float>(GetMesh()->GetRelativeScale3D().Z), 0.01f);
+}
+
+float ARRRandomCharacter::GetSwordAttackDuration() const
+{
+	return HasDedicatedSwordMotion() ? GetFireInterval() : 0.42f * (ComboStep == 2 ? 1.25f : 1.f);
+}
+
+float ARRRandomCharacter::GetAnimationMoveSpeed() const
+{
+	if (Vehicle) { return 0.f; }
+	const UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (Weapon.bSword && HasDedicatedSwordMotion() && Movement->CurrentRootMotion.bIsAdditiveVelocityApplied
+		&& GetCharacterMovement()->GetRootMotionSource(FName(TEXT("SwordStep"))).IsValid())
+	{
+		// The attack clip already contains this step. Playing a walk clip under it
+		// snaps the pelvis/feet on entry and again when the additive force ends.
+		return Movement->CurrentRootMotion.LastPreAdditiveVelocity.Size2D();
+	}
+	return GetVelocity().Size2D();
+}
+
+void ARRRandomCharacter::StartSwordStep()
+{
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (!Weapon.bSword || !HasDedicatedSwordMotion() || !Movement->IsMovingOnGround()
+		|| Movement->Velocity.Size2D() > 60.f || IsDriving() || bDeflecting)
+	{
+		return;
+	}
+	// Match the 10 cm source-rig footstep, scaled to this character. Root motion goes through
+	// CharacterMovement's swept collision and network prediction instead of moving the mesh.
+	const FVector Forward = GetActorForwardVector().GetSafeNormal2D();
+	const float Distance = 10.f * (19.8f / 23.2f) * GetSwordBodyScale() * GetMesh()->GetRelativeScale3D().Z * GetActorScale3D().Z;
+	const FVector Ahead = GetActorLocation() + Forward * Distance;
+	FHitResult Floor;
+	FCollisionQueryParams Query(SCENE_QUERY_STAT(SwordStepFloor), false, this);
+	const float HalfHeight = GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	if (!GetWorld()->LineTraceSingleByChannel(Floor, Ahead,
+		Ahead - FVector(0.f, 0.f, HalfHeight + Movement->MaxStepHeight), ECC_Visibility, Query)
+		|| !Movement->IsWalkable(Floor))
+	{
+		return;
+	}
+	Movement->RemoveRootMotionSource(FName(TEXT("SwordStep")));
+	TSharedPtr<FRootMotionSource_ConstantForce> Step = MakeShared<FRootMotionSource_ConstantForce>();
+	Step->InstanceName = TEXT("SwordStep");
+	Step->Priority = 100;
+	Step->AccumulateMode = ERootMotionAccumulateMode::Additive;
+	// The shorter step must still travel its intended distance at every frame rate.
+	Step->Settings.UnSetFlag(ERootMotionSourceSettingsFlags::DisablePartialEndTick);
+	// The foot arrives before the hip/chest drive and the delayed blade release.
+	Step->Duration = GetSwordAttackDuration() * 0.40f;
+	Step->Force = Forward * Distance / Step->Duration;
+	Step->FinishVelocityParams.Mode = ERootMotionFinishVelocityMode::SetVelocity;
+	Step->FinishVelocityParams.SetVelocity = Movement->Velocity;
+	Movement->ApplyRootMotionSource(Step);
 }
 
 FVector ARRRandomCharacter::FaceToward(const FVector& TargetLocation)
@@ -2413,6 +2632,7 @@ FVector ARRRandomCharacter::FaceToward(const FVector& TargetLocation)
 	{
 		SetActorRotation(Direction.Rotation());
 	}
+	ApplyThirdPersonRotation();
 	return Direction;
 }
 
@@ -2454,19 +2674,27 @@ bool ARRRandomCharacter::FireAt(const FVector& TargetLocation)
 		return true;
 	}
 	// Running (Shift) the gun is down: no shots till the run stops
-	if (!bAlive || !ProjectileClass || bReloading || bClimbing || IsSprinting() || IsDriving() || Ammo <= 0 || Now < NextFireTime)
+	if (!bAlive || !ProjectileClass || bReloading || bClimbing || IsSprinting() || IsDriving() || Ammo <= 0 || Now < NextFireTime
+		|| ARRRandomGameState::IsAttackLocked(this) || bDeflecting)
 	{
 		return false;
 	}
 	FTransform Spawn;
-	if (!GetShotStart(TargetLocation, Spawn))
+	if (!Weapon.bSword && !GetShotStart(TargetLocation, Spawn))
 	{
 		FaceToward(TargetLocation);
 		return false;
 	}
 	NextFireTime = Now + GetFireInterval();
 	LastShotTime = Now;
+	// (the light sword's combo step shown here at once; the server's, the same, comes back replicated)
+	if (Weapon.bSword)
+	{
+		ComboStep = Now - LastSwingTime <= ComboWindow ? (ComboStep + 1) % 3 : 0;
+		LastSwingTime = Now;
+	}
 	FaceToward(TargetLocation);
+	StartSwordStep();
 	ServerFireAt(TargetLocation);
 	return true;
 }
@@ -2541,7 +2769,7 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 	}
 	// The driver's hands are on the wheel (the one in the rear seat still shoots)
 	if (!bAlive || !ProjectileClass || bReloading || bClimbing || IsSprinting() || IsDriving() || IsUsingUltimate() || Now + CooldownSlack < NextFireTime
-		|| ARRRandomGameState::IsPlayLocked(this))
+		|| ARRRandomGameState::IsAttackLocked(this) || bDeflecting)
 	{
 		return false;
 	}
@@ -2550,9 +2778,9 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 		StartReload();
 		return false;
 	}
-	// The muzzle buried in a wall: no shot, nothing spent (it still turns to aim)
+	// The muzzle buried in a wall: no shot, nothing spent (it still turns to aim). A sword's swing needs no muzzle.
 	FTransform SpawnTransform;
-	if (!GetShotStart(TargetLocation, SpawnTransform))
+	if (!Weapon.bSword && !GetShotStart(TargetLocation, SpawnTransform))
 	{
 		FaceToward(TargetLocation);
 		return false;
@@ -2576,25 +2804,105 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 
 	FaceToward(TargetLocation);
 
-	// Deferred so damage, range, speed and look are in place before the shot begins play. Heavy guns fire bigger shots.
-	if (ARRRandomProjectile* Projectile = World->SpawnActorDeferred<ARRRandomProjectile>(ProjectileClass, SpawnTransform, this, this, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+	// Round 97, the LIGHT SWORD: a swing, no shot
+	if (Weapon.bSword)
 	{
-		Projectile->DamageMultiplier = DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackPower) * Weapon.DamageMultiplier * (bGiant ? GiantDamageMultiplier : 1.f);
-		Projectile->MaxRange = GetShotRange();
-		Projectile->SetSpeedMultiplier(Weapon.ProjectileSpeedMultiplier);
-		// A foam finger's poke: unseen, a flat point of damage, a knockout from behind
-		Projectile->bPoke = Weapon.bFoamFinger;
-		Projectile->HitEffect = Weapon.GetHitEffect();
-		Projectile->Tier = Weapon.bFoamFinger ? ERRWeaponTier::Common : Weapon.Tier;
-		// A CANNON's shell smashes what it hits and digs a cell of ground (round 89); the other guns' shots only stop
-		if (Projectile->HitEffect == ERRHitEffect::Cannon)
+		// The combo: within ComboWindow of the last swing, the next blow of three; else back to the first
+		ComboStep = Now - LastSwingTime <= ComboWindow ? (ComboStep + 1) % 3 : 0;
+		LastSwingTime = Now;
+		StartSwordStep();
+		SwingSword(TargetLocation);
+		return true;
+	}
+
+	// Deferred so damage, range, speed and look are in place before the shot begins play. Heavy guns fire bigger shots.
+	// A SHOTGUN fires its pellets at once, fanned out at random within its spread (round 97)
+	const int32 Pellets = FMath::Max(1, int32(Weapon.Pellets));
+	for (int32 Pellet = 0; Pellet < Pellets; ++Pellet)
+	{
+		FTransform PelletTransform = SpawnTransform;
+		if (Pellets > 1)
 		{
-			Projectile->WreckRadius = CannonWreckRadius;
-			Projectile->WreckDig = 1;
+			const float Fan = Weapon.SpreadDegrees * (2.f * (Pellet + FMath::FRand()) / Pellets - 1.f);
+			FRotator Turned = SpawnTransform.Rotator();
+			Turned.Yaw += Fan;
+			Turned.Pitch += FMath::FRandRange(-0.35f, 0.35f) * Weapon.SpreadDegrees;
+			PelletTransform.SetRotation(Turned.Quaternion());
 		}
-		Projectile->FinishSpawning(SpawnTransform);
+		if (ARRRandomProjectile* Projectile = World->SpawnActorDeferred<ARRRandomProjectile>(ProjectileClass, PelletTransform, this, this, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+		{
+			Projectile->DamageMultiplier = DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackPower) * Weapon.DamageMultiplier * (bGiant ? GiantDamageMultiplier : 1.f);
+			Projectile->MaxRange = GetShotRange();
+			Projectile->SetSpeedMultiplier(Weapon.ProjectileSpeedMultiplier * (Pellets > 1 ? FMath::FRandRange(0.92f, 1.08f) : 1.f));
+			// A foam finger's poke: unseen, a flat point of damage, a knockout from behind
+			Projectile->bPoke = Weapon.bFoamFinger;
+			Projectile->HitEffect = Weapon.GetHitEffect();
+			Projectile->Tier = Weapon.bFoamFinger ? ERRWeaponTier::Common : Weapon.Tier;
+			// A CANNON's shell smashes what it hits and digs a cell of ground (round 89); the other guns' shots only stop
+			if (Projectile->HitEffect == ERRHitEffect::Cannon)
+			{
+				Projectile->WreckRadius = CannonWreckRadius;
+				Projectile->WreckDig = 1;
+			}
+			Projectile->FinishSpawning(PelletTransform);
+		}
+	}
+	if (Pellets > 1)
+	{
+		MulticastShotgunBlast(SpawnTransform.GetLocation(), SpawnTransform.GetRotation().Vector(), Weapon.SpreadDegrees);
 	}
 	return true;
+}
+
+void ARRRandomCharacter::SwingSword(const FVector& TargetLocation)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	const FVector Here = GetActorLocation();
+	FVector Facing = (TargetLocation - Here).GetSafeNormal2D();
+	if (Facing.IsNearlyZero())
+	{
+		Facing = GetActorForwardVector().GetSafeNormal2D();
+	}
+	// (the third blow of a combo reaches further and hits harder)
+	const bool bFinisher = ComboStep == 2;
+	const float Reach = FRRWeapon::SwordReach * GetActorScale3D().Z * (bFinisher ? FinisherReach : 1.f);
+	const float MinDot = FMath::Cos(FMath::DegreesToRadians(FRRWeapon::SwordHalfAngle));
+	const ARRRandomProjectile* Shot = ProjectileClass ? ProjectileClass->GetDefaultObject<ARRRandomProjectile>() : nullptr;
+	const float Multiplier = DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackPower) * Weapon.DamageMultiplier * (bGiant ? GiantDamageMultiplier : 1.f) * (bFinisher ? FinisherDamage : 1.f);
+	int32 Hits = 0;
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		ARRRandomCharacter* Other = *It;
+		if (Other == this || !Other->IsAlive() || Other->GetTeam() == Team)
+		{
+			continue;
+		}
+		const FVector Offset = Other->GetActorLocation() - Here;
+		const float Radius = Other->GetCapsuleComponent()->GetScaledCapsuleRadius();
+		if (Offset.Size2D() > Reach + Radius || FMath::Abs(Offset.Z) > 180.f * GetActorScale3D().Z + Other->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()
+			|| (Offset.Size2D() > Radius && FVector::DotProduct(Offset.GetSafeNormal2D(), Facing) < MinDot))
+		{
+			continue;
+		}
+		// Not through a wall
+		FHitResult Wall;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomSword), false, this);
+		Params.AddIgnoredActor(Other);
+		if (GetWorld()->LineTraceSingleByChannel(Wall, Here, Other->GetActorLocation(), ECC_Visibility, Params) && !Cast<ARRRandomCharacter>(Wall.GetActor()))
+		{
+			continue;
+		}
+		const float Damage = (Shot ? FMath::RandRange(Shot->MinDamage, Shot->MaxDamage) : 12.f) * Multiplier;
+		FHitResult Hit;
+		Hit.ImpactPoint = Other->GetActorLocation();
+		Hit.Location = Hit.ImpactPoint;
+		UGameplayStatics::ApplyPointDamage(Other, Damage, Offset.GetSafeNormal(), Hit, GetController(), this, UDamageType::StaticClass());
+		++Hits;
+	}
+	UE_LOG(LogTemp, Verbose, TEXT("RRRandom: %s swings the light sword (%d hit)."), *GetName(), Hits);
 }
 
 bool ARRRandomCharacter::GetShotStart(const FVector& TargetLocation, FTransform& OutSpawn) const
@@ -2995,8 +3303,13 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 {
 	// Shots only hit on the server
 	ARRRandomCharacter* Attacker = DamageCauser ? Cast<ARRRandomCharacter>(DamageCauser->GetInstigator()) : nullptr;
+	// (a LIGHT SWORD's swing is its holder's own hit: round 97)
+	if (!Attacker)
+	{
+		Attacker = Cast<ARRRandomCharacter>(DamageCauser);
+	}
 	// Shots still in the air when the match ends do nothing
-	if (!HasAuthority() || !bAlive || bInvincible || IsUsingUltimate() || ARRRandomGameState::IsPlayLocked(this) || (Attacker && Attacker != this && Attacker->GetTeam() == Team))
+	if (!HasAuthority() || !bAlive || bInvincible || IsUsingUltimate() || ARRRandomGameState::IsAttackLocked(this) || (Attacker && Attacker != this && Attacker->GetTeam() == Team))
 	{
 		return 0.f;
 	}
@@ -3059,7 +3372,7 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 	LastCombatTime = GetWorld()->GetTimeSeconds();
 	// The number floats up on every machine, the host included, with the sticker of the gun that hit; a foam finger's
 	// knockout shows a skull
-	ERRHitEffect Effect = Shot ? Shot->HitEffect : ERRHitEffect::Pistol;
+	ERRHitEffect Effect = Shot ? Shot->HitEffect : (Attacker && Attacker == DamageCauser && Attacker->GetWeapon().bSword ? ERRHitEffect::Sword : ERRHitEffect::Pistol);
 	if (Effect == ERRHitEffect::Poke && Health <= 0.f)
 	{
 		Effect = ERRHitEffect::Skull;
@@ -3077,6 +3390,7 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharacter* Attacker, bool bFell)
 {
 	bAlive = false;
+	bDeflecting = false;
 	Health = 0.f;
 	RespawnRemaining = RespawnDelay;
 	DiceBuffs->ClearBuffs();
@@ -3294,7 +3608,7 @@ bool ARRRandomCharacter::IsPiloting() const
 bool ARRRandomCharacter::CanBoardPlane() const
 {
 	return bAlive && !bDecoy && !Vehicle && !Robot && !bClimbing && !bGiant && !bFlying && !IsUsingUltimate() && !IsRidingCannon()
-		&& !ARRRandomGameState::IsPlayLocked(this);
+		&& !ARRRandomGameState::IsAttackLocked(this);
 }
 
 bool ARRRandomCharacter::BoardPlane(ARRRandomVehicle* Plane)
@@ -3394,7 +3708,7 @@ bool ARRRandomCharacter::ShootPlaneGun(const FVector& TargetLocation, float Cool
 {
 	UWorld* World = GetWorld();
 	const float Now = World->GetTimeSeconds();
-	if (!bAlive || !ProjectileClass || !IsPiloting() || Vehicle->IsCrashing() || ARRRandomGameState::IsPlayLocked(this) || Now + CooldownSlack < NextFireTime)
+	if (!bAlive || !ProjectileClass || !IsPiloting() || Vehicle->IsCrashing() || ARRRandomGameState::IsAttackLocked(this) || Now + CooldownSlack < NextFireTime)
 	{
 		return false;
 	}
@@ -3733,4 +4047,242 @@ void ARRRandomCharacter::MulticastVillainSlam_Implementation(FVector_NetQuantize
 		Effects->TigerStrike(Where, Radius, FLinearColor(0.75f, 0.35f, 1.f));
 	}
 	ARRRandomHUD::PopComicWord(this, TEXT("SLAM!"), Where + FVector(0.f, 0.f, 260.f), FLinearColor(0.75f, 0.35f, 1.f), 1.4f);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The light sword's deflect (round 97)
+
+void ARRRandomCharacter::SetDeflecting(bool bOn, const FVector& Aim)
+{
+	// (kept here too: the guard faces it every frame, UpdateParryLook)
+	DeflectAim = Aim;
+	// The front-only guard turns with the body toward the aim.
+	if (bOn && Weapon.bSword && (HasAuthority() || IsLocallyControlled()))
+	{
+		FaceToward(Aim);
+	}
+	if (!HasAuthority())
+	{
+		// (shown at once here; the server's answer replicates back)
+		ServerSetDeflecting(bOn, Aim);
+		return;
+	}
+	DeflectAim = Aim;
+	if (!bOn)
+	{
+		if (bDeflecting)
+		{
+			DeflectReleaseTime = GetWorld()->GetTimeSeconds();
+		}
+		bDeflecting = false;
+		ApplyThirdPersonRotation();
+		return;
+	}
+	if (bAlive && Weapon.bSword && !Vehicle && !Robot && !IsUsingUltimate() && DeflectFocus >= DeflectMinStart && !ARRRandomGameState::IsAttackLocked(this))
+	{
+		bDeflecting = true;
+	}
+	ApplyThirdPersonRotation();
+}
+
+void ARRRandomCharacter::SetDeflectAim(const FVector& Aim)
+{
+	DeflectAim = Aim;
+	if (bDeflecting && (HasAuthority() || IsLocallyControlled()))
+	{
+		FaceToward(Aim);
+	}
+	if (HasAuthority())
+	{
+		DeflectAim = Aim;
+		return;
+	}
+	// A few times a second is plenty
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (bDeflecting && Now - DeflectAimSentTime > 0.1f)
+	{
+		DeflectAimSentTime = Now;
+		ServerDeflectAim(Aim);
+	}
+}
+
+void ARRRandomCharacter::ServerSetDeflecting_Implementation(bool bOn, FVector_NetQuantize Aim)
+{
+	SetDeflecting(bOn, Aim);
+}
+
+void ARRRandomCharacter::ServerDeflectAim_Implementation(FVector_NetQuantize Aim)
+{
+	SetDeflectAim(Aim);
+}
+
+void ARRRandomCharacter::UpdateDeflect(float DeltaSeconds)
+{
+	if (bDeflecting)
+	{
+		DeflectFocus = FMath::Max(0.f, DeflectFocus - DeltaSeconds);
+		if (DeflectFocus <= 0.f || !Weapon.bSword || !bAlive || Vehicle || IsUsingUltimate() || ARRRandomGameState::IsAttackLocked(this))
+		{
+			bDeflecting = false;
+			DeflectReleaseTime = GetWorld()->GetTimeSeconds();
+		}
+		return;
+	}
+	if (GetWorld()->GetTimeSeconds() - DeflectReleaseTime >= DeflectRefillDelay)
+	{
+		DeflectFocus = FMath::Min(DeflectFocusMax, DeflectFocus + DeflectRefillRate * DeltaSeconds);
+	}
+}
+
+bool ARRRandomCharacter::TryDeflect(ARRRandomProjectile* Shot)
+{
+	if (!HasAuthority() || !bDeflecting || !bAlive || !Shot || !Shot->CanBeDeflected())
+	{
+		return false;
+	}
+	if (!IsInSwordGuardArc(*this, Shot->GetActorLocation(), Shot->GetVelocity()))
+	{
+		return false;
+	}
+	// Back toward where I aim (straight back the way it came when I aim at nothing)
+	FVector Aim = DeflectAim;
+	if (Aim.IsNearlyZero() || FVector::DistSquared(Aim, GetActorLocation()) < FMath::Square(150.f))
+	{
+		Aim = GetActorLocation() + GetActorForwardVector() * 3000.f;
+	}
+	const FVector Where = Shot->GetActorLocation();
+	if (HasDedicatedSwordMotion() && GetTimeSinceDeflect() > 0.22f)
+	{
+		StartSwordParry(Where, 0.045f);
+	}
+	Shot->Deflect(this, Aim);
+	MulticastDeflected(Where, (Aim - Where).GetSafeNormal());
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s deflects a shot with the light sword (%.1f s of focus left)."), *GetName(), DeflectFocus);
+	return true;
+}
+
+void ARRRandomCharacter::MulticastDeflected_Implementation(FVector_NetQuantize Where, FVector_NetQuantizeNormal Away)
+{
+	// A shot knocked away that no flick went out to meet (seen too late here): the flick now
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (!HasDedicatedSwordMotion() && Now - LastDeflectTime > 0.25f)
+	{
+		LastDeflectTime = Now;
+		ParryPoint = Where;
+	}
+	// Blade on shot: a quick flash, a ring, sparks flying off after it
+	if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+	{
+		Effects->SaberParry(Where, Away, FLinearColor(0.45f, 0.9f, 1.f));
+	}
+	const TCHAR* const Words[] = { TEXT("PING!"), TEXT("TING!"), TEXT("ZING!") };
+	ARRRandomHUD::PopComicWord(this, Words[FMath::RandHelper(UE_ARRAY_COUNT(Words))], Where + FVector(0.f, 0.f, 120.f), FLinearColor(0.45f, 0.85f, 1.f), 0.5f);
+}
+
+void ARRRandomCharacter::StartSwordParry(const FVector& Where, float ContactTime)
+{
+	if (!HasAuthority()) { return; }
+	// Shuffle without replacement: every three reactions show all three cuts,
+	// and a new bag cannot start by repeating the previous reaction.
+	const bool bFreshBag = SwordParryUnused == 0;
+	if (bFreshBag) { SwordParryUnused = 0x7; }
+	uint8 Choices[3];
+	int32 Count = 0;
+	for (uint8 I = 0; I < 3; ++I)
+	{
+		if ((SwordParryUnused & (1 << I)) && (!bFreshBag || GetTimeSinceDeflect() > 10.f || I != SwordParryVariant))
+		{
+			Choices[Count++] = I;
+		}
+	}
+	const uint8 Variant = Choices[FMath::RandHelper(Count)];
+	SwordParryUnused &= ~(1 << Variant);
+	MulticastSwordParry(Where, Variant, FMath::Clamp(ContactTime, 0.045f, ParryLead));
+}
+
+void ARRRandomCharacter::MulticastSwordParry_Implementation(FVector_NetQuantize Where, uint8 Variant, float ContactTime)
+{
+	SwordParryVariant = FMath::Min<uint8>(Variant, 2);
+	SwordParryContactTime = FMath::Clamp(ContactTime, 0.045f, ParryLead);
+	LastDeflectTime = GetWorld()->GetTimeSeconds();
+	ParryPoint = Where;
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s sword parry variant %d, contact %.3fs, time %.3f."),
+		*GetName(), SwordParryVariant, SwordParryContactTime, LastDeflectTime);
+}
+
+void ARRRandomCharacter::MulticastShotgunBlast_Implementation(FVector_NetQuantize Muzzle, FVector_NetQuantizeNormal Way, float Spread)
+{
+	if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+	{
+		// Warm peach, glowing hotter with the gun's tier
+		const FLinearColor Peach(1.f, 0.62f, 0.4f);
+		Effects->ShotgunBlast(Muzzle, Way, Spread, Weapon.Tier == ERRWeaponTier::Common ? Peach : FMath::Lerp(Peach, FRRWeapon::GetTierColor(Weapon.Tier), 0.5f));
+	}
+}
+
+void ARRRandomCharacter::UpdateParryLook()
+{
+	// The server chooses the dedicated reaction and sends its anticipation cue
+	// before contact, so all viewers see the same random variation.
+	if (HasDedicatedSwordMotion() && !HasAuthority()) { return; }
+	// The first shot coming at me from the front, due at the blade within ParryLead: the flick starts now, aimed where it
+	// will be (one flick at a time)
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (Now - LastDeflectTime < 0.22f)
+	{
+		return;
+	}
+	const FVector Here = GetActorLocation();
+	const float Reach = GetCapsuleComponent()->GetScaledCapsuleRadius() + ParryReach * GetActorScale3D().Z;
+	for (TActorIterator<ARRRandomProjectile> It(GetWorld()); It; ++It)
+	{
+		const ARRRandomProjectile* Shot = *It;
+		const ARRRandomCharacter* Shooter = Cast<ARRRandomCharacter>(Shot->GetInstigator());
+		const FVector Velocity = Shot->GetVelocity();
+		const float Speed = Velocity.Size();
+		if (!Shot->CanBeDeflected() || Speed < 10.f || (Shooter && Shooter->GetTeam() == Team))
+		{
+			continue;
+		}
+		const FVector ToMe = Here - Shot->GetActorLocation();
+		const float Distance = ToMe.Size();
+		// Heading at me (passing within the blade's reach), from the front
+		const FVector Way = Velocity / Speed;
+		const float Along = FVector::DotProduct(ToMe, Way);
+		if (Along <= 0.f || (ToMe - Way * Along).Size() > Reach)
+		{
+			continue;
+		}
+		const float Due = (Distance - Reach) / Speed;
+		if (Due > ParryLead)
+		{
+			continue;
+		}
+		const FVector Point = Shot->GetActorLocation() + Way * FMath::Max(0.f, Distance - Reach);
+		if (!IsInSwordGuardArc(*this, Point, Velocity)) { continue; }
+		if (HasDedicatedSwordMotion()) { StartSwordParry(Point, Due); }
+		else { LastDeflectTime = Now; ParryPoint = Point; }
+		return;
+	}
+}
+
+void ARRRandomCharacter::DeflectInReach()
+{
+	const FVector Here = GetActorLocation();
+	const float Reach = GetCapsuleComponent()->GetScaledCapsuleRadius() + ParryReach * GetActorScale3D().Z;
+	TArray<ARRRandomProjectile*, TInlineAllocator<4>> Near;
+	for (TActorIterator<ARRRandomProjectile> It(GetWorld()); It; ++It)
+	{
+		ARRRandomProjectile* Shot = *It;
+		const ARRRandomCharacter* Shooter = Cast<ARRRandomCharacter>(Shot->GetInstigator());
+		if (Shot->CanBeDeflected() && !(Shooter && Shooter->GetTeam() == Team) && FVector::Dist(Shot->GetActorLocation(), Here) <= Reach
+			&& FVector::DotProduct(Shot->GetVelocity(), Here - Shot->GetActorLocation()) > 0.f)
+		{
+			Near.Add(Shot);
+		}
+	}
+	for (ARRRandomProjectile* Shot : Near)
+	{
+		TryDeflect(Shot);
+	}
 }

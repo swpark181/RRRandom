@@ -1,4 +1,5 @@
 #include "RRRandomDiceBuffComponent.h"
+#include "RRRandomGameState.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Net/UnrealNetwork.h"
@@ -60,13 +61,25 @@ void URRRandomDiceBuffComponent::TickComponent(float DeltaTime, ELevelTick TickT
 		return;
 	}
 
-	GaugeTime += DeltaTime;
-	if (GaugeFillTime > 0.f && GaugeTime >= GaugeFillTime)
+	// The battle royale (round 97): thirty weapon dice to get ready with, none at the start, then a die a minute and no
+	// ultimate dice from the gauge; the gauge waits for play
+	const bool bBattle = ARRRandomGameState::IsBattleRoyale(this);
+	if (bBattle)
 	{
-		GaugeTime -= GaugeFillTime;
+		UpdateBattleRoyale();
+	}
+	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
+	if (!bBattle || (State && State->HasPlayStarted()))
+	{
+		GaugeTime += DeltaTime;
+	}
+	const float FillTime = bBattle ? BattleGaugeFillTime : GaugeFillTime;
+	if (FillTime > 0.f && GaugeTime >= FillTime)
+	{
+		GaugeTime -= FillTime;
 		++Charges;
 		// Now and then (one at a time) it is an ultimate die
-		if (UltimateDieChance > 0.f && UltimateCharges == 0 && Stream.FRand() < UltimateDieChance)
+		if (!bBattle && UltimateDieChance > 0.f && UltimateCharges == 0 && Stream.FRand() < UltimateDieChance)
 		{
 			++UltimateCharges;
 		}
@@ -96,8 +109,13 @@ bool URRRandomDiceBuffComponent::RollDice()
 	--Charges;
 	LastRoll = FRRDiceRoll();
 	LastRoll.Face = Stream.RandRange(1, 6);
+	// The battle royale's get-ready time (round 97): every die is a weapon die, for the bag
+	if (ARRRandomGameState::IsPrep(this))
+	{
+		LastRoll.bWeapon = true;
+	}
 	// A stored ultimate die goes first
-	if (UltimateCharges > 0)
+	else if (UltimateCharges > 0)
 	{
 		--UltimateCharges;
 		LastRoll.bUltimate = true;
@@ -126,6 +144,30 @@ bool URRRandomDiceBuffComponent::RollDice()
 		ApplyRoll(LastRoll);
 	}
 	return true;
+}
+
+void URRRandomDiceBuffComponent::UpdateBattleRoyale()
+{
+	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
+	if (!State)
+	{
+		return;
+	}
+	if (State->IsPrep() && !bPrepDiceGiven)
+	{
+		bPrepDiceGiven = true;
+		Charges = ARRRandomGameState::PrepDice;
+		UltimateCharges = 0;
+		GaugeTime = 0.f;
+	}
+	// Whatever is left of them goes when the get-ready time ends (or at the start, without one)
+	if (!bBattleStartDone && (State->HasPlayStarted() || (bPrepDiceGiven && !State->IsPrep())))
+	{
+		bBattleStartDone = true;
+		Charges = 0;
+		UltimateCharges = 0;
+		GaugeTime = 0.f;
+	}
 }
 
 void URRRandomDiceBuffComponent::GiveUltimateDie()
@@ -237,3 +279,10 @@ FLinearColor URRRandomDiceBuffComponent::GetStatColor(ERRDiceBuffStat Stat)
 }
 
 #undef LOCTEXT_NAMESPACE
+
+float URRRandomDiceBuffComponent::GetGaugeProgress() const
+{
+	// (the battle royale's fills once a minute: round 97)
+	const float FillTime = ARRRandomGameState::IsBattleRoyale(this) ? BattleGaugeFillTime : GaugeFillTime;
+	return FillTime > 0.f ? FMath::Clamp(GaugeTime / FillTime, 0.f, 1.f) : 1.f;
+}

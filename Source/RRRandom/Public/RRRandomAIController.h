@@ -266,6 +266,13 @@ private:
 	bool bHasBattleGoal = false;
 	bool bRingUrgent = false;
 	float BattleGoalTimer = 0.f;
+	/** Round 96: the goal is a hill's top (ARRRandomDiceTown::GetHillTops), held there until BattleGoalTimer runs out. */
+	bool bHillGoal = false;
+	/** Round 97: heading for the ultimate die's meteor; the bag's guns last seen added (to sort a new one into the hands), and
+	 * the wait before switching hands again. */
+	bool bUltimateGoal = false;
+	int32 SeenBagAdds = 0;
+	float HandTimer = 0.f;
 	float BattleLookTimer = 0.f;
 	/** Into the ring: the nearest the bot has come to its spot, and how long since it came any nearer (another spot then). */
 	float RingBest = UE_BIG_NUMBER;

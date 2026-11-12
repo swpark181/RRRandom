@@ -21,8 +21,9 @@ class UTexture2D;
 
 /**
  * Canvas HUD in the pastel style of RRRandomUIStyle (airy text with a white halo and thin rounded bars over the game;
- * frosted rounded panels on the results and pause screens). Over every brawler: health bar, stored dice count, dice gauge, active buffs,
- * the latest dice roll, damage numbers and a friend-or-foe marker (plus ammo over the player's own brawler).
+ * frosted rounded panels on the results and pause screens). Over teammates: health bar, stored dice count, dice gauge,
+ * active buffs, the latest dice roll, damage numbers and a friend marker (plus ammo over the player's own brawler).
+ * Opponents show only their name/team ID and foe marker; fog and invisibility hide those too.
  * On screen: team score, the player's dice gauge and buff list, magazine count, a respawn countdown, the online status
  * with its keys under the minimap, and:
  * - a 5-4-3-2-1-GO countdown in the middle until play starts,
@@ -51,6 +52,16 @@ public:
 	bool IsPointOnMap(const FVector2D& ScreenPoint) const;
 	void ToggleMap() { bMapExpanded = !bMapExpanded; }
 	bool IsMapExpanded() const { return bMapExpanded; }
+
+	/**
+	 * Round 97, the battle royale's bag (Tab): a frosted panel over the game with my two hands on top and every gun in the bag
+	 * as a card below (its name and tier, its stars, how many of it there are); a left click puts a card in hand 1, a right
+	 * click in hand 2, UPGRADE on a card combines three of it, UPGRADE ALL every one there is, the x on a card throws it away.
+	 */
+	bool IsBagOpen() const { return bBagOpen; }
+	void ToggleBag() { bBagOpen = !bBagOpen; }
+	/** A click on the bag's panel (bRight: the right button); false when it hit nothing of it. */
+	bool HandleBagClick(const FVector2D& ScreenPoint, bool bRight);
 
 	/** The corner map's diameter and its distance from the screen edges, on a 720 pixel tall screen (scaled with it). */
 	static constexpr float MinimapSize = 190.f;
@@ -87,6 +98,8 @@ private:
 	/** Flying a plane: its name and hull over the ammo panel, and the keys for up, down and out. */
 	void DrawPlanePanel(const ARRRandomCharacter& Viewer);
 	void DrawOverhead(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer);
+	/** Shared identity for teammate cards and overhead labels: YOU, player name, or a numbered bot. */
+	static FString CharacterLabel(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer);
 	void DrawAmmoBar(const ARRRandomCharacter& Brawler, float Left, float Top, float Width, float Height);
 	/** Draws the buff chips ending just above Bottom and returns the new top edge. */
 	float DrawBuffChips(const URRRandomDiceBuffComponent& Dice, float CenterX, float Bottom);
@@ -109,8 +122,8 @@ private:
 	/** "[F] RIDE MOTORBIKE" under the brawler next to a free vehicle, "[F] GET OFF" while riding. */
 	void DrawRidePrompt(const ARRRandomCharacter& Brawler);
 	/**
-	 * The star robot (ARRRandomStarRobot): over its gathered cars a pulsing combine sign ("[F]
-	 * COMBINE!" when close enough), over the robot coming together its gauge, over the finished one its health, shield and
+	 * The star robot (ARRRandomStarRobot): only an eligible viewer in reach of its gathered cars sees the combine sign
+	 * and "[F] COMBINE!"; over the robot coming together its gauge, over the finished one its health, shield and
 	 * three seats ("[F] GET IN" next to it), a banner when it is done, and for its crew which seat they have.
 	 */
 	void DrawStarRobot(const ARRRandomCharacter* Viewer, const class ARRRandomStarRobot* Robot);
@@ -147,6 +160,41 @@ private:
 	void DrawOracle(const ARRRandomCharacter* Viewer);
 	/** A die's face (a white rounded square, pips; the 1 in pink), Size across. */
 	void DrawDieFace(const FVector2D& Center, float Size, int32 Face, float Alpha);
+
+	// Round 97 (RRRandomHUDLoadout.cpp)
+	bool bBagOpen = false;
+	/** What a click on the bag's panel can hit, as drawn this frame. */
+	enum class EBagHit : uint8 { Card, Combine, CombineAll, Hand, Discard, Close };
+	struct FBagHit
+	{
+		FBox2D Rect;
+		EBagHit Kind = EBagHit::Card;
+		int32 Index = INDEX_NONE;
+	};
+	TArray<FBagHit> BagHits;
+	void DrawBag(const ARRRandomCharacter& Viewer);
+	/** Bottom middle in the battle royale: my two hands (key, gun, tier stars), the one in use lifted; "+ RIFLE" as a gun comes in. */
+	void DrawHands(const ARRRandomCharacter& Viewer);
+	/** The light sword in hand: its guard's focus (ARRRandomCharacter::IsDeflecting) as a bar over the hands. */
+	void DrawDeflectFocus(const ARRRandomCharacter& Viewer);
+	/** Round 97: looking through the sniper's scope, a lens ring over the screen, its reticle and how close it shows. */
+	void DrawScope(const ARRRandomCharacter& Viewer);
+	/** The get-ready time's banner (time left, no attacks, dice left, keys) and the team roll's board (every team's dice and place). */
+	void DrawPrep(const ARRRandomGameState& State, const ARRRandomCharacter* Viewer);
+	/** On the map in the get-ready time: the spots to start from, my team's pick, the others'; after the roll each team's spot. */
+	void DrawStartSpots(const FBox2D& Rect, TFunctionRef<FVector2D(const FVector&)> ToScreen, const ARRRandomCharacter* Viewer);
+	/** Where the start spots were drawn on the full map this frame (for clicks). */
+	TArray<TPair<int32, FVector2D>> StartSpotHits;
+	/** The ultimate die's meteor: a marker over it (at the screen's edge when off it), and on the map. */
+	void DrawUltimateMeteor(const ARRRandomCharacter* Viewer);
+	void DrawUltimateOnMap(TFunctionRef<FVector2D(const FVector&)> ToScreen, float Scale);
+	/** The bag's news over the hands: the gun that came in (or was combined), and when; "BAG FULL". */
+	int32 SeenBagAdds = 0;
+	int32 SeenBagCombines = 0;
+	int32 SeenBagFull = 0;
+	FString BagNews;
+	FLinearColor BagNewsColor = FLinearColor::White;
+	float BagNewsTime = -100.f;
 	/** 0 .. 1: how much of the cotton candy cloud shows on this screen, easing in and out. */
 	float CloudShown = 0.f;
 	float CloudDepthShown = 0.f;

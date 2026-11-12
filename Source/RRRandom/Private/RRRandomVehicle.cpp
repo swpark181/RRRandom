@@ -837,7 +837,7 @@ void ARRRandomVehicle::UpdatePlane(float DeltaSeconds)
 
 float ARRRandomVehicle::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
 {
-	if (!HasAuthority() || !IsPlane() || bCrashing || !Rider || PlaneHealth <= 0.f || Rider->IsInvincible() || ARRRandomGameState::IsPlayLocked(this))
+	if (!HasAuthority() || !IsPlane() || bCrashing || !Rider || PlaneHealth <= 0.f || Rider->IsInvincible() || ARRRandomGameState::IsAttackLocked(this))
 	{
 		return 0.f;
 	}

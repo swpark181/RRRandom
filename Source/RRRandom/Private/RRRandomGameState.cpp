@@ -43,6 +43,12 @@ void ARRRandomGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ARRRandomGameState, AliveFriends);
 	DOREPLIFETIME(ARRRandomGameState, AliveTeams);
 	DOREPLIFETIME(ARRRandomGameState, TeamPlaces);
+	DOREPLIFETIME(ARRRandomGameState, PrepEndTime);
+	DOREPLIFETIME(ARRRandomGameState, StartSpots);
+	DOREPLIFETIME(ARRRandomGameState, TeamPicks);
+	DOREPLIFETIME(ARRRandomGameState, TeamSpots);
+	DOREPLIFETIME(ARRRandomGameState, TeamDice);
+	DOREPLIFETIME(ARRRandomGameState, TeamOrder);
 }
 
 bool ARRRandomGameState::IsBattleRoyale(const UObject* WorldContext)
@@ -95,7 +101,8 @@ bool ARRRandomGameState::IsPlayLocked(const UObject* WorldContext)
 {
 	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
 	const ARRRandomGameState* State = World ? World->GetGameState<ARRRandomGameState>() : nullptr;
-	return State && (State->IsMatchOver() || !State->HasPlayStarted());
+	// (the battle royale's get-ready time isn't locked: only attacks are, IsAttackLocked)
+	return State && (State->IsMatchOver() || (!State->HasPlayStarted() && !State->IsPrep()));
 }
 
 void ARRRandomGameState::AddTeamScore(int32 Team)
@@ -122,4 +129,48 @@ void ARRRandomGameState::EndMatch(int32 Winner, ARRRandomCharacter* InMVP)
 		WinningTeam = Winner;
 		MVP = InMVP;
 	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The battle royale's get-ready time (round 97)
+
+bool ARRRandomGameState::IsAttackLocked(const UObject* WorldContext)
+{
+	return IsPlayLocked(WorldContext) || IsPrep(WorldContext);
+}
+
+bool ARRRandomGameState::IsPrep(const UObject* WorldContext)
+{
+	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	const ARRRandomGameState* State = World ? World->GetGameState<ARRRandomGameState>() : nullptr;
+	return State && State->IsPrep();
+}
+
+void ARRRandomGameState::SetPrep(float InPrepEndTime, const TArray<FVector>& Spots, int32 TeamCount)
+{
+	PrepEndTime = InPrepEndTime;
+	StartSpots.Reset();
+	for (const FVector& Spot : Spots)
+	{
+		StartSpots.Add(Spot);
+	}
+	TeamPicks.Init(INDEX_NONE, TeamCount);
+	TeamSpots.Init(INDEX_NONE, TeamCount);
+	TeamDice.Init(0, TeamCount * 3);
+	TeamOrder.Init(0, TeamCount);
+}
+
+void ARRRandomGameState::SetTeamPick(int32 Team, int32 Spot)
+{
+	if (TeamPicks.IsValidIndex(Team) && (Spot == INDEX_NONE || StartSpots.IsValidIndex(Spot)))
+	{
+		TeamPicks[Team] = Spot;
+	}
+}
+
+void ARRRandomGameState::SetTeamRoll(const TArray<uint8>& Dice, const TArray<int32>& Order, const TArray<int32>& Spots)
+{
+	TeamDice = Dice;
+	TeamOrder = Order;
+	TeamSpots = Spots;
 }

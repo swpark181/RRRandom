@@ -649,6 +649,16 @@ ARRRandomJumpRamp::ARRRandomJumpRamp()
 	bAlwaysRelevant = true;
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	RootComponent->SetMobility(EComponentMobility::Movable);
+	LandingPad = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("LandingPad"));
+	LandingPad->SetupAttachment(RootComponent);
+	LandingPad->SetUsingAbsoluteLocation(true);
+	LandingPad->SetUsingAbsoluteRotation(true);
+	LandingPad->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	LandingPad->SetCanEverAffectNavigation(false);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> PadMesh(TEXT("/Game/Props/Cannon/SM_CannonPad.SM_CannonPad"));
+	if (PadMesh.Succeeded()) { LandingPad->SetStaticMesh(PadMesh.Object); }
+	LandingPad->SetRelativeScale3D(FVector(1.f, 1.f, 0.3f));
+	LandingPad->SetVisibility(false);
 	// What a ride drives up (the slope) and the block under its high end, both hidden boxes that stop everything
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	for (TObjectPtr<UStaticMeshComponent>* Box : { &Slope, &Support })
@@ -671,11 +681,16 @@ void ARRRandomJumpRamp::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ARRRandomJumpRamp, Length);
 	DOREPLIFETIME(ARRRandomJumpRamp, LandDistance);
+	DOREPLIFETIME(ARRRandomJumpRamp, bHasLandingTarget);
+	DOREPLIFETIME(ARRRandomJumpRamp, LandingTarget);
 }
 
 void ARRRandomJumpRamp::BeginPlay()
 {
 	Super::BeginPlay();
+	LandingPad->SetWorldLocation(LandingTarget);
+	LandingPad->SetWorldRotation(GetActorRotation());
+	LandingPad->SetVisibility(bHasLandingTarget);
 	// The slope: a slab from the foot (the actor, on the floor) up Rise to the lip, Length along +X; its top surface is the ramp
 	constexpr float Thickness = 40.f;
 	const float Pitch = FMath::RadiansToDegrees(FMath::Atan2(Rise, Length));
@@ -813,6 +828,16 @@ void ARRRandomJumpRamp::Animate(float DeltaSeconds)
 	}
 }
 
+FVector ARRRandomJumpRamp::GetLandingVelocity(const FVector& From, const FVector& To, float Gravity, float& OutTime)
+{
+	const float G = FMath::Max(Gravity, 1.f);
+	const float Height = To.Z - From.Z;
+	const float Top = FMath::Max(Apex, Height + 550.f);
+	const float Up = FMath::Sqrt(2.f * G * Top);
+	OutTime = (Up + FMath::Sqrt(2.f * G * (Top - Height))) / G;
+	return FVector(To.X - From.X, To.Y - From.Y, 0.f) / OutTime + FVector(0.f, 0.f, Up);
+}
+
 void ARRRandomJumpRamp::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -830,7 +855,7 @@ void ARRRandomJumpRamp::Tick(float DeltaSeconds)
 		// At the lip, going up it fast enough
 		const FVector Local = Frame.InverseTransformPosition(Rider->GetActorLocation());
 		const FVector Velocity = Frame.InverseTransformVector(Rider->GetVelocity());
-		if (Local.X < Length * 0.35f || Local.X > Length + 60.f || FMath::Abs(Local.Y) > Width * 0.5f + 30.f || Local.Z > Rise + 260.f
+		if (Local.X < Length * (bHasLandingTarget ? 0.8f : 0.35f) || Local.X > Length + 60.f || FMath::Abs(Local.Y) > Width * 0.5f + 30.f || Local.Z > Rise + 260.f
 			|| Velocity.X < MinSpeed)
 		{
 			continue;
@@ -841,12 +866,15 @@ void ARRRandomJumpRamp::Tick(float DeltaSeconds)
 		}
 		LastLeap.Add(Rider, Now);
 		// Round 91: a heavier fall while it flies, so the arc is low and quick and the ride goes faster than it drives
-		Rider->StartRampLeap(LeapGravity);
+		Rider->StartRampLeap(LeapGravity, bHasLandingTarget);
 		// Up Apex over the lip, coming down LandDistance on at the floor (Rise under the lip)
 		const float Gravity = FMath::Max(1.f, FMath::Abs(Rider->GetCharacterMovement()->GetGravityZ()));
 		const float Up = FMath::Sqrt(2.f * Gravity * Apex);
 		const float Flight = (Up + FMath::Sqrt(FMath::Square(Up) + 2.f * Gravity * Rise)) / Gravity;
-		const FVector Leap = GetActorForwardVector() * (LandDistance / Flight) + FVector(0.f, 0.f, Up);
+		float TargetTime = Flight;
+		const FVector Leap = bHasLandingTarget
+			? GetLandingVelocity(Rider->GetActorLocation(), FVector(LandingTarget) + FVector(0.f, 0.f, Rider->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 5.f), Gravity, TargetTime)
+			: GetActorForwardVector() * (LandDistance / Flight) + FVector(0.f, 0.f, Up);
 		// (the pushes' own launch, without a species' knockback share)
 		Rider->ACharacter::LaunchCharacter(Leap, true, true);
 		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
@@ -854,7 +882,7 @@ void ARRRandomJumpRamp::Tick(float DeltaSeconds)
 			Effects->SonicBoom(Rider->GetActorLocation(), GetActorForwardVector(), FLinearColor(1.f, 0.85f, 0.3f));
 		}
 		ARRRandomHUD::PopComicWord(this, TEXT("JUMP!"), Rider->GetActorLocation() + FVector(0.f, 0.f, 220.f), RRUI::Gold, 1.3f);
-		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s leaps off the jump ramp at %s (%.0f on, %.0f up)."), *Rider->GetName(), *GetActorLocation().ToCompactString(), LandDistance / Flight, Up);
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s leaps off the jump ramp at %s (%.0f on, %.0f up, target %s)."), *Rider->GetName(), *GetActorLocation().ToCompactString(), Leap.Size2D(), Leap.Z, *FVector(LandingTarget).ToCompactString());
 	}
 }
 

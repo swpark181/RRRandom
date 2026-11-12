@@ -60,6 +60,10 @@ struct FRRSpeciesLook
 	UPROPERTY()
 	TObjectPtr<USkeletalMesh> Mesh;
 
+	/** Round 95: its shell fur (SK_<Name>Fur on the same skeleton), if it has one. */
+	UPROPERTY()
+	TObjectPtr<USkeletalMesh> FurMesh;
+
 	/** Tinted toward "DiffuseColor", with the pastel switch and hit flash of the fox's material. */
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> Material;
@@ -98,6 +102,19 @@ struct FRRSpeciesLook
 	/** With each run's ground speed at MeshScale. */
 	UPROPERTY()
 	FRRAimAnimations Aim;
+
+	/** Round 97, the light sword (Mixamo, one rig's motion on every skeleton): a slash, and the held guard (deflecting). */
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> SwordSlash;
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> SwordGuard;
+	/** The 2nd and 3rd blows of a combo, and the parry flick from the guard (Tripo text-to-motion). */
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> SwordSlash2;
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> SwordSlash3;
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> SwordParry;
 
 	/** The mesh's scale on the brawler (all about the fox's size). */
 	UPROPERTY()
