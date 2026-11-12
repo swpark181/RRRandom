@@ -228,6 +228,9 @@ public:
 
 	/** Server, before it finishes spawning (the actor stands at the foot on the floor, facing the lip): how long it is and how far it throws. */
 	void Setup(float InLength, float InLandDistance) { Length = InLength; LandDistance = InLandDistance; }
+	/** A battle-map ramp lands on a specific hill/roof, solving from the rider's actual takeoff point. */
+	void SetupLanding(float InLength, const FVector& Target) { Length = InLength; LandingTarget = Target; bHasLandingTarget = true; }
+	static FVector GetLandingVelocity(const FVector& From, const FVector& To, float Gravity, float& OutTime);
 
 	static constexpr float Rise = 150.f;
 	static constexpr float Width = 320.f;
@@ -259,6 +262,9 @@ private:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Support;
 	UPROPERTY(Replicated) float Length = 400.f;
 	UPROPERTY(Replicated) float LandDistance = 1500.f;
+	UPROPERTY(Replicated) bool bHasLandingTarget = false;
+	UPROPERTY(Replicated) FVector_NetQuantize LandingTarget = FVector::ZeroVector;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> LandingPad;
 	/** Who leapt lately (not again till they're down). */
 	TMap<TWeakObjectPtr<AActor>, float> LastLeap;
 };

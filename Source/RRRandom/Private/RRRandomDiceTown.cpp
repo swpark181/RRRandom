@@ -79,7 +79,7 @@ namespace
 	// Round 94: the big buildings' Tripo cover models (char-pipeline/input/props94, ue_import_props.py), by ARRRandomDiceTown::
 	// ECoverModel (each keeps its own proportions: AddCoverModel)
 	const TCHAR* const CoverModelNames[] = { TEXT(""), TEXT("SM_BCCrate"), TEXT("SM_BCShelf"), TEXT("SM_BCCounter"), TEXT("SM_BCSofa"), TEXT("SM_BCPlanter"),
-		TEXT("SM_BCVending"), TEXT("SM_BCLockers"), TEXT("SM_BCDesk"), TEXT("SM_BCBookshelf"), TEXT("SM_BCCafeTable"), TEXT("SM_BCConveyor"), TEXT("SM_BCMachine"), TEXT("SM_BCTeddy"), TEXT("/Game/Vehicles/SM_Car"), TEXT("SM_BCKiosk"), TEXT("SM_BCAirCon"), TEXT("SM_BCWaterTank") };
+		TEXT("SM_BCVending"), TEXT("SM_BCLockers"), TEXT("SM_BCDesk"), TEXT("SM_BCBookshelf"), TEXT("SM_BCCafeTable"), TEXT("SM_BCConveyor"), TEXT("SM_BCMachine"), TEXT("SM_BCTeddy"), TEXT("SM_BCCar"), TEXT("SM_BCKiosk"), TEXT("SM_BCAirCon"), TEXT("SM_BCWaterTank") };
 	// The yaw of each model's front as it comes in: Tripo's models face -Y in Blender, which is +Y once in Unreal (checked
 	// with RRGoCover: at -90 the vending machines and shelves showed their backs)
 	constexpr float CoverModelFrontYaw = 90.f;
@@ -862,7 +862,7 @@ void ARRRandomDiceTown::AddBuilding(const FFrame& Frame, int32 W, int32 D, int32
 				// (its band of shingles reaching the steps' outer edge, its point at their top), a die on the point
 				if (bDream && Roofs)
 				{
-					AddColored(Roofs, FTransform(FRotator(0.f, FrameYaw(Frame), 0.f), FrameSpot(Frame, (W - 1) * 0.5f, (D - 1) * 0.5f, Top * BlockSize),
+					AddColored(Roofs, FTransform(FRotator(0.f, FrameYaw(Frame), 0.f), FrameSpot(Frame, (W - 1) * 0.5f, (D - 1) * 0.5f, (Top + Lift) * BlockSize),
 						FVector((W + 2) / 1.1f, (D + 2) / 1.1f, float(K))), Colors.Roof, Blend(Colors.Roof, White, 0.65f));
 				}
 				if (bDream && K > 0)
@@ -949,6 +949,145 @@ void ARRRandomDiceTown::AddRamp(const FFrame& Frame, int32 U, int32 V, int32 Dir
 	const FTransform Deck(FRotator(Pitch, Yaw, 0.f), At(Middle, MiddleZ), FVector((Slope + 40.f) / BlockSize, Width, Thick / BlockSize));
 	AddColored(Steps, Deck, Shade(Color, 0.9f), Color);
 	Solid->AddInstance(Deck, true);
+}
+
+namespace
+{
+	// Round 96, the diagonal blocks: SM_BTSlope rises toward +X; SM_BTSlant keeps the half toward +X -Y and SM_BTSlopeCorner
+	// rises toward +X -Y (Blender's +Y comes in as Unreal's -Y): their way is this yaw. A bank's slab is this thick under
+	// its slope (its top edge juts this over the wall behind, by 1 / sqrt 2 of it: a lip of 14 at the top of a 100 wall); a
+	// cut corner's box reaches this far in from the cut
+	constexpr float SlantMeshYaw = -45.f;
+	constexpr float BankSlabThickness = 20.f;
+	constexpr float SlantBoxDepth = 100.f;
+}
+
+void ARRRandomDiceTown::AddSlopeRun(const FFrame& Frame, int32 U, int32 V, int32 AlongU, int32 AlongV, int32 UpU, int32 UpV, int32 Count, int32 Level, const FColor& Body, const FColor& Accent)
+{
+	if (!SlopeBlocks || Count <= 0)
+	{
+		return;
+	}
+	const int32 Absolute = Level + Lift;
+	const FIntPoint First = Frame.Cell(U, V);
+	const FIntPoint Along = Frame.Dir(AlongU, AlongV);
+	const FVector2D Up(Frame.Dir(UpU, UpV).X, Frame.Dir(UpU, UpV).Y);
+	const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Up.Y, Up.X));
+	FShapeRun Run;
+	Run.Foot = FIntVector(First.X, First.Y, Absolute - 1);
+	const FVector2D AlongDir(Along.X, Along.Y);
+	for (int32 I = 0; I < Count; ++I)
+	{
+		const FIntPoint Cell = First + Along * I;
+		Set(Cell.X, Cell.Y, Level, 0);
+		const float Jitter = 0.95f + 0.1f * float(CellHash(Cell.X, Cell.Y, Absolute) % 1000) / 1000.f;
+		// (the ends of a run 3 or longer: a corner rising inward and toward the run's middle, as a hip roof's end)
+		const bool bEnd = Count >= 3 && SlopeCorners && (I == 0 || I == Count - 1);
+		const FVector2D Corner = (Up + AlongDir * (I == 0 ? 1.f : -1.f)).GetSafeNormal();
+		UInstancedStaticMeshComponent* Instances = bEnd ? SlopeCorners.Get() : SlopeBlocks.Get();
+		const float PieceYaw = bEnd ? FMath::RadiansToDegrees(FMath::Atan2(Corner.Y, Corner.X)) - SlantMeshYaw : Yaw;
+		Run.Pieces.Emplace(Instances, Instances->GetInstanceCount());
+		AddColored(Instances, FTransform(FRotator(0.f, PieceYaw, 0.f), At(CellCenter(Cell), (Absolute - 0.5f) * BlockSize)), Shade(Body, Jitter), Shade(Accent, Jitter));
+		FIntPoint& Taken = ShapedCells.FindOrAdd(Cell, FIntPoint(Absolute, Absolute));
+		Taken = FIntPoint(FMath::Min(Taken.X, Absolute), FMath::Max(Taken.Y, Absolute));
+	}
+	// What stops: a thin slab under the slope (the run's length across, pitched 45 degrees), and a box filling the back of
+	// the wedge (x 25..50, z -50..25 of the cell, x up the slope) so the wall at its high side stops too
+	const FVector2D Middle = (CellCenter(First) + CellCenter(First + Along * (Count - 1))) * 0.5f;
+	const float MiddleZ = (Absolute - 0.5f) * BlockSize;
+	Run.SolidFirst = Solid->GetInstanceCount();
+	Run.SolidCount = 2;
+	const float Half = BankSlabThickness * 0.5f * UE_INV_SQRT_2;
+	Solid->AddInstance(FTransform(FRotator(45.f, Yaw, 0.f), At(Middle + Up * Half, MiddleZ - Half), FVector(UE_SQRT_2, Count, BankSlabThickness / BlockSize)), true);
+	Solid->AddInstance(FTransform(FRotator(0.f, Yaw, 0.f), At(Middle + Up * (BlockSize * 0.375f), MiddleZ - BlockSize * 0.125f), FVector(0.25f, Count, 0.75f)), true);
+	ShapeRuns.Add(Run);
+}
+
+void ARRRandomDiceTown::AddSlantRun(const FFrame& Frame, int32 U, int32 V, int32 StepU, int32 StepV, int32 InU, int32 InV, int32 Count, int32 L0, int32 L1, TFunctionRef<uint8(int32)> LookAt)
+{
+	if (!SlantBlocks || Count <= 0 || L1 < L0)
+	{
+		return;
+	}
+	const FIntPoint First = Frame.Cell(U, V);
+	const FIntPoint Step = Frame.Dir(StepU, StepV);
+	const FVector2D In = FVector2D(Frame.Dir(InU, InV).X, Frame.Dir(InU, InV).Y).GetSafeNormal();
+	const float InYaw = FMath::RadiansToDegrees(FMath::Atan2(In.Y, In.X));
+	for (int32 I = 0; I < Count; ++I)
+	{
+		const FIntPoint Cell = First + Step * I;
+		for (int32 Level = L0; Level <= L1; ++Level)
+		{
+			Set(Cell.X, Cell.Y, Level, 0);
+			const uint8 Value = LookAt(Level);
+			const FLook& Look = Looks[FMath::Max(1, int32(Value)) - 1];
+			const int32 Absolute = Level + Lift;
+			const float Jitter = 0.95f + 0.1f * float(CellHash(Cell.X, Cell.Y, Absolute) % 1000) / 1000.f;
+			// Each its own run, so it breaks as a block does (a whole cut corner going with one block reached was odd): its
+			// look, and a box from the cut through the cell's middle reaching in (the cut's cells' boxes meet end to end)
+			FShapeRun Run;
+			Run.Foot = FIntVector(Cell.X, Cell.Y, L0 + Lift - 1);
+			Run.Pieces.Emplace(SlantBlocks.Get(), SlantBlocks->GetInstanceCount());
+			AddColored(SlantBlocks, FTransform(FRotator(0.f, InYaw - SlantMeshYaw, 0.f), At(CellCenter(Cell), (Absolute - 0.5f) * BlockSize)), Shade(Look.Body, Jitter), Shade(Look.Accent, Jitter));
+			Run.SolidFirst = Solid->GetInstanceCount();
+			Run.SolidCount = 1;
+			Solid->AddInstance(FTransform(FRotator(0.f, InYaw, 0.f), At(CellCenter(Cell) + In * (SlantBoxDepth * 0.5f), (Absolute - 0.5f) * BlockSize),
+				FVector(SlantBoxDepth / BlockSize, UE_SQRT_2, 1.f)), true);
+			ShapeRuns.Add(Run);
+		}
+		FIntPoint& Taken = ShapedCells.FindOrAdd(Cell, FIntPoint(L0 + Lift, L1 + Lift));
+		Taken = FIntPoint(FMath::Min(Taken.X, L0 + Lift), FMath::Max(Taken.Y, L1 + Lift));
+	}
+}
+
+void ARRRandomDiceTown::AddSlopeRamp(const FFrame& Frame, int32 U, int32 V, int32 DirU, int32 DirV, int32 AcrossU, int32 AcrossV, int32 Width, int32 Base, int32 Rise,
+	const FColor& Body, const FColor& Accent, uint8 FillLook)
+{
+	if (!SlopeBlocks)
+	{
+		return;
+	}
+	// Ramps keep their own levels, Lift included (as stairs do); each cell K up it is earth to level K and a slope over that
+	Base += Lift;
+	FStair Stair;
+	Stair.Start = Frame.Cell(U, V);
+	Stair.Dir = Frame.Dir(DirU, DirV);
+	Stair.Across = Frame.Dir(AcrossU, AcrossV);
+	Stair.Width = Width;
+	Stair.Base = Base;
+	Stair.Rise = Rise;
+	Stair.StepSet = SlopeBlocks;
+	Stair.StepFirst = SlopeBlocks->GetInstanceCount();
+	Stair.StepCount = Rise * Width;
+	Stair.SolidFirst = Solid->GetInstanceCount();
+	Stair.SolidCount = 1;
+	Stair.NodeShift = -BlockSize * 0.5f;
+	Stairs.Add(Stair);
+	const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(float(Stair.Dir.Y), float(Stair.Dir.X)));
+	for (int32 K = 0; K < Rise; ++K)
+	{
+		for (int32 W = 0; W < Width; ++W)
+		{
+			const FIntPoint Cell = Stair.Start + Stair.Dir * K + Stair.Across * W;
+			StairCells.Add(Cell);
+			for (int32 Level = Base + 1; Level <= Base + Rise + Headroom; ++Level)
+			{
+				Set(Cell.X, Cell.Y, Level - Lift, Level <= Base + K ? FillLook : 0);
+			}
+			const float Jitter = 0.95f + 0.1f * float(CellHash(Cell.X, Cell.Y, Base + K) % 1000) / 1000.f;
+			AddColored(SlopeBlocks, FTransform(FRotator(0.f, Yaw, 0.f), At(CellCenter(Cell), (Base + K + 0.5f) * BlockSize)), Shade(Body, Jitter), Shade(Accent, Jitter));
+		}
+	}
+	// What stops: a slab whose top runs up the slopes (as AddRamp's deck, a little longer to meet the ground and the top)
+	const FVector2D Dir(Stair.Dir.X, Stair.Dir.Y);
+	const FVector2D Across(Stair.Across.X, Stair.Across.Y);
+	const FVector2D Edge = CellCenter(Stair.Start) - Dir * (BlockSize * 0.5f) + Across * ((Width - 1) * BlockSize * 0.5f);
+	const float Length = Rise * BlockSize;
+	const float Slope = Length * UE_SQRT_2;
+	const float Thick = BlockSize * 0.5f;
+	const FVector2D Middle = Edge + Dir * (Length * 0.5f + UE_INV_SQRT_2 * Thick * 0.5f);
+	const float MiddleZ = Base * BlockSize + Length * 0.5f - UE_INV_SQRT_2 * Thick * 0.5f;
+	Solid->AddInstance(FTransform(FRotator(45.f, Yaw, 0.f), At(Middle, MiddleZ), FVector((Slope + 40.f) / BlockSize, Width, Thick / BlockSize)), true);
 }
 
 bool ARRRandomDiceTown::AddCoverModel(ECoverModel Model, const FFrame& Frame, int32 W, int32 D, int32 S, int32 U0, int32 V0, int32 U1, int32 V1, int32 Height,
@@ -1712,6 +1851,250 @@ void ARRRandomDiceTown::AddHill(const FFrame& Frame, int32 W, int32 D, int32 Lev
 	}
 }
 
+void ARRRandomDiceTown::AddBigHill(const FFrame& Frame, int32 W, int32 D, int32 Seed)
+{
+	FRandomStream Stream(Seed);
+	constexpr int32 Inset = 5;
+	// (every cliff 3 blocks: a brawler climbs ledges up to 2 above its feet, so each terrace is reached by its ways up only)
+	constexpr int32 Tops[] = { 3, 6, 9 };
+	constexpr int32 Tiers = UE_ARRAY_COUNT(Tops);
+	// Round 96, with the diagonal blocks: each terrace's corners cut at 45 degrees this many cells, so the hill reads as a
+	// round mound, not a stack of boxes (the top's cut small: the pavilion stands one cell in from it)
+	constexpr int32 Cuts[] = { 5, 4, 2 };
+	constexpr int32 StairWidth = 3;
+	constexpr int32 RampWidth = 5;
+	const bool bShapes = HasDiagonalBlocks();
+	const uint8 Grass = MakeLook(Dirt, GrassA);
+	const uint8 WallLook = MakeLook(Shade(Stone, 0.9f), Blend(Stone, White, 0.3f));
+	// Round 96: each terrace grass on top over layers of earth (a block's grass lip on every level made the cliffs stripy)
+	const FColor EarthLayers[] = { Blend(Dirt, Sand, 0.3f), Dirt, DirtDeep };
+	auto LookAt = [&](int32 K, int32 Level) -> uint8
+	{
+		return Level >= Tops[K] ? Grass : Plain(EarthLayers[FMath::Clamp(Tops[K] - Level - 1, 0, 2)]);
+	};
+	auto At = [&Frame](int32 U, int32 V, int32 Turn)
+	{
+		FFrame Child;
+		Child.Origin = Frame.Cell(U, V);
+		Child.Turn = (Frame.Turn + Turn) & 3;
+		Child.bRed = Frame.bRed;
+		return Child;
+	};
+
+	// The terraces, the lowest first, each only from the top of the one under it (that one fills under this one); round
+	// 96: a cut corner's cells beyond the cut stay the terrace below, the cells on the cut are slanted
+	for (int32 K = 0; K < Tiers; ++K)
+	{
+		const int32 E = Inset * K;
+		const int32 Cut = bShapes ? Cuts[K] : 0;
+		const int32 L0 = K == 0 ? 1 : Tops[K - 1] + 1;
+		for (int32 U = E; U <= W - 1 - E; ++U)
+		{
+			for (int32 V = E; V <= D - 1 - E; ++V)
+			{
+				const int32 FromCorner = FMath::Min(U - E, W - 1 - E - U) + FMath::Min(V - E, D - 1 - E - V);
+				if (FromCorner < Cut)
+				{
+					continue;
+				}
+				for (int32 Level = L0; Level <= Tops[K]; ++Level)
+				{
+					Fill(Frame, U, V, U, V, Level, Level, LookAt(K, Level));
+				}
+			}
+		}
+		if (Cut > 0)
+		{
+			for (const FIntPoint Sign : { FIntPoint(1, 1), FIntPoint(-1, 1), FIntPoint(1, -1), FIntPoint(-1, -1) })
+			{
+				const int32 CornerU = Sign.X > 0 ? E : W - 1 - E;
+				const int32 CornerV = Sign.Y > 0 ? E : D - 1 - E;
+				AddSlantRun(Frame, CornerU + Sign.X * (Cut - 1), CornerV, -Sign.X, Sign.Y, Sign.X, Sign.Y, Cut, L0, Tops[K], [&](int32 Level) { return LookAt(K, Level); });
+			}
+		}
+	}
+	// A flight up each, on the next side round (front, right, back, left) from a random start, 3 wide in the middle of it;
+	// round 96: and a second way onto the first terrace, a ramp of slopes 5 wide on the side across from its flight (a hill
+	// with one way up was a trap). The banks round each terrace's edge leave a gap where a way arrives
+	const int32 FirstSide = Stream.RandRange(0, 3);
+	TArray<FIntPoint> Arrivals[Tiers];
+	const int32 MidU = W / 2 - 1;
+	const int32 MidV = D / 2 - 1;
+	for (int32 K = 0; K < Tiers; ++K)
+	{
+		const int32 Base = K == 0 ? 0 : Tops[K - 1];
+		const int32 Rise = Tops[K] - Base;
+		const int32 E = Inset * K;
+		const FColor StepColor = K == Tiers - 1 ? Cream : Sand;
+		switch ((FirstSide + K) % 4)
+		{
+		case 0:
+			AddStairs(Frame, MidU, E - Rise, 0, 1, 1, 0, StairWidth, Base, Rise, StepColor);
+			Arrivals[K].Add(FIntPoint(MidU + 1, E));
+			break;
+		case 1:
+			AddStairs(Frame, W - 1 - E + Rise, MidV, -1, 0, 0, 1, StairWidth, Base, Rise, StepColor);
+			Arrivals[K].Add(FIntPoint(W - 1 - E, MidV + 1));
+			break;
+		case 2:
+			AddStairs(Frame, MidU, D - 1 - E + Rise, 0, -1, 1, 0, StairWidth, Base, Rise, StepColor);
+			Arrivals[K].Add(FIntPoint(MidU + 1, D - 1 - E));
+			break;
+		default:
+			AddStairs(Frame, E - Rise, MidV, 1, 0, 0, 1, StairWidth, Base, Rise, StepColor);
+			Arrivals[K].Add(FIntPoint(E, MidV + 1));
+			break;
+		}
+	}
+	if (bShapes)
+	{
+		const int32 Rise = Tops[0];
+		const uint8 Earth = Plain(EarthLayers[0]);
+		const FColor Path = Blend(Sand, GrassLime, 0.25f);
+		switch ((FirstSide + 2) % 4)
+		{
+		case 0:
+			AddSlopeRamp(Frame, MidU - 1, -Rise, 0, 1, 1, 0, RampWidth, 0, Rise, EarthLayers[0], Path, Earth);
+			Arrivals[0].Add(FIntPoint(MidU + 1, 0));
+			break;
+		case 1:
+			AddSlopeRamp(Frame, W - 1 + Rise, MidV - 1, -1, 0, 0, 1, RampWidth, 0, Rise, EarthLayers[0], Path, Earth);
+			Arrivals[0].Add(FIntPoint(W - 1, MidV + 1));
+			break;
+		case 2:
+			AddSlopeRamp(Frame, MidU - 1, D - 1 + Rise, 0, -1, 1, 0, RampWidth, 0, Rise, EarthLayers[0], Path, Earth);
+			Arrivals[0].Add(FIntPoint(MidU + 1, D - 1));
+			break;
+		default:
+			AddSlopeRamp(Frame, -Rise, MidV - 1, 1, 0, 0, 1, RampWidth, 0, Rise, EarthLayers[0], Path, Earth);
+			Arrivals[0].Add(FIntPoint(0, MidV + 1));
+			break;
+		}
+		const FStair& Ramp = Stairs.Last();
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: big hill, its ramp's foot at %s, up toward (%d, %d)."),
+			*this->At(CellCenter(Ramp.Start + Ramp.Across * (RampWidth / 2)) - FVector2D(Ramp.Dir.X, Ramp.Dir.Y) * BlockSize, 0.f).ToString(), Ramp.Dir.X, Ramp.Dir.Y);
+	}
+	// (and the top's: the foot of the pavilion's flight, a cell in from the top's front edge)
+	Arrivals[Tiers - 1].Add(FIntPoint(Inset * (Tiers - 1) + 5, Inset * (Tiers - 1)));
+	auto NearArrival = [&](int32 K, int32 U, int32 V)
+	{
+		for (const FIntPoint& Arrival : Arrivals[K])
+		{
+			if (FMath::Abs(U - Arrival.X) + FMath::Abs(V - Arrival.Y) <= (bShapes ? 4 : 3))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	// Round 96: grassy banks along each terrace's straight edges, 5 on and 2 off (the ends tapered), rising inward to a wall a block high:
+	// something to crouch behind up there, not a fort (round 95's knee walls without the diagonal blocks)
+	for (int32 K = 0; K < Tiers; ++K)
+	{
+		const int32 E = Inset * K;
+		if (!bShapes)
+		{
+			for (int32 U = E; U <= W - 1 - E; ++U)
+			{
+				for (int32 V = E; V <= D - 1 - E; ++V)
+				{
+					const bool bEdge = U == E || U == W - 1 - E || V == E || V == D - 1 - E;
+					if (bEdge && ((U + V) / 3) % 2 == 0 && !NearArrival(K, U, V))
+					{
+						Fill(Frame, U, V, U, V, Tops[K] + 1, Tops[K] + 1, WallLook);
+					}
+				}
+			}
+			continue;
+		}
+		// Each side: its first cell, the way along it, the way in, its length
+		struct FSide { FIntPoint Start; FIntPoint Along; FIntPoint In; int32 Length; };
+		const FSide Sides[] =
+		{
+			{ FIntPoint(E, E), FIntPoint(1, 0), FIntPoint(0, 1), W - 2 * E },
+			{ FIntPoint(W - 1 - E, E), FIntPoint(0, 1), FIntPoint(-1, 0), D - 2 * E },
+			{ FIntPoint(E, D - 1 - E), FIntPoint(1, 0), FIntPoint(0, -1), W - 2 * E },
+			{ FIntPoint(E, E), FIntPoint(0, 1), FIntPoint(1, 0), D - 2 * E },
+		};
+		for (const FSide& Side : Sides)
+		{
+			int32 RunStart = INDEX_NONE;
+			for (int32 T = 0; T <= Side.Length; ++T)
+			{
+				const FIntPoint Cell = Side.Start + Side.Along * T;
+				const int32 FromEnd = FMath::Min(T, Side.Length - 1 - T);
+				const bool bOn = T < Side.Length && FromEnd > Cuts[K] && (T - Cuts[K]) % 7 < 5 && !NearArrival(K, Cell.X, Cell.Y);
+				if (bOn && RunStart == INDEX_NONE)
+				{
+					RunStart = T;
+				}
+				else if (!bOn && RunStart != INDEX_NONE)
+				{
+					const FIntPoint From = Side.Start + Side.Along * RunStart;
+					AddSlopeRun(Frame, From.X, From.Y, Side.Along.X, Side.Along.Y, Side.In.X, Side.In.Y, T - RunStart, Tops[K] + 1, Dirt, GrassA);
+					RunStart = INDEX_NONE;
+				}
+			}
+		}
+	}
+	// (No dice or crates on the terraces: anything standing there is a step that brings the next cliff within a climb)
+
+	// On top (the top terrace is W - 20 by D - 20, from cell 10 in): open structures, nothing to hide in (round 95: a house
+	// up there was full cover with windows to shoot from; the hill's advantage is meant to cost being seen). An open
+	// pavilion (pillars, a rail, a roof deck with crenels reached by an outside flight) and a watchtower
+	const int32 T0 = Inset * (Tiers - 1);
+	Lift = Tops[Tiers - 1];
+	const int32 Style = Stream.RandRange(0, UE_ARRAY_COUNT(Styles) - 1);
+	AddPavilion(At(T0 + 1, T0 + 6, 0), 9, Style);
+	AddTower(At(T0 + 11, T0 + 11, 0), (Style + 2) % UE_ARRAY_COUNT(Styles));
+	Lift = 0;
+	// Round 96: where the bots go to take the hill: the floor under the pavilion's roof, and its roof deck (5 over the top)
+	HillTops.Add(this->At(CellCenter(Frame.Cell(T0 + 7, T0 + 8)), Tops[Tiers - 1] * BlockSize));
+	HillTops.Add(this->At(CellCenter(Frame.Cell(T0 + 5, T0 + 10)), (Tops[Tiers - 1] + 5) * BlockSize));
+}
+
+void ARRRandomDiceTown::AddPavilion(const FFrame& Frame, int32 N, int32 Style)
+{
+	// N x N: a pillar at each corner and the middle of each side, 4 blocks tall; a knee-high rail between them every other
+	// cell, open in the middle of each side; a flat roof on top at 5 with crenels round it; a flight up the front from 5
+	// cells out to the roof
+	const FStyle& Colors = Styles[Style % UE_ARRAY_COUNT(Styles)];
+	const uint8 PillarLook = Plain(Colors.Trim);
+	const uint8 RailLook = MakeLook(Colors.Low, Wood);
+	const uint8 RoofLook = MakeLook(Colors.Roof, Blend(Colors.Roof, White, 0.35f));
+	const uint8 CrenelLook = Plain(Colors.High);
+	constexpr int32 RoofLevel = 5;
+	const int32 Mid = N / 2;
+	for (int32 U = 0; U < N; ++U)
+	{
+		for (int32 V = 0; V < N; ++V)
+		{
+			const bool bEdgeU = U == 0 || U == N - 1;
+			const bool bEdgeV = V == 0 || V == N - 1;
+			if (!bEdgeU && !bEdgeV)
+			{
+				continue;
+			}
+			const bool bPillar = (bEdgeU || U == Mid) && (bEdgeV || V == Mid);
+			if (bPillar)
+			{
+				Fill(Frame, U, V, U, V, 1, RoofLevel - 1, PillarLook);
+			}
+			else if ((U + V) % 2 == 0 && FMath::Abs(U - Mid) > 1 && FMath::Abs(V - Mid) > 1)
+			{
+				Fill(Frame, U, V, U, V, 1, 1, RailLook);
+			}
+			// The roof's crenels, open where the flight arrives (the front, V 0, in the middle)
+			if ((U + V) % 2 == 0 && !(V == 0 && FMath::Abs(U - Mid) <= 1))
+			{
+				Fill(Frame, U, V, U, V, RoofLevel + 1, RoofLevel + 1, CrenelLook);
+			}
+		}
+	}
+	Fill(Frame, 0, 0, N - 1, N - 1, RoofLevel, RoofLevel, RoofLook);
+	AddStairs(Frame, Mid - 1, -RoofLevel, 0, 1, 1, 0, 2, 0, RoofLevel, Colors.Trim);
+}
+
 void ARRRandomDiceTown::AddCanal(const FFrame& Frame, int32 Length, int32 Width)
 {
 	// Dug one block down to a sandy bed, water most of the way up; where it leaves the island, a waterfall
@@ -1851,6 +2234,9 @@ void ARRRandomDiceTown::Build()
 	LampLights.Reset();
 	Stairs.Reset();
 	StairCells.Reset();
+	ShapeRuns.Reset();
+	ShapedCells.Reset();
+	HillTops.Reset();
 	DefenseGates.Reset();
 	// Loaded here rather than in the constructor, so the editor's tools still run before the assets are imported. Made by
 	// char-pipeline/scripts/blender_block_town.py and ue_import_block_town.py
@@ -1920,6 +2306,14 @@ void ARRRandomDiceTown::Build()
 	}
 	PuddleDiscs.Reset();
 	Steps = MakeInstances(BlockMesh, nullptr, false, 6);
+	// Round 96: the diagonal blocks (char-pipeline/scripts/blender_slope_blocks.py; without them the hills build as round 95's)
+	SlopeMesh = LoadMesh(TEXT("SM_BTSlope"));
+	SlantMesh = LoadMesh(TEXT("SM_BTSlant"));
+	SlopeCornerMesh = LoadMesh(TEXT("SM_BTSlopeCorner"));
+	const bool bDiagonal = SlopeMesh && SlantMesh && SlopeCornerMesh;
+	SlopeBlocks = bDiagonal ? MakeInstances(SlopeMesh, nullptr, false, 6) : nullptr;
+	SlantBlocks = bDiagonal ? MakeInstances(SlantMesh, nullptr, false, 6) : nullptr;
+	SlopeCorners = bDiagonal ? MakeInstances(SlopeCornerMesh, nullptr, false, 6) : nullptr;
 	Underside = MakeInstances(BlockMesh, nullptr, false, 6);
 	Water = MakeInstances(BlockMesh, WaterMaterial, false, 6);
 	Water->CastShadow = false;
@@ -2111,6 +2505,11 @@ void ARRRandomDiceTown::Build()
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town %d blocks, %d dice, %d steps, %d water, %d underside, %d cloud boxes, %d solid boxes, %d stairs, %d walk nodes (%d roamable), %d looks."),
 		Blocks->GetInstanceCount(), DieBlocks->GetInstanceCount(), Steps->GetInstanceCount(), Water->GetInstanceCount(), Underside->GetInstanceCount(),
 		Clouds->GetInstanceCount(), Solid->GetInstanceCount(), Stairs.Num(), Nodes.Num(), Roamable.Num(), Looks.Num());
+	if (HasDiagonalBlocks() && ShapeRuns.Num() > 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town diagonal blocks: %d slopes, %d corners, %d slants in %d runs; %d hill tops."),
+			SlopeBlocks->GetInstanceCount(), SlopeCorners->GetInstanceCount(), SlantBlocks->GetInstanceCount(), ShapeRuns.Num(), HillTops.Num());
+	}
 	if (bDream)
 	{
 		UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town dream pass: %d decor, %d stars, %d moons, %d floating dice, %d floaters."),
@@ -3411,7 +3810,7 @@ void ARRRandomDiceTown::AddDieHouse(const FFrame& Frame, int32 Seed)
 	Fill(Frame, 2, 9, 3, 10, 1, 1, CrateLook);
 	Fill(Frame, 2, 10, 2, 10, 2, 2, CrateLook);
 	Fill(Frame, 9, 2, 9, 3, 1, 2, CrateLook);
-	AddFloater(Stars, FrameSpot(Frame, (N - 1) * 0.5f, (N - 1) * 0.5f, 8.f * BlockSize), FRotator(0.f, FrameYaw(Frame), 0.f), 2.2f, StarYellow, StarYellow,
+	AddFloater(Stars, FrameSpot(Frame, (N - 1) * 0.5f, (N - 1) * 0.5f, (8.f + Lift) * BlockSize), FRotator(0.f, FrameYaw(Frame), 0.f), 2.2f, StarYellow, StarYellow,
 		25.f, 35.f, 0.f, 0.f, 0.f, float(Seed % 100));
 }
 
@@ -3979,11 +4378,17 @@ void ARRRandomDiceTown::MakeWalkGraph()
 			{
 				// Mid-cell on the 45 degree treads
 				const FStair& Stair = Stairs[Step->Key];
-				Nodes.Add({ FIntPoint(X, Y), (Stair.Base + Step->Value + 1) * BlockSize, Stair.Dir });
+				Nodes.Add({ FIntPoint(X, Y), (Stair.Base + Step->Value + 1) * BlockSize + Stair.NodeShift, Stair.Dir });
 				continue;
 			}
+			// (round 96: not in a diagonal block, nor on one)
+			const FIntPoint* Shaped = ShapedCells.Find(FIntPoint(X, Y));
 			for (int32 Level = LevelMin; Level < LevelMax; ++Level)
 			{
+				if (Shaped && Level >= Shaped->X - 1 && Level <= Shaped->Y)
+				{
+					continue;
+				}
 				if (Get(X, Y, Level) && IsClearAbove(X, Y, Level, Headroom))
 				{
 					Nodes.Add({ FIntPoint(X, Y), Level * BlockSize, FIntPoint::ZeroValue });
@@ -4796,7 +5201,7 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 		}
 		for (int32 Step = Stair.StepFirst; Step < Stair.StepFirst + Stair.StepCount; ++Step)
 		{
-			WantGone.FindOrAdd(Steps).Add(Step);
+			WantGone.FindOrAdd(Stair.StepSet ? Stair.StepSet : Steps.Get()).Add(Step);
 		}
 		for (int32 Slab = Stair.SolidFirst; Slab < Stair.SolidFirst + Stair.SolidCount; ++Slab)
 		{
@@ -4871,15 +5276,38 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 		bool bHit = false;
 		for (int32 Step = Stair.StepFirst; Step < Stair.StepFirst + Stair.StepCount && !bHit; ++Step)
 		{
-			bHit = IsHit(BoundsOf(Steps, Step));
+			bHit = IsHit(BoundsOf(Stair.StepSet ? Stair.StepSet : Steps.Get(), Step));
 		}
 		if (bHit)
 		{
 			for (int32 Step = Stair.StepFirst; Step < Stair.StepFirst + Stair.StepCount; ++Step)
 			{
-				WantGone.FindOrAdd(Steps).Add(Step);
+				WantGone.FindOrAdd(Stair.StepSet ? Stair.StepSet : Steps.Get()).Add(Step);
 			}
 			for (int32 Slab = Stair.SolidFirst; Slab < Stair.SolidFirst + Stair.SolidCount; ++Slab)
+			{
+				WantGone.FindOrAdd(Solid).Add(Slab);
+			}
+		}
+	}
+	// Round 96: diagonal blocks, a run at a time: one whose middle a wreck reaches (as the blocks: a wreck merely touching
+	// a cut corner took it and left the blocks behind it standing), or the cell under the run's first gone
+	for (const FShapeRun& Run : ShapeRuns)
+	{
+		const int32 Foot = IsInGrid(Run.Foot.X, Run.Foot.Y, Run.Foot.Z) ? GridIndex(Run.Foot.X, Run.Foot.Y, Run.Foot.Z) : INDEX_NONE;
+		bool bGone = Foot != INDEX_NONE && Grid[Foot] != 0 && Now[Foot];
+		for (int32 Piece = 0; Piece < Run.Pieces.Num() && !bGone; ++Piece)
+		{
+			const FVector PieceMiddle = BoundsOf(Run.Pieces[Piece].Key, Run.Pieces[Piece].Value).GetCenter();
+			bGone = IsHit(FBox(PieceMiddle - FVector(1.f), PieceMiddle + FVector(1.f)));
+		}
+		if (bGone)
+		{
+			for (const TPair<UInstancedStaticMeshComponent*, int32>& Piece : Run.Pieces)
+			{
+				WantGone.FindOrAdd(Piece.Key).Add(Piece.Value);
+			}
+			for (int32 Slab = Run.SolidFirst; Slab < Run.SolidFirst + Run.SolidCount; ++Slab)
 			{
 				WantGone.FindOrAdd(Solid).Add(Slab);
 			}
@@ -5661,7 +6089,7 @@ TArray<UPrimitiveComponent*> ARRRandomDiceTown::GetDetailComponents() const
 {
 	TArray<UPrimitiveComponent*> Out;
 	const UInstancedStaticMeshComponent* Sets[] = { Blocks.Get(), DieBlocks.Get(), GlossBlocks.Get(), Puddles.Get(), Steps.Get(), Water.Get(), Decor.Get(),
-		Neon.Get(), Roofs.Get(), Marshmallows.Get(), Poles.Get() };
+		Neon.Get(), Roofs.Get(), Marshmallows.Get(), Poles.Get(), SlopeBlocks.Get(), SlantBlocks.Get(), SlopeCorners.Get() };
 	for (const UInstancedStaticMeshComponent* Set : Sets)
 	{
 		if (Set)
@@ -6285,8 +6713,27 @@ void ARRRandomDiceTown::LayOutBattle()
 	}
 	case ERRDistrict::Hills:
 	{
-		// Stepped hills, each with a watchtower on its top terrace (a look out over the town round it)
-		for (int32 Try = 0; Try < 6000 && Extras < 3; ++Try)
+		// Round 95: big stepped hills (2, 5 and 8 blocks up) with a building on top, to see the town from and fight for
+		// (round 92's were 24 a side and 3 high: hardly above the cover). Two where they fit, else one, else the old small one
+		int32 BigHills = 0;
+		for (int32 Try = 0; Try < 800 && Extras < 2; ++Try)
+		{
+			const FFrame Frame = RandomFrame();
+			const int32 W = 36;
+			const int32 D = 36;
+			// (a quarter of the tile, between its middle streets and its avenues, is 46 cells: the hill and its first flight fit)
+			const FIntRect Rect = Footprint(Frame, -3, -3, W + 2, D + 2, 1);
+			if (!IsFree(Rect) || !AllIn(Rect, [this](int32 X, int32 Y) { return IsOnIsland(X, Y); }))
+			{
+				continue;
+			}
+			Reserve(Rect);
+			AddBigHill(Frame, W, D, Layout.RandRange(0, 1 << 30));
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: big hill, its top at %s."), *FrameSpot(Frame, (W - 1) * 0.5f, (D - 1) * 0.5f, 900.f).ToString());
+			++Extras;
+			++BigHills;
+		}
+		for (int32 Try = 0; Try < 6000 && Extras < 1; ++Try)
 		{
 			const FFrame Frame = RandomFrame();
 			const int32 W = 24;
@@ -6303,6 +6750,7 @@ void ARRRandomDiceTown::LayOutBattle()
 			Lift = 0;
 			++Extras;
 		}
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: hills tile (%d, %d): %d big hill(s), %d small."), BattleTile.X, BattleTile.Y, BigHills, Extras - BigHills);
 		Buildings = PlaceBuildings(Want(8), 8000, Anywhere, 7, 9, 7, 9, 0.2f, 0.f);
 		Towers = PlaceTowers(Want(1), Anywhere);
 		Trees = PlaceTrees(Want(30), 8000, Anywhere);

@@ -18,6 +18,7 @@ from mathutils import Vector
 argv = sys.argv[sys.argv.index("--") + 1:]
 views = ["front", "back", "left", "low"]
 px = 512
+span_fit = False
 rest = []
 i = 0
 while i < len(argv):
@@ -27,6 +28,9 @@ while i < len(argv):
     elif argv[i] == "--px":
         px = int(argv[i + 1])
         i += 2
+    elif argv[i] == "--span":  # frame the turnaround views by the largest dimension (long vehicles), not the height
+        span_fit = True
+        i += 1
     else:
         rest.append(argv[i])
         i += 1
@@ -123,7 +127,23 @@ VIEWS = {
     "chin_under":(Vector((0, -0.5, -1)).normalized(), Vector((center.x, center.y, lo.z + height * 0.52)), height * 0.4),
     "face": (Vector((0, -1, 0)), Vector((center.x, center.y, head_z)), height * 0.45),
     "head_back": (Vector((0, 1, 0.25)).normalized(), Vector((center.x, center.y, head_z)), height * 0.55),
+    # the head from the front, its left (+X) and its right, a little higher: the ears' outlines (round 95)
+    "head": (Vector((0, -1, 0.1)).normalized(), Vector((center.x, center.y, head_z + height * 0.06)), height * 0.55),
+    "head_l": (Vector((1, -0.3, 0.1)).normalized(), Vector((center.x, center.y, head_z + height * 0.06)), height * 0.55),
+    "head_r": (Vector((-1, -0.3, 0.1)).normalized(), Vector((center.x, center.y, head_z + height * 0.06)), height * 0.55),
+    # close on each ear's outer edge (her right ear on -X), from the front, the outside and behind
+    "ear_r_front": (Vector((-0.3, -1, 0.1)).normalized(), Vector((center.x - height * 0.24, center.y, head_z + height * 0.1)), height * 0.3),
+    "ear_r_out": (Vector((-1, 0.1, 0.1)).normalized(), Vector((center.x - height * 0.24, center.y, head_z + height * 0.1)), height * 0.3),
+    "ear_r_back": (Vector((-0.3, 1, 0.1)).normalized(), Vector((center.x - height * 0.24, center.y, head_z + height * 0.1)), height * 0.3),
+    "ear_l_front": (Vector((0.3, -1, 0.1)).normalized(), Vector((center.x + height * 0.24, center.y, head_z + height * 0.1)), height * 0.3),
+    "ear_l_out": (Vector((1, 0.1, 0.1)).normalized(), Vector((center.x + height * 0.24, center.y, head_z + height * 0.1)), height * 0.3),
+    "ear_l_back": (Vector((0.3, 1, 0.1)).normalized(), Vector((center.x + height * 0.24, center.y, head_z + height * 0.1)), height * 0.3),
 }
+
+if span_fit:
+    span = max(hi.x - lo.x, hi.y - lo.y, height) * 1.08
+    for v in ("front", "back", "left", "right", "front_left", "back_left", "back_right", "front_right"):
+        VIEWS[v] = (VIEWS[v][0], VIEWS[v][1], span)
 
 import os
 tmp_dir = os.path.join(os.path.dirname(os.path.abspath(out)), "_views_tmp")

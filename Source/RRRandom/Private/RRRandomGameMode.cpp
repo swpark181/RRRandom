@@ -13,6 +13,9 @@
 #include "RRRandomGrassFloor.h"
 #include "RRRandomIsland.h"
 #include "RRRandomGameState.h"
+#include "RRRandomLoadout.h"
+#include "RRRandomUltimateMeteor.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "RRRandomMeteorRush.h"
 #include "RRRandomOre.h"
 #include "RRRandomHUD.h"
@@ -942,6 +945,13 @@ APawn* ARRRandomGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPla
 	return Brawler;
 }
 
+void ARRRandomGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// The next-tick bot fill and standings recount (Logout) would otherwise run on the next map, with no world here
+	GetWorldTimerManager().ClearAllTimersForObject(this);
+	Super::EndPlay(EndPlayReason);
+}
+
 void ARRRandomGameMode::Logout(AController* Exiting)
 {
 	Super::Logout(Exiting);
@@ -963,7 +973,8 @@ void ARRRandomGameMode::Logout(AController* Exiting)
 				// (the battle royale under way: no bot comes; the spot is out)
 				if (bBattleRoyale)
 				{
-					GetWorldTimerManager().SetTimerForNextTick([this]() { UpdateBattleStanding(nullptr); });
+					// (bound to this game mode: a player leaving because the game quits mustn't recount after the map is gone)
+					GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]() { UpdateBattleStanding(nullptr); }));
 				}
 			}
 		}
@@ -1279,8 +1290,52 @@ void ARRRandomGameMode::SetUpBattleRoyale()
 		UE_LOG(LogTemp, Warning, TEXT("RRRandom: no battle map built; the battle royale has no ground."));
 		return;
 	}
-	// The teams' starts round the island, the rides spread over it, the ring round all of it from play start
-	Battle->GetTeamStarts(GetTeamCount(), TeamStarts);
+	// Round 97: the get-ready time first (everyone on the plaza, no attacks, thirty weapon dice each, each team picking where
+	// to start), then the team roll, then play from the spots; without it (-RRBRPrep=0) the teams' starts round the island
+	ARRRandomGameState* PrepState = GetGameState<ARRRandomGameState>();
+	float PrepTime = DefaultPrepTime;
+	FParse::Value(FCommandLine::Get(), TEXT("RRBRPrep="), PrepTime);
+	TArray<FVector> Spots;
+	if (PrepTime > 0.f && PrepState)
+	{
+		Battle->GetStartSpots(Spots);
+	}
+	PrepStream.GenerateNewSeed();
+	if (PrepTime > 0.f && PrepState && Spots.Num() >= GetTeamCount())
+	{
+		const float Now = PrepState->GetServerWorldTimeSeconds();
+		PrepState->SetPlayStartTime(Now + PrepTime + ARRRandomGameState::TeamRollTime);
+		PrepState->SetPrep(Now + PrepTime, Spots, GetTeamCount());
+		Battle->GetPlazaStarts(GetTeamCount(), TeamStarts);
+		PlazaCenter = Battle->GetActorLocation();
+		// Every team wants somewhere to begin with (spread out); a player's team picks again on the map
+		TArray<int32> Free;
+		for (int32 Spot = 0; Spot < Spots.Num(); ++Spot)
+		{
+			Free.Add(Spot);
+		}
+		for (int32 Team = 0; Team < GetTeamCount() && Free.Num() > 0; ++Team)
+		{
+			PrepState->SetTeamPick(Team, Free[PrepStream.RandRange(0, Free.Num() - 1)]);
+			Free.Remove(PrepState->GetTeamPick(Team));
+		}
+		GetWorldTimerManager().SetTimer(PrepTimer, this, &ARRRandomGameMode::KeepOnPlaza, 0.5f, true);
+		GetWorldTimerManager().SetTimer(RollTimer, this, &ARRRandomGameMode::RollTeamStarts, PrepTime, false);
+		GetWorldTimerManager().SetTimer(DeployTimer, this, &ARRRandomGameMode::DeployTeams, PrepTime + ARRRandomGameState::TeamRollTime, false);
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: battle royale get-ready time, %.0f s on the plaza, %d start spots."), PrepTime, Spots.Num());
+	}
+	else
+	{
+		// The teams' starts round the island
+		Battle->GetTeamStarts(GetTeamCount(), TeamStarts);
+	}
+	// Round 97: the ultimate dice fall from the sky one at a time once play starts
+	NextUltimateDrop = 0.f;
+	GetWorldTimerManager().SetTimer(SkyTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
+	{
+		ARRRandomUltimateMeteor::UpdateSky(GetWorld(), NextUltimateDrop);
+	}), 1.f, true);
+	// The rides spread over the island, the ring round all of it from play start
 	Battle->SpawnRides();
 	if (ARRRandomBattleZone* Zone = World->SpawnActor<ARRRandomBattleZone>())
 	{
@@ -1295,6 +1350,147 @@ void ARRRandomGameMode::SetUpBattleRoyale()
 		State->SetAlive(0, GetTeamCount());
 	}
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: battle royale, %d teams of %d%s."), GetTeamCount(), TeamSize, bBattleRoyaleTest ? TEXT(" (test map)") : TEXT(""));
+}
+
+void ARRRandomGameMode::KeepOnPlaza()
+{
+	const ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
+	if (!State || !State->IsPrep())
+	{
+		GetWorldTimerManager().ClearTimer(PrepTimer);
+		return;
+	}
+	// Wandered off the plaza (or flung by a cannon): back to the team's place
+	for (int32 Team = 0; Team < TeamSlots.Num(); ++Team)
+	{
+		for (int32 Slot = 0; Slot < TeamSlots[Team].Num(); ++Slot)
+		{
+			ARRRandomCharacter* Brawler = TeamSlots[Team][Slot].Brawler.Get();
+			FTransform Where;
+			if (Brawler && Brawler->IsAlive() && FVector::Dist2D(Brawler->GetActorLocation(), PlazaCenter) > PlazaReach
+				&& !Brawler->GetVehicle() && GetSlotTransform(Team, Slot, Brawler->GetCapsuleComponent()->GetScaledCapsuleHalfHeight(), Where))
+			{
+				Brawler->TeleportTo(Where.GetLocation(), Where.Rotator(), false, true);
+				Brawler->GetCharacterMovement()->StopMovementImmediately();
+			}
+		}
+	}
+}
+
+void ARRRandomGameMode::PickTeamStart(AController* Who, int32 Spot)
+{
+	ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
+	const ARRRandomCharacter* Brawler = Who ? Cast<ARRRandomCharacter>(Who->GetPawn()) : nullptr;
+	if (!State || !State->IsPrep() || !Brawler || !State->GetStartSpots().IsValidIndex(Spot))
+	{
+		return;
+	}
+	State->SetTeamPick(Brawler->GetTeam(), Spot);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s picks start spot %d for team %d."), *GetNameSafe(Who), Spot, Brawler->GetTeam());
+}
+
+void ARRRandomGameMode::RollTeamStarts()
+{
+	ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
+	if (!State)
+	{
+		return;
+	}
+	GetWorldTimerManager().ClearTimer(PrepTimer);
+	const TArray<FVector_NetQuantize>& Spots = State->GetStartSpots();
+	const int32 Teams = GetTeamCount();
+	// Three dice a team; the highest sum first (a tie by a coin)
+	TArray<uint8> Dice;
+	TArray<float> Sums;
+	for (int32 Team = 0; Team < Teams; ++Team)
+	{
+		int32 Sum = 0;
+		for (int32 Die = 0; Die < 3; ++Die)
+		{
+			const uint8 Face = static_cast<uint8>(PrepStream.RandRange(1, 6));
+			Dice.Add(Face);
+			Sum += Face;
+		}
+		Sums.Add(Sum + PrepStream.FRand() * 0.5f);
+	}
+	TArray<int32> ByRoll;
+	for (int32 Team = 0; Team < Teams; ++Team)
+	{
+		ByRoll.Add(Team);
+	}
+	ByRoll.Sort([&Sums](int32 A, int32 B) { return Sums[A] > Sums[B]; });
+	// In that order each team gets its pick, or the nearest spot to it still free and clear of the teams placed before
+	TArray<int32> Order;
+	TArray<int32> SpotOf;
+	Order.Init(0, Teams);
+	SpotOf.Init(INDEX_NONE, Teams);
+	auto IsClear = [&](int32 Spot, float Gap)
+	{
+		for (const int32 Taken : SpotOf)
+		{
+			if (Taken == Spot || (Taken != INDEX_NONE && FVector::Dist2D(Spots[Taken], Spots[Spot]) < Gap))
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	for (int32 Rank = 0; Rank < ByRoll.Num(); ++Rank)
+	{
+		const int32 Team = ByRoll[Rank];
+		Order[Team] = Rank + 1;
+		const int32 Want = State->GetTeamPick(Team) != INDEX_NONE ? State->GetTeamPick(Team) : PrepStream.RandRange(0, Spots.Num() - 1);
+		for (const float Gap : { StartSpotGap, StartSpotGap * 0.5f, 1.f })
+		{
+			int32 Best = INDEX_NONE;
+			for (int32 Spot = 0; Spot < Spots.Num(); ++Spot)
+			{
+				if (IsClear(Spot, Gap) && (Best == INDEX_NONE || FVector::Dist2D(Spots[Spot], Spots[Want]) < FVector::Dist2D(Spots[Best], Spots[Want])))
+				{
+					Best = Spot;
+				}
+			}
+			if (Best != INDEX_NONE)
+			{
+				SpotOf[Team] = Best;
+				break;
+			}
+		}
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: team %d rolls %d (%d, %d, %d): #%d, wanted spot %d, gets %d."), Team, FMath::FloorToInt(Sums[Team]),
+			Dice[Team * 3], Dice[Team * 3 + 1], Dice[Team * 3 + 2], Rank + 1, Want, SpotOf[Team]);
+	}
+	State->SetTeamRoll(Dice, Order, SpotOf);
+	// The bots put their bags in order for the fight
+	for (const TArray<FTeamSlot>& Slots : TeamSlots)
+	{
+		for (const FTeamSlot& Slot : Slots)
+		{
+			ARRRandomCharacter* Brawler = Slot.Brawler.Get();
+			if (Brawler && !Slot.Player.IsValid() && Brawler->GetLoadout())
+			{
+				Brawler->GetLoadout()->AutoManage();
+			}
+		}
+	}
+}
+
+void ARRRandomGameMode::DeployTeams()
+{
+	const ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
+	if (!State)
+	{
+		return;
+	}
+	for (int32 Team = 0; Team < TeamStarts.Num(); ++Team)
+	{
+		const int32 Spot = State->GetTeamSpot(Team);
+		if (State->GetStartSpots().IsValidIndex(Spot))
+		{
+			TeamStarts[Team] = State->GetStartSpots()[Spot];
+		}
+	}
+	PlaceTeamsAtStarts();
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: the teams are at their spots; play starts."));
 }
 
 void ARRRandomGameMode::PlaceTeamsAtStarts()
@@ -1323,7 +1519,8 @@ void ARRRandomGameMode::PlaceTeamsAtStarts()
 void ARRRandomGameMode::UpdateBattleStanding(ARRRandomCharacter* Victim)
 {
 	ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
-	if (!State || State->IsMatchOver())
+	// (nothing to count once the map is going away)
+	if (!State || State->IsMatchOver() || !GetWorld() || IsActorBeingDestroyed())
 	{
 		return;
 	}

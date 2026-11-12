@@ -36,8 +36,40 @@ public:
 	bool HasPlayStarted() const { return GetCountdownRemaining() <= 0.f; }
 	/** Seconds since play started (negative before). */
 	float GetSincePlayStart() const { return -GetCountdownRemaining(); }
-	/** Nobody moves, shoots or rolls: still counting down to the start, or the match is over (false without a game state). */
+	/**
+	 * Nobody moves, shoots or rolls: still counting down to the start, or the match is over (false without a game state).
+	 * The battle royale's get-ready time (IsPrep) isn't locked: everyone walks round the plaza and rolls dice.
+	 */
 	static bool IsPlayLocked(const UObject* WorldContext);
+	/** Nobody hurts anybody: play is locked, or it is the battle royale's get-ready time. */
+	static bool IsAttackLocked(const UObject* WorldContext);
+
+	/**
+	 * Round 97, the battle royale's get-ready time (the user: "게임 시작전 3분 정도 서로 공격 못하게 하고 주사위 30개 줘서 무기를
+	 * 골라서 가질 수 있는 시스템"): everyone on the middle plaza, no attacks, PrepDice weapon dice each to fill the bag with; each
+	 * team picks where it wants to start on the full map. Then the team roll (three dice a team, TeamRollTime): the highest sum
+	 * gets its pick first; then every team appears at its spot and play starts (PlayStartTime), with no dice.
+	 */
+	bool IsPrep() const { return PrepEndTime > 0.f && GetServerWorldTimeSeconds() < PrepEndTime; }
+	static bool IsPrep(const UObject* WorldContext);
+	float GetPrepRemaining() const { return PrepEndTime - GetServerWorldTimeSeconds(); }
+	/** Between the end of the get-ready time and play: the teams' dice tumbling, then the order and the spots showing. */
+	bool IsTeamRoll() const { return PrepEndTime > 0.f && !IsPrep() && !HasPlayStarted(); }
+	float GetPrepEndTime() const { return PrepEndTime; }
+	static constexpr int32 PrepDice = 30;
+	static constexpr float TeamRollTime = 7.f;
+	/** Where a team may start (on the full map), each team's pick (INDEX_NONE: none yet) and, after the roll, its spot. */
+	const TArray<FVector_NetQuantize>& GetStartSpots() const { return StartSpots; }
+	int32 GetTeamPick(int32 Team) const { return TeamPicks.IsValidIndex(Team) ? TeamPicks[Team] : INDEX_NONE; }
+	int32 GetTeamSpot(int32 Team) const { return TeamSpots.IsValidIndex(Team) ? TeamSpots[Team] : INDEX_NONE; }
+	/** A team's three dice (1..6; 0 before the roll), and its place in the order (1 first; 0 before). */
+	int32 GetTeamDie(int32 Team, int32 Die) const { return TeamDice.IsValidIndex(Team * 3 + Die) ? TeamDice[Team * 3 + Die] : 0; }
+	int32 GetTeamOrder(int32 Team) const { return TeamOrder.IsValidIndex(Team) ? TeamOrder[Team] : 0; }
+
+	/** Server only. */
+	void SetPrep(float InPrepEndTime, const TArray<FVector>& Spots, int32 TeamCount);
+	void SetTeamPick(int32 Team, int32 Spot);
+	void SetTeamRoll(const TArray<uint8>& Dice, const TArray<int32>& Order, const TArray<int32>& Spots);
 
 	/** Server only: play starts at this server world time. */
 	void SetPlayStartTime(float Time) { PlayStartTime = Time; }
@@ -150,6 +182,24 @@ public:
 	}
 
 private:
+	UPROPERTY(Replicated)
+	float PrepEndTime = 0.f;
+
+	UPROPERTY(Replicated)
+	TArray<FVector_NetQuantize> StartSpots;
+
+	UPROPERTY(Replicated)
+	TArray<int32> TeamPicks;
+
+	UPROPERTY(Replicated)
+	TArray<int32> TeamSpots;
+
+	UPROPERTY(Replicated)
+	TArray<uint8> TeamDice;
+
+	UPROPERTY(Replicated)
+	TArray<int32> TeamOrder;
+
 	UPROPERTY(Replicated)
 	bool bBattleRoyale = false;
 

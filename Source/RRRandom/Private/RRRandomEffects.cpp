@@ -1917,3 +1917,121 @@ void ARRRandomEffects::SaberClashBurst(const FVector& Where, const FLinearColor&
 	Spray(EShape::Ball, Where, 90, FVector::UpVector, 180.f, FVector2D(800.f, 2200.f), FVector2D(0.09f, 0.2f), FVector2D(0.3f, 0.8f), FLinearColor(1.f, 0.85f, 0.35f), 10.f, 1500.f);
 	Spray(EShape::Star, Where, 18, FVector::UpVector, 180.f, FVector2D(500.f, 1200.f), FVector2D(3.f, 6.f), FVector2D(0.4f, 0.8f), FLinearColor::White, 8.f, 400.f);
 }
+
+void ARRRandomEffects::ShotgunBlast(const FVector& Muzzle, const FVector& Direction, float Spread, const FLinearColor& Tint)
+{
+	// Round 97: a shotgun going off: a hot flash at the muzzle, a fan of glowing streaks racing out across the spread (wider
+	// than the pellets, so the fan reads), a cone of candy stars and sparks, and a puff of smoke rolling out and slowing
+	const FVector Way = Direction.IsNearlyZero() ? FVector::ForwardVector : Direction.GetSafeNormal();
+	const FVector Side = FVector::CrossProduct(FVector::UpVector, Way).GetSafeNormal();
+	const FVector Up = FVector::CrossProduct(Way, Side).GetSafeNormal();
+	FParticle Flash;
+	Flash.Shape = EShape::Ball;
+	Flash.Location = Muzzle + Way * 15.f;
+	Flash.Life = 0.12f;
+	Flash.StartSize = FVector(0.45f, 0.3f, 0.3f);
+	Flash.EndSize = FVector(1.f, 0.6f, 0.6f);
+	Flash.Turn = Way.Rotation();
+	Flash.Color = FMath::Lerp(FireYellow, FLinearColor::White, 0.5f);
+	Flash.Glow = 8.f;
+	Flash.Opacity = 0.8f;
+	Flash.FadeIn = 0.01f;
+	Spawn(Flash);
+	// The fan: long thin glowing streaks, evenly across the spread and a little up and down, each flying its own way
+	constexpr int32 Streaks = 13;
+	for (int32 Index = 0; Index < Streaks; ++Index)
+	{
+		const float Across = FMath::Lerp(-1.2f, 1.2f, (Index + FMath::FRandRange(0.2f, 0.8f)) / Streaks) * Spread;
+		const float Rise = FMath::FRandRange(-0.4f, 0.4f) * Spread;
+		const FVector Out = Way.RotateAngleAxis(Across, Up).RotateAngleAxis(Rise, Side).GetSafeNormal();
+		FParticle Streak;
+		Streak.Shape = EShape::Ball;
+		Streak.Location = Muzzle + Out * FMath::FRandRange(10.f, 40.f);
+		Streak.Velocity = Out * FMath::FRandRange(1800.f, 2800.f);
+		Streak.Drag = 5.f;
+		Streak.Life = FMath::FRandRange(0.2f, 0.32f);
+		Streak.Turn = Out.Rotation();
+		Streak.StartSize = FVector(1.8f, 0.16f, 0.16f);
+		Streak.EndSize = FVector(0.8f, 0.04f, 0.04f);
+		Streak.Color = FMath::Lerp(Tint, FLinearColor::White, FMath::FRandRange(0.05f, 0.35f));
+		Streak.Glow = 3.f;
+		Streak.Opacity = 1.f;
+		Streak.FadeIn = 0.01f;
+		Spawn(Streak);
+	}
+	// The spread itself, drawn for a moment: rows of glowing dots out along the fan, bigger and fainter further out
+	constexpr int32 Rays = 9;
+	for (int32 Ray = 0; Ray < Rays; ++Ray)
+	{
+		const FVector Out = Way.RotateAngleAxis(FMath::Lerp(-Spread, Spread, float(Ray) / (Rays - 1)), Up);
+		for (int32 Step = 1; Step <= 6; ++Step)
+		{
+			const float Reach = Step * 55.f;
+			FParticle Dot;
+			Dot.Shape = EShape::Ball;
+			Dot.Location = Muzzle + Out * Reach;
+			Dot.Velocity = Out * 600.f;
+			Dot.Drag = 6.f;
+			Dot.Life = 0.22f + Step * 0.025f;
+			Dot.StartSize = FVector(0.1f + Step * 0.025f);
+			Dot.EndSize = FVector(0.03f);
+			Dot.Color = FMath::Lerp(FLinearColor::White, Tint, Step / 6.f);
+			Dot.Glow = 3.f;
+			Dot.Opacity = 1.f - Step * 0.08f;
+			Dot.FadeIn = 0.01f + Step * 0.012f;
+			Spawn(Dot);
+		}
+	}
+	// Stars and sparks in a cone as wide as the spread
+	Spray(EShape::Star, Muzzle + Way * 20.f, 10, Way, Spread * 1.3f, FVector2D(700.f, 1500.f), FVector2D(0.5f, 0.9f), FVector2D(0.25f, 0.45f), Tint, 4.f, 300.f);
+	Spray(EShape::Ball, Muzzle + Way * 20.f, 12, Way, Spread * 1.1f, FVector2D(900.f, 1900.f), FVector2D(0.05f, 0.1f), FVector2D(0.15f, 0.3f), FireYellow, 5.f, 600.f);
+	// Smoke rolling out ahead and slowing
+	for (int32 Index = 0; Index < 7; ++Index)
+	{
+		FParticle Puff;
+		Puff.Shape = EShape::Ball;
+		Puff.Location = Muzzle + Way * 25.f;
+		Puff.Velocity = FMath::VRandCone(Way, FMath::DegreesToRadians(Spread * 1.4f)) * FMath::FRandRange(200.f, 520.f);
+		Puff.Drag = 3.f;
+		Puff.Gravity = -40.f;
+		Puff.Life = FMath::FRandRange(0.45f, 0.75f);
+		const float Size = FMath::FRandRange(0.15f, 0.28f);
+		Puff.StartSize = FVector(Size);
+		Puff.EndSize = FVector(Size * 2.6f);
+		Puff.Color = FLinearColor(0.95f, 0.92f, 0.98f);
+		Puff.Glow = 0.6f;
+		Puff.Opacity = 0.3f;
+		Spawn(Puff);
+	}
+}
+
+void ARRRandomEffects::SaberParry(const FVector& Where, const FVector& Away, const FLinearColor& Tint)
+{
+	// Round 97, a shot knocked away by a light sword: a quick small flash where blade met shot, one ring of the blade's color
+	// turned to the way it flies off, and a spray of sparks and a few stars after it (an animal friend's size, not a robot's)
+	const FVector Way = Away.IsNearlyZero() ? FVector::UpVector : Away.GetSafeNormal();
+	FParticle Flash;
+	Flash.Shape = EShape::Ball;
+	Flash.Location = Where;
+	Flash.Life = 0.1f;
+	Flash.StartSize = FVector(0.55f);
+	Flash.EndSize = FVector(0.15f);
+	Flash.Color = FMath::Lerp(Tint, FLinearColor::White, 0.7f);
+	Flash.Glow = 9.f;
+	Flash.Opacity = 0.9f;
+	Flash.FadeIn = 0.01f;
+	Spawn(Flash);
+	FParticle Ring;
+	Ring.Shape = EShape::Ring;
+	Ring.Location = Where;
+	Ring.Turn = FRotationMatrix::MakeFromZ(Way).Rotator();
+	Ring.Life = 0.22f;
+	Ring.StartSize = FVector(0.25f, 0.25f, 1.f);
+	Ring.EndSize = FVector(1.1f, 1.1f, 0.5f);
+	Ring.Color = Tint;
+	Ring.Glow = 5.f;
+	Ring.Opacity = 0.85f;
+	Spawn(Ring);
+	Spray(EShape::Ball, Where, 22, Way, 40.f, FVector2D(700.f, 1600.f), FVector2D(0.04f, 0.09f), FVector2D(0.15f, 0.35f), FMath::Lerp(Tint, FLinearColor::White, 0.4f), 7.f, 900.f);
+	Spray(EShape::Star, Where, 4, Way, 50.f, FVector2D(300.f, 700.f), FVector2D(1.5f, 3.f), FVector2D(0.25f, 0.45f), FLinearColor::White, 6.f, 200.f);
+}

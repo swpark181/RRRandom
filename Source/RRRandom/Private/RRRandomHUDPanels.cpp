@@ -34,6 +34,8 @@ namespace
 	// Countdown: the number for each second pops in this much bigger, and GO stays this long after the start
 	constexpr float CountdownPop = 0.6f;
 	constexpr float GoTime = 1.f;
+	// Round 97: a start spot on the full map takes clicks this near it (on a 720 tall screen)
+	constexpr float SpotClick = 16.f;
 
 	// Team cards, stacked over the ammo panel
 	constexpr float CardWidth = 250.f;
@@ -95,32 +97,42 @@ namespace
 		return FColor(FMath::RoundToInt(FMath::Lerp(104.f, 196.f, T)), FMath::RoundToInt(FMath::Lerp(172.f, 208.f, T)), FMath::RoundToInt(FMath::Lerp(64.f, 104.f, T)), 255);
 	}
 
-	/** The name on a brawler's card, as on the results screen: YOU, a player's name, or BOT n within its team by name. */
-	FString CardLabel(const UWorld* World, const ARRRandomCharacter& Brawler, const ARRRandomCharacter& Viewer)
+}
+
+FString ARRRandomHUD::CharacterLabel(const ARRRandomCharacter& Brawler, const ARRRandomCharacter* Viewer)
+{
+	if (&Brawler == Viewer)
 	{
-		if (&Brawler == &Viewer)
-		{
-			return TEXT("YOU");
-		}
-		if (const APlayerState* Player = Brawler.GetPlayerState())
-		{
-			return Player->GetPlayerName().Left(14).ToUpper();
-		}
-		TArray<FString> Bots;
-		for (TActorIterator<ARRRandomCharacter> It(World); It; ++It)
-		{
-			if (It->GetTeam() == Brawler.GetTeam() && !It->GetPlayerState() && *It != &Viewer && !It->IsDecoy())
-			{
-				Bots.Add(It->GetName());
-			}
-		}
-		Bots.Sort();
-		return FString::Printf(TEXT("BOT %d"), Bots.IndexOfByKey(Brawler.GetName()) + 1);
+		return TEXT("YOU");
 	}
+	if (const APlayerState* Player = Brawler.GetPlayerState())
+	{
+		return Player->GetPlayerName().Left(14).ToUpper();
+	}
+	if (Brawler.IsVillainBoss())
+	{
+		return TEXT("BOSS CAT");
+	}
+	TArray<FString> Bots;
+	for (TActorIterator<ARRRandomCharacter> It(Brawler.GetWorld()); It; ++It)
+	{
+		if (It->GetTeam() == Brawler.GetTeam() && !It->GetPlayerState() && *It != Viewer && !It->IsDecoy())
+		{
+			Bots.Add(It->GetName());
+		}
+	}
+	Bots.Sort();
+	const int32 Index = Bots.IndexOfByKey(Brawler.GetName());
+	return FString::Printf(TEXT("BOT %d"), Index != INDEX_NONE ? Index + 1 : Brawler.GetFName().GetNumber());
 }
 
 void ARRRandomHUD::DrawCountdown(const ARRRandomGameState& State)
 {
+	// (the battle royale's get-ready time and team roll show their own: DrawPrep)
+	if (State.IsPrep() || State.IsTeamRoll())
+	{
+		return;
+	}
 	const float Remaining = State.GetCountdownRemaining();
 	const float S = UIScale;
 	const float CenterX = Canvas->ClipX * 0.5f;
@@ -231,7 +243,7 @@ void ARRRandomHUD::DrawTeamCard(const ARRRandomCharacter& Mate, const ARRRandomC
 	const float SmallSize = 10.f * S;
 	RRUI::DrawPlate(Canvas, FBox2D(FVector2D(TextX, Top + 6.f * S), FVector2D(Right, Top + (CardHeight - 8.f) * S)), 14.f * S);
 	float Y = Top + 3.f * S;
-	const FVector2D Name = RRUI::DrawText(Canvas, CardLabel(GetWorld(), Mate, Viewer), FVector2D(TextX, Y), NameSize, EWeight::ExtraBold, bAlive ? RRUI::Ink : RRUI::InkSoft, NameSize * 0.04f);
+	const FVector2D Name = RRUI::DrawText(Canvas, CharacterLabel(Mate, &Viewer), FVector2D(TextX, Y), NameSize, EWeight::ExtraBold, bAlive ? RRUI::Ink : RRUI::InkSoft, NameSize * 0.04f);
 	const FString Health = FString::FromInt(FMath::CeilToInt(Mate.GetHealth()));
 	const FVector2D HealthBox = RRUI::MeasureText(Health, SmallSize, EWeight::ExtraBold);
 	RRUI::DrawText(Canvas, Health, FVector2D(Right - HealthBox.X, Y + (Name.Y - HealthBox.Y) * 0.6f), SmallSize, EWeight::ExtraBold, RRUI::InkSoft);
@@ -621,6 +633,12 @@ void ARRRandomHUD::DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* 
 		{
 			return FVector2D(Rect.Min.X + (World.Y - View.Min.Y) / Area.Y * Size.X, Rect.Min.Y + (View.Max.X - World.X) / Area.X * Size.Y);
 		});
+		// Round 97: where teams may start (the get-ready time and the team roll), and the ultimate die's meteor
+		DrawStartSpots(Rect, [&](const FVector& World)
+		{
+			return FVector2D(Rect.Min.X + (World.Y - View.Min.Y) / Area.Y * Size.X, Rect.Min.Y + (View.Max.X - World.X) / Area.X * Size.Y);
+		}, Viewer);
+		DrawUltimateOnMap(ToScreen, Scale);
 	}
 
 	// Meteor Rush: where meteors are coming down (a pulsing ring), the ore lying about (small dots in its color) and
@@ -771,6 +789,26 @@ bool ARRRandomHUD::IsOnCornerMap(const FVector2D& ScreenPoint) const
 
 bool ARRRandomHUD::HandleMapClick(const FVector2D& ScreenPoint)
 {
+	// The get-ready time (round 97): a click on a start spot of the full map picks it for my team, the map stays open
+	if (bMapExpanded && ARRRandomGameState::IsPrep(this))
+	{
+		int32 Nearest = INDEX_NONE;
+		float Best = SpotClick * UIScale;
+		for (const TPair<int32, FVector2D>& Spot : StartSpotHits)
+		{
+			const float Distance = FVector2D::Distance(Spot.Value, ScreenPoint);
+			if (Distance < Best)
+			{
+				Best = Distance;
+				Nearest = Spot.Key;
+			}
+		}
+		if (ARRRandomPlayerController* Picker = Cast<ARRRandomPlayerController>(PlayerOwner); Picker && Nearest != INDEX_NONE)
+		{
+			Picker->ServerPickStart(Nearest);
+		}
+		return true;
+	}
 	if (bMapExpanded)
 	{
 		bMapExpanded = false;

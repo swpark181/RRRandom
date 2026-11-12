@@ -156,6 +156,8 @@ public:
 	const FRRBattleTile& GetBattleTile() const { return BattleTile; }
 	/** Round 94: a spot inside each big building on this tile, on its ground floor (each floor is 600 above). */
 	const TArray<FVector>& GetBigBuildingSpots() const { return BigBuildingSpots; }
+	/** Round 96: the spots on top of this tile's big hills (feet height), for the bots. */
+	const TArray<FVector>& GetHillTops() const { return HillTops; }
 	/** Round 94: a piece of cover inside a big building, for the bots: its middle on the floor it stands on, its half size across. */
 	struct FCoverPiece
 	{
@@ -241,6 +243,22 @@ private:
 		int32 StepCount = 0;
 		int32 SolidFirst = 0;
 		int32 SolidCount = 0;
+		/** Round 96: where its looks are when not Steps (a ramp of slopes: SlopeBlocks). */
+		UInstancedStaticMeshComponent* StepSet = nullptr;
+		/** Round 96: its walking spots this much off a flight's (a ramp of slopes rises from its first cell's edge, a flight
+		 * of steps half a block sooner). */
+		float NodeShift = 0.f;
+	};
+
+	/** Round 96: diagonal blocks drawn and stopped together (a bank's run, a cut corner): a wreck reaching one takes them
+	 * all, as does the cell under the first going. */
+	struct FShapeRun
+	{
+		/** Its looks: each an instance in one of the sets (SlopeBlocks, SlopeCorners, SlantBlocks). */
+		TArray<TPair<UInstancedStaticMeshComponent*, int32>> Pieces;
+		int32 SolidFirst = 0;
+		int32 SolidCount = 0;
+		FIntVector Foot;
 	};
 
 	/** A spot the bots can stand: a cell and the height of its floor (above the island's floor), maybe on stairs. */
@@ -368,6 +386,35 @@ private:
 	void AddDie(const FIntPoint& Cell, int32 Level, int32 Size, int32 Kind);
 	/** A stepped hill: Levels terraces, each 3 cells in from the one below, with a ramp up each. */
 	void AddHill(const FFrame& Frame, int32 W, int32 D, int32 Levels);
+	/**
+	 * Round 95: a big stepped hill for the battle royale's hills district (a height to see from): three grass terraces
+	 * 3, 6 and 9 blocks high (each cliff past a climb), each 5 cells in from the one below, a 3-wide flight up each on a
+	 * side turning round the hill, knee-high walls in short runs round each terrace's edge, and on the top terrace open
+	 * structures, nothing to hide in: a pavilion (AddPavilion) and a watchtower. W and D 36 (a quarter of a battle tile;
+	 * the top is W - 20 across). The first terrace's flight reaches 3 cells out.
+	 * Round 96, with the diagonal blocks: the terraces' corners cut at 45 degrees, earth layers under the grass, grassy
+	 * banks for the knee walls, and a 5-wide ramp of slopes onto the first terrace across from its flight; the tops go in
+	 * HillTops for the bots.
+	 */
+	void AddBigHill(const FFrame& Frame, int32 W, int32 D, int32 Seed);
+
+	// Round 96: diagonal blocks (char-pipeline/scripts/blender_slope_blocks.py): a 45 degree slope and a block cut down its
+	// diagonal. Drawn over empty cells (ShapedCells keeps the bots off them), stopped by hidden slabs and boxes in Solid,
+	// broken as a run (FShapeRun). Levels as Fill's (Lift added).
+	/** Whether the diagonal blocks are imported (without them the hills build as round 95's). */
+	bool HasDiagonalBlocks() const { return SlopeBlocks && SlantBlocks && SlopeCorners; }
+	/** A straight run of slopes on level Level, Count cells from (U, V) along (AlongU, AlongV), each rising toward (UpU, UpV)
+	 * (across the run): a grassy bank, its high side a wall as high as a block; its ends tapered (corners) when it is 3 or longer. */
+	void AddSlopeRun(const FFrame& Frame, int32 U, int32 V, int32 AlongU, int32 AlongV, int32 UpU, int32 UpV, int32 Count, int32 Level, const FColor& Body, const FColor& Accent);
+	/** A ramp of slopes: Rise levels over Rise cells along (DirU, DirV) from Base, Width across, earth (FillLook) under each
+	 * slope; it walks as stairs (FStair). */
+	void AddSlopeRamp(const FFrame& Frame, int32 U, int32 V, int32 DirU, int32 DirV, int32 AcrossU, int32 AcrossV, int32 Width, int32 Base, int32 Rise,
+		const FColor& Body, const FColor& Accent, uint8 FillLook);
+	/** A terrace corner cut at 45 degrees: the cells from (U, V) stepping (StepU, StepV) Count times are each a block cut down
+	 * its diagonal, the half toward (InU, InV) kept, from level L0 to L1; LookAt gives each level's look. Each breaks alone. */
+	void AddSlantRun(const FFrame& Frame, int32 U, int32 V, int32 StepU, int32 StepV, int32 InU, int32 InV, int32 Count, int32 L0, int32 L1, TFunctionRef<uint8(int32)> Looks);
+	/** Round 95: an open pavilion N x N (pillars, a knee-high rail, a roof deck at 5 with crenels, a flight 5 cells out in front). */
+	void AddPavilion(const FFrame& Frame, int32 N, int32 Style);
 	void AddCanal(const FFrame& Frame, int32 Length, int32 Width);
 	/** Seven bands of blocks in a half circle across Across, standing at Base. */
 	void AddRainbow(const FVector& Base, const FVector& Across, float Radius);
@@ -511,6 +558,18 @@ private:
 	TArray<FStair> Stairs;
 	/** Cells under stairs (they walk as the stairs, not as the ground under them). */
 	TSet<FIntPoint> StairCells;
+	/** Round 96: diagonal blocks (AddSlopeRun, AddSlantRun), and the levels they take in each cell (lowest, highest): no
+	 * walking spot there from the level under the lowest up to the highest. */
+	TArray<FShapeRun> ShapeRuns;
+	TMap<FIntPoint, FIntPoint> ShapedCells;
+	UPROPERTY(Transient) TObjectPtr<UStaticMesh> SlopeMesh;
+	UPROPERTY(Transient) TObjectPtr<UStaticMesh> SlantMesh;
+	UPROPERTY(Transient) TObjectPtr<UStaticMesh> SlopeCornerMesh;
+	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> SlopeBlocks;
+	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> SlantBlocks;
+	/** A bank's tapered ends (SM_BTSlopeCorner: a pyramid corner). */
+	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> SlopeCorners;
+	TArray<FVector> HillTops;
 
 	/** Levels added to every level written (and read) while building on top of something, like a hill. */
 	int32 Lift = 0;

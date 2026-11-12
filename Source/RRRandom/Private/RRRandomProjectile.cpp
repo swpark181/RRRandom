@@ -6,6 +6,7 @@
 #include "RRRandomVehicle.h"
 #include "RRRandomWreckage.h"
 #include "Components/PointLightComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -274,29 +275,7 @@ void ARRRandomProjectile::BeginPlay()
 			PassThrough(Shooter);
 			if (const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(Shooter))
 			{
-				for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
-				{
-					if (It->GetTeam() == Brawler->GetTeam())
-					{
-						PassThrough(*It);
-					}
-				}
-				// The team's star robot too (its own fists start next to it)
-				for (TActorIterator<ARRRandomStarRobot> It(GetWorld()); It; ++It)
-				{
-					if (It->GetTeam() == Brawler->GetTeam())
-					{
-						PassThrough(*It);
-					}
-				}
-				// And the team's planes (a pilot's own shots start inside its plane)
-				for (TActorIterator<ARRRandomVehicle> It(GetWorld()); It; ++It)
-				{
-					if (It->IsPlane() && It->GetRider() && It->GetRider()->GetTeam() == Brawler->GetTeam())
-					{
-						PassThrough(*It);
-					}
-				}
+				PassThroughTeam(Brawler);
 			}
 		}
 
@@ -310,16 +289,7 @@ void ARRRandomProjectile::BeginPlay()
 			}
 		}
 
-		if (MaxRange > 0.f && GetSpeed() > 0.f)
-		{
-			// One that reaches its range without hitting anything ends in the air: a shot fizzles out, a rocket fist blows up
-			SetLifeSpan(0.f);
-			FTimerHandle Handle;
-			GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this]()
-			{
-				RunOutOfRange();
-			}), MaxRange / GetSpeed(), false);
-		}
+		StartRangeTimer();
 	}
 	else
 	{
@@ -435,6 +405,104 @@ void ARRRandomProjectile::PassThrough(AActor* Friend)
 		Body->IgnoreActorWhenMoving(this, true);
 		FriendBodies.Add(Body);
 	}
+}
+
+void ARRRandomProjectile::StartRangeTimer()
+{
+	if (MaxRange > 0.f && GetSpeed() > 0.f)
+	{
+		// One that reaches its range without hitting anything ends in the air: a shot fizzles out, a rocket fist blows up
+		SetLifeSpan(0.f);
+		GetWorldTimerManager().SetTimer(RangeTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
+		{
+			RunOutOfRange();
+		}), MaxRange / FMath::Max(GetSpeed(), float(Movement->Velocity.Size())), false);
+	}
+}
+
+void ARRRandomProjectile::PassThroughTeam(const ARRRandomCharacter* Shooter)
+{
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		if (It->GetTeam() == Shooter->GetTeam())
+		{
+			PassThrough(*It);
+		}
+	}
+	// The team's star robot too (its own fists start next to it)
+	for (TActorIterator<ARRRandomStarRobot> It(GetWorld()); It; ++It)
+	{
+		if (It->GetTeam() == Shooter->GetTeam())
+		{
+			PassThrough(*It);
+		}
+	}
+	// And the team's planes (a pilot's own shots start inside its plane)
+	for (TActorIterator<ARRRandomVehicle> It(GetWorld()); It; ++It)
+	{
+		if (It->IsPlane() && It->GetRider() && It->GetRider()->GetTeam() == Shooter->GetTeam())
+		{
+			PassThrough(*It);
+		}
+	}
+}
+
+void ARRRandomProjectile::Deflect(ARRRandomCharacter* Deflector, const FVector& Aim)
+{
+	if (!HasAuthority() || !Deflector || !CanBeDeflected())
+	{
+		return;
+	}
+	// The old side no longer passes through it (the shots in the air still do)
+	TArray<AActor*> Ignored = Collision->GetMoveIgnoreActors();
+	for (AActor* Each : Ignored)
+	{
+		if (Each && !Cast<ARRRandomProjectile>(Each))
+		{
+			Collision->IgnoreActorWhenMoving(Each, false);
+		}
+	}
+	ForgetFriends();
+	// Now the deflector's shot: it and its team pass through it, its hits are the deflector's
+	SetInstigator(Deflector);
+	SetOwner(Deflector);
+	PassThrough(Deflector);
+	PassThroughTeam(Deflector);
+	// Off the blade toward the aim, a little faster, from just outside the body
+	const float Speed = FMath::Max(float(Movement->Velocity.Size()), Movement->InitialSpeed) * DeflectSpeedUp;
+	const float Radius = Deflector->GetCapsuleComponent()->GetScaledCapsuleRadius() + GetRadius() * GetActorScale3D().X + 25.f;
+	const FVector From(Deflector->GetActorLocation().X, Deflector->GetActorLocation().Y, GetActorLocation().Z);
+	FVector Way = (Aim - From).GetSafeNormal();
+	if (Way.IsNearlyZero())
+	{
+		Way = Deflector->GetActorForwardVector();
+	}
+	// (knocked away out at the blade it stays where it is; one that reached the body leaves from just outside it)
+	const bool bOutside = FVector::Dist2D(GetActorLocation(), From) > Radius;
+	SetActorLocationAndRotation(bOutside ? GetActorLocation() : From + Way.GetSafeNormal2D() * Radius, Way.Rotation(), false, nullptr, ETeleportType::TeleportPhysics);
+	Movement->MaxSpeed = FMath::Max(Movement->MaxSpeed, Speed);
+	Movement->Velocity = Way * Speed;
+	// A missile now homes on the aim
+	if (bMissile)
+	{
+		MissileTarget = Aim;
+		MissileAge = 0.f;
+	}
+	// (the hit that brought it here stops the movement right after: it flies again from the next frame)
+	const FVector Launch = Way * Speed;
+	GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this, Launch]()
+	{
+		if (bImpacted)
+		{
+			return;
+		}
+		Movement->SetUpdatedComponent(Collision);
+		Movement->Velocity = Launch;
+		Movement->UpdateComponentVelocity();
+		StartRangeTimer();
+		ForceNetUpdate();
+	}));
+	ForceNetUpdate();
 }
 
 void ARRRandomProjectile::ForgetFriends()
@@ -584,6 +652,11 @@ void ARRRandomProjectile::OnHit(UPrimitiveComponent* HitComponent, AActor* Other
 	{
 		return;
 	}
+	// A light sword on guard turns it back toward where its holder aims (round 97)
+	if (ARRRandomCharacter* Guard = Cast<ARRRandomCharacter>(OtherActor); Guard && Guard != GetInstigator() && Guard->TryDeflect(this))
+	{
+		return;
+	}
 
 	const float BaseDamage = FMath::RandRange(MinDamage, MaxDamage) * DamageMultiplier;
 	if (OtherActor && OtherActor != GetInstigator())
@@ -669,7 +742,8 @@ UStaticMesh* ARRRandomProjectile::LoadShotModel(ERRHitEffect Effect)
 		return nullptr;
 	}
 	const TCHAR* Names[] = { TEXT("Pistol"), TEXT("Smg"), TEXT("Minigun"), TEXT("Rifle"), TEXT("Blaster"), TEXT("Cannon") };
-	const int32 Index = static_cast<int32>(Effect);
+	// (round 97: the sniper fires the rifle's shot, the shotgun's pellets are the SMG's)
+	const int32 Index = Effect == ERRHitEffect::Sniper ? static_cast<int32>(ERRHitEffect::Rifle) : Effect == ERRHitEffect::Shotgun ? static_cast<int32>(ERRHitEffect::Smg) : static_cast<int32>(Effect);
 	UStaticMesh* Model = nullptr;
 	if (Index < UE_ARRAY_COUNT(Names))
 	{
@@ -701,6 +775,8 @@ float ARRRandomProjectile::GetShotLength(ERRHitEffect Effect)
 	case ERRHitEffect::Rifle: return 40.f;
 	case ERRHitEffect::Blaster: return 30.f;
 	case ERRHitEffect::Cannon: return 36.f;
+	case ERRHitEffect::Sniper: return 52.f;
+	case ERRHitEffect::Shotgun: return 20.f;
 	default: return 30.f;
 	}
 }

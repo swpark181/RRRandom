@@ -133,6 +133,13 @@ clean, straight, even edge ...; neat even rolled cuffs ... crisp borders between
 
 ## 5. 멀티뷰 3D (Model, 크레딧)
 
+**사용자 규칙(2026-11-11): Tripo 3D 는 무조건 Smart Mesh(P2.0) 로 만든다.** HD / Ultra Mesh Quality / H3.1 생성은 쓰지 않는다.
+Smart Mesh 는 메시만 100 크레딧이고, 끝난 뒤 뷰어 아래 **"Texture 30"** 을 따로 눌러야 색이 입혀진다(합계 130).
+Topology 는 탭을 새로 열 때마다 Quad 5000 으로 돌아가니 매번 **Triangle** 로 바꾸고 폴리곤 수를 넣는다(동물친구는 20000, 칸이 그보다
+작으면 가장 큰 값). Export 는 File Name 을 무시하므로 받자마자 zip 이름을 바꾼다(메모 tripo-smart-mesh). Smart Mesh 도 멀티뷰 입력(두 번째 상자 아이콘, Front/Left/Right/Back)이 있다(2026-11-11 여우로 확인, 20,989면). Smart Mesh 화면에
+멀티뷰 입력이 있으면 아래처럼 4칸을 채우고, 한 장만 받으면 FRONT 정면 그림을 넣는다(토끼 T포즈 Smart Mesh 는 정면 한 장으로 만들었다).
+아래 HD 옵션 설명은 예전 기록이다.
+
 - Model 탭 → 입력 모드 두 번째 아이콘(멀티뷰: Front / Left / Right / Back 칸). `find("file inputs for Front, Left, Right, Back")`
   → Front=정면, **Left 칸=LEFT SIDE 그림**(그림 왼쪽을 보는 옆모습), Back=뒷모습, Right=RIGHT SIDE 그림.
   (여우 여자 때는 옆모습이 하나뿐이라 Right 를 비웠다. 8방향이면 넣되, 두 옆모습의 비대칭 디테일이 서로 맞는지 먼저 확인 —
@@ -220,7 +227,7 @@ vertex" 가 몸 정점 수와 같아야 함) → 같은 꼬리·목 명령 → �
   살아난다(다람쥐). 내보낼 땐 4K. 받은 베이스컬러 확장자가 `.jpg`/`.JPEG` 로 섞이니 대소문자 무시하고 찾을 것.
 - **모양(목 털이 길게 늘어진 조각 등)** = 지오메트리 → 텍스처만 다시 칠하면 색만 바뀌고 조각 모양이 남고, Blender 이완
   (`blender_smooth_region.py`)도 울퉁불퉁 → **컨셉 그 부분만 Image 편집("Edit this exact image … change only one thing")해서 3D 를 다시**
-  (Ultra, 4K 텍스처면 55 크레딧). 여우 목 털을 이렇게 고쳤다.
+  (예전 Ultra 4K 는 55 크레딧; 지금은 Smart Mesh 100 + 텍스처 30). 여우 목 털을 이렇게 고쳤다.
 
 ### 3D 텍스처의 작은 흠(반점·무늬) 고치기 — Tripo 에서 (사용자 지시, 72차)
 Blender 로 텍스처를 직접 칠하면 털 결이 없는 평평한 색이 되어 "이상하다"고 했다. 대신: 그 흠이 보이는 멀티뷰 입력 그림만

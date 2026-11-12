@@ -279,6 +279,11 @@ float ARRRandomCannon::GetFlightTime() const
 	return FMath::Clamp(FVector::Dist2D(GetMuzzleLocation(), FVector(PadLocation)) / CrossSpeed, FlightTimeRange.X, FlightTimeRange.Y);
 }
 
+bool ARRRandomCannon::IsLaunchClear(UWorld* World, const FVector& From, const FVector& To)
+{
+	return World && IsArcClear(World, From, To);
+}
+
 FVector ARRRandomCannon::GetArcPoint(float Alpha, float HalfHeight) const
 {
 	FVector Start;

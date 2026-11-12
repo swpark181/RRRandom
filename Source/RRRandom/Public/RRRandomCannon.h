@@ -71,6 +71,8 @@ public:
 	static bool SpawnBattleSet(UWorld* World, const class ARRRandomBattleMap* Map, const FVector2D& WantCannon, const FVector2D& WantPad, int32 InIndex);
 	/** Server: a set whose cannon stands at From, aimed at a pad at To (both on the floor). */
 	static ARRRandomCannon* SpawnSet(UWorld* World, const FVector& From, const FVector& To, int32 InIndex);
+	/** Checks the actual flight capsule against structures, including elevated landing pads. */
+	static bool IsLaunchClear(UWorld* World, const FVector& From, const FVector& To);
 	/**
 	 * Open ground in Dice Town near Want (world X, Y): the nearest spot whose ground within Clear is all bare level-0 floor
 	 * (no blocks, stairs, roofs or canals) with nothing overhead; its spot on the floor. False with none within Reach. Accept: any

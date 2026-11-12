@@ -122,7 +122,7 @@ public:
 
 	/** 0..1 progress toward the next charge. */
 	UFUNCTION(BlueprintPure, Category = "RRRandom")
-	float GetGaugeProgress() const { return GaugeFillTime > 0.f ? GaugeTime / GaugeFillTime : 1.f; }
+	float GetGaugeProgress() const;
 
 	const TArray<FRRDiceBuff>& GetActiveBuffs() const { return ActiveBuffs; }
 
@@ -236,6 +236,20 @@ private:
 
 	/** Server: the latest die is in the air and hasn't taken effect yet. */
 	bool bRollPending = false;
+
+	/**
+	 * Server, round 97, the battle royale: the get-ready time's weapon dice handed out, and every die taken away again for
+	 * the start (then one a BattleGaugeFillTime, none of them ultimate: those fall from the sky, ARRRandomUltimateMeteor).
+	 */
+	bool bPrepDiceGiven = false;
+	bool bBattleStartDone = false;
+	void UpdateBattleRoyale();
+
+public:
+	/** The battle royale's gauge: a die a minute (the user's). */
+	static constexpr float BattleGaugeFillTime = 60.f;
+
+private:
 
 	/** Counts rolls so clients notice a new one even when it matches the last. */
 	UPROPERTY(ReplicatedUsing = OnRep_RollCount)

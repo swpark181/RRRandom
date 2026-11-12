@@ -106,6 +106,18 @@ private:
 	/** 0 in the hands .. 1 aimed down the line shots fly (only without the aiming animations). */
 	float AimBlend = 0.f;
 
+	/** The light sword's tip last frame of a swing (for its streak). */
+	FVector LastSwordTip = FVector::ZeroVector;
+	bool bSwordTipKnown = false;
+	/** 0 .. 1 into the light sword's guard (deflecting). */
+	float GuardBlend = 0.f;
+	/** Round 97: the light sword's glowing core, made the first time it is shown. */
+	void UpdateBladeGlow(bool bShow, float Stretch);
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> BladeGlow;
+	UPROPERTY(Transient)
+	TObjectPtr<class UMaterialInstanceDynamic> BladeGlowMaterial;
+
 	/** When rr.Gun.Debug last logged the hand. */
 	double DebugLogTime = 0.0;
 

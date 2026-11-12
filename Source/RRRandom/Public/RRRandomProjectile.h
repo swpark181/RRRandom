@@ -43,6 +43,15 @@ public:
 	/** Shots already flying pass through a brawler of the shooter's team that turns up after they set off (a fox's clones). Server only. */
 	void PassThroughIfTeammate(ARRRandomCharacter* Newcomer);
 
+	/**
+	 * Round 97, a light sword's deflect (ARRRandomCharacter::TryDeflect): server: turned round toward Aim a little faster, out
+	 * of the deflector's body, now the deflector's own shot (its team passes through it, the old one doesn't), its range
+	 * flown again. Not a poke, a robot's fist or a shot already done.
+	 */
+	bool CanBeDeflected() const { return !bImpacted && !bPoke && RocketArm == 0; }
+	void Deflect(ARRRandomCharacter* Deflector, const FVector& Aim);
+	static constexpr float DeflectSpeedUp = 1.2f;
+
 	/** Scales the flying speed; call before the shot finishes spawning. */
 	void SetSpeedMultiplier(float Multiplier);
 
@@ -207,6 +216,11 @@ private:
 	 */
 	void PassThrough(AActor* Friend);
 	void ForgetFriends();
+	/** Server: PassThrough for the shooter's whole side (its teammates, its team's star robot and planes). */
+	void PassThroughTeam(const ARRRandomCharacter* Shooter);
+	/** Server: ends it in the air once MaxRange is flown. */
+	FTimerHandle RangeTimer;
+	void StartRangeTimer();
 
 	/** The friends' bodies told to ignore this shot (PassThrough). */
 	TArray<TWeakObjectPtr<UPrimitiveComponent>> FriendBodies;

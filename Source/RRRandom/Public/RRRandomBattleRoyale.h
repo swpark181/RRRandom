@@ -132,6 +132,12 @@ public:
 	 * random turn of them each game (the host's). Feet height, on the ground.
 	 */
 	void GetTeamStarts(int32 TeamCount, TArray<FVector>& OutStarts) const;
+	/**
+	 * Round 97: where teams may pick to start after the get-ready time, one on open ground near the middle of each tile on the
+	 * island but the plaza's; and the teams' places on the plaza meanwhile (round the giant die, facing it).
+	 */
+	void GetStartSpots(TArray<FVector>& OutSpots) const;
+	void GetPlazaStarts(int32 TeamCount, TArray<FVector>& OutStarts) const;
 	/** Open ground (feet height) near a spot, on a tile: off the buildings, flat, with room round it. False if there is none near. */
 	bool FindOpenGround(const FVector2D& Want, float Clear, float MaxReach, FVector& OutSpot) const;
 
@@ -152,6 +158,8 @@ protected:
 	int32 Seed = 0;
 
 private:
+	/** Short, tested approaches to hilltops and large roofs, with a bike at each ramp. */
+	void SpawnHighRoutes(int32 DesiredEach, int32& OutCannons, int32& OutRamps, int32& OutBikes);
 	/** Shows a tile's detail when this machine's view is near it, its far look otherwise. */
 	void UpdateStreaming();
 	/** This machine's view: its local player's camera (or pawn), false without one (a dedicated server). */

@@ -20,9 +20,11 @@ class URRRandomEventComponent;
 class URRRandomDiceBuffComponent;
 class URRRandomOverheadDieComponent;
 class URRRandomWingsComponent;
+class URRRandomFurComponent;
 class URRRandomFlightEffectsComponent;
 class URRRandomGunComponent;
 class URRRandomKitComponent;
+class URRRandomLoadoutComponent;
 class URRRandomOreCarryComponent;
 
 /** A damage number floating over a brawler's head, drawn by the HUD. */
@@ -282,6 +284,46 @@ public:
 	const FRRWeapon& GetWeapon() const { return Weapon; }
 	/** Swaps to another gun with a full magazine. */
 	void EquipWeapon(const FRRWeapon& NewWeapon);
+	/** Server, round 97 (the bag's hands): swaps to another gun with this many rounds in it (INDEX_NONE: full). */
+	void EquipWeaponWithAmmo(const FRRWeapon& NewWeapon, int32 InAmmo);
+	/** Server: no shot for this many seconds from now (switching hands). */
+	void DelayFire(float Seconds);
+	/** Round 97: the battle royale's bag of guns and its two hands. */
+	URRRandomLoadoutComponent* GetLoadout() const { return Loadout; }
+
+	/**
+	 * Round 97, the LIGHT SWORD's deflect (the user: "오른쪽 마우스를 누르고 있으면 발사체를 내 조준점 쪽으로 튕겨내도록 …
+	 * 짧은 3초 정도만 집중해서 튕겨낼 수 있다는 컨셉"): held (the right button), the sword goes up on guard and every shot
+	 * that reaches the holder from the front flies back off the blade toward where it aims, now the holder's own shot.
+	 * Focus: DeflectFocusMax seconds of it, drained while held; let go, it refills (after DeflectRefillDelay, at
+	 * DeflectRefillRate a second); it takes DeflectMinStart to begin. No swings meanwhile.
+	 * SetDeflecting / SetDeflectAim from the holder's machine (or a bot's), the server decides.
+	 */
+	void SetDeflecting(bool bOn, const FVector& Aim);
+	void SetDeflectAim(const FVector& Aim);
+	bool IsDeflecting() const { return bDeflecting; }
+	float GetDeflectFocus() const { return DeflectFocus; }
+	/** Seconds since the last parry flick began (on guard: a shot seen coming, or one knocked away), and where it struck at. */
+	float GetTimeSinceDeflect() const { return GetWorld()->GetTimeSeconds() - LastDeflectTime; }
+	const FVector& GetParryPoint() const { return ParryPoint; }
+	uint8 GetSwordParryVariant() const { return SwordParryVariant; }
+	float GetSwordParryContactTime() const { return SwordParryContactTime; }
+	static constexpr float DedicatedParryDuration = 0.44f;
+	/**
+	 * Round 97, the light sword like a laser sword: on guard each screen watches the shots coming at the holder and starts the
+	 * flick ParryLead before one reaches the blade (ParryReach out from the body), so the blade meets it; the server knocks it
+	 * away right there, out at the blade, not at the body.
+	 */
+	static constexpr float ParryReach = 140.f;
+	static constexpr float ParryLead = 0.13f;
+	/** Server, from a shot reaching this body (ARRRandomProjectile::OnHit): deflects it if it can; true if it did. */
+	bool TryDeflect(class ARRRandomProjectile* Shot);
+	static constexpr float DeflectFocusMax = 3.f;
+	static constexpr float DeflectMinStart = 0.5f;
+	static constexpr float DeflectRefillDelay = 0.6f;
+	static constexpr float DeflectRefillRate = 0.5f;
+	/** Front-only guard: both the projectile position and incoming direction must be within this angle on either side. */
+	static constexpr float DeflectHalfAngle = 60.f;
 	/** How far it fights from with the gun it holds (the bots keep to it; a foam finger only pokes this far). */
 	float GetAttackRange() const { return AttackRange * Weapon.RangeMultiplier; }
 	/** How far its shots fly before fizzling out: from one corner of the map to the other (a foam finger's poke: GetAttackRange). */
@@ -368,7 +410,7 @@ public:
 	 * Round 91: thrown off a jump ramp, falling this many times heavier until it lands (Landed), so the leap is low and
 	 * fast rather than floating. Each machine that throws it (the server, the driver's own) does the same.
 	 */
-	void StartRampLeap(float GravityMultiplier);
+	void StartRampLeap(float GravityMultiplier, bool bCushionedLanding = false);
 	/** A jump taken on the run carries on a little faster (JumpCarryShare), so it goes further. */
 	virtual void OnJumped_Implementation() override;
 	const TArray<FRRDamagePopup>& GetDamagePopups() const { return DamagePopups; }
@@ -383,20 +425,43 @@ public:
 	float GetFireStanceAlpha() const { return FireStanceAlpha; }
 	/** The aiming animations (URRRandomBodyAnimInstance), or none of them when the body has no fox assets. */
 	const FRRAimAnimations& GetAimAnimations() const { return AimAnimations; }
+	/** Round 97: the light sword's slash and guard motions (null when this species has none: the sword swings by itself). */
+	UAnimSequence* GetSwordSlash() const { return SwordSlash; }
+	UAnimSequence* GetSwordGuard() const { return SwordGuard; }
+	/** Round 97: the blow of a combo step (0 .. 2; the first blow when a step has no motion of its own), the parry flick. */
+	UAnimSequence* GetSwordSlash(int32 Step) const { return SwordSlashes[FMath::Clamp(Step, 0, 2)]; }
+	UAnimSequence* GetSwordParry() const { return SwordParry; }
+	bool HasDedicatedSwordMotion() const;
+	/** The shared sword choreography's mesh-space distances relative to the original fox. */
+	float GetSwordBodyScale() const;
+	float GetSwordAttackDuration() const;
+	/** Input-driven locomotion speed; the sword's planted step must not trigger a walk clip. */
+	float GetAnimationMoveSpeed() const;
+	/** Which blow of the combo the last swing was (0 .. 2): within ComboWindow of the one before it counts on, else it starts over. */
+	int32 GetComboStep() const { return ComboStep; }
+	static constexpr float ComboWindow = 0.9f;
+	/** The third blow hits harder and reaches further. */
+	static constexpr float FinisherDamage = 1.3f;
+	static constexpr float FinisherReach = 1.15f;
 	/** True while the body should take the aiming pose: shooting lately, standing, not dancing, and not with the foam finger. */
 	bool WantsAimPose() const;
+	/** Combat/guard takes priority over movement-facing, independently of the animation set. */
+	bool WantsAimFacing() const;
 	/** 0 .. 1, how far the body is in its aiming pose this frame (from its anim instance). */
 	float GetAimPoseWeight() const;
 
 	/**
 	 * Third person (a cheat, ARRRandomPlayerController::RRThirdPerson): the camera goes over the right shoulder and follows the
-	 * mouse, the brawler faces where the camera looks, and aiming down the sights (holding the right button) brings the
+	 * mouse; movement faces the travel direction, combat faces the aim, and aiming down the sights brings the
 	 * camera in close. Set on the controlling machine; the server is told so it turns the brawler the same way.
 	 */
 	void SetThirdPerson(bool bOn);
 	bool IsThirdPerson() const { return bThirdPerson; }
-	void SetAimingDownSights(bool bOn) { bAimingDownSights = bOn; }
+	void SetAimingDownSights(bool bOn);
 	bool IsAimingDownSights() const { return bThirdPerson && bAimingDownSights; }
+	/** Round 97: 0 .. 1 into the sniper's scope on this screen (the HUD draws its ring), and how many times closer it shows. */
+	float GetScopeBlend() const { return ScopeBlend; }
+	float GetScopeZoom() const { return Weapon.ScopeZoom; }
 	/** 0 top-down .. 1 third person, and 0 .. 1 into the sights: how far the camera has moved (eased). */
 	float GetThirdPersonBlend() const { return ThirdPersonBlend; }
 	float GetSightsBlend() const { return SightsBlend; }
@@ -428,6 +493,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Random")
 	TObjectPtr<URRRandomKitComponent> Kit;
 
+	UPROPERTY(VisibleAnywhere, Category = "Combat")
+	TObjectPtr<URRRandomLoadoutComponent> Loadout;
+
 	/** The 3D die that tumbles over the head on each roll. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Random")
 	TObjectPtr<URRRandomOverheadDieComponent> OverheadDie;
@@ -435,6 +503,10 @@ protected:
 	/** Glowing wings on the back while the flight power lasts. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Flight")
 	TObjectPtr<URRRandomWingsComponent> Wings;
+
+	/** Round 95: shell fur over the body, for the species that have it (SK_<Name>Fur; the fox). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Look")
+	TObjectPtr<URRRandomFurComponent> Fur;
 
 	/** The shadow right under the brawler, dust on take-off and landing, wind streaks in flight: height read from above. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Flight")
@@ -635,6 +707,17 @@ protected:
 	/** Mixamo rifle aiming set: standing aim, and the aimed run forward, backward, left and right (in place). */
 	UPROPERTY(EditAnywhere, Category = "Animation")
 	FRRAimAnimations AimAnimations;
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequence> SwordSlash;
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequence> SwordGuard;
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequence> SwordSlashes[3];
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequence> SwordParry;
+	UPROPERTY(Replicated)
+	uint8 ComboStep = 0;
+	float LastSwingTime = -100.f;
 
 	/**
 	 * The fire animation is a bladed rifle stance: the hands hold the rifle this many degrees left of where the body
@@ -679,6 +762,7 @@ private:
 	void AddDamagePopup(float Amount, ERRHitEffect Effect, bool bBackstab);
 	/** Seconds between shots with the current gun and attack speed buffs. */
 	float GetFireInterval() const;
+	void StartSwordStep();
 	/** Server side of FireAt. Slack lets a client's shot arrive a little before the server's cooldown ends. */
 	bool ShootAt(const FVector& TargetLocation, float CooldownSlack);
 	/** Turns the body toward the target and returns that flat direction. */
@@ -691,6 +775,8 @@ private:
 	void ApplyStandingBody();
 	void ApplyTeamColor();
 	void OnWeaponDie(int32 Face);
+	/** Server, round 97: the LIGHT SWORD's swing toward a spot: every opponent within its reach in front is hit at once. */
+	void SwingSword(const FVector& TargetLocation);
 	void OnGiantDie(int32 Face);
 	/** Grows toward giant size or shrinks back, on every machine. */
 	void UpdateGiantSize(float DeltaSeconds);
@@ -765,6 +851,41 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerFireAt(FVector_NetQuantize TargetLocation);
 
+	// Round 97, the light sword's deflecting (see IsDeflecting)
+	UFUNCTION(Server, Reliable)
+	void ServerSetDeflecting(bool bOn, FVector_NetQuantize Aim);
+	UFUNCTION(Server, Unreliable)
+	void ServerDeflectAim(FVector_NetQuantize Aim);
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastDeflected(FVector_NetQuantize Where, FVector_NetQuantizeNormal Away);
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastSwordParry(FVector_NetQuantize Where, uint8 Variant, float ContactTime);
+	void StartSwordParry(const FVector& Where, float ContactTime);
+	/** Round 97: a shotgun's blast at the muzzle on every machine (ARRRandomEffects::ShotgunBlast). */
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastShotgunBlast(FVector_NetQuantize Muzzle, FVector_NetQuantizeNormal Way, float Spread);
+	/** Server: drains the focus while deflecting (ending it when it runs out or the sword is gone), refills it otherwise. */
+	void UpdateDeflect(float DeltaSeconds);
+	UPROPERTY(Replicated)
+	bool bDeflecting = false;
+	UPROPERTY(Replicated)
+	float DeflectFocus = 3.f;
+	/** Server: where the holder aims (its crosshair), what deflected shots fly at; when it last let go. */
+	FVector DeflectAim = FVector::ZeroVector;
+	float DeflectReleaseTime = -100.f;
+	/** This machine: when it last sent its aim. */
+	float DeflectAimSentTime = -100.f;
+	/** Every machine: when the last deflect flashed (the sword's guard pose jolts). */
+	float LastDeflectTime = -100.f;
+	FVector ParryPoint = FVector::ZeroVector;
+	uint8 SwordParryVariant = 0;
+	uint8 SwordParryUnused = 0;
+	float SwordParryContactTime = 0.13f;
+	/** Every machine: watches for shots coming at me on guard, to start the parry flick before they arrive. */
+	void UpdateParryLook();
+	/** Server: knocks away the shots that have come within the blade's reach. */
+	void DeflectInReach();
+
 	UFUNCTION(Server, Reliable)
 	void ServerRobotAltFireAt(FVector_NetQuantize TargetLocation);
 
@@ -773,6 +894,8 @@ private:
 
 	UFUNCTION(Server, Reliable)
 	void ServerSetThirdPerson(bool bOn);
+	UFUNCTION(Server, Reliable)
+	void ServerSetAimingDownSights(bool bOn);
 
 	UFUNCTION(Server, Reliable)
 	void ServerStartReload();
@@ -934,6 +1057,9 @@ private:
 	float ClientTrustRemaining = 0.f;
 	/** When jump was last pressed; a jump that reaches a wall shortly after still climbs it. */
 	float JumpPressedTime = -UE_BIG_NUMBER;
+	/** Round 96: where my feet were then: a climb reaches MaxClimbHeight over them, not over where a jump has lifted them to (a
+	 * jump's top is about 1.2 m up: a climb from there went over 3 m cliffs). */
+	float JumpPressedFeetZ = 0.f;
 
 	UPROPERTY(Replicated)
 	int32 Ammo = 0;
@@ -1094,6 +1220,7 @@ private:
 	/** Third person: on (replicated, so the server turns the brawler with the camera too), the sights, and the camera's eased blends. */
 	UPROPERTY(Replicated)
 	bool bThirdPerson = false;
+	UPROPERTY(Replicated)
 	bool bAimingDownSights = false;
 
 	/** The dance line after the match: given a spot (and where it is), standing in it, and seconds since it set off. */
@@ -1130,6 +1257,9 @@ private:
 	bool bHitFlashShown = false;
 	float ThirdPersonBlend = 0.f;
 	float SightsBlend = 0.f;
+	/** Round 97: 0 .. 1 into the sniper's scope (this screen's own view through it), and whether my body is hidden from it. */
+	float ScopeBlend = 0.f;
+	bool bScopeHidesBody = false;
 	void UpdateCamera(float DeltaSeconds);
 	/** The camera eased over to the sword clash (ClashCameraBlend of the way), from wherever UpdateCamera put it. */
 	void ApplyClashCamera();
@@ -1141,6 +1271,7 @@ private:
 	float RushCameraBlend = 0.f;
 	/** A jump ramp's heavier fall while its leap lasts (StartRampLeap); 0 when not leaping. */
 	float RampLeapGravity = 0.f;
+	bool bRampCushionedLanding = false;
 	float BaseCameraArmLength = 0.f;
 	FName MeshCollisionProfile;
 };
