@@ -30,6 +30,7 @@
 #include "RRRandomOre.h"
 #include "RRRandomOverheadDieComponent.h"
 #include "RRRandomProjectile.h"
+#include "RRRandomRounds.h"
 #include "RRRandomTigerSpirit.h"
 #include "RRRandomFoxClones.h"
 #include "RRRandomMoonHop.h"
@@ -47,6 +48,8 @@
 #include "GameFramework/DamageType.h"
 #include "TimerManager.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -109,8 +112,12 @@ namespace
 	// runs this share of its walking speed faster than a walk, and the over-the-shoulder camera pulls back by this share
 	constexpr float SprintLean = 9.f;
 	constexpr float SprintLeanSpan = 0.35f;
-	constexpr float SprintCameraPull = 0.12f;
-	constexpr float SprintCameraRate = 4.f;
+	// (round 99, the user: "달리기가 별로 안 빨라지는 느낌": the camera pulling back 12% hid the speed; now it barely pulls
+	// back, the view widens instead, wind lines run in from the screen's edges (ARRRandomHUD) and dust flies off the heels;
+	// the run itself is 1.7 times the walk, was 1.5: URRRandomMovementComponent::SprintSpeedScale)
+	constexpr float SprintCameraPull = 0.04f;
+	constexpr float SprintCameraRate = 6.f;
+	constexpr float SprintFieldOfView = 11.f;
 	constexpr float FlightCameraPullRate = 2.f;
 	// Crew of the star robot ask it to fire (its fists or its shield) this often at most
 	constexpr float RobotFireRequestInterval = 0.1f;
@@ -223,6 +230,11 @@ namespace
 	constexpr float ScopeSpeed = 12.f;
 	constexpr float ScopeEyeHeight = 45.f;
 	constexpr float ScopeHideAt = 0.6f;
+	// Round 99: the camera this near the body's middle line hides the body from this screen (shown again past the second);
+	// the head reaches this far over the capsule's top
+	constexpr float CameraHideDistance = 100.f;
+	constexpr float CameraShowDistance = 128.f;
+	constexpr float CameraHideHeadRoom = 30.f;
 	// The 90 degree camera 1400 away that this replaces; the arm grows so the same stretch of arena fits on screen
 	constexpr float FramingFieldOfView = 90.f;
 	constexpr float FramingArmLength = 1400.f;
@@ -318,6 +330,10 @@ ARRRandomCharacter::ARRRandomCharacter(const FObjectInitializer& ObjectInitializ
 	Post.MotionBlurAmount = 0.f;
 	// Cartoon look (off for now, bCartoonLook): the post process cuts lighting into flat bands and inks the edges.
 	// The instance is where its values are tuned in the editor (live while playing in the editor).
+	// Round 99: the friend-or-foe lines (char-pipeline/scripts/ue_make_team_outline.py); a player's camera gets an instance of
+	// it in UpdateCamera
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TeamOutline(TEXT("/Game/PostProcess/M_PP_TeamOutline.M_PP_TeamOutline"));
+	TeamOutlineMaterial = TeamOutline.Succeeded() ? TeamOutline.Object : nullptr;
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ToonPostProcess(TEXT("/Game/PostProcess/MI_PP_Toon.MI_PP_Toon"));
 	if (bCartoonLook && ToonPostProcess.Succeeded())
 	{
@@ -431,6 +447,14 @@ void ARRRandomCharacter::UseLook(const FRRSpeciesLook& Look)
 	SwordSlashes[1] = Look.SwordSlash2 ? Look.SwordSlash2.Get() : Look.SwordSlash.Get();
 	SwordSlashes[2] = Look.SwordSlash3 ? Look.SwordSlash3.Get() : Look.SwordSlash.Get();
 	SwordParry = Look.SwordParry;
+	EmoteAnimations = Look.Emotes;
+	for (int32 Step = 0; Step < 3; ++Step)
+	{
+		HammerSwings[Step] = Look.HammerSwings[Step];
+		DaggerStabs[Step] = Look.DaggerStabs[Step];
+	}
+	ShieldBlock = Look.ShieldBlock;
+	ShieldCarry = Look.ShieldCarry;
 }
 
 void ARRRandomCharacter::SetSpecies(int32 NewSpecies)
@@ -476,6 +500,11 @@ void ARRRandomCharacter::ApplySpecies()
 	// Every species has its ultimate (OnUltimateDie); a clone rolls nothing
 	DiceBuffs->UltimateDieChance = bDecoy ? 0.f : UltimateDieChance;
 	ApplyKit();
+	// Round 98: the main mode's role weapon goes with the species
+	if (HasAuthority() && !bDecoy && ARRRandomGameState::IsRounds(this))
+	{
+		EquipWeapon(GetRoleWeapon());
+	}
 	CurrentAnimation = nullptr;
 	if (!HasActorBegunPlay())
 	{
@@ -542,6 +571,7 @@ void ARRRandomCharacter::BeginPlay()
 
 	// The random event component has made per-slot dynamic materials by now
 	ApplyTeamColor();
+	ARRRandomProjectile::PreloadShotModels();
 	// A defense villain moves as its own kind of object: what the wall ring stops (and nothing else)
 	if (IsVillain())
 	{
@@ -562,6 +592,12 @@ void ARRRandomCharacter::BeginPlay()
 		DiceBuffs->OnUltimateDie.AddUObject(this, &ARRRandomCharacter::OnUltimateDie);
 		DiceBuffs->OnFlightDie.AddUObject(this, &ARRRandomCharacter::OnFlightDie);
 		DiceBuffs->OnOwnDie.AddUObject(this, &ARRRandomCharacter::OnOwnDie);
+		DiceBuffs->OnCard.AddUObject(this, &ARRRandomCharacter::OnCard);
+		// Round 98: the role's own weapon in the main mode
+		if (!bDecoy && ARRRandomGameState::IsRounds(this))
+		{
+			Weapon = GetRoleWeapon();
+		}
 		// (a fox's clone starts with its fox's health)
 		if (!bDecoy)
 		{
@@ -643,7 +679,15 @@ void ARRRandomCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ARRRandomCharacter, FlingVelocity);
 	DOREPLIFETIME(ARRRandomCharacter, Ultimate);
 	DOREPLIFETIME(ARRRandomCharacter, bDecoy);
+	DOREPLIFETIME(ARRRandomCharacter, bInLava);
+	DOREPLIFETIME(ARRRandomCharacter, LavaStruggle);
 	DOREPLIFETIME_CONDITION(ARRRandomCharacter, RespawnRemaining, COND_OwnerOnly);
+	DOREPLIFETIME_CONDITION(ARRRandomCharacter, LastKiller, COND_OwnerOnly);
+	DOREPLIFETIME_CONDITION(ARRRandomCharacter, RespawnTotal, COND_OwnerOnly);
+	DOREPLIFETIME_CONDITION(ARRRandomCharacter, RespawnQuick, COND_OwnerOnly);
+	DOREPLIFETIME(ARRRandomCharacter, bFlingSpin);
+	DOREPLIFETIME(ARRRandomCharacter, EmoteIndex);
+	DOREPLIFETIME(ARRRandomCharacter, EmoteSerial);
 	DOREPLIFETIME(ARRRandomCharacter, bGiant);
 	DOREPLIFETIME(ARRRandomCharacter, GiantRemaining);
 	DOREPLIFETIME(ARRRandomCharacter, bFlying);
@@ -699,8 +743,10 @@ void ARRRandomCharacter::ApplyTeamColor()
 		{
 			// A villain wears its wave's color (a stand-in's borrowed look more strongly, to tell it from the animal friend)
 			const bool bStandIn = SpeciesLooks.IsValidIndex(ShownSpecies) && SpeciesLooks[ShownSpecies].bStandIn;
-			Material->SetVectorParameterValue(ColorParameter, IsVillain() ? VillainTint : GetTeamColor(Team));
-			Material->SetScalarParameterValue(TintStrengthParameter, IsVillain() ? (bStandIn ? VillainStandInTint : VillainTintStrength) : BodyTeamTint);
+			Material->SetVectorParameterValue(ColorParameter, IsVillain() ? VillainTint : GetTeamColor(GetShownTeam()));
+			// (round 98: a disguised red fox wears the other team's color strongly, so it reads)
+			Material->SetScalarParameterValue(TintStrengthParameter, IsVillain() ? (bStandIn ? VillainStandInTint : VillainTintStrength)
+				: Kit && Kit->IsDisguised() ? FMath::Max(BodyTeamTint, 0.45f) : BodyTeamTint);
 		}
 	}
 }
@@ -816,13 +862,102 @@ void ARRRandomCharacter::EndUltimate(ARRRandomUltimate* Which)
 	}
 }
 
+void ARRRandomCharacter::SetInLava(bool bIn)
+{
+	// Server, from the lava every frame: in it or not. Just leapt out, it isn't caught again for a moment (still over it)
+	const float Now = GetWorld()->GetTimeSeconds();
+	// (a struggle's hop lifts it clear of the surface for a moment: it is still caught until it has been out LavaLetGo seconds,
+	// so the notches aren't lost between presses)
+	if (bIn)
+	{
+		LavaTouchTime = Now;
+	}
+	const bool bCaught = (bIn || (bInLava && Now - LavaTouchTime < LavaLetGo)) && bAlive && Now - LavaOutTime > LavaFreeTime;
+	if (bCaught && LavaStruggle > 0 && Now - LavaStruggleTime > LavaStruggleKeep)
+	{
+		// Not pressing: the notches slip away one by one
+		--LavaStruggle;
+		LavaStruggleTime = Now - LavaStruggleKeep * 0.5f;
+	}
+	if (bCaught != bInLava)
+	{
+		bInLava = bCaught;
+		LavaStruggle = 0;
+	}
+}
+
+void ARRRandomCharacter::StruggleInLava()
+{
+	// (no faster than a hand can: held keys and doubled events don't count)
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (!bAlive || !bInLava || Now - LavaPressTime < LavaPressGap)
+	{
+		return;
+	}
+	LavaPressTime = Now;
+	ServerStruggleInLava();
+}
+
+void ARRRandomCharacter::ServerStruggleInLava_Implementation()
+{
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (!bAlive || !bInLava || Now - LavaStruggleTime < LavaPressGap * 0.8f)
+	{
+		return;
+	}
+	LavaStruggleTime = Now;
+	++LavaStruggle;
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s struggles in the lava, %d of %d."), *GetName(), int32(LavaStruggle), LavaEscapePresses);
+	const bool bOut = LavaStruggle >= LavaEscapePresses;
+	if (bOut)
+	{
+		// Out: the lava throws it clear (ARRRandomLava::BurnPeople, which knows the way to dry ground)
+		LavaStruggle = 0;
+		bLavaLeap = true;
+	}
+	else
+	{
+		LaunchCharacter(FVector(0.f, 0.f, LavaStruggleHop), false, true);
+	}
+	MulticastLavaStruggle(bOut);
+}
+
+bool ARRRandomCharacter::TakeLavaLeap()
+{
+	if (!bLavaLeap)
+	{
+		return false;
+	}
+	bLavaLeap = false;
+	LavaOutTime = GetWorld()->GetTimeSeconds();
+	bInLava = false;
+	return true;
+}
+
+void ARRRandomCharacter::MulticastLavaStruggle_Implementation(bool bOut)
+{
+	const FVector Feet = GetActorLocation() - FVector(0.f, 0.f, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+	{
+		Effects->LavaBubble(Feet + FVector(0.f, 0.f, 60.f), bOut ? 3.f : 1.6f);
+	}
+	if (bOut)
+	{
+		ARRRandomHUD::PopComicWord(this, TEXT("PHEW!"), GetActorLocation() + FVector(0.f, 0.f, 190.f), RRUI::Gold, 1.2f);
+	}
+}
+
 void ARRRandomCharacter::MakeDecoyOf(const ARRRandomCharacter* Source)
 {
 	bDecoy = true;
 	Team = Source->Team;
 	SetSpecies(Source->Species);
 	Weapon = Source->Weapon;
-	Health = Source->Health;
+	// Round 100 (the user: "분신들이 데미지를 일정비율 줄 수 있도록 … 체력도 캐릭터 일정 비율만큼. 대신 유지 시간을 짧게"):
+	// a clone has a share of the fox's full health (it used to pop at the first hit) and its shots do a share of their
+	// damage (they did none); what it knocks out is the fox's (DecoyOwner)
+	Health = Source->GetMaxHealth() * DecoyHealthShare;
+	DecoyOwner = const_cast<ARRRandomCharacter*>(Source);
 	bThirdPerson = false;
 }
 
@@ -1075,6 +1210,7 @@ void ARRRandomCharacter::DelayFire(float Seconds)
 void ARRRandomCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	UpdateOutlineStencil();
 	if (!bAlive || !Weapon.bSword || bDeflecting || IsDriving() || GetCharacterMovement()->IsFalling())
 	{
 		GetCharacterMovement()->RemoveRootMotionSource(FName(TEXT("SwordStep")));
@@ -1082,6 +1218,10 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 
 	UpdateDamagePopups(DeltaSeconds);
 	UpdateHitFlash(DeltaSeconds);
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		UpdateShield(DeltaSeconds);
+	}
 	UpdateJumpLanding(DeltaSeconds);
 	// Out of sight while its ultimate stands in for it (the tiger's giant, the rabbit's hops)
 	const bool bStandIn = Ultimate && Ultimate->HidesBrawler();
@@ -1117,9 +1257,12 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 		UpdateDeflect(DeltaSeconds);
 	}
 	// (on guard: the parry flick timed to meet the shots coming, on every screen; the server knocks them away at the blade)
-	if (bDeflecting && Weapon.bSword)
+	if (bDeflecting && CanGuard())
 	{
-		UpdateParryLook();
+		if (!Weapon.bShieldGuard)
+		{
+			UpdateParryLook();
+		}
 		// On guard the body faces the aim (the holder's own machine for a player, the server for a bot): parries send shots there
 		if ((IsLocallyControlled() || (HasAuthority() && !IsPlayerControlled())) && !DeflectAim.IsNearlyZero())
 		{
@@ -1133,6 +1276,16 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 	UpdateFormation(DeltaSeconds);
 	UpdateDashEffects(DeltaSeconds);
 	UpdateCannonRide(DeltaSeconds);
+	// Round 98: an emote ends on the move, after a shot, or once it has played a few times over
+	if (HasAuthority() && EmoteIndex > 0)
+	{
+		const UAnimSequence* Playing = HasEmote(EmoteIndex) ? EmoteAnimations[EmoteIndex - 1].Get() : nullptr;
+		const float Length = Playing ? Playing->GetPlayLength() : 2.f;
+		if (FVector::Dist2D(GetActorLocation(), EmoteStartLocation) > 60.f || GetTimeSinceShot() < 0.2f || GetWorld()->GetTimeSeconds() - EmoteStartTime > FMath::Max(3.f, Length * 2.f))
+		{
+			EmoteIndex = 0;
+		}
+	}
 
 	if (HasAuthority())
 	{
@@ -1231,6 +1384,13 @@ void ARRRandomCharacter::ServerSetJumpHeld_Implementation(bool bHeld)
 void ARRRandomCharacter::Jump()
 {
 	SetJumpHeld(true);
+	// Round 101 (the user: "용암에 빠졌을 때 스페이스바를 연타해서 빠져나올 수 있게"): stuck in lava, jump is a struggle: each
+	// press a little hop and one more notch, LavaEscapePresses of them close together and it leaps out
+	if (bInLava && !Robot && !Vehicle)
+	{
+		StruggleInLava();
+		return;
+	}
 	// The star robot jumps with its driver (the MOVE seat, the whole crew in, on the ground): one heavy jump, no climbing,
 	// hops or flying (UpdateFlight gives it its height)
 	if (Robot)
@@ -1399,7 +1559,7 @@ bool ARRRandomCharacter::CanJumpRobot() const
 	return bAlive && Robot && RobotSeat == ERRRobotSeat::Move && Robot->IsAssembled() && Robot->IsCrewFull() && !Robot->IsHeldStill() && !ARRRandomGameState::IsPlayLocked(this);
 }
 
-bool ARRRandomCharacter::TryClimb()
+bool ARRRandomCharacter::FindClimb(const FVector& Forward, FVector& OutDestination, FVector& OutWallFacing, float ExtraReach) const
 {
 	UWorld* World = GetWorld();
 	const UCapsuleComponent* Capsule = GetCapsuleComponent();
@@ -1408,27 +1568,14 @@ bool ARRRandomCharacter::TryClimb()
 	const FVector Location = GetActorLocation();
 	const float FeetZ = Location.Z - HalfHeight;
 
-	// Only the controlling machine decides to climb; a remote player's server hears about it through ServerStartClimb
-	if (!IsLocallyControlled())
-	{
-		return false;
-	}
-
-	// Toward where the brawler is trying to go, or where it faces when standing still
-	FVector Forward = GetLastMovementInputVector().GetSafeNormal2D();
-	if (Forward.IsNearlyZero())
-	{
-		Forward = GetActorForwardVector().GetSafeNormal2D();
-	}
-
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomClimb), false, this);
 	const FCollisionObjectQueryParams StaticOnly(ECC_WorldStatic);
 
 	// A wall right in front, at chest height, or else a low one at the knees (a window sill, which a giant's chest is over)
 	FHitResult Wall;
 	const FVector Knees(Location.X, Location.Y, FeetZ + MinClimbHeight + 25.f);
-	const bool bChest = World->LineTraceSingleByObjectType(Wall, Location, Location + Forward * (Radius + ClimbReach), StaticOnly, Params);
-	if ((!bChest && !World->LineTraceSingleByObjectType(Wall, Knees, Knees + Forward * (Radius + ClimbReach), StaticOnly, Params))
+	const bool bChest = World->LineTraceSingleByObjectType(Wall, Location, Location + Forward * (Radius + ClimbReach + ExtraReach), StaticOnly, Params);
+	if ((!bChest && !World->LineTraceSingleByObjectType(Wall, Knees, Knees + Forward * (Radius + ClimbReach + ExtraReach), StaticOnly, Params))
 		|| FMath::Abs(Wall.ImpactNormal.Z) > MaxWallNormalZ)
 	{
 		return false;
@@ -1460,10 +1607,44 @@ bool ARRRandomCharacter::TryClimb()
 	{
 		return false;
 	}
+	OutDestination = Destination;
+	OutWallFacing = (-Wall.ImpactNormal).GetSafeNormal2D();
+	return true;
+}
 
-	const FVector WallFacing = (-Wall.ImpactNormal).GetSafeNormal2D();
-	UE_LOG(LogTemp, Verbose, TEXT("RRRandom: %s climbs from %s (feet) onto %s (wall normal %s, by %s)."), *GetName(), *FVector(Location.X, Location.Y, FeetZ).ToCompactString(),
-		*Top.ImpactPoint.ToCompactString(), *Wall.ImpactNormal.ToCompactString(), Top.GetComponent() ? *Top.GetComponent()->GetName() : TEXT("?"));
+bool ARRRandomCharacter::CanClimbToward(const FVector& Direction, float ExtraReach, float MaxRise) const
+{
+	// Round 99, for the bots: whether a jump this way would be a climb (so they go up a ledge the moment they reach it,
+	// instead of pushing at it first), no higher than MaxRise over the feet; with ExtraReach, whether what is that much
+	// further ahead could be climbed once reached (so it isn't steered round)
+	FVector Destination;
+	FVector WallFacing;
+	const FVector Forward = Direction.GetSafeNormal2D();
+	return bAlive && !bClimbing && !Vehicle && !Robot && !bFlying && !Forward.IsNearlyZero() && FindClimb(Forward, Destination, WallFacing, ExtraReach)
+		&& Destination.Z - GetActorLocation().Z <= MaxRise;
+}
+
+bool ARRRandomCharacter::TryClimb()
+{
+	// Only the controlling machine decides to climb; a remote player's server hears about it through ServerStartClimb
+	if (!IsLocallyControlled())
+	{
+		return false;
+	}
+
+	// Toward where the brawler is trying to go, or where it faces when standing still
+	FVector Forward = GetLastMovementInputVector().GetSafeNormal2D();
+	if (Forward.IsNearlyZero())
+	{
+		Forward = GetActorForwardVector().GetSafeNormal2D();
+	}
+	FVector Destination;
+	FVector WallFacing;
+	if (!FindClimb(Forward, Destination, WallFacing))
+	{
+		return false;
+	}
+	UE_LOG(LogTemp, Verbose, TEXT("RRRandom: %s climbs from %s onto %s."), *GetName(), *GetActorLocation().ToCompactString(), *Destination.ToCompactString());
 	StartClimb(Destination, WallFacing);
 	if (!HasAuthority())
 	{
@@ -1750,7 +1931,9 @@ void ARRRandomCharacter::UpdateWalkSpeed()
 	// Round 97: light on its feet with the light sword in hand (on foot)
 	const float SwordSpeed = !Vehicle && Weapon.bSword ? FRRWeapon::SwordMoveShare : 1.f;
 	GetCharacterMovement()->MaxWalkSpeed = IsUsingUltimate() ? 0.f
-		: BaseWalkSpeed * VehicleSpeed * KitSpeed * RandomEvents->GetSpeedMultiplier() * DiceBuffs->GetMultiplier(ERRDiceBuffStat::MoveSpeed) * CloudSpeed * SwordSpeed;
+		: BaseWalkSpeed * VehicleSpeed * KitSpeed * RandomEvents->GetSpeedMultiplier() * DiceBuffs->GetMultiplier(ERRDiceBuffStat::MoveSpeed) * CloudSpeed * SwordSpeed
+		// (round 101: wading through lava, on foot)
+		* (bInLava && !Vehicle && !Robot ? LavaMoveShare : 1.f);
 	// A plane flies as fast as it would drive
 	GetCharacterMovement()->MaxFlySpeed = GetCharacterMovement()->MaxWalkSpeed;
 	if (IsDashingToFormation())
@@ -1819,13 +2002,68 @@ void ARRRandomCharacter::UpdateVehicleHandling()
 	// otherwise it turns to where it goes
 	// (A plane turns itself the way it flies, level: UpdatePlaneFlight; turning to its movement would tip it up and down)
 	ApplyThirdPersonRotation();
+	PlaceBodyMesh();
+	LogNetSmooth(GetWorld()->GetDeltaSeconds());
+}
+
+void ARRRandomCharacter::PlaceBodyMesh()
+{
 	// Up on the deck or in the seat (the body's own offset otherwise; knocked out it is a ragdoll and left alone)
 	if (bAlive && !bClimbing)
 	{
 		// (A landing's crouch: the body sinks with its bent legs)
 		const float Crouch = JumpLandDrop * FMath::Sin(LandSquash * HALF_PI);
-		GetMesh()->SetRelativeLocation(MeshRelativeLocation + GetRideOffset() - FVector(0.f, 0.f, Crouch));
+		// Round 100: on top of the glide that smooths another machine's body from one update to the next (this used to wipe
+		// it out; see URRRandomMovementComponent::SmoothClientPosition)
+		const URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(GetCharacterMovement());
+		const FVector Glide = RandomMovement && URRRandomMovementComponent::IsNetSmoothOn() ? RandomMovement->GetNetSmoothOffset() : FVector::ZeroVector;
+		GetMesh()->SetRelativeLocation(MeshRelativeLocation + GetRideOffset() - FVector(0.f, 0.f, Crouch) + Glide);
 	}
+}
+
+void ARRRandomCharacter::LogNetSmooth(float DeltaSeconds)
+{
+#if !UE_BUILD_SHIPPING
+	// rr.Net.LogSmooth 1: how far this body (as drawn: its mesh) and its capsule went each frame beyond what its speed
+	// accounts for, on a screen where it is another machine's. A second's worst jump and how many frames jumped at all
+	if (!URRRandomMovementComponent::IsNetSmoothLogged() || !bAlive || (GetLocalRole() != ROLE_SimulatedProxy && GetRemoteRole() != ROLE_AutonomousProxy))
+	{
+		NetLogTime = -1.f;
+		return;
+	}
+	const FVector Body = GetMesh()->GetComponentLocation() - GetActorRotation().RotateVector(GetRideOffset());
+	const FVector Capsule = GetActorLocation();
+	if (NetLogTime >= 0.f && DeltaSeconds > 0.f)
+	{
+		const FVector Step = GetVelocity() * DeltaSeconds;
+		const float BodyJump = FVector::Dist2D(Body - NetLogBody, Step);
+		const float CapsuleJump = FVector::Dist2D(Capsule - NetLogCapsule, Step);
+		NetLogBodyWorst = FMath::Max(NetLogBodyWorst, BodyJump);
+		NetLogCapsuleWorst = FMath::Max(NetLogCapsuleWorst, CapsuleJump);
+		NetLogBodySum += BodyJump;
+		NetLogCapsuleSum += CapsuleJump;
+		NetLogBodyJumps += BodyJump > 12.f ? 1 : 0;
+		NetLogCapsuleJumps += CapsuleJump > 12.f ? 1 : 0;
+		++NetLogFrames;
+		NetLogTime += DeltaSeconds;
+		if (NetLogTime >= 1.f)
+		{
+			const URRRandomMovementComponent* RandomMovement = Cast<URRRandomMovementComponent>(GetCharacterMovement());
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: net smooth %s: body worst %.0f, mean %.1f, %d jumps; capsule worst %.0f, mean %.1f, %d jumps; %d frames, trouble %.3f, speed %.0f."),
+				*GetName(), NetLogBodyWorst, NetLogBodySum / FMath::Max(NetLogFrames, 1), NetLogBodyJumps, NetLogCapsuleWorst, NetLogCapsuleSum / FMath::Max(NetLogFrames, 1),
+				NetLogCapsuleJumps, NetLogFrames, RandomMovement ? RandomMovement->GetNetTrouble() : 0.f, GetVelocity().Size2D());
+			NetLogTime = 0.f;
+			NetLogBodyWorst = NetLogCapsuleWorst = NetLogBodySum = NetLogCapsuleSum = 0.f;
+			NetLogBodyJumps = NetLogCapsuleJumps = NetLogFrames = 0;
+		}
+	}
+	else
+	{
+		NetLogTime = 0.f;
+	}
+	NetLogBody = Body;
+	NetLogCapsule = Capsule;
+#endif
 }
 
 namespace
@@ -2194,6 +2432,11 @@ void ARRRandomCharacter::UpdateLocomotionAnimation()
 		Wanted = RunAnimation;
 	}
 
+	// Round 98: an emote, standing still
+	if (IsEmoting() && HasEmote(EmoteIndex) && !bInAir)
+	{
+		Wanted = EmoteAnimations[EmoteIndex - 1];
+	}
 	if (IsCelebrating())
 	{
 		Wanted = VictoryAnimations.Num() > 0 ? VictoryAnimations[CelebrationPick % VictoryAnimations.Num()].Get() : VictoryAnimation.Get();
@@ -2260,6 +2503,21 @@ void ARRRandomCharacter::UpdateCamera(float DeltaSeconds)
 	{
 		return;
 	}
+	// Round 99: a player's camera draws the friend-or-foe lines (M_PP_TeamOutline), as wide as 3 pixels on a 720 tall screen
+	if (TeamOutlineMaterial && IsPlayerControlled())
+	{
+		if (!TeamOutlineInstance)
+		{
+			TeamOutlineInstance = UMaterialInstanceDynamic::Create(TeamOutlineMaterial, this);
+			TopDownCamera->PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.f, TeamOutlineInstance));
+		}
+		const float Height = GEngine && GEngine->GameViewport && GEngine->GameViewport->Viewport ? float(GEngine->GameViewport->Viewport->GetSizeXY().Y) : 720.f;
+		if (Height != OutlineWidthFor && Height > 0.f)
+		{
+			OutlineWidthFor = Height;
+			TeamOutlineInstance->SetScalarParameterValue(TEXT("OutlineWidth"), FMath::Max(2.f, 3.5f * Height / 720.f));
+		}
+	}
 	ThirdPersonBlend = bThirdPerson ? 1.f : 0.f;
 	SightsBlend = FMath::FInterpTo(SightsBlend, IsAimingDownSights() ? 1.f : 0.f, DeltaSeconds, SightsSpeed);
 	// Round 97, the sniper's scope: into it with the sights (third person, a gun with a scope); the body hidden from this
@@ -2269,9 +2527,26 @@ void ARRRandomCharacter::UpdateCamera(float DeltaSeconds)
 	{
 		ScopeBlend = 0.f;
 	}
-	if ((ScopeBlend > ScopeHideAt) != bScopeHidesBody)
+	// Round 99 (the user: "사격중 장애물에 걸릴때 내 캐릭터 모델 내부가 보이는 문제"): backed against a wall the camera's arm is
+	// pushed in until the camera sits inside the body, looking at the inside of its head. Once the camera is that close to
+	// the body's middle line (feet to the top of the big head) the body is left out of this screen, as in the scope; it
+	// comes back a little further out, so it doesn't flicker
+	if (bThirdPerson && !Robot && bAlive && ThirdPersonBlend > 0.f)
 	{
-		bScopeHidesBody = ScopeBlend > ScopeHideAt;
+		const float Body = GetActorScale3D().Z;
+		const float HalfHeight = GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+		const FVector Middle = GetActorLocation();
+		const float Near = FMath::PointDistToSegment(TopDownCamera->GetComponentLocation(), Middle - FVector(0.f, 0.f, HalfHeight), Middle + FVector(0.f, 0.f, HalfHeight + CameraHideHeadRoom * Body));
+		bCameraInBody = Near < (bCameraInBody ? CameraShowDistance : CameraHideDistance) * Body;
+	}
+	else
+	{
+		bCameraInBody = false;
+	}
+	const bool bHideBody = ScopeBlend > ScopeHideAt || bCameraInBody;
+	if (bHideBody != bScopeHidesBody)
+	{
+		bScopeHidesBody = bHideBody;
 		TArray<UPrimitiveComponent*> Parts;
 		GetComponents<UPrimitiveComponent>(Parts);
 		for (UPrimitiveComponent* Part : Parts)
@@ -2351,7 +2626,7 @@ void ARRRandomCharacter::UpdateCamera(float DeltaSeconds)
 		CameraBoom->TargetOffset = Pivot;
 		const float ScopeFieldOfView = FMath::RadiansToDegrees(2.f * FMath::Atan(FMath::Tan(FMath::DegreesToRadians(SightsFieldOfView * 0.5f)) / FMath::Max(1.f, Weapon.ScopeZoom)));
 		TopDownCamera->SetFieldOfView(FMath::Lerp(FMath::Lerp(ShoulderFieldOfView, SightsFieldOfView, SightsBlend) + ShoulderFlightFieldOfView * FlightCameraPull
-			+ RushFieldOfView * RushCameraBlend, ScopeFieldOfView, ScopeBlend));
+			+ RushFieldOfView * RushCameraBlend + SprintFieldOfView * SprintCameraBlend * (1.f - SightsBlend), ScopeFieldOfView, ScopeBlend));
 		ApplyClashCamera();
 		return;
 	}
@@ -2555,7 +2830,36 @@ float ARRRandomCharacter::GetFireInterval() const
 
 bool ARRRandomCharacter::HasDedicatedSwordMotion() const
 {
-	return SwordSlash && SwordSlash->GetName().Contains(TEXT("SwordDedicated"));
+	// (round 98: the hammer and the dagger have their own one-handed blows)
+	return SwordSlash && SwordSlash->GetName().Contains(TEXT("SwordDedicated")) && !HasRoleMeleeMotion();
+}
+
+bool ARRRandomCharacter::HasRoleMeleeMotion() const
+{
+	return (Weapon.IsHammer() && HammerSwings[0]) || (Weapon.IsDagger() && DaggerStabs[0]);
+}
+
+UAnimSequence* ARRRandomCharacter::GetSwordSlash(int32 Step) const
+{
+	Step = FMath::Clamp(Step, 0, 2);
+	if (HasRoleMeleeMotion())
+	{
+		const TObjectPtr<UAnimSequence>* Own = Weapon.IsHammer() ? HammerSwings : DaggerStabs;
+		return Own[Step] ? Own[Step].Get() : Own[0].Get();
+	}
+	return SwordSlashes[Step];
+}
+
+void ARRRandomCharacter::GetMeleeWindow(int32 Step, float& OutFrom, float& OutTo) const
+{
+	// The blow inside each Tripo clip (wind-up start .. just past the hit), as measured from the right hand track
+	// (hammer: overhead bonk lands at 0.49, bat swing at 0.38, ground smash at 0.57; dagger: thrust 0.47, slash 0.30, lunge 0.43)
+	static const float HammerWindows[3][2] = { { 0.24f, 0.64f }, { 0.18f, 0.52f }, { 0.28f, 0.72f } };
+	static const float DaggerWindows[3][2] = { { 0.3f, 0.62f }, { 0.1f, 0.45f }, { 0.3f, 0.6f } };
+	Step = FMath::Clamp(Step, 0, 2);
+	const float* Window = Weapon.IsHammer() ? HammerWindows[Step] : DaggerWindows[Step];
+	OutFrom = Window[0];
+	OutTo = Window[1];
 }
 
 float ARRRandomCharacter::GetSwordBodyScale() const
@@ -2565,6 +2869,10 @@ float ARRRandomCharacter::GetSwordBodyScale() const
 
 float ARRRandomCharacter::GetSwordAttackDuration() const
 {
+	if (HasRoleMeleeMotion())
+	{
+		return FMath::Max(0.3f, GetFireInterval() * 0.95f);
+	}
 	return HasDedicatedSwordMotion() ? GetFireInterval() : 0.42f * (ComboStep == 2 ? 1.25f : 1.f);
 }
 
@@ -2834,6 +3142,21 @@ bool ARRRandomCharacter::ShootAt(const FVector& TargetLocation, float CooldownSl
 			Projectile->DamageMultiplier = DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackPower) * Weapon.DamageMultiplier * (bGiant ? GiantDamageMultiplier : 1.f);
 			Projectile->MaxRange = GetShotRange();
 			Projectile->SetSpeedMultiplier(Weapon.ProjectileSpeedMultiplier * (Pellets > 1 ? FMath::FRandRange(0.92f, 1.08f) : 1.f));
+			// Round 98: the ACORN launcher's arc lands on the aim (no further than its range)
+			if (Weapon.bLob)
+			{
+				FVector Landing = TargetLocation;
+				const FVector Start = PelletTransform.GetLocation();
+				const float Most = GetAttackRange();
+				if (const float Far = FVector::Dist2D(Landing, Start); Far > Most)
+				{
+					// (round 99: along the aim, not straight up at where a far aim's height was: aimed at the sky the acorn
+					// went nearly straight up; the rise is kept to what an arc that far can make)
+					Landing = Start + (Landing - Start) * (Most / Far);
+					Landing.Z = FMath::Clamp(Landing.Z, Start.Z - Most, Start.Z + Most * 0.6f);
+				}
+				Projectile->MakeLob(Landing);
+			}
 			// A foam finger's poke: unseen, a flat point of damage, a knockout from behind
 			Projectile->bPoke = Weapon.bFoamFinger;
 			Projectile->HitEffect = Weapon.GetHitEffect();
@@ -2868,8 +3191,10 @@ void ARRRandomCharacter::SwingSword(const FVector& TargetLocation)
 	}
 	// (the third blow of a combo reaches further and hits harder)
 	const bool bFinisher = ComboStep == 2;
-	const float Reach = FRRWeapon::SwordReach * GetActorScale3D().Z * (bFinisher ? FinisherReach : 1.f);
-	const float MinDot = FMath::Cos(FMath::DegreesToRadians(FRRWeapon::SwordHalfAngle));
+	// (round 98: each melee weapon its own reach and angle; the hammer's third blow hits all round)
+	const bool bSlam = bFinisher && Weapon.IsHammer();
+	const float Reach = Weapon.GetMeleeReach() * GetActorScale3D().Z * (bFinisher ? FinisherReach : 1.f);
+	const float MinDot = bSlam ? -1.f : FMath::Cos(FMath::DegreesToRadians(Weapon.GetMeleeHalfAngle()));
 	const ARRRandomProjectile* Shot = ProjectileClass ? ProjectileClass->GetDefaultObject<ARRRandomProjectile>() : nullptr;
 	const float Multiplier = DiceBuffs->GetMultiplier(ERRDiceBuffStat::AttackPower) * Weapon.DamageMultiplier * (bGiant ? GiantDamageMultiplier : 1.f) * (bFinisher ? FinisherDamage : 1.f);
 	int32 Hits = 0;
@@ -2895,14 +3220,37 @@ void ARRRandomCharacter::SwingSword(const FVector& TargetLocation)
 		{
 			continue;
 		}
-		const float Damage = (Shot ? FMath::RandRange(Shot->MinDamage, Shot->MaxDamage) : 12.f) * Multiplier;
+		float Damage = (Shot ? FMath::RandRange(Shot->MinDamage, Shot->MaxDamage) : 12.f) * Multiplier;
+		// Round 98: the DAGGER in the back (or out of a disguise or invisibility) does double
+		if (Weapon.IsDagger() && (FVector::DotProduct(Other->GetActorForwardVector().GetSafeNormal2D(), Offset.GetSafeNormal2D()) > FMath::Cos(FMath::DegreesToRadians(RRKit::BackstabHalfAngle + 15.f))
+			|| Kit->ConsumeAmbush()))
+		{
+			Damage *= FRRWeapon::DaggerBackstab;
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s stabs %s from behind (%.0f)."), *GetName(), *Other->GetName(), Damage);
+		}
+		// The HAMMER throws them back (its slam up and away all round); a knockout from it flies spinning
+		const FVector Away = Offset.GetSafeNormal2D().IsNearlyZero() ? Facing : Offset.GetSafeNormal2D();
+		if (Weapon.MeleeKnock > 0.f)
+		{
+			Other->SetBlastImpact(Away * Weapon.MeleeKnock * 1.3f + FVector(0.f, 0.f, 450.f));
+		}
 		FHitResult Hit;
 		Hit.ImpactPoint = Other->GetActorLocation();
 		Hit.Location = Hit.ImpactPoint;
 		UGameplayStatics::ApplyPointDamage(Other, Damage, Offset.GetSafeNormal(), Hit, GetController(), this, UDamageType::StaticClass());
+		if (Weapon.MeleeKnock > 0.f && Other->IsAlive())
+		{
+			Other->LaunchCharacter(Away * Weapon.MeleeKnock * (bSlam ? 1.2f : 1.f) + FVector(0.f, 0.f, bSlam ? 420.f : 220.f), true, true);
+		}
 		++Hits;
 	}
-	UE_LOG(LogTemp, Verbose, TEXT("RRRandom: %s swings the light sword (%d hit)."), *GetName(), Hits);
+	if (bSlam)
+	{
+		MulticastHammerSlam(Here - FVector(0.f, 0.f, GetCapsuleComponent()->GetScaledCapsuleHalfHeight()) + Facing * 60.f, Reach);
+	}
+	// (striking ends a disguise or invisibility, as a shot does)
+	Kit->OnShot();
+	UE_LOG(LogTemp, Verbose, TEXT("RRRandom: %s swings the %s (%d hit)."), *GetName(), *Weapon.Name, Hits);
 }
 
 bool ARRRandomCharacter::GetShotStart(const FVector& TargetLocation, FTransform& OutSpawn) const
@@ -3202,6 +3550,11 @@ void ARRRandomCharacter::UpdateDashEffects(float DeltaSeconds)
 	ARRRandomEffects* Effects = ARRRandomEffects::Get(this);
 	const FLinearColor Tint = FMath::Lerp(GetTeamColor(Team), FLinearColor::White, 0.45f);
 	const FVector Feet = GetActorLocation() - FVector(0.f, 0.f, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	// Round 99: sprinting on the ground, dust off the heels and wind past the body (on every screen)
+	if (Effects && !bDashNow && bAlive && !Vehicle && GetCharacterMovement()->IsMovingOnGround() && GetSprintShare() > 0.5f && !GetMesh()->bHiddenInGame && !IsHidden() && !Kit->IsCloaked())
+	{
+		Effects->RunDust(Feet, GetVelocity(), GetActorScale3D().Z, DeltaSeconds);
+	}
 	if (bDashNow != bDashShown && Effects)
 	{
 		// A boom as it sets off (behind it, toward the spot) and as it stops
@@ -3301,6 +3654,7 @@ void ARRRandomCharacter::UpdateHitFlash(float DeltaSeconds)
 
 float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
 {
+	ARRRandomCharacter* KnockoutCredit = nullptr;
 	// Shots only hit on the server
 	ARRRandomCharacter* Attacker = DamageCauser ? Cast<ARRRandomCharacter>(DamageCauser->GetInstigator()) : nullptr;
 	// (a LIGHT SWORD's swing is its holder's own hit: round 97)
@@ -3325,18 +3679,25 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 		return Vehicle->TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
 	}
 
-	// A fox's clone's shots are only for show; the clone itself goes up in smoke at the first real hit
+	// A fox's clone's shots do a share of their damage (round 100; they were only for show), and the fox gets what they
+	// knock out; the clone itself goes up in smoke once its own smaller health is gone
 	if (Attacker && Attacker->IsDecoy())
 	{
-		return 0.f;
+		DamageAmount *= DecoyDamageShare;
+		if (ARRRandomCharacter* Fox = Attacker->DecoyOwner.Get())
+		{
+			KnockoutCredit = Fox;
+		}
 	}
 	if (bDecoy)
 	{
-		if (DamageAmount > 0.f)
+		Health = FMath::Max(0.f, Health - DamageAmount);
+		HitFlash = 1.f;
+		if (Health <= 0.f)
 		{
 			VanishDecoy();
 		}
-		return 0.f;
+		return DamageAmount;
 	}
 
 	FVector ShotDirection = DamageCauser ? DamageCauser->GetActorForwardVector() : -GetActorForwardVector();
@@ -3359,6 +3720,15 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 		}
 	}
 
+	// Round 98: the HAMMER's shield up stops most of a swing or a blast from the front (shots stop on it, TryDeflect)
+	if (bDeflecting && Weapon.bShieldGuard && FVector::DotProduct(GetActorForwardVector().GetSafeNormal2D(), -ShotDirection.GetSafeNormal2D()) > FMath::Cos(FMath::DegreesToRadians(DeflectHalfAngle)))
+	{
+		DamageAmount *= 0.15f;
+		DeflectFocus = FMath::Max(0.f, DeflectFocus - 0.2f);
+		MulticastShieldBlock(GetActorLocation() + GetActorForwardVector() * 60.f);
+	}
+	// An emote ends when hurt
+	EmoteIndex = 0;
 	// Giants shrug off part of every hit
 	const float Damage = Super::TakeDamage(DamageAmount * (bGiant ? GiantDamageTakenMultiplier : 1.f), DamageEvent, EventInstigator, DamageCauser);
 	if (Damage <= 0.f)
@@ -3372,7 +3742,7 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 	LastCombatTime = GetWorld()->GetTimeSeconds();
 	// The number floats up on every machine, the host included, with the sticker of the gun that hit; a foam finger's
 	// knockout shows a skull
-	ERRHitEffect Effect = Shot ? Shot->HitEffect : (Attacker && Attacker == DamageCauser && Attacker->GetWeapon().bSword ? ERRHitEffect::Sword : ERRHitEffect::Pistol);
+	ERRHitEffect Effect = Shot ? Shot->HitEffect : (Attacker && Attacker == DamageCauser && Attacker->GetWeapon().bSword ? Attacker->GetWeapon().GetHitEffect() : ERRHitEffect::Pistol);
 	if (Effect == ERRHitEffect::Poke && Health <= 0.f)
 	{
 		Effect = ERRHitEffect::Skull;
@@ -3382,7 +3752,7 @@ float ARRRandomCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Dam
 
 	if (Health <= 0.f)
 	{
-		KnockOut(ShotDirection, Attacker);
+		KnockOut(ShotDirection, KnockoutCredit ? KnockoutCredit : Attacker);
 	}
 	return Damage;
 }
@@ -3393,11 +3763,29 @@ void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharact
 	bDeflecting = false;
 	Health = 0.f;
 	RespawnRemaining = RespawnDelay;
+	EmoteIndex = 0;
+	LastKiller = Attacker != this ? Attacker : nullptr;
+	// Round 98, the main mode: the wait grows with each knockout this round, and more when it comes soon after the last
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (ARRRandomGameState::IsRounds(this))
+	{
+		float Quick = 0.f;
+		RespawnRemaining = RRRounds::GetRespawnDelay(RoundKnockouts, Now - LastKnockoutTime, Quick);
+		RespawnQuick = Quick;
+		++RoundKnockouts;
+		LastKnockoutTime = Now;
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s waits %.1f s to get back up (knockout %d this round, +%.1f s for a quick one)."), *GetName(), RespawnRemaining, RoundKnockouts, Quick);
+	}
+	RespawnTotal = RespawnRemaining;
 	DiceBuffs->ClearBuffs();
 	Kit->ClearPowers();
-	// Back to the starting pistol (the squirrel keeps its gun in its cheek pouch). A giant falls as one and gets back up
-	// normal size (see ApplyStandingBody).
-	if (!RRKit::Get(Species).bCheekPouch)
+	// Back to the starting pistol (the squirrel keeps its gun in its cheek pouch; round 98: in the main mode every role keeps
+	// its own). A giant falls as one and gets back up normal size (see ApplyStandingBody).
+	if (ARRRandomGameState::IsRounds(this))
+	{
+		Weapon = GetRoleWeapon();
+	}
+	else if (!RRKit::Get(Species).bCheekPouch)
 	{
 		Weapon = FRRWeapon();
 	}
@@ -3408,11 +3796,20 @@ void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharact
 	KnockdownDirection = ShotDirection.GetSafeNormal2D();
 	// Run over this very moment: thrown along the vehicle's way, faster the faster it went
 	FlingVelocity = FVector::ZeroVector;
+	bFlingSpin = false;
 	if (FlyBackAnimation && RamImpactTime == GetWorld()->GetTimeSeconds() && !RamImpact.IsNearlyZero())
 	{
 		const float Speed = FMath::Clamp(RamImpact.Size2D() * FlingSpeedShare, FlingSpeedRange.X, FlingSpeedRange.Y) * RRKit::Get(Species).KnockbackScale;
 		KnockdownDirection = RamImpact.GetSafeNormal2D();
 		FlingVelocity = RamImpact.GetSafeNormal2D() * Speed + FVector(0.f, 0.f, FlingLift);
+	}
+	// Round 98: a blast's knockout throws the body further, up and away, spinning as it goes
+	else if (FlyBackAnimation && BlastImpactTime == GetWorld()->GetTimeSeconds() && !BlastImpact.IsNearlyZero())
+	{
+		const float Knock = RRKit::Get(Species).KnockbackScale;
+		KnockdownDirection = BlastImpact.GetSafeNormal2D();
+		FlingVelocity = FVector(BlastImpact.X * Knock, BlastImpact.Y * Knock, FMath::Max<FVector::FReal>(BlastImpact.Z, FlingLift) * FMath::Max(0.6f, Knock));
+		bFlingSpin = true;
 	}
 	SetTrustClientMovement(false);
 	// Out of a cannon's arc (every machine ends it as it hears)
@@ -3506,6 +3903,12 @@ void ARRRandomCharacter::UpdateFling(float DeltaSeconds)
 		return;
 	}
 	FlingTime += DeltaSeconds;
+	// Round 98: a blast's fling spins the body like a top (slowing as it goes), tipped a little
+	if (bFlingSpin)
+	{
+		FlingSpin += DeltaSeconds * FMath::Lerp(1100.f, 300.f, FMath::Clamp(FlingTime / 1.4f, 0.f, 1.f));
+		GetMesh()->SetRelativeRotation(MeshRelativeRotation + FRotator(0.f, FlingSpin, FMath::Sin(FlingTime * 9.f) * 18.f));
+	}
 	// Down on the ground (or laid down by the server already); off the edge it just keeps falling until getting back up
 	const UCharacterMovementComponent* Movement = GetCharacterMovement();
 	if (FlingTime > 0.2f && (Movement->IsMovingOnGround() || Movement->MovementMode == MOVE_None))
@@ -3519,6 +3922,7 @@ void ARRRandomCharacter::EndFling()
 	UE_CLOG(HasAuthority(), LogTemp, Log, TEXT("RRRandom: %s, run over, lands %.0f away (%+.0f up) after %.2f s."), *GetName(),
 		FVector::Dist2D(GetActorLocation(), FlingStart), GetActorLocation().Z - FlingStart.Z, FlingTime);
 	bFlinging = false;
+	FlingSpin = 0.f;
 	GetCharacterMovement()->StopMovementImmediately();
 	GetCharacterMovement()->DisableMovement();
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -3565,12 +3969,17 @@ void ARRRandomCharacter::Respawn()
 	ApplyStandingBody();
 
 	Health = MaxHealth;
+	if (ARRRandomGameState::IsRounds(this))
+	{
+		Weapon = GetRoleWeapon();
+	}
 	Ammo = GetMaxAmmo();
 	bReloading = false;
 	ReloadRemaining = 0.f;
 	LastCombatTime = -UE_BIG_NUMBER;
 	NextFireTime = 0.f;
 	bAlive = true;
+	bFlingSpin = false;
 }
 
 namespace
@@ -4057,7 +4466,7 @@ void ARRRandomCharacter::SetDeflecting(bool bOn, const FVector& Aim)
 	// (kept here too: the guard faces it every frame, UpdateParryLook)
 	DeflectAim = Aim;
 	// The front-only guard turns with the body toward the aim.
-	if (bOn && Weapon.bSword && (HasAuthority() || IsLocallyControlled()))
+	if (bOn && CanGuard() && (HasAuthority() || IsLocallyControlled()))
 	{
 		FaceToward(Aim);
 	}
@@ -4078,7 +4487,7 @@ void ARRRandomCharacter::SetDeflecting(bool bOn, const FVector& Aim)
 		ApplyThirdPersonRotation();
 		return;
 	}
-	if (bAlive && Weapon.bSword && !Vehicle && !Robot && !IsUsingUltimate() && DeflectFocus >= DeflectMinStart && !ARRRandomGameState::IsAttackLocked(this))
+	if (bAlive && CanGuard() && !Vehicle && !Robot && !IsUsingUltimate() && DeflectFocus >= DeflectMinStart && !ARRRandomGameState::IsAttackLocked(this))
 	{
 		bDeflecting = true;
 	}
@@ -4121,7 +4530,7 @@ void ARRRandomCharacter::UpdateDeflect(float DeltaSeconds)
 	if (bDeflecting)
 	{
 		DeflectFocus = FMath::Max(0.f, DeflectFocus - DeltaSeconds);
-		if (DeflectFocus <= 0.f || !Weapon.bSword || !bAlive || Vehicle || IsUsingUltimate() || ARRRandomGameState::IsAttackLocked(this))
+		if (DeflectFocus <= 0.f || !CanGuard() || !bAlive || Vehicle || IsUsingUltimate() || ARRRandomGameState::IsAttackLocked(this))
 		{
 			bDeflecting = false;
 			DeflectReleaseTime = GetWorld()->GetTimeSeconds();
@@ -4143,6 +4552,15 @@ bool ARRRandomCharacter::TryDeflect(ARRRandomProjectile* Shot)
 	if (!IsInSwordGuardArc(*this, Shot->GetActorLocation(), Shot->GetVelocity()))
 	{
 		return false;
+	}
+	// Round 98, the HAMMER's shield: the shot stops on it (no deflecting back), at the cost of a little focus
+	if (Weapon.bShieldGuard)
+	{
+		const FVector Where = Shot->GetActorLocation();
+		DeflectFocus = FMath::Max(0.f, DeflectFocus - 0.15f);
+		Shot->Destroy();
+		MulticastShieldBlock(Where);
+		return true;
 	}
 	// Back toward where I aim (straight back the way it came when I aim at nothing)
 	FVector Aim = DeflectAim;
@@ -4285,4 +4703,301 @@ void ARRRandomCharacter::DeflectInReach()
 	{
 		TryDeflect(Shot);
 	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Round 98, the main mode
+
+void ARRRandomCharacter::SetBlastImpact(const FVector& Velocity)
+{
+	BlastImpact = Velocity;
+	BlastImpactTime = GetWorld()->GetTimeSeconds();
+}
+
+FRRWeapon ARRRandomCharacter::GetRoleWeapon() const
+{
+	const int32 Type = FRRWeapon::FindType(RRKit::Get(Species).RoleWeapon);
+	// (a die's 4: about x1.09 damage, no random spread)
+	return Type > 0 ? FRRWeapon::Make(Type, 4, MaxAmmo) : FRRWeapon();
+}
+
+int32 ARRRandomCharacter::GetShownTeam() const
+{
+	return Kit && Kit->IsDisguised() && (Team == 0 || Team == 1) ? 1 - Team : Team;
+}
+
+int32 ARRRandomCharacter::GetApparentTeam(int32 ViewerTeam) const
+{
+	return Kit && Kit->IsDisguised() && ViewerTeam != Team ? ViewerTeam : Team;
+}
+
+void ARRRandomCharacter::UpdateOutlineStencil()
+{
+	// Round 99 (the user: "피아식별이 어려운 문제"): what this body is to the one looking at this screen, written into its custom
+	// stencil for the friend-or-foe lines (M_PP_TeamOutline): 1 a teammate (blue), 2 an opponent (red), 3 the viewer's own
+	// (no line). A disguised red fox passes for one of the viewer's own; with nobody playing here (watching bots), team 0
+	// is the blue side
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+	const APlayerController* Local = GetWorld()->GetFirstPlayerController();
+	const ARRRandomCharacter* Viewer = Local ? Cast<ARRRandomCharacter>(Local->GetPawn()) : nullptr;
+	const int32 ViewerTeam = Viewer ? Viewer->GetTeam() : 0;
+	const int32 Wanted = this == Viewer ? 3 : (IsVillain() || GetApparentTeam(ViewerTeam) != ViewerTeam) ? 2 : 1;
+	if (Wanted == OutlineStencil)
+	{
+		return;
+	}
+	OutlineStencil = Wanted;
+	GetMesh()->SetCustomDepthStencilValue(Wanted);
+	if (Gun)
+	{
+		Gun->SetCustomDepthStencilValue(Wanted);
+	}
+	if (ShieldMesh)
+	{
+		ShieldMesh->SetCustomDepthStencilValue(Wanted);
+	}
+}
+
+void ARRRandomCharacter::ResetForRound()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	GetOffVehicle();
+	if (Robot)
+	{
+		Robot->Leave(this);
+	}
+	DiceBuffs->ClearBuffs();
+	DiceBuffs->ResetForRound(RRRounds::StartDice);
+	Kit->ClearPowers();
+	Kit->ResetAbility();
+	if (URRRandomOreCarryComponent* Carry = GetOreCarry())
+	{
+		Carry->DropAll(true);
+	}
+	bGiant = false;
+	GiantRemaining = 0.f;
+	bFlying = false;
+	FlightRemaining = 0.f;
+	bDeflecting = false;
+	DeflectFocus = DeflectFocusMax;
+	EmoteIndex = 0;
+	RoundKnockouts = 0;
+	LastKnockoutTime = -1000.f;
+	LastKiller = nullptr;
+	Weapon = GetRoleWeapon();
+	if (bAlive)
+	{
+		// Standing: straight home, whole again
+		SetActorLocationAndRotation(HomeLocation, HomeRotation, false, nullptr, ETeleportType::TeleportPhysics);
+		GetCharacterMovement()->StopMovementImmediately();
+		Health = MaxHealth;
+		Ammo = GetMaxAmmo();
+		bReloading = false;
+		ReloadRemaining = 0.f;
+		NextFireTime = 0.f;
+		if (AController* Own = GetController())
+		{
+			Own->SetControlRotation(HomeRotation);
+		}
+	}
+	else
+	{
+		RespawnRemaining = 0.f;
+		Respawn();
+	}
+	ForceNetUpdate();
+}
+
+void ARRRandomCharacter::UseAbility()
+{
+	if (!HasAuthority())
+	{
+		ServerUseAbility();
+		return;
+	}
+	// (the main mode's roles only)
+	if (ARRRandomGameState::IsRounds(this) && Kit->UseAbility())
+	{
+		EmoteIndex = 0;
+	}
+}
+
+void ARRRandomCharacter::ServerUseAbility_Implementation()
+{
+	UseAbility();
+}
+
+void ARRRandomCharacter::ChooseCard(int32 Index)
+{
+	if (!HasAuthority())
+	{
+		ServerChooseCard(static_cast<uint8>(FMath::Clamp(Index, 0, 255)));
+		return;
+	}
+	if (bAlive)
+	{
+		DiceBuffs->ChooseCard(Index);
+	}
+}
+
+void ARRRandomCharacter::ServerChooseCard_Implementation(uint8 Index)
+{
+	ChooseCard(Index);
+}
+
+void ARRRandomCharacter::OnCard(ERRCard Card, int32 Face)
+{
+	if (!bAlive)
+	{
+		return;
+	}
+	switch (Card)
+	{
+	case ERRCard::Giant:
+		StartGiant(3.f + Face);
+		break;
+	case ERRCard::Wings:
+		StartFlight(4.f + Face);
+		break;
+	case ERRCard::Shield:
+		Kit->GrantShield(Face * 12.f, RRRounds::CardSeconds);
+		break;
+	case ERRCard::Cloak:
+		Kit->GrantCloak(Face * 1.5f);
+		break;
+	case ERRCard::Heal:
+		Health = FMath::Min(MaxHealth, Health + 15.f + Face * 10.f);
+		break;
+	default:
+		// The timed stat cards are the dice component's own buffs
+		break;
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) keeps the %s card (%d)."), *GetName(), Team, *RRRounds::GetCardName(Card), Face);
+}
+
+FString ARRRandomCharacter::GetEmoteName(int32 Index)
+{
+	static const TCHAR* Names[] = { TEXT("WAVE"), TEXT("CLAP"), TEXT("CHEER"), TEXT("LAUGH"), TEXT("DANCE"), TEXT("TAUNT") };
+	return Index >= 1 && Index <= EmoteCount ? FString(Names[Index - 1]) : FString();
+}
+
+void ARRRandomCharacter::PlayEmote(int32 Index)
+{
+	if (!HasAuthority())
+	{
+		ServerPlayEmote(static_cast<uint8>(FMath::Clamp(Index, 0, EmoteCount)));
+		return;
+	}
+	if (!bAlive || Vehicle || Robot || IsUsingUltimate() || ARRRandomGameState::IsMatchOver(this) || (Index != 0 && !HasEmote(Index)))
+	{
+		return;
+	}
+	EmoteIndex = static_cast<uint8>(Index);
+	++EmoteSerial;
+	EmoteStartTime = GetWorld()->GetTimeSeconds();
+	EmoteStartLocation = GetActorLocation();
+	CurrentAnimation = nullptr;
+}
+
+void ARRRandomCharacter::ServerPlayEmote_Implementation(uint8 Index)
+{
+	PlayEmote(Index);
+}
+
+void ARRRandomCharacter::OnRep_Emote()
+{
+	EmoteStartTime = GetWorld()->GetTimeSeconds();
+	// A new one (or the same again) plays from its start
+	CurrentAnimation = nullptr;
+}
+
+void ARRRandomCharacter::MulticastHammerSlam_Implementation(FVector_NetQuantize Where, float Radius)
+{
+	if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+	{
+		Effects->TigerStrike(Where, Radius, FLinearColor::FromSRGBColor(FColor(247, 216, 138)));
+	}
+	ARRRandomHUD::PopComicWord(this, TEXT("BONK!"), Where + FVector(0.f, 0.f, 220.f), FLinearColor::FromSRGBColor(FColor(233, 169, 63)), 1.3f);
+}
+
+void ARRRandomCharacter::MulticastShieldBlock_Implementation(FVector_NetQuantize Where)
+{
+	if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+	{
+		Effects->SaberParry(Where, GetActorForwardVector(), FLinearColor::FromSRGBColor(FColor(247, 216, 138)));
+	}
+	ARRRandomHUD::PopComicWord(this, TEXT("CLONK!"), Where + FVector(0.f, 0.f, 90.f), FLinearColor::FromSRGBColor(FColor(247, 216, 138)), 0.6f);
+}
+
+void ARRRandomCharacter::UpdateShield(float DeltaSeconds)
+{
+	const bool bWanted = bAlive && Weapon.bShieldGuard && !IsEmoting() && !IsCelebrating() && !IsDespairing() && !Vehicle && !Robot && !IsUsingUltimate();
+	if (!bWanted)
+	{
+		if (ShieldMesh && ShieldMesh->IsVisible())
+		{
+			ShieldMesh->SetVisibility(false);
+		}
+		return;
+	}
+	if (!ShieldMesh)
+	{
+		UStaticMesh* Model = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Props/Weapons98/SM_Shield.SM_Shield"));
+		if (!Model)
+		{
+			return;
+		}
+		ShieldMesh = NewObject<UStaticMeshComponent>(this, TEXT("RoleShield"));
+		ShieldMesh->SetStaticMesh(Model);
+		ShieldMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		// (round 101: on the body, placed on the left forearm every frame)
+		ShieldMesh->SetupAttachment(GetMesh());
+		ShieldMesh->RegisterComponent();
+		ShieldMesh->SetRenderCustomDepth(true);
+		ShieldMesh->SetCustomDepthStencilValue(OutlineStencil);
+	}
+	ShieldMesh->SetVisibility(true);
+	// Round 101 (the user: "등 뒤가 아니라 한손에 망치, 한손에 방패를 들고 다닌다가 막기 버튼을 눌렀을 때 막는다 / 조금 더
+	// 커야"): strapped on the left forearm all the time (it used to hang on the back and float out in front for a guard).
+	// The arm's pose does the rest: carried at the left side (the ShieldCarry pose), raised across the chest for a guard
+	// (ShieldBlock). Placed from the bones in the body's own space: its middle on the forearm, its face square to the
+	// forearm and turned away from the chest (carried) or the way the tiger faces (guarding).
+	ShieldBlend = FMath::FInterpConstantTo(ShieldBlend, bDeflecting ? 1.f : 0.f, DeltaSeconds, 6.f);
+	const float Ease = FMath::InterpEaseInOut(0.f, 1.f, ShieldBlend, 2.f);
+	const USkeletalMeshComponent* Body = GetMesh();
+	const FName ElbowBone(TEXT("LeftForeArm"));
+	const FName WristBone(TEXT("LeftHand"));
+	const FName ChestBone(TEXT("Spine2"));
+	if (Body->GetBoneIndex(ElbowBone) == INDEX_NONE || Body->GetBoneIndex(WristBone) == INDEX_NONE || Body->GetBoneIndex(ChestBone) == INDEX_NONE)
+	{
+		ShieldMesh->SetVisibility(false);
+		return;
+	}
+	const FVector Elbow = Body->GetSocketTransform(ElbowBone, RTS_Component).GetLocation();
+	const FVector Wrist = Body->GetSocketTransform(WristBone, RTS_Component).GetLocation();
+	const FVector Chest = Body->GetSocketTransform(ChestBone, RTS_Component).GetLocation();
+	const FVector Along = (Wrist - Elbow).GetSafeNormal();
+	const FVector Middle = FMath::Lerp(Elbow, Wrist, ShieldOnArm);
+	// (the body's own axes: the mesh is turned on its capsule, so the way the tiger faces comes from the actor)
+	const FTransform ToBody = Body->GetComponentTransform().Inverse();
+	const FVector Forward = ToBody.TransformVectorNoScale(GetActorForwardVector()).GetSafeNormal();
+	const FVector Up = ToBody.TransformVectorNoScale(FVector::UpVector).GetSafeNormal();
+	FVector Out = ((Middle - Chest) * FVector(1.f, 1.f, 1.f) - Up * FVector::DotProduct(Middle - Chest, Up) * 0.7f).GetSafeNormal();
+	// (carried, it is turned a third of the way to the front, so its face shows from ahead and its back from behind)
+	FVector Face = FMath::Lerp(Out, Forward, FMath::Max(Ease, ShieldCarryForward)).GetSafeNormal();
+	// Square to the forearm (the strap runs along it); if the arm points straight out of the face, the face wins
+	Face = (Face - Along * FVector::DotProduct(Face, Along) * 0.85f).GetSafeNormal();
+	if (Face.IsNearlyZero())
+	{
+		Face = Forward;
+	}
+	const float Scale = ShieldSize / FMath::Max(Body->GetComponentScale().Z, 0.01f);
+	ShieldMesh->SetRelativeLocationAndRotation(Middle + Face * (ShieldOffArm / FMath::Max(Body->GetComponentScale().Z, 0.01f)), FRotationMatrix::MakeFromXZ(Face, Up).ToQuat());
+	ShieldMesh->SetRelativeScale3D(FVector(Scale));
 }

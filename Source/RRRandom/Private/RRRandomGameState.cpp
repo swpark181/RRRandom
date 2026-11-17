@@ -7,6 +7,53 @@ ARRRandomGameState::ARRRandomGameState()
 {
 	TeamScores[0] = 0;
 	TeamScores[1] = 0;
+	RoundWins[0] = 0;
+	RoundWins[1] = 0;
+	TiebreakDice[0] = 0;
+	TiebreakDice[1] = 0;
+}
+
+bool ARRRandomGameState::IsRounds(const UObject* WorldContext)
+{
+	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	const ARRRandomGameState* State = World ? World->GetGameState<ARRRandomGameState>() : nullptr;
+	return State && State->bRounds;
+}
+
+void ARRRandomGameState::StartRound(int32 InRound, ERRRoundRule InRule, int32 InFace)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	Round = InRound;
+	RoundRule = InRule;
+	RuleFace = InFace;
+	PlayedRules |= 1 << static_cast<int32>(InRule);
+	RoundIntroTime = GetServerWorldTimeSeconds();
+	RoundWinner = INDEX_NONE;
+	TiebreakDice[0] = 0;
+	TiebreakDice[1] = 0;
+	TeamScores[0] = 0;
+	TeamScores[1] = 0;
+	bOvertime = false;
+	HoldTeam = INDEX_NONE;
+	HoldEndTime = 0.f;
+	HoldLength = 0.f;
+}
+
+void ARRRandomGameState::EndRound(int32 Winner, int32 DieBlue, int32 DieRed)
+{
+	if (!HasAuthority() || RoundWinner != INDEX_NONE || (Winner != 0 && Winner != 1))
+	{
+		return;
+	}
+	RoundWinner = Winner;
+	RoundOverTime = GetServerWorldTimeSeconds();
+	++RoundWins[Winner];
+	TiebreakDice[0] = DieBlue;
+	TiebreakDice[1] = DieRed;
+	HoldTeam = INDEX_NONE;
 }
 
 void ARRRandomGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -49,6 +96,16 @@ void ARRRandomGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ARRRandomGameState, TeamSpots);
 	DOREPLIFETIME(ARRRandomGameState, TeamDice);
 	DOREPLIFETIME(ARRRandomGameState, TeamOrder);
+	DOREPLIFETIME(ARRRandomGameState, bRounds);
+	DOREPLIFETIME(ARRRandomGameState, Round);
+	DOREPLIFETIME(ARRRandomGameState, RoundRule);
+	DOREPLIFETIME(ARRRandomGameState, RuleFace);
+	DOREPLIFETIME(ARRRandomGameState, RoundWins);
+	DOREPLIFETIME(ARRRandomGameState, RoundIntroTime);
+	DOREPLIFETIME(ARRRandomGameState, RoundWinner);
+	DOREPLIFETIME(ARRRandomGameState, RoundOverTime);
+	DOREPLIFETIME(ARRRandomGameState, TiebreakDice);
+	DOREPLIFETIME(ARRRandomGameState, PlayedRules);
 }
 
 bool ARRRandomGameState::IsBattleRoyale(const UObject* WorldContext)
@@ -101,8 +158,8 @@ bool ARRRandomGameState::IsPlayLocked(const UObject* WorldContext)
 {
 	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
 	const ARRRandomGameState* State = World ? World->GetGameState<ARRRandomGameState>() : nullptr;
-	// (the battle royale's get-ready time isn't locked: only attacks are, IsAttackLocked)
-	return State && (State->IsMatchOver() || (!State->HasPlayStarted() && !State->IsPrep()));
+	// (the battle royale's get-ready time isn't locked: only attacks are, IsAttackLocked; round 98: between rounds is)
+	return State && (State->IsMatchOver() || State->IsRoundOver() || (!State->HasPlayStarted() && !State->IsPrep()));
 }
 
 void ARRRandomGameState::AddTeamScore(int32 Team)

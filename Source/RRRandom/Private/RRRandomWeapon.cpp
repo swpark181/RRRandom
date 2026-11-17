@@ -22,6 +22,13 @@ namespace
 		float Range;
 		bool bSword;
 		ERRHitEffect Effect;
+		/** Round 98: an animal friend's own weapon (the main mode's roles): never from a weapon die or the bag. */
+		bool bRoleOnly = false;
+		float MeleeReach = 0.f;
+		float MeleeHalfAngle = 0.f;
+		float MeleeKnock = 0.f;
+		bool bShieldGuard = false;
+		bool bLob = false;
 	};
 
 	// Many soft, fast shots at one end; few heavy, slow ones at the other. Round 97: the SNIPER (one hard, very fast shot,
@@ -38,6 +45,11 @@ namespace
 		{ TEXT("SNIPER"),      2.7f,  0.27f, 3.2f,  1.5f, 2.4f,  0.9f,  1, 0.f, 1.6f, false, ERRHitEffect::Sniper },
 		{ TEXT("SHOTGUN"),     0.42f, 0.5f,  2.f,   1.3f, 1.05f, 0.65f, 7, 9.f, 0.7f, false, ERRHitEffect::Shotgun },
 		{ TEXT("LIGHT SWORD"), 3.f,   0.4f,  2.6f,  0.7f, 1.f,   1.f,   1, 0.f, 0.27f, true,  ERRHitEffect::Sword },
+		// Round 98, the roles' own: the tiger's HAMMER (slow, heavy, pushes; the right button a shield), the red fox's DAGGER
+		// (short and quick, x2 from behind), the squirrel's ACORN launcher (an arc, a burst where it lands)
+		{ TEXT("HAMMER"),      4.6f,  0.4f,  4.f,   0.8f, 1.f,   1.f,   1, 0.f, 0.24f, true,  ERRHitEffect::Hammer, true, 300.f, 75.f, 720.f, true },
+		{ TEXT("DAGGER"),      2.4f,  0.6f,  1.6f,  0.6f, 1.f,   1.f,   1, 0.f, 0.17f, true,  ERRHitEffect::Dagger, true, 230.f, 55.f, 0.f },
+		{ TEXT("ACORN"),       3.3f,  0.4f,  3.8f,  1.3f, 0.36f, 1.6f,  1, 0.f, 1.15f, false, ERRHitEffect::Acorn, true, 0.f, 0.f, 0.f, false, true },
 	};
 	constexpr int32 GunTypeCount = UE_ARRAY_COUNT(WeaponTypes);
 
@@ -65,6 +77,30 @@ namespace
 		Weapon.SpreadDegrees = Type.Spread;
 		Weapon.RangeMultiplier = Type.Range > 0.f ? Type.Range : 1.f;
 		Weapon.bSword = Type.bSword;
+		Weapon.MeleeReach = Type.MeleeReach;
+		Weapon.MeleeHalfAngle = Type.MeleeHalfAngle;
+		Weapon.MeleeKnock = Type.MeleeKnock;
+		Weapon.bShieldGuard = Type.bShieldGuard;
+		Weapon.bLob = Type.bLob;
+	}
+
+	/** The types a weapon die or the bag can give (not the roles' own). */
+	int32 PickRollable(FRandomStream& Stream)
+	{
+		int32 Count = 0;
+		for (const FRRWeaponType& Each : WeaponTypes)
+		{
+			Count += Each.bRoleOnly ? 0 : 1;
+		}
+		int32 Pick = Stream.RandRange(0, Count - 1);
+		for (int32 Index = 0; Index < GunTypeCount; ++Index)
+		{
+			if (!WeaponTypes[Index].bRoleOnly && Pick-- == 0)
+			{
+				return Index;
+			}
+		}
+		return 0;
 	}
 }
 
@@ -93,7 +129,7 @@ FRRWeapon FRRWeapon::Roll(FRandomStream& Stream, int32 Quality, int32 BaseMagazi
 	{
 		return MakeFoamFinger(BaseMagazineSize);
 	}
-	const int32 Index = Stream.RandRange(0, GunTypeCount - 1);
+	const int32 Index = PickRollable(Stream);
 	const FRRWeaponType& Type = WeaponTypes[Index];
 
 	FRRWeapon Weapon;
@@ -156,7 +192,19 @@ FRRWeapon FRRWeapon::MakeTiered(int32 Type, ERRWeaponTier Tier, int32 BaseMagazi
 
 int32 FRRWeapon::RollType(FRandomStream& Stream, float FingerChance)
 {
-	return Stream.FRand() < FingerChance ? GetFingerType() : Stream.RandRange(1, GunTypeCount);
+	return Stream.FRand() < FingerChance ? GetFingerType() : PickRollable(Stream) + 1;
+}
+
+int32 FRRWeapon::FindType(const TCHAR* TypeName)
+{
+	for (int32 Index = 0; Index < GunTypeCount; ++Index)
+	{
+		if (FCString::Stricmp(WeaponTypes[Index].Name, TypeName) == 0)
+		{
+			return Index + 1;
+		}
+	}
+	return INDEX_NONE;
 }
 
 ERRWeaponTier FRRWeapon::GetTierForFace(int32 Face)
@@ -225,6 +273,9 @@ int32 FRRWeapon::GetLookIndex() const
 	case ERRHitEffect::Sniper: return 6;
 	case ERRHitEffect::Shotgun: return 7;
 	case ERRHitEffect::Sword: return 8;
+	case ERRHitEffect::Hammer: return 9;
+	case ERRHitEffect::Dagger: return 10;
+	case ERRHitEffect::Acorn: return 11;
 	default: return 0;
 	}
 }

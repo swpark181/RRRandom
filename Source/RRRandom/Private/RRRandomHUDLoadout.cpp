@@ -565,7 +565,7 @@ void ARRRandomHUD::DrawUltimateMeteor(const ARRRandomCharacter* Viewer)
 	RRUI::DrawDisc(Canvas, Point, Radius, Gold);
 	DrawDieFace(Point, Radius * 1.1f, 6, 1.f);
 	const float Left = Meteor->GetTimeToImpact();
-	FString Label = Left > 0.f ? FString::Printf(TEXT("ULTIMATE DIE IN %d"), FMath::CeilToInt(Left)) : FString(TEXT("ULTIMATE DIE"));
+	FString Label = Left > 0.f ? FString::Printf(TEXT("ULTIMATE DICE IN %d"), FMath::CeilToInt(Left)) : FString(TEXT("ULTIMATE DICE"));
 	if (Viewer && Left <= 0.f)
 	{
 		Label += FString::Printf(TEXT(" · %dm"), FMath::RoundToInt(FVector::Dist2D(Viewer->GetActorLocation(), Meteor->GetActorLocation()) / 100.f));
@@ -580,7 +580,7 @@ void ARRRandomHUD::DrawUltimateMeteor(const ARRRandomCharacter* Viewer)
 
 void ARRRandomHUD::DrawDeflectFocus(const ARRRandomCharacter& Viewer)
 {
-	if (!Viewer.GetWeapon().bSword || !Viewer.IsAlive())
+	if (!Viewer.CanGuard() || !Viewer.IsAlive())
 	{
 		return;
 	}

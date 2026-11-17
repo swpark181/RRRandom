@@ -2035,3 +2035,373 @@ void ARRRandomEffects::SaberParry(const FVector& Where, const FVector& Away, con
 	Spray(EShape::Ball, Where, 22, Way, 40.f, FVector2D(700.f, 1600.f), FVector2D(0.04f, 0.09f), FVector2D(0.15f, 0.35f), FMath::Lerp(Tint, FLinearColor::White, 0.4f), 7.f, 900.f);
 	Spray(EShape::Star, Where, 4, Way, 50.f, FVector2D(300.f, 700.f), FVector2D(1.5f, 3.f), FVector2D(0.25f, 0.45f), FLinearColor::White, 6.f, 200.f);
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Round 99
+
+void ARRRandomEffects::Streak(const FVector& From, const FVector& Head, float Width, float Life, const FLinearColor& Color, float Glow, float Opacity)
+{
+	const FVector Path = Head - From;
+	const float Moved = Path.Size();
+	if (Moved < 1.f)
+	{
+		return;
+	}
+	// One long oval lying along the stretch flown, overlapping the last one, thinning away as it fades
+	FParticle Piece;
+	Piece.Shape = EShape::Ball;
+	Piece.Location = From + Path * 0.5f;
+	Piece.Turn = Path.Rotation();
+	Piece.FadeIn = 0.f;
+	Piece.Life = Life;
+	const float Long = Moved * 1.5f / 100.f;
+	Piece.StartSize = FVector(Long, Width / 100.f, Width / 100.f);
+	Piece.EndSize = FVector(Long, Width * 0.05f / 100.f, Width * 0.05f / 100.f);
+	Piece.Color = Color;
+	Piece.Glow = Glow;
+	Piece.Opacity = Opacity;
+	Spawn(Piece);
+}
+
+void ARRRandomEffects::ShotTrail(ERRHitEffect Gun, const FVector& From, const FVector& Head, float Size, const FLinearColor& Tint, float DeltaSeconds)
+{
+	const FVector Path = Head - From;
+	const float Moved = Path.Size();
+	if (Moved < 1.f || DeltaSeconds <= 0.f)
+	{
+		return;
+	}
+	const FVector Way = Path / Moved;
+	const FLinearColor Hot = FMath::Lerp(Tint, FLinearColor::White, 0.75f);
+	switch (Gun)
+	{
+	case ERRHitEffect::Smg:
+		// Quick thin darts
+		Streak(From, Head, 7.f * Size, 0.07f, Tint, 4.f, 0.7f);
+		Streak(From, Head, 3.f * Size, 0.05f, Hot, 7.f, 0.9f);
+		break;
+	case ERRHitEffect::Minigun:
+		// A hail of hot tracer rounds: thin, bright, orange behind white
+		Streak(From, Head, 6.f * Size, 0.1f, FMath::Lerp(Tint, FireOrange, 0.5f), 5.f, 0.75f);
+		Streak(From, Head, 2.5f * Size, 0.07f, FMath::Lerp(FireYellow, FLinearColor::White, 0.5f), 9.f, 0.95f);
+		break;
+	case ERRHitEffect::Rifle:
+		// A long sharp line
+		Streak(From, Head, 9.f * Size, 0.18f, Tint, 4.f, 0.7f);
+		Streak(From, Head, 3.5f * Size, 0.13f, Hot, 8.f, 0.95f);
+		break;
+	case ERRHitEffect::Sniper:
+	{
+		// A hard white line that hangs in the air a moment, in a sleeve of thin vapor
+		Streak(From, Head, 12.f * Size, 0.45f, Tint, 3.5f, 0.6f);
+		Streak(From, Head, 4.5f * Size, 0.35f, FLinearColor::White, 10.f, 1.f);
+		for (int32 Index = CountThisFrame(Moved / 90.f / DeltaSeconds, DeltaSeconds); Index > 0; --Index)
+		{
+			FParticle Vapor;
+			Vapor.Shape = EShape::Ball;
+			Vapor.Location = From + Path * FMath::FRand() + FMath::VRand() * 4.f;
+			Vapor.Velocity = FMath::VRand() * 14.f;
+			Vapor.Life = FMath::FRandRange(0.5f, 0.9f);
+			Vapor.StartSize = FVector(0.1f * Size);
+			Vapor.EndSize = FVector(0.3f * Size);
+			Vapor.Color = Smoke;
+			Vapor.Glow = 0.9f;
+			Vapor.Opacity = 0.3f;
+			Spawn(Vapor);
+		}
+		break;
+	}
+	case ERRHitEffect::Shotgun:
+		// Little sparks
+		Streak(From, Head, 4.f * Size, 0.06f, FMath::Lerp(Tint, FireYellow, 0.5f), 6.f, 0.8f);
+		break;
+	case ERRHitEffect::Blaster:
+	{
+		// A ball of plasma: a soft pulsing halo round it, drops of it left hanging behind
+		FParticle Halo;
+		Halo.Shape = EShape::Ball;
+		Halo.Location = Head;
+		Halo.Life = 0.07f;
+		Halo.StartSize = FVector(0.62f * Size);
+		Halo.EndSize = FVector(0.3f * Size);
+		Halo.Color = Tint;
+		Halo.Glow = 6.f;
+		Halo.Opacity = 0.5f;
+		Halo.FadeIn = 0.f;
+		Spawn(Halo);
+		Streak(From, Head, 16.f * Size, 0.16f, Tint, 3.5f, 0.5f);
+		for (int32 Index = CountThisFrame(Moved / 55.f / DeltaSeconds, DeltaSeconds); Index > 0; --Index)
+		{
+			FParticle Drop;
+			Drop.Shape = EShape::Ball;
+			Drop.Location = From + Path * FMath::FRand() + FMath::VRand() * 9.f * Size;
+			Drop.Velocity = Way * 60.f + FMath::VRand() * 35.f;
+			Drop.Drag = 2.f;
+			Drop.Life = FMath::FRandRange(0.25f, 0.45f);
+			Drop.StartSize = FVector(FMath::FRandRange(0.07f, 0.13f) * Size);
+			Drop.EndSize = FVector(0.02f * Size);
+			Drop.Color = FMath::Lerp(Tint, FLinearColor::White, 0.35f);
+			Drop.Glow = 7.f;
+			Drop.Opacity = 0.85f;
+			Drop.FadeIn = 0.f;
+			Spawn(Drop);
+		}
+		break;
+	}
+	case ERRHitEffect::Cannon:
+	{
+		// A shell on a little flame, a rope of smoke behind it
+		for (int32 Index = CountThisFrame(Moved / 26.f / DeltaSeconds, DeltaSeconds); Index > 0; --Index)
+		{
+			FParticle Puff;
+			Puff.Shape = EShape::Ball;
+			Puff.Location = From + Path * FMath::FRand() + FMath::VRand() * 5.f * Size;
+			Puff.Velocity = FMath::VRand() * 25.f + FVector(0.f, 0.f, 25.f);
+			Puff.Drag = 1.5f;
+			Puff.Life = FMath::FRandRange(0.5f, 0.9f);
+			Puff.StartSize = FVector(0.16f * Size);
+			Puff.EndSize = FVector(FMath::FRandRange(0.4f, 0.6f) * Size);
+			Puff.Color = FMath::FRand() < 0.6f ? Smoke : SmokeDark;
+			Puff.Glow = 0.8f;
+			Puff.Opacity = 0.45f;
+			Spawn(Puff);
+		}
+		for (int32 Index = CountThisFrame(70.f, DeltaSeconds); Index > 0; --Index)
+		{
+			FParticle Fire;
+			Fire.Shape = EShape::Ball;
+			Fire.Location = Head - Way * 14.f * Size + FMath::VRand() * 4.f * Size;
+			Fire.Velocity = -Way * FMath::FRandRange(150.f, 350.f);
+			Fire.Drag = 4.f;
+			Fire.Life = FMath::FRandRange(0.08f, 0.16f);
+			Fire.StartSize = FVector(FMath::FRandRange(0.16f, 0.24f) * Size);
+			Fire.EndSize = FVector(0.04f * Size);
+			Fire.Color = FMath::FRand() < 0.5f ? FireYellow : FireOrange;
+			Fire.Glow = 6.f;
+			Fire.Opacity = 0.9f;
+			Fire.FadeIn = 0.f;
+			Spawn(Fire);
+		}
+		break;
+	}
+	case ERRHitEffect::Acorn:
+		// Dots along its arc, so the throw reads as one
+		for (int32 Index = CountThisFrame(Moved / 45.f / DeltaSeconds, DeltaSeconds); Index > 0; --Index)
+		{
+			FParticle Dot;
+			Dot.Shape = EShape::Ball;
+			Dot.Location = From + Path * FMath::FRand();
+			Dot.Life = FMath::FRandRange(0.45f, 0.6f);
+			Dot.StartSize = FVector(0.1f * Size);
+			Dot.EndSize = FVector(0.02f * Size);
+			Dot.Color = FMath::Lerp(Tint, FLinearColor(0.75f, 1.f, 0.45f), 0.5f);
+			Dot.Glow = 3.f;
+			Dot.Opacity = 0.75f;
+			Dot.FadeIn = 0.f;
+			Spawn(Dot);
+		}
+		break;
+	default:
+		// The pistol's candy bullet: a short soft tail
+		Streak(From, Head, 9.f * Size, 0.1f, Tint, 3.5f, 0.6f);
+		Streak(From, Head, 4.f * Size, 0.07f, Hot, 6.f, 0.85f);
+		break;
+	}
+}
+
+void ARRRandomEffects::MuzzleFlash(ERRHitEffect Gun, const FVector& Muzzle, const FVector& Direction, float Size, const FLinearColor& Tint)
+{
+	const FVector Way = Direction.IsNearlyZero() ? FVector::ForwardVector : Direction.GetSafeNormal();
+	const FLinearColor Hot = FMath::Lerp(Tint, FLinearColor::White, 0.7f);
+	// (the shotgun has its own blast, ShotgunBlast; a sword, a hammer and a dagger fire nothing)
+	if (Gun == ERRHitEffect::Shotgun || Gun == ERRHitEffect::Sword || Gun == ERRHitEffect::Hammer || Gun == ERRHitEffect::Dagger || Gun == ERRHitEffect::Poke || Gun == ERRHitEffect::Skull)
+	{
+		return;
+	}
+	const bool bHeavy = Gun == ERRHitEffect::Cannon || Gun == ERRHitEffect::Sniper || Gun == ERRHitEffect::Blaster || Gun == ERRHitEffect::Acorn;
+	const bool bLight = Gun == ERRHitEffect::Smg || Gun == ERRHitEffect::Minigun;
+	// A flash at the muzzle, a tongue of it along the barrel's way
+	FParticle Flash;
+	Flash.Shape = EShape::Ball;
+	Flash.Location = Muzzle + Way * 8.f * Size;
+	Flash.Life = bHeavy ? 0.1f : 0.06f;
+	Flash.StartSize = FVector((bHeavy ? 0.5f : bLight ? 0.2f : 0.3f) * Size);
+	Flash.EndSize = FVector(0.08f * Size);
+	Flash.Color = Gun == ERRHitEffect::Blaster ? Hot : FMath::Lerp(FireYellow, FLinearColor::White, 0.5f);
+	Flash.Glow = 9.f;
+	Flash.Opacity = 0.9f;
+	Flash.FadeIn = 0.f;
+	Spawn(Flash);
+	FParticle Tongue = Flash;
+	Tongue.Location = Muzzle + Way * (bHeavy ? 34.f : 22.f) * Size;
+	Tongue.Turn = Way.Rotation();
+	Tongue.StartSize = FVector((bHeavy ? 0.85f : bLight ? 0.4f : 0.55f) * Size, (bHeavy ? 0.22f : 0.12f) * Size, (bHeavy ? 0.22f : 0.12f) * Size);
+	Tongue.EndSize = FVector(Tongue.StartSize.X * 1.3f, 0.02f * Size, 0.02f * Size);
+	Tongue.Color = Gun == ERRHitEffect::Blaster ? Tint : FireOrange;
+	Tongue.Glow = 6.f;
+	Spawn(Tongue);
+	switch (Gun)
+	{
+	case ERRHitEffect::Sniper:
+	case ERRHitEffect::Blaster:
+	{
+		// A ring bursting off the muzzle, across the barrel
+		FParticle Ring;
+		Ring.Shape = EShape::Ring;
+		Ring.Location = Muzzle + Way * 18.f * Size;
+		Ring.Turn = FRotationMatrix::MakeFromZ(Way).Rotator();
+		Ring.Velocity = Way * 120.f;
+		Ring.Life = 0.2f;
+		Ring.StartSize = FVector(0.12f * Size, 0.12f * Size, 1.2f);
+		Ring.EndSize = FVector((Gun == ERRHitEffect::Sniper ? 0.75f : 0.55f) * Size, (Gun == ERRHitEffect::Sniper ? 0.75f : 0.55f) * Size, 0.5f);
+		Ring.Color = Gun == ERRHitEffect::Sniper ? FLinearColor::White : Tint;
+		Ring.Glow = 5.f;
+		Ring.Opacity = 0.8f;
+		Ring.FadeIn = 0.f;
+		Spawn(Ring);
+		break;
+	}
+	case ERRHitEffect::Cannon:
+	case ERRHitEffect::Acorn:
+		// A thump of smoke
+		for (int32 Index = 0; Index < 7; ++Index)
+		{
+			FParticle Puff;
+			Puff.Shape = EShape::Ball;
+			Puff.Location = Muzzle + FMath::VRand() * 8.f * Size;
+			Puff.Velocity = FMath::VRandCone(Way, FMath::DegreesToRadians(40.f)) * FMath::FRandRange(120.f, 320.f);
+			Puff.Drag = 4.f;
+			Puff.Life = FMath::FRandRange(0.35f, 0.6f);
+			Puff.StartSize = FVector(0.16f * Size);
+			Puff.EndSize = FVector(FMath::FRandRange(0.4f, 0.6f) * Size);
+			Puff.Color = Gun == ERRHitEffect::Acorn ? Dust : Smoke;
+			Puff.Glow = 0.8f;
+			Puff.Opacity = 0.45f;
+			Spawn(Puff);
+		}
+		break;
+	default:
+		break;
+	}
+	// Sparks (a shell casing's worth for the quick guns)
+	Spray(EShape::Ball, Muzzle, bHeavy ? 6 : bLight ? 1 : 3, Way, 35.f, FVector2D(250.f, 600.f), FVector2D(0.025f, 0.05f) * Size, FVector2D(0.1f, 0.22f), FMath::Lerp(FireYellow, Hot, 0.4f), 7.f, 500.f);
+}
+
+void ARRRandomEffects::RunDust(const FVector& Feet, const FVector& Velocity, float Size, float DeltaSeconds)
+{
+	const FVector Back = -Velocity.GetSafeNormal2D();
+	if (Back.IsNearlyZero())
+	{
+		return;
+	}
+	// Puffs kicked up behind the heels, low, swelling as they hang there
+	for (int32 Index = CountThisFrame(22.f, DeltaSeconds); Index > 0; --Index)
+	{
+		FParticle Puff;
+		Puff.Shape = EShape::Ball;
+		Puff.Location = Feet + Back * 20.f * Size + FVector(FMath::FRandRange(-18.f, 18.f), FMath::FRandRange(-18.f, 18.f), FMath::FRandRange(4.f, 16.f)) * Size;
+		Puff.Velocity = Back * FMath::FRandRange(40.f, 140.f) + FVector(0.f, 0.f, FMath::FRandRange(30.f, 90.f));
+		Puff.Drag = 3.f;
+		Puff.Life = FMath::FRandRange(0.35f, 0.6f);
+		Puff.StartSize = FVector(0.14f * Size);
+		Puff.EndSize = FVector(FMath::FRandRange(0.4f, 0.62f) * Size);
+		Puff.Color = Dust;
+		Puff.Glow = 0.8f;
+		Puff.Opacity = 0.4f;
+		Puff.FadeIn = 0.04f;
+		Spawn(Puff);
+	}
+	// And thin lines of wind streaming past the body
+	for (int32 Index = CountThisFrame(14.f, DeltaSeconds); Index > 0; --Index)
+	{
+		FParticle Wind;
+		Wind.Shape = EShape::Ball;
+		Wind.Location = Feet + FVector(FMath::FRandRange(-45.f, 45.f), FMath::FRandRange(-45.f, 45.f), FMath::FRandRange(40.f, 170.f)) * Size - Back * 30.f * Size;
+		Wind.Velocity = Back * FMath::FRandRange(150.f, 300.f);
+		Wind.Turn = Back.Rotation();
+		Wind.Life = FMath::FRandRange(0.16f, 0.26f);
+		Wind.StartSize = FVector(FMath::FRandRange(0.5f, 0.9f) * Size, 0.02f * Size, 0.02f * Size);
+		Wind.EndSize = FVector(1.2f * Size, 0.004f * Size, 0.004f * Size);
+		Wind.Color = FLinearColor::White;
+		Wind.Glow = 2.5f;
+		Wind.Opacity = 0.5f;
+		Wind.FadeIn = 0.03f;
+		Spawn(Wind);
+	}
+}
+
+void ARRRandomEffects::DamageSmoke(const FVector& Where, float Size, int32 Stage, float DeltaSeconds)
+{
+	if (Stage <= 0)
+	{
+		return;
+	}
+	// Stage 1: a thin thread of pale smoke and a spark now and then. Stage 2: thick dark smoke, crackling sparks.
+	// Stage 3: on fire, black smoke pouring off it
+	static const FLinearColor Soot(0.16f, 0.14f, 0.17f);
+	static const FLinearColor Grey(0.5f, 0.48f, 0.52f);
+	const float SmokeRate = Stage == 1 ? 7.f : Stage == 2 ? 16.f : 24.f;
+	for (int32 Index = CountThisFrame(SmokeRate, DeltaSeconds); Index > 0; --Index)
+	{
+		FParticle Puff;
+		Puff.Shape = EShape::Ball;
+		Puff.Location = Where + FMath::VRand() * 18.f * Size;
+		Puff.Velocity = FVector(FMath::FRandRange(-30.f, 30.f), FMath::FRandRange(-30.f, 30.f), FMath::FRandRange(110.f, 200.f)) * Size;
+		Puff.Drag = 0.8f;
+		Puff.Life = FMath::FRandRange(0.9f, 1.5f) * (Stage == 1 ? 0.8f : 1.f);
+		Puff.StartSize = FVector((Stage == 1 ? 0.22f : 0.34f) * Size);
+		Puff.EndSize = FVector(FMath::FRandRange(0.8f, 1.2f) * (Stage == 1 ? 0.7f : 1.1f) * Size);
+		Puff.Color = Stage == 1 ? (FMath::FRand() < 0.6f ? Smoke : Grey) : Stage == 2 ? (FMath::FRand() < 0.5f ? Grey : Soot) : Soot;
+		Puff.Glow = Stage == 1 ? 0.8f : 0.45f;
+		Puff.Opacity = Stage == 1 ? 0.35f : 0.6f;
+		Puff.FadeIn = 0.1f;
+		Spawn(Puff);
+	}
+	if (Stage >= 3)
+	{
+		for (int32 Index = CountThisFrame(34.f, DeltaSeconds); Index > 0; --Index)
+		{
+			FParticle Fire;
+			Fire.Shape = EShape::Ball;
+			Fire.Location = Where + FMath::VRand() * 22.f * Size;
+			Fire.Velocity = FVector(FMath::FRandRange(-40.f, 40.f), FMath::FRandRange(-40.f, 40.f), FMath::FRandRange(160.f, 320.f)) * Size;
+			Fire.Drag = 1.5f;
+			Fire.Life = FMath::FRandRange(0.25f, 0.5f);
+			Fire.StartSize = FVector(FMath::FRandRange(0.3f, 0.5f) * Size);
+			Fire.EndSize = FVector(0.06f * Size);
+			Fire.Color = FMath::FRand() < 0.4f ? FireYellow : FMath::FRand() < 0.6f ? FireOrange : FireRed;
+			Fire.Glow = 5.f;
+			Fire.Opacity = 0.9f;
+			Fire.FadeIn = 0.02f;
+			Spawn(Fire);
+		}
+	}
+	// Sparks crackling out of it: rarely at first, all the time when it is nearly gone
+	const float SparkRate = Stage == 1 ? 0.7f : Stage == 2 ? 2.5f : 6.f;
+	if (FMath::FRand() < SparkRate * DeltaSeconds)
+	{
+		Spray(EShape::Ball, Where, Stage == 1 ? 5 : 9, FVector::UpVector, 80.f, FVector2D(250.f, 700.f) * Size, FVector2D(0.03f, 0.07f) * Size, FVector2D(0.2f, 0.45f),
+			FMath::Lerp(FireYellow, FLinearColor::White, 0.4f), 8.f, 900.f);
+		Spray(EShape::Star, Where, 1, FVector::UpVector, 60.f, FVector2D(150.f, 350.f), FVector2D(2.f, 3.5f) * Size, FVector2D(0.2f, 0.35f), FireYellow, 7.f, 300.f);
+	}
+}
+
+void ARRRandomEffects::AcornFall(const FVector& From, const FVector& Head, float Size, bool bGolden, float DeltaSeconds)
+{
+	// Round 100, the squirrel's acorn rain: a warm streak behind each acorn as it comes down, a leaf now and then; a
+	// golden one trails gold and sheds little stars
+	static const FLinearColor Amber(1.f, 0.6f, 0.2f);
+	static const FLinearColor FallGold(1.f, 0.85f, 0.3f);
+	Streak(From, Head, (bGolden ? 30.f : 18.f) * Size, bGolden ? 0.24f : 0.15f, bGolden ? FallGold : Amber, bGolden ? 5.f : 2.5f, 0.5f);
+	if (bGolden)
+	{
+		if (FMath::FRand() < 28.f * DeltaSeconds)
+		{
+			Spray(EShape::Star, Head, 1, FVector::UpVector, 180.f, FVector2D(40.f, 150.f), FVector2D(2.f, 3.5f), FVector2D(0.3f, 0.5f), FallGold, 7.f, 150.f);
+		}
+	}
+	else if (FMath::FRand() < 5.f * DeltaSeconds)
+	{
+		Spray(EShape::Ball, Head, 1, FVector::UpVector, 90.f, FVector2D(30.f, 90.f), FVector2D(0.05f, 0.09f), FVector2D(0.4f, 0.7f), FLinearColor(0.45f, 0.8f, 0.25f), 2.f, 120.f);
+	}
+}

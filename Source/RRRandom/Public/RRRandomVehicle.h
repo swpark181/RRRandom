@@ -276,6 +276,10 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Vehicle")
 	TObjectPtr<UStaticMeshComponent> Body;
+	/** Round 99: the custom stencil the body writes now (its rider's friend-or-foe line; 0 parked). */
+	int32 OutlineStencil = 0;
+	/** Round 100: last frame the rider's network glide moved this (so it is put back once when the glide ends). */
+	bool bHadGlide = false;
 
 	UPROPERTY(EditAnywhere, ReplicatedUsing = OnRep_Kind, Category = "Vehicle")
 	ERRVehicleKind Kind = ERRVehicleKind::Kickboard;

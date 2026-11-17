@@ -1,0 +1,103 @@
+<title>친구와 온라인 플레이</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+:root{--bg:#f3f8ff;--panel:#fff;--ink:#22304a;--muted:#5d6b85;--line:#d9e4f2;--a:#2b7fd6;--a-soft:#dcebfb;--ok:#14936f;--ok-soft:#d9f3ea;--warn:#b86e00;--warn-soft:#fff0d0;--shadow:0 6px 20px rgba(40,70,120,.10)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#141b28;--panel:#1e2838;--ink:#eaf1fb;--muted:#a5b3c9;--line:#2f3c52;--a:#79b8f7;--a-soft:#1f3550;--ok:#5fd6b0;--ok-soft:#173a30;--warn:#f0b955;--warn-soft:#43340f;--shadow:0 6px 20px rgba(0,0,0,.35);color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#141b28;--panel:#1e2838;--ink:#eaf1fb;--muted:#a5b3c9;--line:#2f3c52;--a:#79b8f7;--a-soft:#1f3550;--ok:#5fd6b0;--ok-soft:#173a30;--warn:#f0b955;--warn-soft:#43340f;--shadow:0 6px 20px rgba(0,0,0,.35);color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font-family:'Noto Sans KR',system-ui,'Malgun Gothic',sans-serif;font-size:15px;line-height:1.75}
+.wrap{max-width:860px;margin:0 auto;padding-block:28px 72px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1,h2,h3{font-family:'Jua','Noto Sans KR',sans-serif;font-weight:400;line-height:1.3;margin:0;text-wrap:balance}
+h1{font-size:clamp(28px,5vw,40px)} h2{font-size:24px;margin-top:44px} h3{font-size:18px}
+.lead{color:var(--muted);max-width:64ch}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--shadow);margin-top:14px;min-width:0}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}.grid>*{min-width:0}
+.badge{display:inline-block;font-size:12px;font-weight:700;border-radius:999px;padding:2px 10px;margin-bottom:6px}
+.b-ok{background:var(--ok-soft);color:var(--ok)}.b-a{background:var(--a-soft);color:var(--a)}.b-w{background:var(--warn-soft);color:var(--warn)}
+ol,ul{padding-left:1.3em;margin:.4em 0}li{margin:.25em 0}
+code,kbd{background:var(--a-soft);border-radius:6px;padding:1px 7px;font-size:13px;font-family:Consolas,'Cascadia Mono',monospace}
+pre{background:var(--a-soft);border-radius:10px;padding:12px 14px;overflow-x:auto;font-size:13px;margin:.6em 0}
+.small{font-size:13px;color:var(--muted)}
+.tablewrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;min-width:480px}th,td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}th{font-size:12px;color:var(--muted)}
+a{color:var(--a)}
+</style>
+<div class="wrap">
+<h1>친구와 온라인으로 RRRandom 하기</h1>
+<p class="lead">전용 서버 없이 한 사람이 방을 열고(호스트) 나머지가 들어갑니다. 최대 6명, 빈자리는 봇이 채웁니다. 상황에 맞는 방법 하나를 고르면 됩니다.</p>
+
+<div class="card">
+  <span class="badge b-w">먼저 알아둘 것</span>
+  <ul>
+    <li><b>아직 배포용 실행 파일이 없습니다.</b> 지금은 친구 PC에도 <b>Unreal Engine 5.8</b>과 <b>이 프로젝트 폴더(빌드된 상태)</b>가 있어야 합니다. 원하시면 설치 없이 실행되는 패키지 빌드를 만들어 드릴 수 있습니다(그러면 친구는 폴더만 받아 실행).</li>
+    <li>호스트와 친구는 <b>같은 버전</b>이어야 합니다(같은 커밋).</li>
+    <li>호스트가 나가면 게임이 끝나고 모두 타이틀로 돌아갑니다(호스트 넘기기 없음).</li>
+  </ul>
+</div>
+
+<h2>어떤 방법으로?</h2>
+<div class="grid">
+  <div class="card"><span class="badge b-ok">가장 쉬움 · 지금 바로 됨</span><h3>① 같은 공유기 (집·사무실)</h3><p>설정 없이 방을 찾아 들어갑니다.</p></div>
+  <div class="card"><span class="badge b-a">서로 다른 집 · 지금 됨</span><h3>② 주소(IP)로 직접 참가</h3><p>호스트 쪽 공유기에서 포트 하나를 열거나, 가상 LAN 프로그램을 씁니다.</p></div>
+  <div class="card"><span class="badge b-a">서로 다른 집 · 준비 필요</span><h3>③ EOS (Epic 온라인 서비스)</h3><p>포트를 열 필요가 없지만 Epic 개발자 포털 설정이 먼저 필요합니다.</p></div>
+</div>
+
+<h2>① 같은 공유기에서</h2>
+<div class="card">
+  <ol>
+    <li><b>호스트</b>: <code>RRRandom 실행.bat</code> → 타이틀에서 <b>NETWORK → HOST GAME</b> (또는 <kbd>F1</kbd>). 왼쪽 위에 <code>HOSTING (LAN)</code>이 보이면 열린 것.</li>
+    <li><b>친구</b>: 같은 방법으로 실행 → <b>NETWORK → JOIN GAME</b> (또는 <kbd>F2</kbd>). 방 목록에서 고르면 들어갑니다.</li>
+    <li>처음 한 번 Windows 방화벽이 <b>UnrealEditor 허용</b>을 물으면 "개인 네트워크"에 허용합니다(호스트와 친구 모두).</li>
+  </ol>
+  <p class="small">나가기는 <kbd>F3</kbd> 또는 Esc → TITLE.</p>
+</div>
+
+<h2>② 주소로 직접 참가 (서로 다른 집)</h2>
+<div class="card">
+  <p>방 찾기는 같은 공유기 안에서만 됩니다. 밖에서는 호스트의 주소를 직접 넣어 들어갑니다(101차에 추가).</p>
+  <h3>호스트가 할 일 — 둘 중 하나</h3>
+  <ul>
+    <li><b>포트 열기</b>: 공유기 설정의 "포트 포워딩"에서 <b>UDP 7777</b>을 호스트 PC로 보냅니다. 친구에게 알려 줄 주소는 공인 IP(검색창에 "내 IP")입니다.</li>
+    <li><b>가상 LAN 프로그램</b>(Tailscale, ZeroTier, Radmin VPN 같은 것)을 둘 다 설치해 같은 네트워크에 들어갑니다. 포트를 열 필요가 없고, 친구에게 알려 줄 주소는 그 프로그램이 보여 주는 호스트의 주소입니다.</li>
+  </ul>
+  <p>그다음 ①과 똑같이 <b>HOST GAME</b>으로 방을 엽니다.</p>
+  <h3>친구가 할 일</h3>
+  <ol>
+    <li>프로젝트 폴더의 <code>RRRandom 친구 방 참가 (IP).bat</code>을 실행합니다.</li>
+    <li><code>Host address</code>에 호스트가 알려 준 주소를 넣고 Enter (예: <code>203.0.113.7</code>).</li>
+    <li><code>Animal friend</code>에 고를 동물친구 이름(Fox, Tiger, Rabbit, Squirrel, Dragon, RedFox)을 넣고 Enter. 비우면 Fox.</li>
+  </ol>
+  <p class="small">이미 게임을 켠 상태라면 <kbd>`</kbd>(물결 키)로 콘솔을 열고 <code>RRJoinIP 203.0.113.7</code>을 쳐도 됩니다.</p>
+</div>
+
+<h2>③ EOS로 (포트 안 열고)</h2>
+<div class="card">
+  <p>EOS가 연결을 중계해 줍니다. 무료지만 한 번 설정해야 합니다(지금은 키가 비어 있어 꺼져 있음).</p>
+  <ol>
+    <li><a href="https://dev.epicgames.com/portal">Epic Developer Portal</a>에서 제품을 만들고 Product ID · Sandbox ID · Deployment ID를 확인.</li>
+    <li>Product Settings → Clients에서 클라이언트 생성(정책 <b>Peer2Peer</b>) → Client ID / Secret.</li>
+    <li>Epic Account Services에서 권한(Basic Profile, Online Presence, Friends)을 켜고 클라이언트 연결.</li>
+    <li><code>Config/DefaultEngine.ini</code>의 <code>+Artifacts=(...)</code> 줄에 위 값을 채움. (비밀 값이라 공개 저장소에는 올리지 않기)</li>
+    <li>호스트와 친구 모두 Epic 계정으로 로그인(개발 단계에서는 Dev Auth Tool, 또는 <code>LoginType=accountportal</code>).</li>
+    <li>HOST GAME / JOIN GAME. 왼쪽 위가 <code>HOSTING (EOS)</code> / <code>ONLINE (EOS)</code>이면 성공.</li>
+  </ol>
+  <p class="small">자세한 단계는 프로젝트 README의 "EOS로 인터넷 플레이". 브랜드 심사 전에는 조직 멤버 계정만 로그인될 수 있습니다.</p>
+</div>
+
+<h2>잘 안 될 때</h2>
+<div class="card tablewrap"><table>
+  <tr><th>증상</th><th>볼 곳</th></tr>
+  <tr><td>방 목록이 비어 있음</td><td>같은 공유기인지, 둘 다 방화벽 허용했는지. 다른 집이면 ②로.</td></tr>
+  <tr><td>주소로 들어가다 타이틀로 돌아옴</td><td>호스트가 방을 열었는지, UDP 7777이 호스트 PC로 가는지, 주소가 맞는지. 버전이 다르면 거절됩니다.</td></tr>
+  <tr><td>상대가 순간이동하듯 끊김</td><td>100차 이전 빌드에서 보이던 증상. 지금은 지연 200ms·손실 5%에서도 1초 중 가장 크게 튀는 거리가 39 → 6(참가자 화면, 측정)으로 줄었습니다.</td></tr>
+  <tr><td>왼쪽 위 노란 줄</td><td>마지막 진행 상황/오류가 영어로 나옵니다. 자세한 건 <code>Saved/Logs/RRRandom.log</code>.</td></tr>
+</table></div>
+
+<h2>확인된 것과 아닌 것</h2>
+<div class="card">
+  <ul>
+    <li><b>확인</b>: 같은 PC에서 호스트 + 참가(방 찾기), 주소 직접 참가(<code>127.0.0.1</code>), 지연·손실을 건 상태의 움직임 보간.</li>
+    <li><b>미확인</b>: 실제로 다른 PC·다른 집에서 접속(포트 포워딩, 가상 LAN), EOS 경로.</li>
+    <li>친구끼리 하는 것을 전제로 합니다(치트 방지는 약함).</li>
+  </ul>
+</div>
+</div>

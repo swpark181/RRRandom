@@ -50,7 +50,8 @@ public:
 	static constexpr float GlowTime = 0.5f;
 	static constexpr float RiseTime = 1.5f;
 	static constexpr float SinkTime = 0.6f;
-	static constexpr float BurnPerSecond = 25.f;
+	// (round 101: 25 -> 34 a second: about three seconds for a 100 health animal friend that doesn't struggle out)
+	static constexpr float BurnPerSecond = 34.f;
 	static constexpr float AfterBurnPerSecond = 8.f;
 	static constexpr float AfterBurnSeconds = 2.f;
 	static constexpr float EmberSeconds = 3.f;
@@ -92,6 +93,8 @@ private:
 	void UpdateLights(float Now);
 	void UpdateEffects(float DeltaSeconds, float Now);
 	void BurnPeople(float Now);
+	/** Server: which way out of the lava from a spot (flat, unit), nearest dry column first; zero if there is none near. */
+	FVector GetWayOut(const class ARRRandomDiceTown* Town, const FVector& Feet, const FVector& Wanted) const;
 	/** Server: the boxes that cut the lava out of the navmesh, rows of columns at a time. */
 	void UpdateNavBlockers();
 

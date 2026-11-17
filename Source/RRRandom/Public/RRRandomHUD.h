@@ -11,6 +11,9 @@ enum class ERRResultsButton : uint8
 	NewGame,
 	Title,
 	Resume,
+	/** Round 98: the results' animal friend row: open it, and one of the six (FResultsButtonRect::Value). */
+	ChangeFriend,
+	Friend,
 };
 
 class ARRRandomCharacter;
@@ -76,7 +79,43 @@ public:
 	 */
 	static void PopComicWord(const UObject* WorldContext, const FString& Text, const FVector& Where, const FLinearColor& Color, float Size = 1.f);
 
+	// Round 98, the main mode's screen
+	/** The value of the button under a point (the animal friend of a Friend button), or INDEX_NONE. */
+	int32 GetResultsButtonValueAt(const FVector2D& ScreenPoint) const;
+	/** The developer's lines (the online panel, the cheat keys, the team cards and the corner map in the main mode): F4. */
+	void ToggleDebug() { bShowDebug = !bShowDebug; }
+	bool IsDebugShown() const { return bShowDebug; }
+	/** The emote wheel (held T): open or shut, the mouse's push since it opened, and the slice it points at (1..6, 0 none). */
+	void SetEmoteWheel(bool bOpen) { bEmoteWheel = bOpen; EmoteAim = FVector2D::ZeroVector; }
+	bool IsEmoteWheelOpen() const { return bEmoteWheel; }
+	void AddEmoteAim(const FVector2D& Delta) { EmoteAim = (EmoteAim + Delta).GetClampedToMaxSize(160.f); }
+	int32 GetEmotePick() const;
+	/** The results' animal friend row is open (CHANGE FRIEND), and when the next match starts by itself (real time). */
+	bool IsFriendPickOpen() const { return bFriendPick; }
+	void SetFriendPick(bool bOpen) { bFriendPick = bOpen; }
+	float GetResultsAge() const;
+
 private:
+	bool bShowDebug = false;
+	bool bEmoteWheel = false;
+	FVector2D EmoteAim = FVector2D::ZeroVector;
+	bool bFriendPick = false;
+	/** The main mode: the rounds board at the top (round, rule, both teams' rounds and this round's score, the clock). */
+	void DrawRoundsBoard(const ARRRandomGameState& State);
+	/** The round's start: ROUND n, the rule die tumbling onto its face, the rule and its line. */
+	void DrawRoundIntro(const ARRRandomGameState& State, const ARRRandomCharacter* Viewer);
+	/** The round's end: who took it, the rounds so far, a sudden death's dice. */
+	void DrawRoundOver(const ARRRandomGameState& State, const ARRRandomCharacter* Viewer);
+	/** The cards a roll dealt, waiting for 1 / 2 / 3. */
+	void DrawCards(const ARRRandomCharacter& Viewer);
+	/** Q: the ability, its name and cooldown, by the ammo panel. */
+	void DrawAbility(const ARRRandomCharacter& Viewer);
+	/** Knocked out in the main mode: who did it, and the wait with its quick-knockout part. */
+	void DrawKnockedOutBy(const ARRRandomCharacter& Viewer);
+	/** The emote wheel in the middle of the screen. */
+	void DrawEmoteWheel(const ARRRandomCharacter& Viewer);
+	/** The main mode's results extras: the rounds, NEXT MATCH IN n, CHANGE FRIEND and its row of animal friends. */
+	void DrawRoundsResults(const ARRRandomGameState& State, const ARRRandomCharacter* Viewer, float Fade);
 	/** One comic word: on its burst at the time it popped (this machine's clock), its color, size and the burst's tilt. */
 	void DrawComicWord(const FString& Text, const FVector& Where, float Start, const FLinearColor& Color, float Size, float Tilt);
 	struct FComicWord
@@ -126,6 +165,10 @@ private:
 	 * and "[F] COMBINE!"; over the robot coming together its gauge, over the finished one its health, shield and
 	 * three seats ("[F] GET IN" next to it), a banner when it is done, and for its crew which seat they have.
 	 */
+	/** Round 99: lines of wind in from the screen's edges while I sprint. */
+	void DrawSprintLines(const ARRRandomCharacter& Viewer);
+	/** Round 101: stuck in lava, the sign that says to mash SPACE and how far the struggle has got. */
+	void DrawLavaPrompt(const ARRRandomCharacter& Viewer);
 	void DrawStarRobot(const ARRRandomCharacter* Viewer, const class ARRRandomStarRobot* Robot);
 	/** Every team's robot (DrawStarRobot: the viewer's team's, or its combine sign; then the rival's), and the duel. */
 	void DrawStarRobots(const ARRRandomCharacter* Viewer);
@@ -228,6 +271,10 @@ private:
 
 	/** Seconds the big "TIGER SPIRIT xN!" stays up after my ultimate die lands. */
 	static constexpr float UltimateBannerTime = 1.8f;
+	/** Round 99: the ultimate die's sign. Whether I held one last frame, when it arrived, how long it is called out big. */
+	bool bHadUltimateDie = false;
+	float UltimateDieGotAt = -100.f;
+	static constexpr float UltimateCalloutTime = 3.5f;
 	/** A downward triangle with a white border, its top edge at Top, centered on CenterX. */
 	void DrawFriendOrFoeMarker(float CenterX, float Top, const FLinearColor& Color);
 
@@ -238,6 +285,7 @@ private:
 		ERRResultsButton Button = ERRResultsButton::None;
 		FBox2D Rect;
 		bool bEnabled = true;
+		int32 Value = INDEX_NONE;
 	};
 	TArray<FResultsButtonRect> ResultsButtons;
 	/** One of ResultsButtons as a pill: mint for the main choice, frosted white otherwise; lifted under the mouse, faded when disabled. */
@@ -248,6 +296,12 @@ private:
 
 	/** 0 .. 1: how far the aim shows that the muzzle is buried in a wall (ARRRandomCharacter::GetShotStart), easing in and out. */
 	float MuzzleBlockedBlend = 0.f;
+	/** Round 99: 0 .. 1, the crosshair is over an opponent (it turns red), easing in and out. */
+	float CrosshairFoeBlend = 0.f;
+	/** Round 99: the star robot seat I was last seen in (0 MOVE, 1 ATTACK, 2 DEFEND; none: INDEX_NONE), when I got it, and how long its big card stays up. */
+	int32 LastRobotSeat = INDEX_NONE;
+	float RobotSeatGotAt = -100.f;
+	static constexpr float RobotRoleCardTime = 3.2f;
 
 	/** The clash: wrong keys seen so far for this viewer's seat, and when the last one flashed. */
 	int32 ClashMissesSeen = 0;

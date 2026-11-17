@@ -52,6 +52,8 @@ public:
 	void Deflect(ARRRandomCharacter* Deflector, const FVector& Aim);
 	static constexpr float DeflectSpeedUp = 1.2f;
 
+	/** Round 98: flies in an arc landing on Target (the ACORN launcher); call before the shot finishes spawning. */
+	void MakeLob(const FVector& Target);
 	/** Scales the flying speed; call before the shot finishes spawning. */
 	void SetSpeedMultiplier(float Multiplier);
 
@@ -113,6 +115,9 @@ public:
 	 */
 	UPROPERTY(Replicated)
 	bool bPoke = false;
+	/** Round 98: an arc (MakeLob): gravity on every machine. */
+	UPROPERTY(Replicated)
+	bool bLob = false;
 
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	float PokeDamage = 1.f;
@@ -132,9 +137,16 @@ public:
 	void Splash(const FVector& Where, AActor* Hit, float BaseDamage);
 	/** A gun's own shot model (round 90; null until imported), and how long it is drawn. */
 	static UStaticMesh* LoadShotModel(ERRHitEffect Effect);
+	/** Round 99: every gun's shot model loaded now (once), so the first shot of each kind doesn't hitch. */
+	static void PreloadShotModels();
 	static float GetShotLength(ERRHitEffect Effect);
 	/** Drawn as its gun's own model (not the tinted ball). */
 	bool bOwnModel = false;
+	/** Round 99: this machine draws the gun's own trail behind the shot (ARRRandomEffects::ShotTrail), from where it was last frame. */
+	bool bGunTrail = false;
+	/** Round 99: where an arc was aimed (MakeLob), for the log of how near it landed. */
+	FVector LobTarget = FVector::ZeroVector;
+	FVector LastTrailLocation = FVector::ZeroVector;
 
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	float BackstabAngle = 60.f;

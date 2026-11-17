@@ -1,4 +1,5 @@
 #include "RRRandomKit.h"
+#include "RRRandomRounds.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomEffects.h"
 #include "RRRandomGameState.h"
@@ -27,10 +28,18 @@ namespace
 			Kit.OwnDieChance = 0.2f;
 			Kit.PassiveName = TEXT("BACKSTAB");
 			Kit.PassiveLine = TEXT("+25% damage from behind and out of invisibility");
-			Kit.DieName = TEXT("INVISIBLE DIE");
+			Kit.DieName = TEXT("INVISIBLE DICE");
 			Kit.DieLine = TEXT("invisible for 2s per pip, a faint shimmer to opponents");
 			Kit.DieWord = TEXT("INVISIBLE");
 			Kit.DieColor = FLinearColor::FromSRGBColor(FColor(189, 166, 240));
+			Kit.MoveSpeedScale = 1.05f;
+			Kit.RoleName = TEXT("ASSAULT");
+			Kit.RoleLine = TEXT("rapid SMG up close, slips away unseen");
+			Kit.RoleWeapon = TEXT("SMG");
+			Kit.Ability = ERRAbility::Cloak;
+			Kit.AbilityPower = 4.f;
+			Kit.AbilityCooldown = 14.f;
+			Kit.AbilityLine = TEXT("invisible 4s, the first shot out hits harder");
 			break;
 		case RRSpecies::Rabbit:
 			Kit.MoveSpeedScale = 1.15f;
@@ -39,29 +48,53 @@ namespace
 			Kit.OwnDieChance = 0.2f;
 			Kit.PassiveName = TEXT("HOP HOP");
 			Kit.PassiveLine = TEXT("+15% speed, double jump, picks up ore from further");
-			Kit.DieName = TEXT("SUPER HOP DIE");
+			Kit.DieName = TEXT("SUPER HOP DICE");
 			Kit.DieLine = TEXT("one super-high second jump per pip");
 			Kit.DieWord = TEXT("HOP");
 			Kit.DieColor = FLinearColor::FromSRGBColor(FColor(151, 201, 245));
+			Kit.HealthScale = 0.9f;
+			Kit.RoleName = TEXT("SCOUT");
+			Kit.RoleLine = TEXT("sniper from up high, hops onto the roofs");
+			Kit.RoleWeapon = TEXT("SNIPER");
+			Kit.Ability = ERRAbility::SuperHop;
+			Kit.AbilityPower = 2.f;
+			Kit.AbilityCooldown = 9.f;
+			Kit.AbilityLine = TEXT("two super hops, high as a roof");
 			break;
 		case RRSpecies::Squirrel:
 			Kit.bCheekPouch = true;
 			Kit.OwnDieChance = 0.2f;
 			Kit.PassiveName = TEXT("CHEEK POUCH");
 			Kit.PassiveLine = TEXT("knocked out, keeps its gun and a third of its ore");
-			Kit.DieName = TEXT("ACORN SHIELD DIE");
+			Kit.DieName = TEXT("ACORN SHIELD DICE");
 			Kit.DieLine = TEXT("a shield of 10 per pip; in Meteor Rush, pulls ore in");
 			Kit.DieWord = TEXT("SHIELD");
 			Kit.DieColor = FLinearColor::FromSRGBColor(FColor(143, 221, 190));
+			// (round 98 bot matches: the trapper went down most and scored least at 100; 110 and a harder acorn)
+			Kit.HealthScale = 1.1f;
+			Kit.RoleName = TEXT("TRAPPER");
+			Kit.RoleLine = TEXT("acorns lobbed over cover, traps on the way in");
+			Kit.RoleWeapon = TEXT("ACORN");
+			Kit.Ability = ERRAbility::AcornTrap;
+			Kit.AbilityPower = 1.f;
+			Kit.AbilityCooldown = 10.f;
+			Kit.AbilityLine = TEXT("an acorn mine at your feet, two at most");
 			break;
 		case RRSpecies::Tiger:
-			Kit.HealthScale = 1.3f;
+			Kit.HealthScale = 1.5f;
+			Kit.RoleName = TEXT("TANK");
+			Kit.RoleLine = TEXT("big hammer, a shield on the right button");
+			Kit.RoleWeapon = TEXT("HAMMER");
+			Kit.Ability = ERRAbility::Giant;
+			Kit.AbilityPower = 5.f;
+			Kit.AbilityCooldown = 22.f;
+			Kit.AbilityLine = TEXT("giant 5s: bigger, tougher, harder hitting");
 			Kit.MoveSpeedScale = 0.9f;
 			Kit.KnockbackScale = 0.5f;
 			Kit.GiantDieChance = 0.2f;
 			Kit.PassiveName = TEXT("BEAST BODY");
-			Kit.PassiveLine = TEXT("+30% health, pushed half as far, 10% slower");
-			Kit.DieName = TEXT("GIANT DIE");
+			Kit.PassiveLine = TEXT("+50% health, pushed half as far, 10% slower");
+			Kit.DieName = TEXT("GIANT DICE");
 			Kit.DieLine = TEXT("only the tiger turns giant, twice as often");
 			Kit.DieColor = FLinearColor(0.3f, 0.95f, 1.f);
 			break;
@@ -71,9 +104,32 @@ namespace
 			Kit.FlightDieChance = 0.2f;
 			Kit.PassiveName = TEXT("GLIDE");
 			Kit.PassiveLine = TEXT("hold jump while falling to glide down");
-			Kit.DieName = TEXT("FLIGHT DIE");
+			Kit.DieName = TEXT("FLIGHT DICE");
 			Kit.DieLine = TEXT("only the dragon flies, twice as often");
 			Kit.DieColor = FLinearColor(1.f, 0.5f, 0.85f);
+			// (round 98 bot matches: the dragon topped the knockouts and seldom went down: less health, shorter, rarer flights)
+			Kit.HealthScale = 0.85f;
+			Kit.RoleName = TEXT("AIR STRIKE");
+			Kit.RoleLine = TEXT("fireballs from the sky");
+			Kit.RoleWeapon = TEXT("BLASTER");
+			Kit.Ability = ERRAbility::Flight;
+			Kit.AbilityPower = 5.f;
+			Kit.AbilityCooldown = 15.f;
+			Kit.AbilityLine = TEXT("fly 5s, shooting all the while");
+			break;
+		case RRSpecies::RedFox:
+			// Round 98: her own kit (the fox's passive and die, the fox's ultimate through GetKitSpecies), the ambush role
+			Kit = MakeKits(RRSpecies::Fox);
+			// (round 98 bot matches: the ambusher went down most: a little tougher, a longer disguise)
+			Kit.HealthScale = 0.95f;
+			Kit.MoveSpeedScale = 1.1f;
+			Kit.RoleName = TEXT("AMBUSH");
+			Kit.RoleLine = TEXT("dagger x2 from behind, passes for the other team");
+			Kit.RoleWeapon = TEXT("DAGGER");
+			Kit.Ability = ERRAbility::Disguise;
+			Kit.AbilityPower = 10.f;
+			Kit.AbilityCooldown = 16.f;
+			Kit.AbilityLine = TEXT("disguised 10s as the other team; striking ends it");
 			break;
 		case RRSpecies::Rat:
 		case RRSpecies::Cat:
@@ -86,7 +142,7 @@ namespace
 	}
 
 	// The red fox's is the fox's (RRSpecies::GetKitSpecies)
-	const FRRKit Kits[RRSpecies::AllCount] = { MakeKits(0), MakeKits(1), MakeKits(2), MakeKits(3), MakeKits(4), MakeKits(RRSpecies::Fox),
+	const FRRKit Kits[RRSpecies::AllCount] = { MakeKits(0), MakeKits(1), MakeKits(2), MakeKits(3), MakeKits(4), MakeKits(RRSpecies::RedFox),
 		MakeKits(RRSpecies::Rat), MakeKits(RRSpecies::Cat) };
 
 	// The invisible look (M_FXCloak): on the brawler's own screen and its teammates' a see-through body (outline plus some
@@ -126,6 +182,8 @@ void URRRandomKitComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(URRRandomKitComponent, ShieldMax);
 	DOREPLIFETIME(URRRandomKitComponent, ShieldRemaining);
 	DOREPLIFETIME(URRRandomKitComponent, MagnetRemaining);
+	DOREPLIFETIME_CONDITION(URRRandomKitComponent, AbilityCooldown, COND_OwnerOnly);
+	DOREPLIFETIME(URRRandomKitComponent, DisguiseRemaining);
 }
 
 void URRRandomKitComponent::BeginPlay()
@@ -185,6 +243,7 @@ void URRRandomKitComponent::ApplyOwnDie(int32 Face)
 void URRRandomKitComponent::ClearPowers()
 {
 	CloakRemaining = 0.f;
+	DisguiseRemaining = 0.f;
 	SuperHops = 0;
 	Shield = 0.f;
 	ShieldMax = 0.f;
@@ -196,6 +255,18 @@ void URRRandomKitComponent::ClearPowers()
 bool URRRandomKitComponent::IsHiddenFrom(int32 Team) const
 {
 	const ARRRandomCharacter* Brawler = GetBrawler();
+	// Round 98: a disguised red fox passes for one of theirs unless they stand right by her
+	if (IsDisguised() && Brawler && Brawler->GetTeam() != Team && GetWorld()->GetTimeSeconds() >= RevealUntil)
+	{
+		for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+		{
+			if (It->GetTeam() == Team && It->IsAlive() && FVector::Dist(It->GetActorLocation(), Brawler->GetActorLocation()) < DisguiseNoticeRange)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
 	if (!IsCloaked() || !Brawler || Brawler->GetTeam() == Team || GetWorld()->GetTimeSeconds() < RevealUntil)
 	{
 		return false;
@@ -212,6 +283,12 @@ bool URRRandomKitComponent::IsHiddenFrom(int32 Team) const
 
 void URRRandomKitComponent::OnShot()
 {
+	// (round 98: striking out of a disguise has the ambush bonus too)
+	if (IsDisguised())
+	{
+		DisguiseRemaining = 0.f;
+		AmbushUntil = GetWorld()->GetTimeSeconds() + AmbushWindow;
+	}
 	if (IsCloaked())
 	{
 		CloakRemaining = 0.f;
@@ -262,6 +339,8 @@ void URRRandomKitComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	if (GetOwner()->HasAuthority())
 	{
 		CloakRemaining = FMath::Max(0.f, CloakRemaining - DeltaTime);
+		DisguiseRemaining = FMath::Max(0.f, DisguiseRemaining - DeltaTime);
+		AbilityCooldown = FMath::Max(0.f, AbilityCooldown - DeltaTime);
 		if (Shield > 0.f)
 		{
 			ShieldRemaining -= DeltaTime;
@@ -281,6 +360,7 @@ void URRRandomKitComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	{
 		UpdateCloakLook(DeltaTime);
 		UpdateShieldLook(DeltaTime);
+		UpdateDisguiseLook();
 	}
 }
 
@@ -464,5 +544,100 @@ void URRRandomKitComponent::UpdateShieldLook(float DeltaTime)
 		const bool bEnding = ShieldRemaining < 3.f && FMath::Frac(GetWorld()->GetTimeSeconds() * 3.f) < 0.5f;
 		BubbleMaterial->SetScalarParameterValue(TEXT("Opacity"), (0.08f + 0.1f * Share) * (bEnding ? 0.4f : 1.f) + 0.3f * BubbleFlash);
 		BubbleMaterial->SetScalarParameterValue(TEXT("Glow"), 0.6f + 1.f * BubbleFlash);
+	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Round 98: the Q ability, the cards' powers, the disguise
+
+bool URRRandomKitComponent::UseAbility()
+{
+	ARRRandomCharacter* Brawler = GetBrawler();
+	const FRRKit& Own = GetKit();
+	if (!Brawler || !GetOwner()->HasAuthority() || !Brawler->IsAlive() || Own.Ability == ERRAbility::None || AbilityCooldown > 0.f
+		|| Brawler->IsUsingUltimate() || Brawler->GetVehicle() || Brawler->IsInRobot() || ARRRandomGameState::IsAttackLocked(this))
+	{
+		return false;
+	}
+	switch (Own.Ability)
+	{
+	case ERRAbility::Cloak:
+		CloakRemaining = FMath::Max(CloakRemaining, Own.AbilityPower);
+		break;
+	case ERRAbility::SuperHop:
+		SuperHops = FMath::Min(SuperHops + FMath::RoundToInt(Own.AbilityPower), RRKit::MaxSuperHops);
+		break;
+	case ERRAbility::AcornTrap:
+	{
+		// The oldest goes when a third is set
+		TArray<ARRRandomAcornTrap*> Mine;
+		for (TActorIterator<ARRRandomAcornTrap> It(GetWorld()); It; ++It)
+		{
+			if (It->GetOwner() == Brawler && !It->IsActorBeingDestroyed())
+			{
+				Mine.Add(*It);
+			}
+		}
+		if (Mine.Num() >= ARRRandomAcornTrap::MaxPerOwner)
+		{
+			Mine[0]->Destroy();
+		}
+		const FVector Feet = Brawler->GetActorLocation() - FVector(0.f, 0.f, Brawler->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() - 18.f);
+		FActorSpawnParameters Params;
+		Params.Owner = Brawler;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		if (!GetWorld()->SpawnActor<ARRRandomAcornTrap>(ARRRandomAcornTrap::StaticClass(), FTransform(Feet), Params))
+		{
+			return false;
+		}
+		break;
+	}
+	case ERRAbility::Giant:
+		Brawler->StartGiant(Own.AbilityPower);
+		break;
+	case ERRAbility::Flight:
+		Brawler->StartFlight(Own.AbilityPower);
+		break;
+	case ERRAbility::Disguise:
+		DisguiseRemaining = Own.AbilityPower;
+		break;
+	default:
+		return false;
+	}
+	AbilityCooldown = Own.AbilityCooldown;
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) uses %s."), *Brawler->GetName(), Brawler->GetTeam(), *RRRounds::GetAbilityName(Own.Ability));
+	return true;
+}
+
+void URRRandomKitComponent::GrantCloak(float Seconds)
+{
+	CloakRemaining = FMath::Max(CloakRemaining, Seconds);
+}
+
+void URRRandomKitComponent::GrantShield(float Amount, float Seconds)
+{
+	Shield = FMath::Max(Shield, Amount);
+	ShieldMax = Shield;
+	ShieldRemaining = FMath::Max(ShieldRemaining, Seconds);
+}
+
+void URRRandomKitComponent::OnRep_Disguise()
+{
+	UpdateDisguiseLook();
+}
+
+void URRRandomKitComponent::UpdateDisguiseLook()
+{
+	ARRRandomCharacter* Brawler = GetBrawler();
+	const bool bWanted = IsDisguised() && Brawler && Brawler->IsAlive();
+	if (!Brawler || bWanted == bDisguiseShown || !Brawler->HasActorBegunPlay())
+	{
+		return;
+	}
+	bDisguiseShown = bWanted;
+	Brawler->ApplyTeamColor();
+	if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+	{
+		Effects->FoxPoof(Brawler->GetActorLocation(), 0.6f);
 	}
 }

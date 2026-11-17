@@ -52,6 +52,9 @@ struct FRRMeleeFrame
 	const UAnimSequence* Guard = nullptr;
 	float GuardTime = 0.f;
 	float GuardWeight = 0.f;
+	/** Round 101: the arms' pose while carrying a hammer and a shield, and how much of it is on. */
+	const UAnimSequence* Carry = nullptr;
+	float CarryWeight = 0.f;
 	FVector Facing = FVector(0.f, 1.f, 0.f);
 	bool bGuarding = false;
 	float LowerBodyWeight = 0.f;

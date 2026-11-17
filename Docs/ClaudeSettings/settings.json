@@ -1,11 +1,16 @@
 {
+  "model": "claude-fable-5-2[1m]",
   "modelSettings": {
     "claude-opus-5-5": {
+      "effortLevel": "high"
+    },
+    "claude-fable-5-2": {
       "effortLevel": "high"
     }
   },
   "autoUpdatesChannel": "latest",
   "theme": "dark",
+  "agentPushNotifEnabled": true,
   "autoMode": {
     "environment": [
       "### Org-wide",
@@ -33,6 +38,5 @@
       "**Trusted repo**: The git repository at C:\\work (its working directory) — no remotes are currently configured",
       "**Org-specific CLIs**: None configured"
     ]
-  },
-  "agentPushNotifEnabled": true
+  }
 }

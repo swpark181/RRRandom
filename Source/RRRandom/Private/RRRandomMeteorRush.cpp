@@ -37,12 +37,12 @@ void ARRRandomMeteorRushDirector::Tick(float DeltaSeconds)
 	if (!bOvertime && Since >= NextMeteorTime - ARRRandomMeteor::WarnTime)
 	{
 		SpawnMeteor(false);
-		NextMeteorTime += MeteorInterval;
+		NextMeteorTime += Interval;
 	}
 	// And now and then a falling star (not too near a meteor's landing)
 	if (!bOvertime && Since >= NextStarTime)
 	{
-		if (FMath::Abs(Since - (NextMeteorTime - MeteorInterval)) > 2.f && FMath::Abs(Since - NextMeteorTime) > 2.f)
+		if (FMath::Abs(Since - (NextMeteorTime - Interval)) > 2.f && FMath::Abs(Since - NextMeteorTime) > 2.f)
 		{
 			DropFallingStar();
 		}
@@ -94,7 +94,7 @@ void ARRRandomMeteorRushDirector::Tick(float DeltaSeconds)
 	// Holding the goal, and more than the other team: counting down
 	const int32 Goal = State->GetScoreToWin();
 	const int32 Leader = Carried[0] >= Goal && Carried[0] > Carried[1] ? 0 : Carried[1] >= Goal && Carried[1] > Carried[0] ? 1 : INDEX_NONE;
-	UpdateHold(Leader, HoldSeconds);
+	UpdateHold(Leader, Hold);
 	if (State->IsMatchOver())
 	{
 		return;

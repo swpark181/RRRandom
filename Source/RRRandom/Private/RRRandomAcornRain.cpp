@@ -17,12 +17,19 @@ namespace
 	const FLinearColor NutColor(0.62f, 0.27f, 0.08f);
 	const FLinearColor CapColor(0.22f, 0.11f, 0.04f);
 	// Instances in flight at once, at most (AcornsPerSecond x FallTime, with room)
-	constexpr int32 MaxInFlight = 64;
+	constexpr int32 MaxInFlight = 110;
+	// Round 100 (the user: "다람쥐 궁극기는 오브젝트를 좀 더 이쁘게"): the nuts in three warm tones, now and then a bigger
+	// golden one that sparkles; each a little bigger or smaller than the next
+	const FLinearColor NutTones[] = { FLinearColor(0.62f, 0.27f, 0.08f), FLinearColor(0.8f, 0.43f, 0.12f), FLinearColor(0.5f, 0.2f, 0.07f) };
+	const FLinearColor GoldenNut(1.f, 0.7f, 0.1f);
+	const FLinearColor GoldenCap(0.62f, 0.36f, 0.05f);
+	constexpr float GoldenShare = 0.12f;
 }
 
 ARRRandomAcornRain::ARRRandomAcornRain()
 {
-	AreaRadius = 650.f;
+	// (round 100: twice as far across, the user's "범위를 두배로"; more acorns a second to go with it)
+	AreaRadius = 1300.f;
 	CursorHoloColor = FLinearColor(0.9f, 0.5f, 0.1f);
 	TargetHoloColor = FLinearColor(0.75f, 0.32f, 0.05f);
 
@@ -37,6 +44,8 @@ ARRRandomAcornRain::ARRRandomAcornRain()
 		Pool->SetUsingAbsoluteScale(true);
 		Pool->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Pool->SetCastShadow(false);
+		Pool->bAffectDistanceFieldLighting = false;
+		Pool->bAffectDynamicIndirectLighting = false;
 		Pool->NumCustomDataFloats = 3;
 		if (Mesh)
 		{
@@ -136,7 +145,7 @@ void ARRRandomAcornRain::TickUltimate(float DeltaSeconds)
 			// Down: a pop (and on the server, the hit); acorns land in order, near enough
 			if (Index == NextToLand)
 			{
-				LandAcorn(Where);
+				LandAcorn(Where, FRandomStream(RainSeed * 31 + Index * 131).FRand() < GoldenShare);
 				++NextToLand;
 			}
 			continue;
@@ -145,9 +154,25 @@ void ARRRandomAcornRain::TickUltimate(float DeltaSeconds)
 		const float Left01 = (LandTime - RainTime) / FallTime;
 		const FVector At = Where + FVector(0.f, 0.f, 25.f + DropHeight * Left01 * Left01);
 		const FRotator Turn(Spin * 40.f * Left01, Spin * 360.f * Left01, Spin * 30.f);
-		const FTransform Place(Turn, At, FVector(AcornScale));
+		// (its own look, the same on every machine)
+		const FRandomStream Look(RainSeed * 31 + Index * 131);
+		const bool bGolden = Look.FRand() < GoldenShare;
+		const float Size = bGolden ? 1.5f : Look.FRandRange(0.8f, 1.25f);
+		const FLinearColor Nut = bGolden ? GoldenNut : NutTones[Look.RandRange(0, UE_ARRAY_COUNT(NutTones) - 1)];
+		const FLinearColor Cap = bGolden ? GoldenCap : CapColor;
+		const FTransform Place(Turn, At, FVector(AcornScale * Size));
 		Nuts->UpdateInstanceTransform(Slot, Place, true, false, true);
 		Caps->UpdateInstanceTransform(Slot, Place, true, false, true);
+		const float NutData[] = { Nut.R, Nut.G, Nut.B };
+		const float CapData[] = { Cap.R, Cap.G, Cap.B };
+		Nuts->SetCustomData(Slot, MakeArrayView(NutData, 3));
+		Caps->SetCustomData(Slot, MakeArrayView(CapData, 3));
+		// A warm streak behind it as it comes down (a golden one's sparkles)
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			const float Was01 = FMath::Min(1.f, Left01 + DeltaSeconds / FallTime);
+			Effects->AcornFall(Where + FVector(0.f, 0.f, 25.f + DropHeight * Was01 * Was01), At, Size, bGolden, DeltaSeconds);
+		}
 		++Slot;
 	}
 	// The rest of the pool out of sight
@@ -172,11 +197,15 @@ void ARRRandomAcornRain::TickUltimate(float DeltaSeconds)
 	}
 }
 
-void ARRRandomAcornRain::LandAcorn(const FVector& Where)
+void ARRRandomAcornRain::LandAcorn(const FVector& Where, bool bGolden)
 {
 	if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
 	{
-		Effects->AcornPop(Where + FVector(0.f, 0.f, 20.f), 1.f);
+		Effects->AcornPop(Where + FVector(0.f, 0.f, 20.f), bGolden ? 1.7f : 1.f);
+		if (bGolden)
+		{
+			Effects->StarImpact(Where + FVector(0.f, 0.f, 20.f), FVector::UpVector, 1.2f, GoldenNut);
+		}
 	}
 	if (!HasAuthority() || !Brawler)
 	{

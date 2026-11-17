@@ -1,4 +1,6 @@
 #include "RRRandomStarRobot.h"
+#include "RRRandomMovementComponent.h"
+#include "RRRandomHUD.h"
 #include "RRRandomBattleRoyale.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomEffects.h"
@@ -471,6 +473,15 @@ ARRRandomStarRobot::ARRRandomStarRobot()
 	ClashLight->SetAttenuationRadius(ClashLightRadius);
 	ClashLight->SetCastShadows(false);
 	ClashLight->SetVisibility(false);
+	// Round 99: a red warning light in its chest, blinking once it is badly damaged (UpdateDamageLook)
+	DamageLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("DamageLight"));
+	DamageLight->SetupAttachment(Root);
+	DamageLight->SetRelativeLocation(FVector(60.f, 0.f, RobotHeight * 0.62f));
+	DamageLight->SetIntensityUnits(ELightUnits::Candelas);
+	DamageLight->SetAttenuationRadius(900.f);
+	DamageLight->SetLightColor(FLinearColor(1.f, 0.12f, 0.05f));
+	DamageLight->SetCastShadows(false);
+	DamageLight->SetVisibility(false);
 
 	// A glowing disc (a flattened ball in the cloak material), placed at the left fist every frame it's up
 	Shield = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Shield"));
@@ -1848,6 +1859,18 @@ FVector ARRRandomStarRobot::GetTopLocation() const
 void ARRRandomStarRobot::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	// Round 100: on the one who walks it, where that one is drawn (see ARRRandomVehicle::Tick: the capsule it hangs on
+	// jumps from one network update to the next on another machine, the glide evens that out)
+	if (const ARRRandomCharacter* Carrier = Cast<ARRRandomCharacter>(GetAttachParentActor()))
+	{
+		const URRRandomMovementComponent* CarrierMovement = Cast<URRRandomMovementComponent>(Carrier->GetCharacterMovement());
+		const FVector Glide = CarrierMovement && URRRandomMovementComponent::IsNetSmoothOn() ? CarrierMovement->GetNetSmoothOffset() : FVector::ZeroVector;
+		if (!Glide.IsNearlyZero() || bHadGlide)
+		{
+			SetActorRelativeLocation(FVector(0.f, 0.f, -Carrier->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight()) + Glide);
+			bHadGlide = !Glide.IsNearlyZero();
+		}
+	}
 	UWorld* World = GetWorld();
 	const float Elapsed = ServerNow(World) - CombineStartTime;
 
@@ -1948,13 +1971,90 @@ void ARRRandomStarRobot::Tick(float DeltaSeconds)
 	{
 		return;
 	}
+	UpdateOutline();
 	if (bAssembled)
 	{
 		PoseAssembled(DeltaSeconds);
+		UpdateDamageLook(DeltaSeconds);
 	}
 	else
 	{
 		PoseCombining(FMath::Clamp(Elapsed, 0.f, CombineSeconds), DeltaSeconds);
+	}
+}
+
+int32 ARRRandomStarRobot::GetDamageStage() const
+{
+	const float Share = MaxHealth > 0.f ? Health / MaxHealth : 1.f;
+	return !bAssembled || Share > 0.7f ? 0 : Share > 0.4f ? 1 : Share > 0.1f ? 2 : 3;
+}
+
+void ARRRandomStarRobot::UpdateDamageLook(float DeltaSeconds)
+{
+	// Round 99 (the user: "적 로보트도 HP는 보이지 않고 파괴 정도를 알 수 있는 디자인적 장치 … 30% 단위"): how hurt it is shows on
+	// the robot itself, a step every 30% of its health, on every screen (the other team sees no health bar): from 70% a
+	// thread of pale smoke off a shoulder and a spark now and then; from 40% thick dark smoke from its back too, crackling
+	// sparks and a slow red light in its chest; from 10% it burns, head and all, the light blinking fast. Each step down
+	// goes with a burst and a word over it
+	const int32 Stage = GetDamageStage();
+	ARRRandomEffects* Effects = ARRRandomEffects::Get(this);
+	const float Size = GetActorScale3D().Z;
+	const FVector Chest = GetActorLocation() + FVector(0.f, 0.f, RobotHeight * 0.62f * Size);
+	if (Stage > ShownDamageStage && Effects)
+	{
+		static const TCHAR* const Words[] = { TEXT(""), TEXT("CRACK!"), TEXT("BZZT!"), TEXT("ON FIRE!") };
+		const FLinearColor Colors[] = { FLinearColor::White, FLinearColor(1.f, 0.8f, 0.25f), FLinearColor(1.f, 0.5f, 0.15f), FLinearColor(1.f, 0.2f, 0.15f) };
+		Effects->RocketBlast(Chest + GetActorForwardVector() * HullRadius, GetActorForwardVector(), 0.45f + 0.2f * Stage);
+		ARRRandomHUD::PopComicWord(this, Words[Stage], GetTopLocation() + FVector(0.f, 0.f, 80.f), Colors[Stage], 1.1f + 0.15f * Stage);
+	}
+	ShownDamageStage = Stage;
+	if (Stage > 0 && Effects)
+	{
+		Effects->DamageSmoke((ShoulderL ? ShoulderL->GetComponentLocation() : Chest) + FVector(0.f, 0.f, 40.f * Size), 1.5f * Size, Stage, DeltaSeconds);
+		if (Stage >= 2)
+		{
+			Effects->DamageSmoke(Chest - GetActorForwardVector() * (HullRadius * 0.6f) * Size + FVector(0.f, 0.f, 90.f * Size), 1.9f * Size, Stage, DeltaSeconds);
+		}
+		if (Stage >= 3)
+		{
+			Effects->DamageSmoke(GetTopLocation() - FVector(0.f, 0.f, 50.f * Size), 1.4f * Size, Stage, DeltaSeconds);
+			Effects->DamageSmoke((ShoulderR ? ShoulderR->GetComponentLocation() : Chest) + FVector(0.f, 0.f, 40.f * Size), 1.3f * Size, 2, DeltaSeconds);
+		}
+	}
+	const bool bWarn = Stage >= 2;
+	if (DamageLight->IsVisible() != bWarn)
+	{
+		DamageLight->SetVisibility(bWarn);
+	}
+	if (bWarn)
+	{
+		const float Now = GetWorld()->GetTimeSeconds();
+		DamageLight->SetIntensity(Stage >= 3 ? 90.f * (0.25f + 0.75f * FMath::Abs(FMath::Sin(Now * 9.f))) : 40.f * (0.3f + 0.7f * FMath::Abs(FMath::Sin(Now * 2.5f))));
+	}
+}
+
+void ARRRandomStarRobot::UpdateOutline()
+{
+	// Round 99: the friend-or-foe line round it (M_PP_TeamOutline, like the animal friends'): 1 the viewer's team's (blue),
+	// 2 the other team's (red), 3 the one the viewer rides (no line); none while it is still coming together
+	const APlayerController* Local = GetWorld()->GetFirstPlayerController();
+	const ARRRandomCharacter* Viewer = Local ? Cast<ARRRandomCharacter>(Local->GetPawn()) : nullptr;
+	const int32 Wanted = !bAssembled ? 0 : Viewer && Viewer->GetRobot() == this ? 3 : (Viewer ? Viewer->GetTeam() : 0) == Team ? 1 : 2;
+	if (Wanted == OutlineStencil)
+	{
+		return;
+	}
+	OutlineStencil = Wanted;
+	TInlineComponentArray<UStaticMeshComponent*> Parts(this);
+	for (UStaticMeshComponent* Part : Parts)
+	{
+		// (not the glowing blade and shield: see-through, they'd draw a line round nothing)
+		if (Part == Shield || Part == SwordBlade || Part == SwordCore || CarMeshes.Contains(Part))
+		{
+			continue;
+		}
+		Part->SetRenderCustomDepth(Wanted != 0);
+		Part->SetCustomDepthStencilValue(Wanted);
 	}
 }
 

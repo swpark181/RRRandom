@@ -38,6 +38,11 @@ enum class ERRMatchRule : uint8
 	 * a shrinking ring of safe ground (ARRRandomBattleZone); the last team standing wins.
 	 */
 	BattleRoyale,
+	/**
+	 * Round 98, the main mode: three rounds of 3 vs 3 in the arena cut out of Dice Town, each round's rule picked by the rule
+	 * die (a deathmatch, most KO, a meteor round); two rounds win (RRRandomRounds.h).
+	 */
+	Rounds,
 };
 
 /** A game found online, for the title's room list (URRRandomSessionSubsystem::FindRooms). */
@@ -80,6 +85,8 @@ public:
 
 	/** Logs in if needed, finds a game and joins the first one. Retries a few times when nothing is found yet. */
 	void JoinGame(int32 Retries = 0);
+	/** Round 100: joins the game hosted at an address ("192.168.0.12" or "1.2.3.4:7777"), without the room search (-RRJoinIP=, RRJoinIP). */
+	void JoinAddress(const FString& Address);
 
 	/**
 	 * The title's room list (round 90): logs in if needed and looks for games without joining any; GetRooms has them once

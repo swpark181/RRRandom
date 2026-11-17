@@ -52,9 +52,9 @@ public:
 
 	/** How far to each side of the line the breath reaches: BaseBreathRadius, and BreathRadiusPerFace more for each pip. */
 	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
-	float BaseBreathRadius = 140.f;
+	float BaseBreathRadius = 280.f;
 	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
-	float BreathRadiusPerFace = 55.f;
+	float BreathRadiusPerFace = 110.f;
 
 	/** How high it flies over the floor: BaseHeight, and HeightPerScale more for each step of Scale. */
 	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
@@ -110,7 +110,14 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
 	float WreckStep = 450.f;
 	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
-	float WreckShare = 0.85f;
+	float WreckShare = 1.f;
+	/**
+	 * Round 100 (the user: "건물에 닿았을 때 좀 더 아래까지 파괴 … 지금은 지붕만 파괴됨"): a building whose roof the breath
+	 * takes off loses this many layers of blocks under the roof as well (4 = its top floor), over the roof's whole
+	 * footprint, not only the cells inside the breath.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
+	int32 RoofCrushLayers = 4;
 
 	/** Seconds flying away at the end. */
 	UPROPERTY(EditAnywhere, Category = "Dragon Flight")
@@ -193,6 +200,8 @@ private:
 	FVector OnLine(float Along) const;
 	/** Server, every frame of the pass and while the ground burns: the breath's front and the burning strip hurt enemies. */
 	void BurnEnemies(float DeltaSeconds);
+	/** Round 100: what is really under a spot of the line (a roof, a hill, a crater's floor), by a ray from the dragon's height. */
+	FVector GroundUnder(const FVector& Spot) const;
 	/** Lays a hologram strip on the floor from one spot to another, Radius to each side. */
 	void PlaceStrip(UStaticMeshComponent* Strip, const FVector& From, const FVector& To, float Radius) const;
 

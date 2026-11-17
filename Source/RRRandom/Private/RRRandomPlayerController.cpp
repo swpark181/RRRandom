@@ -1,4 +1,6 @@
 #include "RRRandomPlayerController.h"
+#include "RRRandomSpecies.h"
+#include "RRRandomRounds.h"
 #include "RRRandomBattleRoyale.h"
 #include "RRRandomFogOfWar.h"
 #include "RRRandomCannon.h"
@@ -24,6 +26,11 @@
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Engine/PostProcessVolume.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Camera/PlayerCameraManager.h"
@@ -44,6 +51,12 @@
 
 namespace
 {
+	// Round 100 (registered at startup, so -ExecCmds can set it)
+	TAutoConsoleVariable<int32> CVarTopViewCut(TEXT("rr.TopView.Cut"), 1, TEXT("0: the top view leaves roofs and walls over the animal friend on screen as they are (round 100 ghosts off)."));
+	TAutoConsoleVariable<int32> CVarTopViewCutTest(TEXT("rr.TopView.CutTest"), 0, TEXT("1: ghost what stands between the camera and my own animal friend, as when spectating (captures)."));
+	TAutoConsoleVariable<float> CVarLogHitches(TEXT("rr.LogHitches"), 0.f,
+		TEXT("Over 0: log each frame that takes longer than this many milliseconds of real time."));
+
 	constexpr float AimTraceDistance = 10000.f;
 	// Surfaces flatter than this count as somewhere a brawler could stand
 	constexpr float MinStandableNormalZ = 0.7f;
@@ -126,6 +139,30 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 	{
 		BagAction = NewObject<UInputAction>(this, TEXT("IA_Bag"));
 		BagAction->ValueType = EInputActionValueType::Boolean;
+	}
+	if (!AbilityAction)
+	{
+		AbilityAction = NewObject<UInputAction>(this, TEXT("IA_Ability"));
+		AbilityAction->ValueType = EInputActionValueType::Boolean;
+	}
+	if (!EmoteAction)
+	{
+		EmoteAction = NewObject<UInputAction>(this, TEXT("IA_Emote"));
+		EmoteAction->ValueType = EInputActionValueType::Boolean;
+	}
+	if (!DebugAction)
+	{
+		DebugAction = NewObject<UInputAction>(this, TEXT("IA_Debug"));
+		DebugAction->ValueType = EInputActionValueType::Boolean;
+	}
+	if (CardActions.IsEmpty())
+	{
+		for (int32 Card = 0; Card < RRRounds::CardsDealt; ++Card)
+		{
+			UInputAction* Action = NewObject<UInputAction>(this, *FString::Printf(TEXT("IA_Card%d"), Card + 1));
+			Action->ValueType = EInputActionValueType::Boolean;
+			CardActions.Add(Action);
+		}
 	}
 	if (HandActions.IsEmpty())
 	{
@@ -245,6 +282,15 @@ void ARRRandomPlayerController::CreateDefaultInputAssets()
 	MappingContext->MapKey(BagAction, EKeys::Tab);
 	MappingContext->MapKey(HandActions[0], EKeys::One);
 	MappingContext->MapKey(HandActions[1], EKeys::Two);
+	// Round 98
+	MappingContext->MapKey(AbilityAction, EKeys::Q);
+	MappingContext->MapKey(EmoteAction, EKeys::T);
+	MappingContext->MapKey(DebugAction, EKeys::F4);
+	const FKey CardKeys[] = { EKeys::One, EKeys::Two, EKeys::Three };
+	for (int32 Card = 0; Card < CardActions.Num() && Card < UE_ARRAY_COUNT(CardKeys); ++Card)
+	{
+		MappingContext->MapKey(CardActions[Card], CardKeys[Card]);
+	}
 	MappingContext->MapKey(SprintAction, EKeys::LeftShift);
 	MappingContext->MapKey(SprintAction, EKeys::RightShift);
 	MappingContext->MapKey(DescendAction, EKeys::LeftControl);
@@ -355,6 +401,14 @@ void ARRRandomPlayerController::SetupInputComponent()
 	{
 		EnhancedInput->BindAction(HandActions[Hand], ETriggerEvent::Started, this, &ARRRandomPlayerController::OnHand, Hand);
 	}
+	EnhancedInput->BindAction(AbilityAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnAbility);
+	EnhancedInput->BindAction(EmoteAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnEmoteStart);
+	EnhancedInput->BindAction(EmoteAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnEmoteStop);
+	EnhancedInput->BindAction(DebugAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnDebug);
+	for (int32 Card = 0; Card < CardActions.Num(); ++Card)
+	{
+		EnhancedInput->BindAction(CardActions[Card], ETriggerEvent::Started, this, &ARRRandomPlayerController::OnCardKey, Card);
+	}
 	EnhancedInput->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ARRRandomPlayerController::OnMove);
 	EnhancedInput->BindAction(JumpAction, ETriggerEvent::Started, this, &ARRRandomPlayerController::OnJump);
 	EnhancedInput->BindAction(JumpAction, ETriggerEvent::Completed, this, &ARRRandomPlayerController::OnStopJumping);
@@ -393,8 +447,22 @@ void ARRRandomPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
 
+#if !UE_BUILD_SHIPPING
+	// Round 99 (the user's frame drops): rr.LogHitches N logs every frame that took longer than N milliseconds of real time
+	// (the clock on the wall, so it works in a -benchmark bot match too), to line up with what the log says happened then
+	static double LastFrameAt = 0.0;
+	const double FrameAt = FPlatformTime::Seconds();
+	const float HitchLimit = CVarLogHitches.GetValueOnGameThread();
+	if (HitchLimit > 0.f && LastFrameAt > 0.0 && (FrameAt - LastFrameAt) * 1000.0 > HitchLimit && IsLocalController())
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: hitch, a frame of %.0f ms (game time %.2f)."), (FrameAt - LastFrameAt) * 1000.0, GetWorld()->GetTimeSeconds());
+	}
+	LastFrameAt = FrameAt;
+#endif
+
 	UpdateSprint();
 	UpdateWatching(DeltaTime);
+	UpdateTopViewCut(DeltaTime);
 	// Locked in a sword clash in the star robot: W A S D are the clash's keys (the robot can't walk meanwhile)
 	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()); Mine && Mine->IsInRobot() && Mine->GetRobot()->IsClashing() && !IsGameplayInputBlocked())
 	{
@@ -506,6 +574,151 @@ void ARRRandomPlayerController::PlayerTick(float DeltaTime)
 	{
 		UpdateStudioCam(DeltaTime);
 	}
+	// Round 98, the main mode: the killcam, and the next match by itself
+	if (IsLocalController() && ARRRandomGameState::IsRounds(this))
+	{
+		UpdateKillCam(DeltaTime);
+		UpdateNextMatch();
+		// -RRSpectate (a bot match): watch a blue bot standing, the next one when it goes down
+		const ARRRandomCharacter* Watching = Cast<ARRRandomCharacter>(GetViewTarget());
+		if (!GetPawn() && !ResultsDirector && !bStudioCam && (!Watching || !Watching->IsAlive()))
+		{
+			for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+			{
+				if (It->IsAlive() && It->GetTeam() == 0 && !It->IsDecoy())
+				{
+					SetViewTargetWithBlend(*It, 0.3f);
+					break;
+				}
+			}
+		}
+	}
+}
+
+void ARRRandomPlayerController::OnAbility()
+{
+	if (IsGameplayInputBlocked())
+	{
+		return;
+	}
+	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()); Mine && Mine->IsAlive())
+	{
+		Mine->UseAbility();
+	}
+}
+
+void ARRRandomPlayerController::OnEmoteStart()
+{
+	ARRRandomHUD* Hud = Cast<ARRRandomHUD>(GetHUD());
+	if (Hud && !bPauseMenuOpen && ARRRandomGameState::IsRounds(this) && !ARRRandomGameState::IsMatchOver(this))
+	{
+		Hud->SetEmoteWheel(true);
+	}
+}
+
+void ARRRandomPlayerController::OnEmoteStop()
+{
+	ARRRandomHUD* Hud = Cast<ARRRandomHUD>(GetHUD());
+	if (!Hud || !Hud->IsEmoteWheelOpen())
+	{
+		return;
+	}
+	const int32 Pick = Hud->GetEmotePick();
+	Hud->SetEmoteWheel(false);
+	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()); Mine && Pick > 0)
+	{
+		Mine->PlayEmote(Pick);
+	}
+}
+
+void ARRRandomPlayerController::OnDebug()
+{
+	if (ARRRandomHUD* Hud = Cast<ARRRandomHUD>(GetHUD()))
+	{
+		Hud->ToggleDebug();
+	}
+}
+
+void ARRRandomPlayerController::OnCardKey(int32 Index)
+{
+	// (Ctrl + a number is a gun cheat)
+	if (IsInputKeyDown(EKeys::LeftControl) || IsInputKeyDown(EKeys::RightControl) || bPauseMenuOpen)
+	{
+		return;
+	}
+	ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	if (Mine && Mine->IsAlive() && Mine->GetDiceBuffs() && Mine->GetDiceBuffs()->HasCards())
+	{
+		Mine->ChooseCard(Index);
+	}
+}
+
+void ARRRandomPlayerController::UpdateKillCam(float DeltaTime)
+{
+	const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	const ARRRandomCharacter* Killer = Mine ? Mine->GetLastKiller() : nullptr;
+	// Knocked out (a moment after, so the fall shows first) by someone still standing, and the match not over
+	const bool bWanted = Mine && !Mine->IsAlive() && Killer && Killer->IsAlive() && !ResultsDirector && !ARRRandomGameState::IsMatchOver(this)
+		&& Mine->GetRespawnTotal() - Mine->GetRespawnRemaining() > 0.9f && Mine->GetRespawnRemaining() > 0.35f;
+	if (!bWanted)
+	{
+		if (bKillCamOn)
+		{
+			bKillCamOn = false;
+			if (Mine && !ResultsDirector)
+			{
+				SetViewTargetWithBlend(const_cast<ARRRandomCharacter*>(Mine), 0.25f);
+			}
+		}
+		return;
+	}
+	if (!KillCam)
+	{
+		FActorSpawnParameters Params;
+		Params.Owner = this;
+		KillCam = GetWorld()->SpawnActor<ACameraActor>(Params);
+		if (!KillCam)
+		{
+			return;
+		}
+		KillCam->GetCameraComponent()->SetConstraintAspectRatio(false);
+		KillCam->GetCameraComponent()->SetFieldOfView(70.f);
+	}
+	// From my fallen side of the killer, a little off to one side, looking at it, turning slowly round it
+	const FVector Target = Killer->GetActorLocation() + FVector(0.f, 0.f, 40.f);
+	FVector From = (Mine->GetActorLocation() - Killer->GetActorLocation()).GetSafeNormal2D();
+	if (From.IsNearlyZero())
+	{
+		From = -Killer->GetActorForwardVector();
+	}
+	if (!bKillCamOn)
+	{
+		KillCamYaw = From.Rotation().Yaw + 25.f;
+	}
+	KillCamYaw += DeltaTime * 8.f;
+	const float Size = Killer->GetActorScale3D().Z;
+	const FVector Where = Target + FRotator(0.f, KillCamYaw, 0.f).Vector() * 560.f * Size + FVector(0.f, 0.f, 210.f * Size);
+	KillCam->SetActorLocationAndRotation(Where, (Target - Where).Rotation());
+	if (!bKillCamOn)
+	{
+		bKillCamOn = true;
+		SetViewTargetWithBlend(KillCam, 0.4f, VTBlend_EaseInOut, 2.f);
+	}
+}
+
+void ARRRandomPlayerController::UpdateNextMatch()
+{
+	const ARRRandomHUD* Hud = Cast<ARRRandomHUD>(GetHUD());
+	if (!ARRRandomGameState::IsMatchOver(this) || !GetWorld()->GetAuthGameMode() || !Hud || bNextMatchAsked)
+	{
+		return;
+	}
+	if (!Hud->IsFriendPickOpen() && Hud->GetResultsAge() >= RRRounds::NextMatchDelay)
+	{
+		bNextMatchAsked = true;
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: the next match starts by itself."));
+		RRNewGame();
+	}
 }
 
 void ARRRandomPlayerController::RRNewGame()
@@ -566,6 +779,25 @@ void ARRRandomPlayerController::OnClick()
 	case ERRResultsButton::Resume:
 		ClosePauseMenu();
 		break;
+	// Round 98: another animal friend for the next match (the host starts it at once; a joiner sends its pick with it)
+	case ERRResultsButton::ChangeFriend:
+		const_cast<ARRRandomHUD*>(Hud)->SetFriendPick(!Hud->IsFriendPickOpen());
+		break;
+	case ERRResultsButton::Friend:
+	{
+		const int32 Species = Hud->GetResultsButtonValueAt(FVector2D(MouseX, MouseY));
+		if (URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>(); Sessions && Species >= 0 && Species < RRSpecies::Count)
+		{
+			Sessions->SetSpecies(Species);
+			const_cast<ARRRandomHUD*>(Hud)->SetFriendPick(false);
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: the next match as the %s."), RRSpecies::GetAssetName(Species));
+			if (GetWorld()->GetAuthGameMode())
+			{
+				RRNewGame();
+			}
+		}
+		break;
+	}
 	case ERRResultsButton::NewGame:
 		RRNewGame();
 		break;
@@ -749,8 +981,8 @@ void ARRRandomPlayerController::ServerPickStart_Implementation(int32 Spot)
 
 void ARRRandomPlayerController::OnCheatGun(int32 Type)
 {
-	// The battle royale (round 97): 1 and 2 are the hands; a gun cheat there takes Ctrl
-	if (ARRRandomGameState::IsBattleRoyale(this) && !(IsInputKeyDown(EKeys::LeftControl) || IsInputKeyDown(EKeys::RightControl)))
+	// The battle royale (round 97): 1 and 2 are the hands; a gun cheat there takes Ctrl (round 98: the main mode 1-3 are the cards)
+	if ((ARRRandomGameState::IsBattleRoyale(this) || ARRRandomGameState::IsRounds(this)) && !(IsInputKeyDown(EKeys::LeftControl) || IsInputKeyDown(EKeys::RightControl)))
 	{
 		return;
 	}
@@ -1181,6 +1413,11 @@ void ARRRandomPlayerController::ServerCheatRival_Implementation(const FString& W
 	{
 		Rival->CheatHurt(40.f);
 	}
+	// (round 99: "hurt55" leaves it 55% of its health, to look at each damage stage)
+	else if (What.StartsWith(TEXT("hurt")))
+	{
+		Rival->CheatHurt(Rival->GetMaxHealth() * FMath::Clamp(FCString::Atof(*What.RightChop(4)), 1.f, 100.f) / 100.f);
+	}
 #endif
 }
 
@@ -1197,6 +1434,99 @@ void ARRRandomPlayerController::ServerCheatRobotShield_Implementation(float Seco
 	{
 		Robot->CheatShield(Seconds);
 	}
+#endif
+}
+
+void ARRRandomPlayerController::RRStrike(float Ahead)
+{
+	// Round 100, for scripted captures: my ultimate's click, this far ahead of where my animal friend faces
+	const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	if (Mine && Mine->GetUltimate() && Mine->GetUltimate()->IsPicking())
+	{
+		ServerUltimateStrike(Mine->GetActorLocation() + Mine->GetActorForwardVector().GetSafeNormal2D() * Ahead);
+	}
+}
+
+void ARRRandomPlayerController::RRLook(float Roughness, float Sun, float Sky, float Contrast, float Saturation, float Exposure)
+{
+#if !UE_BUILD_SHIPPING
+	// Round 101, for proposal captures only (nothing here is the game's look until someone decides so): the town's blocks
+	// as glossy as Roughness (their own is 0.6; under 0 leaves them), the sun and the sky this many times as bright, and
+	// this screen's contrast, saturation and exposure
+	UWorld* World = GetWorld();
+	static TMap<TWeakObjectPtr<ULightComponent>, float> SunWas;
+	static TMap<TWeakObjectPtr<USkyLightComponent>, float> SkyWas;
+	int32 Sets = 0;
+	if (Roughness >= 0.f)
+	{
+		for (TActorIterator<ARRRandomDiceTown> Town(World); Town; ++Town)
+		{
+			TInlineComponentArray<UInstancedStaticMeshComponent*> All(*Town);
+			for (UInstancedStaticMeshComponent* Instances : All)
+			{
+				UMaterialInterface* Material = Instances->GetMaterial(0);
+				const UMaterial* Base = Material ? Material->GetMaterial() : nullptr;
+				if (!Base || Base->GetName() != TEXT("M_BTBlock"))
+				{
+					continue;
+				}
+				UMaterialInstanceDynamic* Dynamic = Cast<UMaterialInstanceDynamic>(Material);
+				if (!Dynamic)
+				{
+					Dynamic = Instances->CreateDynamicMaterialInstance(0);
+				}
+				float Now = 0.f;
+				// (the plaza's mirror tiles, the dice and the puddles are glossier already: only the plain blocks change)
+				static TSet<TWeakObjectPtr<UMaterialInstanceDynamic>> Changed;
+				if (Dynamic && (Changed.Contains(Dynamic) || !Dynamic->GetScalarParameterValue(TEXT("Roughness"), Now) || Now > 0.3f))
+				{
+					Changed.Add(Dynamic);
+					Dynamic->SetScalarParameterValue(TEXT("Roughness"), Roughness);
+					++Sets;
+				}
+			}
+		}
+	}
+	for (TObjectIterator<UDirectionalLightComponent> It; It; ++It)
+	{
+		if (It->GetWorld() == World && It->Mobility != EComponentMobility::Static)
+		{
+			const float Was = SunWas.FindOrAdd(*It, It->Intensity);
+			It->SetIntensity(Was * Sun);
+		}
+	}
+	for (TObjectIterator<USkyLightComponent> It; It; ++It)
+	{
+		if (It->GetWorld() == World && It->Mobility != EComponentMobility::Static)
+		{
+			const float Was = SkyWas.FindOrAdd(*It, It->Intensity);
+			It->SetIntensity(Was * Sky);
+		}
+	}
+	{
+		// Over every camera (the studio camera of a capture too): a volume without bounds
+		static TWeakObjectPtr<APostProcessVolume> Volume;
+		if (!Volume.IsValid() || Volume->GetWorld() != World)
+		{
+			Volume = World->SpawnActor<APostProcessVolume>();
+		}
+		FPostProcessSettings Grade;
+		Grade.bOverride_ColorContrast = true;
+		Grade.ColorContrast = FVector4(Contrast, Contrast, Contrast, 1.f);
+		Grade.bOverride_ColorSaturation = true;
+		Grade.ColorSaturation = FVector4(Saturation, Saturation, Saturation, 1.f);
+		Grade.bOverride_AutoExposureBias = Exposure != 0.f;
+		Grade.AutoExposureBias = Exposure;
+		if (Volume.IsValid())
+		{
+			Volume->bUnbound = true;
+			Volume->Priority = 100.f;
+			Volume->BlendWeight = 1.f;
+			Volume->Settings = Grade;
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: look test: roughness %.2f on %d block sets, sun x%.2f, sky x%.2f, contrast %.2f, saturation %.2f, exposure %+.2f."),
+		Roughness, Sets, Sun, Sky, Contrast, Saturation, Exposure);
 #endif
 }
 
@@ -1245,6 +1575,56 @@ void ARRRandomPlayerController::RRShoot()
 		}
 	}
 	RandomCharacter->FireAt(Target);
+}
+
+void ARRRandomPlayerController::RRAbility()
+{
+	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		Mine->UseAbility();
+	}
+}
+
+void ARRRandomPlayerController::RRCard(int32 Number)
+{
+	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		Mine->ChooseCard(Number - 1);
+	}
+}
+
+void ARRRandomPlayerController::RREmote(int32 Number)
+{
+	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		Mine->PlayEmote(Number);
+	}
+}
+
+void ARRRandomPlayerController::RRJump()
+{
+	OnJump();
+}
+
+void ARRRandomPlayerController::RRJumpStop()
+{
+	OnStopJumping();
+}
+
+void ARRRandomPlayerController::RRDeal()
+{
+	ServerDeal();
+}
+
+void ARRRandomPlayerController::ServerDeal_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		Mine->GetDiceBuffs()->AddCharge();
+		Mine->GetDiceBuffs()->RollDice();
+	}
+#endif
 }
 
 void ARRRandomPlayerController::OnCheatStarCarsKey()
@@ -1492,6 +1872,14 @@ void ARRRandomPlayerController::RRJoin()
 	}
 }
 
+void ARRRandomPlayerController::RRJoinIP(const FString& Address)
+{
+	if (URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>())
+	{
+		Sessions->JoinAddress(Address);
+	}
+}
+
 void ARRRandomPlayerController::RRLeave()
 {
 	if (URRRandomSessionSubsystem* Sessions = GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>())
@@ -1703,6 +2091,12 @@ void ARRRandomPlayerController::OnLook(const FInputActionValue& Value)
 	const float Sensitivity = LookSensitivity * (RandomCharacter && RandomCharacter->IsAimingDownSights() ? SightsSensitivity : 1.f);
 	// A jump of the pointer (taking the mouse back, a window switch) is not a turn
 	const FVector2D Delta = Value.Get<FVector2D>().ClampAxes(-MaxLookDelta, MaxLookDelta);
+	// Round 98: with the emote wheel open the mouse points at a slice instead of turning (screen Y down)
+	if (ARRRandomHUD* WheelHud = Cast<ARRRandomHUD>(GetHUD()); WheelHud && WheelHud->IsEmoteWheelOpen())
+	{
+		WheelHud->AddEmoteAim(FVector2D(Delta.X, -Delta.Y) * 3.f);
+		return;
+	}
 	AddYawInput(Delta.X * Sensitivity);
 	// Mouse up looks up
 	AddPitchInput(-Delta.Y * Sensitivity);
@@ -2086,6 +2480,93 @@ void ARRRandomPlayerController::ClientTeamOut_Implementation(int32 Place, int32 
 	TeamOutPlace = Place;
 	TeamOutOf = Teams;
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: my team is out, #%d of %d."), Place, Teams);
+}
+
+void ARRRandomPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	TopViewCut.Restore();
+	Super::EndPlay(EndPlayReason);
+}
+
+void ARRRandomPlayerController::UpdateTopViewCut(float DeltaTime)
+{
+	// Round 100 (the user: "탑뷰일 때 내가 보는 캐릭터가 건물에 들어가도 캐릭터가 보이게"): in the top view the roof and the
+	// floors over the animal friend on this screen (mine, or the one I watch while knocked out), and the tops of the walls
+	// on the camera's side, are put away and drawn as faint ghosts while they stand between it and the camera
+	// (FRRViewCut: drawn pieces only, on this machine only). The walls' bottom row stays, so the room still reads.
+	if (!IsLocalController())
+	{
+		return;
+	}
+	const ARRRandomCharacter* Seen = Cast<ARRRandomCharacter>(GetViewTarget());
+	// Round 101 (the user: "죽은 뒤 타 캐릭터 화면 볼 때 캐릭터가 건물에 가려질 때 건물을 반투명으로"): knocked out, the
+	// screen shows someone else: the one who did it, from a camera that circles it straight through walls (UpdateKillCam),
+	// or in the battle royale a teammate (UpdateWatching). What stands between that camera and them is ghosted the same way
+	const ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	bool bSpectating = false;
+	if (bKillCamOn && KillCam && Mine && Mine->GetLastKiller())
+	{
+		Seen = Mine->GetLastKiller();
+		bSpectating = true;
+	}
+	else if (Seen && Mine && Seen != Mine && !Mine->IsAlive())
+	{
+		bSpectating = true;
+	}
+	// (rr.TopView.CutTest 1, for captures: my own animal friend seen from whatever camera is on, as if spectated)
+	if (CVarTopViewCutTest.GetValueOnGameThread() != 0 && Mine && Mine->IsAlive())
+	{
+		Seen = Mine;
+		bSpectating = true;
+	}
+	const bool bWanted = Seen && Seen->IsAlive() && (bSpectating || !Seen->IsThirdPerson()) && !Seen->IsInRobot() && !ResultsDirector && !bStudioCam && PlayerCameraManager
+		&& CVarTopViewCut.GetValueOnGameThread() != 0;
+	if (!bWanted)
+	{
+		if (TopViewCut.Num() > 0)
+		{
+			TopViewCut.Restore();
+		}
+		return;
+	}
+	// (ten times a second is plenty: pieces come and go a wall at a time)
+	TopViewCutTimer -= DeltaTime;
+	if (TopViewCutTimer > 0.f)
+	{
+		return;
+	}
+	TopViewCutTimer = 0.1f;
+	const float Body = Seen->GetActorScale3D().Z;
+	const float HalfHeight = Seen->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	const FVector Middle = Seen->GetActorLocation();
+	// The body from head to knees, and a little room round it
+	TArray<FVector, TInlineAllocator<8>> Spots;
+	Spots.Add(Middle + FVector(0.f, 0.f, HalfHeight * 0.9f));
+	Spots.Add(Middle);
+	for (int32 Side = 0; Side < 4; ++Side)
+	{
+		Spots.Add(Middle + FRotator(0.f, 45.f + 90.f * Side, 0.f).Vector() * (TopViewCutRoom * Body));
+	}
+	// (the circling camera itself, not the view on its way there)
+	const FVector Eye = bKillCamOn && KillCam ? KillCam->GetActorLocation() : PlayerCameraManager->GetCameraLocation();
+	FRRViewCut::FParams Params;
+	if (bSpectating)
+	{
+		// From the side: everything over knee height on the lines goes, walls on the floor it stands on too; the lines stop
+		// short of it, so what it leans on stays
+		Params.Radius = 25.f;
+		Params.EndGap = 80.f * Body;
+		Params.MinTop = Middle.Z - HalfHeight + 45.f * Body;
+		Params.GhostOpacity = TopViewGhostOpacity;
+		TopViewCut.Update(this, MakeArrayView(&Eye, 1), Spots, Params);
+		return;
+	}
+	Params.Radius = 15.f;
+	// What stands on the floor it stands on stays (the walls' bottom row, the furniture), unless it is much taller than it
+	Params.MinBottom = Middle.Z - HalfHeight + 60.f;
+	Params.TallTop = Middle.Z + HalfHeight + 30.f * Body;
+	Params.GhostOpacity = TopViewGhostOpacity;
+	TopViewCut.Update(this, MakeArrayView(&Eye, 1), Spots, Params);
 }
 
 void ARRRandomPlayerController::UpdateWatching(float DeltaTime)

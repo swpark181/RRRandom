@@ -162,7 +162,8 @@ void URRRandomSessionSubsystem::RunStartupCommand()
 	{
 		MatchRule = RuleName.Equals(TEXT("MeteorRush"), ESearchCase::IgnoreCase) ? ERRMatchRule::MeteorRush
 			: RuleName.Equals(TEXT("Defense"), ESearchCase::IgnoreCase) ? ERRMatchRule::Defense
-			: RuleName.Equals(TEXT("BattleRoyale"), ESearchCase::IgnoreCase) ? ERRMatchRule::BattleRoyale : ERRMatchRule::Knockout;
+			: RuleName.Equals(TEXT("BattleRoyale"), ESearchCase::IgnoreCase) ? ERRMatchRule::BattleRoyale
+			: RuleName.Equals(TEXT("Rounds"), ESearchCase::IgnoreCase) ? ERRMatchRule::Rounds : ERRMatchRule::Knockout;
 	}
 	// -RRBRTest: the battle royale's test level (and its rule)
 	if (FParse::Param(FCommandLine::Get(), TEXT("RRBRTest")))
@@ -193,6 +194,10 @@ void URRRandomSessionSubsystem::RunStartupCommand()
 	else if (FParse::Param(FCommandLine::Get(), TEXT("RRJoin")))
 	{
 		JoinGame(StartupJoinRetries);
+	}
+	else if (FString JoinAddressArg; FParse::Value(FCommandLine::Get(), TEXT("RRJoinIP="), JoinAddressArg))
+	{
+		JoinAddress(JoinAddressArg);
 	}
 	else if (FParse::Param(FCommandLine::Get(), TEXT("RRSolo")) && IsOnTitle())
 	{
@@ -227,6 +232,27 @@ void URRRandomSessionSubsystem::JoinGame(int32 Retries)
 	RoomToJoin = INDEX_NONE;
 	bJoinFromRooms = false;
 	Continue();
+}
+
+void URRRandomSessionSubsystem::JoinAddress(const FString& Address)
+{
+	// Round 100: straight to a host's address, without looking for its room. The room list finds LAN games by broadcast,
+	// which doesn't cross the internet or most VPNs; the address does (the host's port 7777, UDP, has to be reachable)
+	FString Url = Address.TrimStartAndEnd();
+	if (IsBusy() || Url.IsEmpty())
+	{
+		return;
+	}
+	if (!Url.Contains(TEXT(":")))
+	{
+		Url += TEXT(":7777");
+	}
+	SetStatus(FString::Printf(TEXT("Connecting to %s"), *Url));
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: joining the game at %s."), *Url);
+	if (APlayerController* Controller = GetGameInstance()->GetFirstLocalPlayerController())
+	{
+		Controller->ClientTravel(Url, TRAVEL_Absolute);
+	}
 }
 
 void URRRandomSessionSubsystem::FindRooms()
@@ -509,7 +535,7 @@ void URRRandomSessionSubsystem::OnFindSessionsComplete(bool bWasSuccessful)
 			Room.Players = FMath::Max(1, Room.MaxPlayers - Result.Session.NumOpenPublicConnections);
 			int32 Rule = 0;
 			Result.Session.SessionSettings.Get(RuleKey, Rule);
-			Room.Rule = static_cast<ERRMatchRule>(FMath::Clamp(Rule, 0, static_cast<int32>(ERRMatchRule::BattleRoyale)));
+			Room.Rule = static_cast<ERRMatchRule>(FMath::Clamp(Rule, 0, static_cast<int32>(ERRMatchRule::Rounds)));
 			Result.Session.SessionSettings.Get(StageKey, Room.Stage);
 			Room.SearchIndex = Index;
 		}

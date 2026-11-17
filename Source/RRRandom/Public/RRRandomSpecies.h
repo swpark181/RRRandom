@@ -116,6 +116,20 @@ struct FRRSpeciesLook
 	UPROPERTY()
 	TObjectPtr<UAnimSequence> SwordParry;
 
+	/** Round 98: the emote wheel's motions (A_<Name>_Emote<Wave|Clap|Cheer|Laugh|Dance|Taunt>; missing ones are null). */
+	UPROPERTY()
+	TArray<TObjectPtr<UAnimSequence>> Emotes;
+	/** Round 98: the tiger's hammer blow and the red fox's dagger stab (Tripo text-to-motion), when imported. */
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> HammerSwings[3];
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> DaggerStabs[3];
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> ShieldBlock;
+	/** Round 101: the arms while carrying the hammer and the shield (one held pose). */
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> ShieldCarry;
+
 	/** The mesh's scale on the brawler (all about the fox's size). */
 	UPROPERTY()
 	float MeshScale = 1.f;

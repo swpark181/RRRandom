@@ -48,7 +48,7 @@ public:
 
 	/** Sprinting on foot: this many times the walking speed (the character says when it may: not on a vehicle etc.). */
 	UPROPERTY(EditAnywhere, Category = "Sprint", meta = (ClampMin = "1"))
-	float SprintSpeedScale = 1.5f;
+	float SprintSpeedScale = 1.7f;
 
 	/** Sprinting right now: wanted, allowed, and on the ground or in a jump. */
 	bool IsSprinting() const;
@@ -56,6 +56,30 @@ public:
 	virtual float GetMaxSpeed() const override;
 	virtual void UpdateFromCompressedFlags(uint8 Flags) override;
 	virtual FNetworkPredictionData_Client* GetPredictionData_Client() const override;
+
+	/**
+	 * Round 100 (the user: "네트워크 플레이에 지연율이 올라갈때 끊기는 모습을 줄일 수 있도록"). Another machine's animal friend
+	 * is shown where the last update put it and run on from there; when the next update disagrees, the body glides over to
+	 * it instead of jumping (the engine's mesh smoothing). Two things made that jump show:
+	 * - the brawler set its body's place itself every frame (the seat on a ride, a landing's crouch), wiping out the
+	 *   glide's offset: PlaceBodyMesh now adds the two, and is run again after the engine's own (SmoothClientPosition);
+	 * - the glide's time and reach are fixed for a good connection (0.1 s, 256): with lag and jitter the corrections are
+	 *   bigger and came as snaps. UpdateNetSmoothing stretches both with the connection's measured lag and jitter.
+	 * rr.Net.Smooth 0 turns both off (to compare); rr.Net.LogSmooth 1 logs how far other bodies jump each second.
+	 */
+	virtual void SmoothClientPosition(float DeltaSeconds) override;
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	/** The glide's offset now, in the capsule's own frame (zero when there is none): the body's, and what rides on it. */
+	FVector GetNetSmoothOffset() const;
+	/** Seconds of lag over a good connection's, with jitter counted double: what the smoothing stretches with. */
+	float GetNetTrouble() const { return NetTrouble; }
+	static bool IsNetSmoothOn();
+	static bool IsNetSmoothLogged();
+
+private:
+	void UpdateNetSmoothing(float DeltaTime);
+	float NetSmoothingTimer = 0.f;
+	float NetTrouble = 0.f;
 };
 
 /** A saved move that remembers the sprint, so replayed moves and the server see it. */

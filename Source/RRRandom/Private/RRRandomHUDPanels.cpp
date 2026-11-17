@@ -15,6 +15,7 @@
 #include "RRRandomOre.h"
 #include "RRRandomPlaneStation.h"
 #include "RRRandomPlayerController.h"
+#include "RRRandomRounds.h"
 #include "RRRandomStarRobot.h"
 #include "RRRandomUIStyle.h"
 #include "RRRandomWeapon.h"
@@ -136,9 +137,10 @@ void ARRRandomHUD::DrawCountdown(const ARRRandomGameState& State)
 	const float Remaining = State.GetCountdownRemaining();
 	const float S = UIScale;
 	const float CenterX = Canvas->ClipX * 0.5f;
-	const float Y = Canvas->ClipY * 0.28f;
+	// (round 98: the main mode's round intro has the rule die up top: the count goes lower, and only its last seconds)
+	const float Y = Canvas->ClipY * (State.IsRounds() ? 0.62f : 0.28f);
 	const float NumberSize = 96.f * S;
-	if (Remaining > 0.f)
+	if (Remaining > 0.f && !(State.IsRounds() && Remaining > RRRounds::IntroCountdown))
 	{
 		// GET READY over a big number that pops in at the start of each second and settles
 		const int32 Number = FMath::CeilToInt(Remaining);

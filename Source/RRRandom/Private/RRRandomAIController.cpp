@@ -1,4 +1,7 @@
 #include "RRRandomAIController.h"
+#include "Misc/ScopeExit.h"
+#include "RRRandomRounds.h"
+#include "RRRandomKit.h"
 #include "RRRandomBattleRoyale.h"
 #include "RRRandomCannon.h"
 #include "RRRandomMovementComponent.h"
@@ -38,6 +41,12 @@ namespace
 	constexpr float DistanceSlack = 150.f;
 	constexpr float ArenaCenterArriveRadius = 200.f;
 	constexpr float CoverArriveRadius = 40.f;
+	// Round 99: Meteor Rush ore this near is fetched before anything else (a fight, a reload)
+	constexpr float OreGrabDistance = 2200.f;
+	// A meteor coming down (or still throwing) is worth this much of a detour over a piece of ore lying about
+	constexpr float MeteorGoalBonus = 1500.f;
+	// (round 99) further than this from the cover spot, the way to it is a route
+	constexpr float CoverRouteDistance = 220.f;
 	// Pause before rolling dice, so bots don't react on the very same frame
 	constexpr float DiceReactionMin = 0.2f;
 	constexpr float DiceReactionMax = 0.8f;
@@ -69,6 +78,17 @@ namespace
 	constexpr float RouteStuckJumpTime = 0.5f;
 	// Onto the navmesh: the bot's feet from this close; a goal (maybe up in the air: a flyer, a jump) from this far round it
 	const FVector NavFeetExtent(200.f, 200.f, 400.f);
+	// Round 99: the feet count as on the navmesh within this of it; how far ahead a route's walker looks for a ledge or a
+	// wall; no second ledge jump within this long; a route that ended short is asked for again after this long
+	const FVector NavOnMeshExtent(70.f, 70.f, 60.f);
+	constexpr float LedgeLookAhead = 28.f;
+	constexpr float LedgeJumpGap = 0.6f;
+	// A bot climbs what rises no more than this over its middle by itself (a block and a bit: what the navmesh takes for a
+	// step); a body perched in the air on something it can't stand on hops off this fast (flat, up)
+	constexpr float BotClimbRise = 135.f;
+	constexpr float PerchHopSpeed = 260.f;
+	constexpr float PerchHopLift = 300.f;
+	constexpr float RouteEndRefreshTime = 0.4f;
 	const FVector NavGoalExtent(400.f, 400.f, 1500.f);
 	// Between bursts with this few rounds left, the bot reloads instead of running dry mid-fight
 	constexpr int32 LowAmmo = 3;
@@ -132,6 +152,34 @@ namespace
 		const FVector Offset = FVector(-Ahead.Y, Ahead.X, 0.f) * ShotSide + FVector(0.f, 0.f, ShotHeight);
 		return World->SweepTestByObjectType(From + Offset, To + Offset, FQuat::Identity, FCollisionObjectQueryParams(ECC_WorldStatic),
 			FCollisionShape::MakeSphere(Radius), FCollisionQueryParams(SCENE_QUERY_STAT(RRRandomCoverSweep), false));
+	}
+
+	/**
+	 * Round 99: what really stops this body going Way, asked the way its movement asks (the capsule's own channel and
+	 * responses: walls, the arena's fence, rides, other animal friends), from a step up so the floor and low steps don't
+	 * count. Reach: how far past the capsule to look.
+	 */
+	bool FindBlocker(const ARRRandomCharacter* Self, const FVector& Way, float Reach, FHitResult& OutHit)
+	{
+		const UCapsuleComponent* Capsule = Self->GetCapsuleComponent();
+		const float Lift = Self->GetCharacterMovement()->MaxStepHeight + 5.f;
+		const float Radius = Capsule->GetScaledCapsuleRadius() * 0.95f;
+		const float HalfHeight = FMath::Max(Radius, Capsule->GetScaledCapsuleHalfHeight() - Lift * 0.5f);
+		const FVector From = Self->GetActorLocation() + FVector(0.f, 0.f, Lift * 0.5f);
+		const FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomBlocker), false, Self);
+		return Self->GetWorld()->SweepSingleByChannel(OutHit, From, From + Way.GetSafeNormal2D() * Reach, FQuat::Identity, Capsule->GetCollisionObjectType(),
+			FCollisionShape::MakeCapsule(Radius, HalfHeight), Params, FCollisionResponseParams(Capsule->GetCollisionResponseToChannels())) && OutHit.bBlockingHit;
+	}
+
+	FString DescribeBlocker(const ARRRandomCharacter* Self, const FVector& Way)
+	{
+		FHitResult Hit;
+		if (!FindBlocker(Self, Way, 70.f, Hit))
+		{
+			return TEXT("nothing");
+		}
+		return FString::Printf(TEXT("%s.%s normal %s %s"), *GetNameSafe(Hit.GetActor()), *GetNameSafe(Hit.GetComponent()), *Hit.ImpactNormal.ToCompactString(),
+			Hit.bStartPenetrating ? TEXT("(inside it)") : TEXT(""));
 	}
 }
 
@@ -316,8 +364,9 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
 		if (Map)
 		{
-			PatrolGoal = Map->GetRandomWalkSpot(Stream, RoutePatrolRadius);
-			PatrolTimer = RoutePatrolTime;
+			// (round 98: the main mode keeps inside its arena's fence)
+			PatrolGoal = Map->GetRandomWalkSpot(Stream, ARRRandomGameState::IsRounds(this) ? RRRounds::ArenaHalf - 400.f : RoutePatrolRadius);
+			PatrolTimer = ARRRandomGameState::IsRounds(this) ? RoutePatrolTime * 0.5f : RoutePatrolTime;
 		}
 		else if (bRoutes && Nav && Nav->GetRandomPointInNavigableRadius(ArenaCenter, PatrolRadiusMax, NavSpot))
 		{
@@ -377,9 +426,10 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	UpdateReload(Self, bCanSee && Distance <= Self->GetAttackRange());
 	// The light sword (round 97): shot at from further than a swing reaches, on guard (while focus lasts) to send the shots back
 	// at the shooter; down again up close (to swing) or out of focus
-	if (Self->GetWeapon().bSword && Target && bCanSee)
+	// (round 98: the hammer's shield too, the same way)
+	if (Self->CanGuard() && Target && bCanSee)
 	{
-		const bool bWant = Distance > FRRWeapon::SwordReach * 1.6f && UnderFireTimer > 0.f
+		const bool bWant = Distance > Self->GetWeapon().GetMeleeReach() * 1.6f && UnderFireTimer > 0.f
 			&& Self->GetDeflectFocus() >= (Self->IsDeflecting() ? 0.3f : 1.5f);
 		if (bWant != Self->IsDeflecting())
 		{
@@ -395,11 +445,24 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		Self->SetDeflecting(false, SelfLocation);
 	}
 	UpdateDice(Self, Distance, DeltaSeconds);
+	// Round 98, the main mode: the card to keep, and the Q ability
+	if (ARRRandomGameState::IsRounds(this))
+	{
+		UpdateCards(Self, Distance, DeltaSeconds);
+		UpdateAbility(Self, Target, Distance, bCanSee, DeltaSeconds);
+	}
 	UpdateFlight(Self, Distance, DeltaSeconds);
 
 	// Hide while reloading or hurt (or keeping the team's winning ore safe); otherwise fight
-	const bool bWantsCover = Target && (bRetreating || bGuardingOre || Self->IsReloading() || (UnderFireTimer > 0.f && HealthShare < UnderFireCoverHealthShare));
+	// Round 99 (the user: "메테오 게임에서 봇이 운석 드랍을 줍는 우선순위 추가. 지금은 먹으러 안 가는것 같다"): ore lying within
+	// OreGrabDistance comes before the fight: the bot goes and gets it, shooting on the way, where it used to stand and
+	// trade shots with whoever was in sight (and hide to reload) while the meteor's drops lay there. Only a bot that is
+	// badly hurt, or keeping the team's winning ore safe, still looks after itself first
+	const bool bOreNear = bHasRushGoal && bRushOre && FVector::Dist2D(SelfLocation, RushGoal) <= OreGrabDistance;
+	const bool bHurtUnderFire = UnderFireTimer > 0.f && HealthShare < UnderFireCoverHealthShare;
+	const bool bWantsCover = Target && (bRetreating || bGuardingOre || bHurtUnderFire || (Self->IsReloading() && !bOreNear));
 	FVector Wanted = FVector::ZeroVector;
+	bool bCoverRoute = false;
 	if (bWantsCover)
 	{
 		CoverSearchTimer -= DeltaSeconds;
@@ -418,6 +481,13 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		{
 			const FVector ToSpot = CoverSpot - SelfLocation;
 			Wanted = ToSpot.Size2D() > CoverArriveRadius ? ToSpot.GetSafeNormal2D() : FVector::ZeroVector;
+			// Round 99: round the walls to it where the map has routes (it used to be walked at in a straight line, the
+			// cover itself often in the way); the last stretch straight
+			if (bRoutes && ToSpot.Size2D() > CoverRouteDistance)
+			{
+				Wanted = FollowRoute(Self, CoverSpot - FVector(0.f, 0.f, Self->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()), DeltaSeconds, true);
+				bCoverRoute = true;
+			}
 		}
 		else
 		{
@@ -432,7 +502,7 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		Wanted = ChooseFightDirection(Self, Target, Distance, bCanSee);
 	}
 	// Meteor Rush: the ore (or home with it) unless an opponent is in sight and in range
-	const bool bRushing = bHasRushGoal && !bWantsCover && !(Target && bCanSee && Distance <= Self->GetAttackRange() * ShootRangeShare);
+	const bool bRushing = bHasRushGoal && !bWantsCover && (bOreNear || !(Target && bCanSee && Distance <= Self->GetAttackRange() * ShootRangeShare));
 	if (bRushing && !bRoutes)
 	{
 		const FVector ToGoal = RushGoal - (SelfLocation - FVector(0.f, 0.f, Self->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
@@ -440,7 +510,7 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	}
 	// On a map with routes, out of a close fight: along the route to the opponent, where it was last seen, or the roaming
 	// spot (feet heights)
-	bool bOnRoute = false;
+	bool bOnRoute = bCoverRoute;
 	if (bRoutes && !bWantsCover && (bRushing ||!(Target && bCanSee && Distance <= Self->GetAttackRange() * PreferredShare + DistanceSlack)))
 	{
 		// (the battle royale: into the ring first when it is urgent, whoever is about)
@@ -452,7 +522,7 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 		Wanted = FollowRoute(Self, Goal, DeltaSeconds);
 		bOnRoute = true;
 	}
-	else
+	else if (!bCoverRoute)
 	{
 		RouteStuckTimer = 0.f;
 	}
@@ -464,22 +534,26 @@ void ARRRandomAIController::Tick(float DeltaSeconds)
 	}
 	else if (!UpdateStarRobot(Self, bInFight, Wanted, bOnRoute, DeltaSeconds))
 	{
-		UpdateVehicles(Self, Target, bInFight, Wanted, DeltaSeconds);
+		UpdateVehicles(Self, Target, bInFight, Wanted, bOnRoute, DeltaSeconds);
 	}
 
+	MoveMode = bOnRoute ? TEXT("route") : bWantsCover ? TEXT("cover") : bRushing ? TEXT("rush") : Target ? TEXT("fight") : TEXT("roam");
 	// (a route already goes round walls, and its stairs would look like walls to the steering's probe)
 	// (On a route the push away from teammates is weak: in a lane between walls it would only shove them into the walls)
-	const FVector Move = Unstick(Self, (bOnRoute ? Wanted : SteerAroundObstacles(Self, Wanted)) + GetSeparation(Self) * (bOnRoute ? RouteSeparationShare : 1.f), DeltaSeconds);
+	// (round 99: unless the route itself says it can't be walked blind this frame, FollowRoute's bRouteSteer)
+	const bool bBlind = bOnRoute && !bRouteSteer;
+	const FVector Move = Unstick(Self, (bBlind ? Wanted : SteerAroundObstacles(Self, Wanted)) + GetSeparation(Self) * (bOnRoute ? RouteSeparationShare : 1.f), DeltaSeconds);
 	if (bBattle)
 	{
 		UpdateSprint(Self, bInFight || (Target && bCanSee), Move);
 	}
+	ClimbLedgeAhead(Self, Move);
 	BadCoverTimer -= DeltaSeconds;
 	if (!Move.IsNearlyZero())
 	{
 		Self->AddMovementInput(Move.GetSafeNormal2D());
 	}
-	WatchProgress(Self, Move, bOnRoute ? TEXT("route") : bWantsCover ? TEXT("cover") : bRushing ? TEXT("rush") : Target ? TEXT("fight") : TEXT("roam"), DeltaSeconds);
+	WatchProgress(Self, Move, MoveMode, DeltaSeconds);
 
 	if (bCanSee && ReactionTimer <= 0.f)
 	{
@@ -496,6 +570,7 @@ void ARRRandomAIController::UpdateRushGoal(const ARRRandomCharacter* Self, float
 	}
 	RushTimer = 0.3f;
 	bHasRushGoal = false;
+	bRushOre = false;
 	bGuardingOre = false;
 	const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
 	const URRRandomOreCarryComponent* Carry = Self->GetOreCarry();
@@ -515,8 +590,11 @@ void ARRRandomAIController::UpdateRushGoal(const ARRRandomCharacter* Self, float
 	}
 
 	// The best ore in reach: near, and worth more (a crystal is worth a detour; overtime's golden one, any)
+	UNavigationSystemV1* RushNav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+	const ANavigationData* RushNavData = RushNav ? RushNav->GetDefaultNavDataInstance(FNavigationSystem::DontCreate) : nullptr;
 	const bool bBigMap = Town.IsValid();
-	const float Reach = bBigMap ? 6500.f : 3500.f;
+	// (round 99: anywhere in the main mode's arena, 9200 across)
+	const float Reach = bBigMap ? 9500.f : 3500.f;
 	float Best = UE_BIG_NUMBER;
 	for (TActorIterator<ARRRandomOre> It(GetWorld()); It; ++It)
 	{
@@ -524,6 +602,16 @@ void ARRRandomAIController::UpdateRushGoal(const ARRRandomCharacter* Self, float
 		if (Distance > Reach && It->GetKind() != ERROreKind::Golden)
 		{
 			continue;
+		}
+		// (round 99: nor ore that came to rest where there is no walking to it, on a map with a navmesh: a bot under it
+		// only hops; one in the air, on its way down, is fine)
+		if (RushNav && RushNavData && It->IsResting() && It->GetKind() != ERROreKind::Golden)
+		{
+			FNavLocation OnMesh;
+			if (!RushNav->ProjectPointToNavigation(It->GetActorLocation(), OnMesh, FVector(110.f, 110.f, 130.f), RushNavData))
+			{
+				continue;
+			}
 		}
 		// Off a map with walking routes, bots don't climb: ore up on a block or a hill is left to the players
 		if (!bBigMap && It->IsResting() && It->GetKind() != ERROreKind::Golden && It->GetActorLocation().Z - Feet.Z > 90.f)
@@ -536,14 +624,12 @@ void ARRRandomAIController::UpdateRushGoal(const ARRRandomCharacter* Self, float
 			Best = Score;
 			RushGoal = It->GetActorLocation();
 			bHasRushGoal = true;
+			bRushOre = true;
 		}
 	}
-	if (bHasRushGoal)
-	{
-		return;
-	}
-
-	// Else a meteor on its way or still throwing: wait just outside where it lands
+	// A meteor on its way or still throwing: wait just outside where it lands. Round 99: it counts for more than a stray
+	// piece far off (it used to be gone to only when no ore lay anywhere in reach, so the bots were rarely there when it
+	// came down and the drops went to whoever was)
 	for (TActorIterator<ARRRandomMeteor> It(GetWorld()); It; ++It)
 	{
 		if (!It->IsActive())
@@ -552,11 +638,12 @@ void ARRRandomAIController::UpdateRushGoal(const ARRRandomCharacter* Self, float
 		}
 		const FVector Spot = It->GetActorLocation();
 		const float Distance = FVector::Dist2D(Feet, Spot);
-		if (Distance > Reach * 1.5f || Distance >= Best)
+		if (Distance > Reach * 1.5f || Distance - MeteorGoalBonus >= Best)
 		{
 			continue;
 		}
-		Best = Distance;
+		Best = Distance - MeteorGoalBonus;
+		bRushOre = true;
 		const FVector Out = Distance > 1.f ? (Feet - Spot).GetSafeNormal2D() : FVector(1.f, 0.f, 0.f);
 		RushGoal = It->GetTimeToImpact() > 0.3f ? Spot + Out * (ARRRandomMeteor::ImpactRadius + 120.f) : Spot;
 		bHasRushGoal = true;
@@ -601,12 +688,39 @@ FVector ARRRandomAIController::GetTravelGoal(const ARRRandomCharacter* Self, con
 	return bHasArenaCenter ? PatrolGoal : Self->GetActorLocation();
 }
 
-FVector ARRRandomAIController::FollowRoute(ARRRandomCharacter* Self, const FVector& Goal, float DeltaSeconds)
+void ARRRandomAIController::SwapErrandRoute()
 {
+	Swap(Route, ErrandRoute.Route);
+	Swap(RouteIndex, ErrandRoute.RouteIndex);
+	Swap(RouteGoal, ErrandRoute.RouteGoal);
+	Swap(RouteTimer, ErrandRoute.RouteTimer);
+	Swap(RouteStuckTimer, ErrandRoute.RouteStuckTimer);
+	Swap(bNavRoute, ErrandRoute.bNavRoute);
+	Swap(bRouteOffMesh, ErrandRoute.bRouteOffMesh);
+	Swap(bRoutePartial, ErrandRoute.bRoutePartial);
+}
+
+FVector ARRRandomAIController::FollowRoute(ARRRandomCharacter* Self, const FVector& Goal, float DeltaSeconds, bool bErrand)
+{
+	// (an errand's route has its own memory: swapped in for this call)
+	if (bErrand)
+	{
+		SwapErrandRoute();
+	}
+	ON_SCOPE_EXIT
+	{
+		if (bErrand)
+		{
+			SwapErrandRoute();
+		}
+	};
 	const ARRRandomDiceTown* Map = Town.Get();
 	const FVector Feet = Self->GetActorLocation() - FVector(0.f, 0.f, Self->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 	RouteTimer -= DeltaSeconds;
-	if (HasRoutes() && (RouteTimer <= 0.f || RouteIndex >= Route.Num() || FVector::Dist(Goal, RouteGoal) > RouteRefreshDistance))
+	// (round 99: at the end of a route that stops short of the goal a new one is asked for a couple of times a second, not
+	// every frame)
+	if (HasRoutes() && (RouteTimer <= 0.f || FVector::Dist(Goal, RouteGoal) > RouteRefreshDistance
+		|| (RouteIndex >= Route.Num() && RouteTimer <= RouteRefreshTime - RouteEndRefreshTime)))
 	{
 		RouteTimer = RouteRefreshTime;
 		RouteGoal = Goal;
@@ -619,7 +733,9 @@ FVector ARRRandomAIController::FollowRoute(ARRRandomCharacter* Self, const FVect
 		{
 			NavGoal = Feet + (Goal - Feet).GetSafeNormal2D() * 5000.f;
 		}
-		bNavRoute = FindNavRoute(Feet, NavGoal, Route);
+		bRouteOffMesh = false;
+		bRoutePartial = false;
+		bNavRoute = FindNavRoute(Feet, NavGoal, Route, bRouteOffMesh, bRoutePartial);
 		if (!bNavRoute && !(Map && Map->FindPath(Feet, Goal, Route)))
 		{
 			Route.Reset();
@@ -632,13 +748,31 @@ FVector ARRRandomAIController::FollowRoute(ARRRandomCharacter* Self, const FVect
 	}
 	const FVector Next = Route.IsValidIndex(RouteIndex) ? Route[RouteIndex] : Goal;
 	const FVector Toward = Next - Feet;
+	// Round 99: where the route can't be walked blind, the steering takes it: no route at all, a start off the navmesh (the
+	// first corner may be on the floor below, a wall between), the stretch past the end of a route that stops short
+	bRouteSteer = Route.Num() == 0 || bRouteOffMesh || (RouteIndex >= Route.Num() && bRoutePartial);
 	if (Toward.Size2D() < RouteArriveRadius)
 	{
 		RouteStuckTimer = 0.f;
 		return FVector::ZeroVector;
 	}
+	const UCharacterMovementComponent* Movement = Self->GetCharacterMovement();
+	const bool bOnFoot = !Self->GetVehicle() && !Self->GetRobot() && !Self->IsClimbing() && Movement->IsMovingOnGround();
+	// Something solid right ahead on the way (not another animal friend: the push apart sees to those): a ledge the route
+	// goes up is climbed at once (it used to be pushed at for half a second first); anything else is steered round, and
+	// another route asked for soon
+	FHitResult Ahead;
+	if (bOnFoot && FindBlocker(Self, Toward, LedgeLookAhead, Ahead) && !Cast<ARRRandomCharacter>(Ahead.GetActor()))
+	{
+		// (a ledge it can climb is climbed, by the tick: ClimbLedgeAhead)
+		if (!Self->CanClimbToward(Toward, 0.f, BotClimbRise))
+		{
+			bRouteSteer = true;
+			RouteTimer = FMath::Min(RouteTimer, RouteEndRefreshTime);
+		}
+	}
 	// Stopped against something: jump (at a ledge a jump climbs it), and soon look for another route
-	const bool bStopped = Self->GetVelocity().Size2D() < StuckSpeed && !Self->GetVehicle();
+	const bool bStopped = Self->GetVelocity().Size2D() < StuckSpeed && !Self->GetVehicle() && !Self->IsClimbing();
 	RouteStuckTimer = bStopped ? RouteStuckTimer + DeltaSeconds : 0.f;
 	if (RouteStuckTimer >= RouteStuckJumpTime)
 	{
@@ -659,13 +793,20 @@ bool ARRRandomAIController::HasRoutes() const
 	return Nav && Nav->GetDefaultNavDataInstance() != nullptr;
 }
 
-bool ARRRandomAIController::FindNavRoute(const FVector& Feet, const FVector& Goal, TArray<FVector>& OutPoints) const
+bool ARRRandomAIController::FindNavRoute(const FVector& Feet, const FVector& Goal, TArray<FVector>& OutPoints, bool& bOutOffMesh, bool& bOutPartial) const
 {
 	UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
 	const ANavigationData* Data = Nav ? Nav->GetDefaultNavDataInstance(FNavigationSystem::DontCreate) : nullptr;
 	FNavLocation Start;
 	FNavLocation End;
-	if (!Data || !Nav->ProjectPointToNavigation(Feet, Start, NavFeetExtent, Data) || !Nav->ProjectPointToNavigation(Goal, End, NavGoalExtent, Data))
+	if (!Data)
+	{
+		return false;
+	}
+	// (round 99: right under the feet first. The wide look that follows finds the navmesh from a roof's trim or a block's
+	// top too, but perhaps a floor down or the far side of a wall: the route is then marked as starting off the navmesh)
+	bOutOffMesh = !Nav->ProjectPointToNavigation(Feet, Start, NavOnMeshExtent, Data);
+	if ((bOutOffMesh && !Nav->ProjectPointToNavigation(Feet, Start, NavFeetExtent, Data)) || !Nav->ProjectPointToNavigation(Goal, End, NavGoalExtent, Data))
 	{
 		return false;
 	}
@@ -676,6 +817,7 @@ bool ARRRandomAIController::FindNavRoute(const FVector& Feet, const FVector& Goa
 	{
 		return false;
 	}
+	bOutPartial = Result.IsPartial();
 	const TArray<FNavPathPoint>& Points = Result.Path->GetPathPoints();
 	OutPoints.Reset(Points.Num());
 	for (int32 Index = 1; Index < Points.Num(); ++Index)
@@ -761,7 +903,7 @@ bool ARRRandomAIController::UpdateStarRobot(ARRRandomCharacter* Self, bool bInFi
 			const FVector Toward = ToRival.GetSafeNormal();
 			if (HasRoutes() && ToRival.Size() > RobotDuelDistance * 3.f)
 			{
-				Wanted = FollowRoute(Self, Rival->GetActorLocation(), DeltaSeconds);
+				Wanted = FollowRoute(Self, Rival->GetActorLocation(), DeltaSeconds, true);
 				bOnRoute = true;
 			}
 			else
@@ -799,7 +941,7 @@ bool ARRRandomAIController::UpdateStarRobot(ARRRandomCharacter* Self, bool bInFi
 		{
 			if (HasRoutes())
 			{
-				Wanted = FollowRoute(Self, Gathered, DeltaSeconds);
+				Wanted = FollowRoute(Self, Gathered, DeltaSeconds, true);
 				bOnRoute = true;
 			}
 			else
@@ -831,7 +973,7 @@ bool ARRRandomAIController::UpdateStarRobot(ARRRandomCharacter* Self, bool bInFi
 	// A map with walking routes: along them, round the walls (to its feet), the last stretch straight at it
 	if (HasRoutes() && Distance > ARRRandomStarRobot::BoardReach * 1.6f)
 	{
-		Wanted = FollowRoute(Self, Robot->GetActorLocation(), DeltaSeconds);
+		Wanted = FollowRoute(Self, Robot->GetActorLocation(), DeltaSeconds, true);
 		bOnRoute = true;
 		return true;
 	}
@@ -840,7 +982,7 @@ bool ARRRandomAIController::UpdateStarRobot(ARRRandomCharacter* Self, bool bInFi
 	return true;
 }
 
-bool ARRRandomAIController::UpdateVehicles(ARRRandomCharacter* Self, const ARRRandomCharacter* Target, bool bInFight, FVector& Wanted, float DeltaSeconds)
+bool ARRRandomAIController::UpdateVehicles(ARRRandomCharacter* Self, const ARRRandomCharacter* Target, bool bInFight, FVector& Wanted, bool& bOnRoute, float DeltaSeconds)
 {
 	const FVector Location = Self->GetActorLocation();
 	// Defense (round 90): villains are about all the time, so the bots stay on foot by the tower (the rides are the players')
@@ -913,7 +1055,16 @@ bool ARRRandomAIController::UpdateVehicles(ARRRandomCharacter* Self, const ARRRa
 		Self->ToggleRide();
 		return false;
 	}
+	// Round 99: over to it along a route where the map has them (it used to walk straight at it, through whatever wall
+	// stood between, for up to eight seconds); the last stretch straight, steered
+	if (HasRoutes() && ToRide.Size2D() > ARRRandomVehicle::MountRange * 2.f)
+	{
+		Wanted = FollowRoute(Self, Ride->GetActorLocation() - FVector(0.f, 0.f, Self->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()), DeltaSeconds, true);
+		bOnRoute = true;
+		return true;
+	}
 	Wanted = ToRide.GetSafeNormal2D();
+	bOnRoute = false;
 	return true;
 }
 
@@ -1088,6 +1239,12 @@ FVector ARRRandomAIController::SteerAroundObstacles(const ARRRandomCharacter* Se
 	{
 		return Direction;
 	}
+	// Round 99: a ledge ahead that a jump will climb is walked straight at (ClimbLedgeAhead takes it), not gone round: in
+	// a crater dug by a blast a bot off the navmesh ran round and round the pit's wall instead of climbing out
+	if (Self->GetCharacterMovement()->IsMovingOnGround() && Self->CanClimbToward(Direction, AvoidProbeDistance, BotClimbRise))
+	{
+		return Direction;
+	}
 
 	// Turn further and further aside, keeping to the side that worked last time so the bot doesn't dither
 	for (const float Angle : AvoidAngles)
@@ -1115,14 +1272,14 @@ bool ARRRandomAIController::IsWayClear(const ARRRandomCharacter* Self, const FVe
 	const float Lift = Self->GetCharacterMovement()->MaxStepHeight + 5.f;
 	const float HalfHeight = FMath::Max(Radius, Capsule->GetScaledCapsuleHalfHeight() - Lift * 0.5f);
 	const FVector From = Self->GetActorLocation() + FVector(0.f, 0.f, Lift * 0.5f);
-	FCollisionObjectQueryParams Objects(ECC_WorldStatic);
-	Objects.AddObjectTypesToQuery(ECC_WorldDynamic);
+	// (round 99: asked the way the body's own movement asks, by its channel and responses: the main mode's fence, which
+	// stops animal friends only, and parked rides were not seen before, and bots walked into them for good)
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomSteer), false, Self);
 	FHitResult Hit;
-	const bool bHit = GetWorld()->SweepSingleByObjectType(Hit, From, From + Direction.GetSafeNormal2D() * Distance, FQuat::Identity, Objects,
-		FCollisionShape::MakeCapsule(Radius, HalfHeight), Params);
-	// (Shots fly as world dynamic too; one passing by isn't a wall)
-	const bool bBlocked = bHit && !(Hit.GetActor() && Hit.GetActor()->IsA<ARRRandomProjectile>());
+	const bool bHit = GetWorld()->SweepSingleByChannel(Hit, From, From + Direction.GetSafeNormal2D() * Distance, FQuat::Identity, Capsule->GetCollisionObjectType(),
+		FCollisionShape::MakeCapsule(Radius, HalfHeight), Params, FCollisionResponseParams(Capsule->GetCollisionResponseToChannels()));
+	// (Shots fly as world dynamic too; one passing by isn't a wall. Nor is another animal friend: they step apart)
+	const bool bBlocked = bHit && !(Hit.GetActor() && (Hit.GetActor()->IsA<ARRRandomProjectile>() || Hit.GetActor()->IsA<ARRRandomCharacter>()));
 	if (OutHit)
 	{
 		*OutHit = Hit;
@@ -1130,15 +1287,56 @@ bool ARRRandomAIController::IsWayClear(const ARRRandomCharacter* Self, const FVe
 	return !bBlocked;
 }
 
+void ARRRandomAIController::ClimbLedgeAhead(ARRRandomCharacter* Self, const FVector& Move)
+{
+	// Round 99 (the user: "벽으로 계속 이동하려는 문제"): walking into something a jump climbs (a block, a ledge the route goes
+	// up, a crater's rim), whatever it is walking for, the bot jumps now: its jump is the climb (ARRRandomCharacter::Jump).
+	// It used to push at the ledge for half a second, till it counted as stopped, before trying
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (Move.IsNearlyZero() || Now < NextLedgeJumpTime || Self->GetVehicle() || Self->GetRobot() || Self->IsClimbing() || Self->IsUsingUltimate()
+		|| !Self->GetCharacterMovement()->IsMovingOnGround())
+	{
+		return;
+	}
+	FHitResult Ahead;
+	if (FindBlocker(Self, Move, LedgeLookAhead, Ahead) && !Cast<ARRRandomCharacter>(Ahead.GetActor()) && Self->CanClimbToward(Move, 0.f, BotClimbRise))
+	{
+		NextLedgeJumpTime = Now + LedgeJumpGap;
+		// (the climb looks along the last movement input: this frame's, so it is the way the ledge was found)
+		Self->AddMovementInput(Move.GetSafeNormal2D());
+		Self->Jump();
+	}
+}
+
 FVector ARRRandomAIController::Unstick(ARRRandomCharacter* Self, const FVector& Move, float DeltaSeconds)
 {
+	// Round 99: perched in the air on something it can't stand on (a roof's trim, a prop's top: the movement keeps it
+	// "falling" there, where neither walking nor jumping works), barely moving: a little hop off, the way it wants to go
+	const UCharacterMovementComponent* Movement = Self->GetCharacterMovement();
+	if (Movement->IsFalling() && !Self->IsClimbing() && !Self->IsInFlight() && !Self->GetVehicle() && !Self->GetRobot() && !Move.IsNearlyZero()
+		&& Self->GetVelocity().Size() < StuckSpeed)
+	{
+		PerchedTimer += DeltaSeconds;
+		if (PerchedTimer >= WedgedTime)
+		{
+			PerchedTimer = 0.f;
+			Self->LaunchCharacter(Move.GetSafeNormal2D() * PerchHopSpeed + FVector(0.f, 0.f, PerchHopLift), true, true);
+			UE_CLOG(CVarLogStalls.GetValueOnGameThread() != 0, LogTemp, Log, TEXT("RRRandom: bot perched: %s at %s hops off."), *Self->GetName(), *Self->GetActorLocation().ToCompactString());
+		}
+	}
+	else
+	{
+		PerchedTimer = 0.f;
+	}
 	if (DetourTimer > 0.f)
 	{
 		DetourTimer -= DeltaSeconds;
 		return DetourWay;
 	}
 	// (In the air too: a bot hopping against a wall it can't climb is as stuck as one pushing it; not flying, though)
-	const bool bTrying = !Move.IsNearlyZero() && !Self->GetVehicle() && !Self->GetRobot() && !Self->IsUsingUltimate() && !Self->IsInFlight()
+	// (round 99: nor climbing: the climb moves the body itself, at no speed the movement knows of, and every one of them
+	// counted as a wedge, sending the bot off sideways as it got to the top)
+	const bool bTrying = !Move.IsNearlyZero() && !Self->GetVehicle() && !Self->GetRobot() && !Self->IsUsingUltimate() && !Self->IsInFlight() && !Self->IsClimbing()
 		&& Self->GetCharacterMovement()->MaxWalkSpeed > 1.f;
 	WedgedTimer = bTrying && Self->GetVelocity().Size2D() < StuckSpeed ? WedgedTimer + DeltaSeconds : 0.f;
 	if (WedgedTimer < WedgedTime)
@@ -1153,7 +1351,8 @@ FVector ARRRandomAIController::Unstick(ARRRandomCharacter* Self, const FVector& 
 	const FVector Want = Move.GetSafeNormal2D();
 	FHitResult Hit;
 	FVector Away = FVector::ZeroVector;
-	if (!IsWayClear(Self, Want, Self->GetCapsuleComponent()->GetScaledCapsuleRadius() + 60.f, &Hit) && Hit.bBlockingHit)
+	// (round 99: what the body's own movement runs into, the arena's fence and parked rides too, not only world static)
+	if (FindBlocker(Self, Want, 60.f, Hit) && !Hit.bStartPenetrating)
 	{
 		Away = Hit.ImpactNormal.GetSafeNormal2D();
 	}
@@ -1187,8 +1386,10 @@ FVector ARRRandomAIController::Unstick(ARRRandomCharacter* Self, const FVector& 
 		RouteTimer = 0.f;
 		StrafeSign = -StrafeSign;
 	}
-	UE_CLOG(CVarLogStalls.GetValueOnGameThread() != 0, LogTemp, Log, TEXT("RRRandom: bot unstick: %s at %s goes %s for %.1f s (try %d, blocked by %s)."),
-		*Self->GetName(), *Self->GetActorLocation().ToCompactString(), *DetourWay.ToCompactString(), DetourTime, WedgeCount, *GetNameSafe(Hit.GetActor()));
+	UE_CLOG(CVarLogStalls.GetValueOnGameThread() != 0, LogTemp, Log, TEXT("RRRandom: bot unstick: %s (%s) at %s wanted %s goes %s for %.1f s (try %d, blocked by %s; really %s; %s, route %d/%d %s next %s)."),
+		*Self->GetName(), MoveMode, *Self->GetActorLocation().ToCompactString(), *Want.ToCompactString(), *DetourWay.ToCompactString(), DetourTime, WedgeCount, *GetNameSafe(Hit.GetActor()),
+		*DescribeBlocker(Self, Want), Self->GetCharacterMovement()->IsMovingOnGround() ? TEXT("on ground") : TEXT("in the air"), RouteIndex, Route.Num(),
+		bNavRoute ? TEXT("navmesh") : TEXT("graph"), Route.IsValidIndex(RouteIndex) ? *Route[RouteIndex].ToCompactString() : TEXT("-"));
 	return DetourWay;
 }
 
@@ -1202,6 +1403,26 @@ void ARRRandomAIController::WatchProgress(const ARRRandomCharacter* Self, const 
 		ProgressTimer = 0.f;
 		bStallLogged = false;
 		return;
+	}
+	// Round 99: how much of its walking the bot spends getting nowhere, and how much of that pushing at a wall (logged now
+	// and then with the stalls, to compare builds)
+	if (CVarLogStalls.GetValueOnGameThread() != 0)
+	{
+		WalkSeconds += DeltaSeconds;
+		if (Self->GetVelocity().Size2D() < StuckSpeed && !Self->IsClimbing())
+		{
+			StoppedSeconds += DeltaSeconds;
+			FHitResult Wall;
+			if (FindBlocker(Self, Move, 30.f, Wall) && !Cast<ARRRandomCharacter>(Wall.GetActor()))
+			{
+				PushSeconds += DeltaSeconds;
+			}
+		}
+		if (WalkSeconds >= NextWalkReport)
+		{
+			NextWalkReport = WalkSeconds + 20.f;
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: bot walk: %s walked %.1f s, stopped %.1f s, pushing at a wall %.1f s."), *Self->GetName(), WalkSeconds, StoppedSeconds, PushSeconds);
+		}
 	}
 	ProgressTimer += DeltaSeconds;
 	if (FVector::Dist2D(Location, ProgressFrom) >= StallDistance)
@@ -1256,12 +1477,12 @@ void ARRRandomAIController::WatchProgress(const ARRRandomCharacter* Self, const 
 		}
 	}
 	const FVector Next = Route.IsValidIndex(RouteIndex) ? Route[RouteIndex] : FVector::ZeroVector;
-	UE_LOG(LogTemp, Log, TEXT("RRRandom: bot stall: %s (%s) at %s for %.1f s, wants %s, speed %.0f (max %.0f), %s, route %d/%d (%s) next %s, blocked by %s (%s) normal %s, nearest %s %.0f away (team %d)."),
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: bot stall: %s (%s) at %s for %.1f s, wants %s, speed %.0f (max %.0f), %s, route %d/%d (%s) next %s, blocked by %s (%s) normal %s, really %s, nearest %s %.0f away (team %d)."),
 		*Self->GetName(), Mode, *Location.ToCompactString(), ProgressTimer, *Way.ToCompactString(), Self->GetVelocity().Size2D(), Self->GetCharacterMovement()->MaxWalkSpeed,
 		Self->GetCharacterMovement()->IsMovingOnGround() ? TEXT("on ground") : TEXT("in the air"), RouteIndex, Route.Num(),
 		bNavRoute ? TEXT("navmesh") : TEXT("walking graph"), *Next.ToCompactString(),
 		Hit.bBlockingHit ? *GetNameSafe(Hit.GetActor()) : TEXT("nothing"), Hit.bBlockingHit ? *GetNameSafe(Hit.GetComponent()) : TEXT(""),
-		*Hit.ImpactNormal.ToCompactString(), *GetNameSafe(Nearest), NearestDistance, Nearest ? Nearest->GetTeam() : -1);
+		*Hit.ImpactNormal.ToCompactString(), *DescribeBlocker(Self, Way), *GetNameSafe(Nearest), NearestDistance, Nearest ? Nearest->GetTeam() : -1);
 }
 
 FVector ARRRandomAIController::GetSeparation(const ARRRandomCharacter* Self) const
@@ -1300,7 +1521,9 @@ void ARRRandomAIController::TryShoot(ARRRandomCharacter* Self, const ARRRandomCh
 	// Lead the target by a random part of its travel time, then throw the aim off a little
 	const FVector SelfLocation = Self->GetActorLocation();
 	const float ProjectileSpeed = Self->GetProjectileSpeed();
-	const float LeadTime = ProjectileSpeed > 0.f ? Distance / ProjectileSpeed * Stream.FRandRange(0.f, 0.8f) : 0.f;
+	// (round 98: a lobbed acorn hangs in the air longer than its speed says: lead it by most of its arc)
+	const float LeadTime = ProjectileSpeed <= 0.f ? 0.f : Self->GetWeapon().bLob ? Distance / (ProjectileSpeed * 0.8f) * Stream.FRandRange(0.6f, 1.f)
+		: Distance / ProjectileSpeed * Stream.FRandRange(0.f, 0.8f);
 	// Only sideways motion is led; a jump would otherwise tilt the shot
 	const FVector Predicted = Target->GetActorLocation() + FVector(Target->GetVelocity().X, Target->GetVelocity().Y, 0.f) * LeadTime;
 	// Swing the aim point around the bot by the error, keeping the target's height so shots tilt toward other levels
@@ -1744,4 +1967,121 @@ void ARRRandomAIController::UpdateSprint(ARRRandomCharacter* Self, bool bInFight
 	// Out of a fight, on foot, on a long way (or into the ring): Shift held, as a player would; shooting needs it let go
 	const float Trip = bHasBattleGoal ? FVector::Dist2D(Self->GetActorLocation(), BattleGoal) : 0.f;
 	Movement->bWantsToSprint = !bInFight && !Move.IsNearlyZero() && Self->CanSprint() && !Self->IsReloading() && (bRingUrgent || Trip > SprintTrip);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Round 98, the main mode: cards and abilities
+
+void ARRRandomAIController::UpdateCards(ARRRandomCharacter* Self, float Distance, float DeltaSeconds)
+{
+	URRRandomDiceBuffComponent* Dice = Self->GetDiceBuffs();
+	if (!Dice->HasCards())
+	{
+		CardTimer = Stream.FRandRange(0.4f, 1.1f);
+		return;
+	}
+	// A moment to "read" them, then the one that suits: hurt, health or a shield; fighting, power or speed of attack;
+	// else moving fast, flying or growing
+	CardTimer -= DeltaSeconds;
+	if (CardTimer > 0.f)
+	{
+		return;
+	}
+	const float HealthShare = Self->GetHealth() / FMath::Max(1.f, Self->GetMaxHealth());
+	const bool bFighting = Distance <= Self->GetAttackRange() * EngageRangeShare;
+	int32 Best = 0;
+	float BestScore = -1.f;
+	const TArray<ERRCard>& Cards = Dice->GetCards();
+	for (int32 Index = 0; Index < Cards.Num(); ++Index)
+	{
+		float Score = Stream.FRandRange(0.f, 0.6f);
+		switch (Cards[Index])
+		{
+		case ERRCard::Heal: Score += HealthShare < 0.5f ? 3.f : HealthShare < 0.8f ? 1.f : 0.f; break;
+		case ERRCard::Shield: Score += HealthShare < 0.6f ? 2.f : bFighting ? 1.2f : 0.6f; break;
+		case ERRCard::Power: Score += bFighting ? 2.f : 1.2f; break;
+		case ERRCard::Rapid: Score += bFighting ? 1.8f : 1.f; break;
+		case ERRCard::Giant: Score += bFighting ? 1.7f : 0.7f; break;
+		case ERRCard::Swift: Score += bFighting ? 0.6f : 1.3f; break;
+		case ERRCard::Wings: Score += bFighting ? 0.8f : 1.1f; break;
+		case ERRCard::Cloak: Score += bRetreating ? 2.f : 0.9f; break;
+		default: break;
+		}
+		if (Score > BestScore)
+		{
+			BestScore = Score;
+			Best = Index;
+		}
+	}
+	Self->ChooseCard(Best);
+}
+
+void ARRRandomAIController::UpdateAbility(ARRRandomCharacter* Self, const ARRRandomCharacter* Target, float Distance, bool bCanSee, float DeltaSeconds)
+{
+	// The rabbit's super hop: the second jump of a double jump goes super high (it was set off just before)
+	if (HopTimer > 0.f)
+	{
+		HopTimer -= DeltaSeconds;
+		if (HopTimer <= 0.f)
+		{
+			Self->StopJumping();
+			Self->Jump();
+			HopReleaseTimer = 0.3f;
+		}
+	}
+	if (HopReleaseTimer > 0.f)
+	{
+		HopReleaseTimer -= DeltaSeconds;
+		if (HopReleaseTimer <= 0.f)
+		{
+			Self->StopJumping();
+		}
+	}
+	const URRRandomKitComponent* Kit = Self->GetKit();
+	const FRRKit& Own = RRKit::Get(Self->GetSpecies());
+	AbilityThinkTimer -= DeltaSeconds;
+	if (!Kit || Kit->GetAbilityCooldown() > 0.f || Own.Ability == ERRAbility::None || AbilityThinkTimer > 0.f)
+	{
+		return;
+	}
+	AbilityThinkTimer = Stream.FRandRange(0.4f, 0.9f);
+	const bool bSeen = Target && bCanSee;
+	const float Range = Self->GetAttackRange();
+	bool bUse = false;
+	switch (Own.Ability)
+	{
+	case ERRAbility::Cloak:
+		// In to fight unseen, or out of a losing one
+		bUse = (bSeen && Distance < Range * 1.4f && Distance > 400.f) || (bRetreating && UnderFireTimer > 0.f);
+		break;
+	case ERRAbility::SuperHop:
+		// Up onto the roofs when pressed, or to see over cover
+		bUse = UnderFireTimer > 0.f || (bSeen && Distance < 700.f) || (!bSeen && Stream.FRand() < 0.08f);
+		break;
+	case ERRAbility::AcornTrap:
+		bUse = (bSeen && Distance < 1100.f) || UnderFireTimer > 0.f;
+		break;
+	case ERRAbility::Giant:
+		bUse = bSeen && Distance < 900.f;
+		break;
+	case ERRAbility::Flight:
+		bUse = bSeen && Distance < Range;
+		break;
+	case ERRAbility::Disguise:
+		// Walking in among them unseen before a stab
+		bUse = !bRetreating && (!bSeen || Distance > 500.f) && Target != nullptr;
+		break;
+	default:
+		break;
+	}
+	if (!bUse)
+	{
+		return;
+	}
+	Self->UseAbility();
+	if (Own.Ability == ERRAbility::SuperHop && !Self->GetCharacterMovement()->IsFalling())
+	{
+		Self->Jump();
+		HopTimer = 0.28f;
+	}
 }

@@ -38,6 +38,18 @@ public:
 	static constexpr float FallingStarMin = 6.f;
 	static constexpr float FallingStarMax = 10.f;
 
+	/**
+	 * Round 98: a meteor round of the main mode (call before it begins play): its first meteor this far into play, the next
+	 * ones this far apart, and the hold to win this long (the match's own ScoreToWin and clock come from the game state).
+	 */
+	void SetRoundPace(float InFirst, float InInterval, float InHold)
+	{
+		NextMeteorTime = InFirst;
+		NextStarTime = InFirst - 2.f;
+		Interval = InInterval;
+		Hold = InHold;
+	}
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -59,6 +71,8 @@ private:
 
 	FRandomStream Stream;
 	float NextMeteorTime = FirstMeteorTime;
+	float Interval = MeteorInterval;
+	float Hold = HoldSeconds;
 	bool bOvertime = false;
 	bool bHasLastSpot = false;
 	FVector LastSpot = FVector::ZeroVector;

@@ -40,6 +40,14 @@ struct FRRWreck
 	UPROPERTY()
 	uint8 Dig = 0;
 
+	/**
+	 * Round 100 (the dragon's breath): a roof this wreck takes off takes this many layers of the walls under it too,
+	 * over the roof's whole footprint. A roof is one model and went whole at a touch, while walls only break cell by
+	 * cell inside the wreck, so a building at the breath's edge used to lose its roof and nothing else.
+	 */
+	UPROPERTY()
+	uint8 Crush = 0;
+
 	/** How far a spot is from the line (flat for a column), less Radius: negative inside. */
 	float Distance(const FVector& Spot) const;
 	bool Contains(const FVector& Spot, float Margin = 0.f) const { return Distance(Spot) <= Margin; }
@@ -64,6 +72,40 @@ struct FRRRegrow
 	FTransform Target;
 	/** Seconds it waits before it starts growing (a crater fills from the bottom up). */
 	float Delay = 0.f;
+};
+
+/**
+ * Round 99 (the user: "프레임드랍 … 건물 파괴나 재생성 될 때"). A piece of a big instanced mesh that moves for a moment
+ * (a part of a building coming down, a block growing back) is played by a copy of it in a small instanced mesh of its own.
+ * Moving an instance of the big mesh makes the renderer take the whole mesh in again (the town's blocks are tens of
+ * thousands of instances, all in the distance field scene: some 30 ms on the render thread, measured), and the shows did
+ * that every frame for up to a second and a half; this way the big mesh is touched once when the show starts or ends.
+ * The stand-ins are made on first use, one per big mesh (its mesh, materials and custom data), with nothing that costs:
+ * no collision, no navigation, no distance field. Each machine keeps its own.
+ */
+struct FRRStandIns
+{
+	struct FPiece
+	{
+		TWeakObjectPtr<UInstancedStaticMeshComponent> StandIn;
+		int32 Slot = INDEX_NONE;
+	};
+
+	/** A copy of Source's instance Index (its colors too) at Transform (world), on a stand-in belonging to Owner. */
+	FPiece Add(AActor* Owner, UInstancedStaticMeshComponent* Source, int32 Index, const FTransform& Transform);
+	void Move(const FPiece& Piece, const FTransform& Transform);
+	/** The copy goes (its place kept for the next one). */
+	void Remove(FPiece& Piece);
+	/** Every stand-in destroyed (the owner ending play). */
+	void Clear();
+
+private:
+	struct FSet
+	{
+		TWeakObjectPtr<UInstancedStaticMeshComponent> StandIn;
+		TArray<int32> Free;
+	};
+	TMap<TWeakObjectPtr<UInstancedStaticMeshComponent>, FSet> Sets;
 };
 
 /**
@@ -96,7 +138,7 @@ public:
 	 * Server: smashes what's within Radius of the line From - To (a column through every height, or a ball round the line),
 	 * digging Dig layers into the ground where it reaches the floor. bLasting (round 93, the oracle meteors): never mended.
 	 */
-	static void Wreck(const UObject* WorldContext, const FVector& From, const FVector& To, float Radius, bool bColumn, int32 Dig = 0, bool bLasting = false);
+	static void Wreck(const UObject* WorldContext, const FVector& From, const FVector& To, float Radius, bool bColumn, int32 Dig = 0, bool bLasting = false, int32 Crush = 0);
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -151,6 +193,8 @@ private:
 	{
 		FRRRegrow Regrow;
 		float Age;
+		/** Its copy that does the growing (the big mesh's own instance stays hidden until the whole batch is back). */
+		FRRStandIns::FPiece Stand;
 	};
 
 	UFUNCTION()
@@ -187,6 +231,9 @@ private:
 	TSet<int32> Applied;
 	/** To apply at the next tick: wrecks came in (all of a frame's at once), or the map was not built yet. */
 	bool bPending = false;
+	/** Round 99: changes are applied no more often than this (seconds), a volley's worth at once. */
+	static constexpr float ApplyGap = 0.2f;
+	float LastApplyTime = -100.f;
 
 	TArray<FPiece> Pieces;
 	bool bFoundPieces = false;
@@ -197,4 +244,7 @@ private:
 	TArray<FChunk> Chunks;
 	TArray<int32> FreeSlots;
 	TArray<FGrowing> Growing;
+	FRRStandIns GrowStandIns;
+	/** Every piece growing back is in place: the big meshes take them over and the stand-ins go. */
+	void FinishGrowing();
 };

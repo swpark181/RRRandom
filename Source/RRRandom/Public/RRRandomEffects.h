@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "RRRandomWeapon.h"
 #include "RRRandomEffects.generated.h"
 
 class UInstancedStaticMeshComponent;
@@ -136,6 +137,25 @@ public:
 	/** A bubble swelling and popping on the lava, a spark drifting up off it. */
 	void LavaBubble(const FVector& Where, float Size);
 
+	/**
+	 * Round 99 (the user: "각 총기에 맞는 발사체 디자인 개선"): each gun's shot leaves its own mark in the air, laid along the
+	 * stretch it flew this frame: the SMG's quick darts, the minigun's hot tracers, the rifle's long line, the sniper's hard
+	 * white line in a sleeve of vapor, the shotgun's sparks, the blaster's dripping plasma, the cannon shell's flame and
+	 * rope of smoke, the acorn's dotted arc, the pistol's soft tail. Tint: the shot's color (the shooter's team's).
+	 */
+	void ShotTrail(ERRHitEffect Gun, const FVector& From, const FVector& Head, float Size, const FLinearColor& Tint, float DeltaSeconds);
+	/** Round 99: the flash at the muzzle as a gun fires, by the gun (rings off the sniper and the blaster, smoke off the cannon). */
+	void MuzzleFlash(ERRHitEffect Gun, const FVector& Muzzle, const FVector& Direction, float Size, const FLinearColor& Tint);
+	/** Round 99: an animal friend sprinting: dust kicked up behind its heels and lines of wind streaming past. */
+	void RunDust(const FVector& Feet, const FVector& Velocity, float Size, float DeltaSeconds);
+	/**
+	 * Round 99: something big that is hurt (the star robot): stage 1 a thread of pale smoke and a spark now and then,
+	 * 2 thick dark smoke and crackling sparks, 3 on fire.
+	 */
+	void DamageSmoke(const FVector& Where, float Size, int32 Stage, float DeltaSeconds);
+	/** Round 100: an acorn of the squirrel's rain on its way down: a warm streak behind it (gold and little stars off a golden one). */
+	void AcornFall(const FVector& From, const FVector& Head, float Size, bool bGolden, float DeltaSeconds);
+
 private:
 	enum class EShape : uint8 { Ball, Ring, Star, Die, Count };
 
@@ -167,6 +187,8 @@ private:
 	};
 
 	void Spawn(const FParticle& Particle);
+	/** One glowing oval lying along From to Head, thinning away over Life (the piece of a shot's trail). */
+	void Streak(const FVector& From, const FVector& Head, float Width, float Life, const FLinearColor& Color, float Glow, float Opacity);
 	/** Little glowing particles thrown out from a spot. */
 	void Spray(EShape Shape, const FVector& Where, int32 Count, const FVector& Direction, float Cone, FVector2D Speed, FVector2D Size, FVector2D Life,
 		const FLinearColor& Color, float Glow, float Gravity);

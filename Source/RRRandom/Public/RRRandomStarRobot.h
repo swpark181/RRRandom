@@ -147,6 +147,11 @@ public:
 	/** Server: the one hit for the whole crew (the first one in) passes damage on to the robot; the others take none. */
 	bool IsDamageProxy(const ARRRandomCharacter* Who) const;
 
+	/**
+	 * Round 99: how battered it looks, a step every 30% of its health: 0 whole (over 70%), 1 smoking (to 40%), 2 thick
+	 * smoke, sparks and a red light (to 10%), 3 on fire. The other team sees this instead of its health.
+	 */
+	int32 GetDamageStage() const;
 	float GetHealth() const { return Health; }
 	float GetMaxHealth() const { return MaxHealth; }
 	bool IsShieldUp() const { return bShieldUp; }
@@ -369,6 +374,17 @@ private:
 	/** A light where the blades bite in a clash. */
 	UPROPERTY()
 	TObjectPtr<class UPointLightComponent> ClashLight;
+	/** Round 99: the red warning light in its chest; the damage stage last shown; the outline stencil its parts write now. */
+	UPROPERTY()
+	TObjectPtr<class UPointLightComponent> DamageLight;
+	int32 ShownDamageStage = 0;
+	int32 OutlineStencil = -1;
+	/** Round 100: last frame its carrier's network glide moved this (so it is put back once when the glide ends). */
+	bool bHadGlide = false;
+	/** Every machine: the smoke, sparks, fire and light of its damage stage. */
+	void UpdateDamageLook(float DeltaSeconds);
+	/** Every machine: the friend-or-foe line's stencil on its parts, by who looks. */
+	void UpdateOutline();
 	/** The glowing shield, a disc held up in front of its left fist. */
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> Shield;

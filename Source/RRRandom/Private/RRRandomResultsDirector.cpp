@@ -1,5 +1,6 @@
 #include "RRRandomResultsDirector.h"
 #include "RRRandomCharacter.h"
+#include "RRRandomViewCut.h"
 #include "RRRandomFirework.h"
 #include "RRRandomGameState.h"
 #include "Camera/CameraComponent.h"
@@ -10,6 +11,12 @@
 #include "Components/SkyLightComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "Materials/MaterialInstanceDynamic.h"
+
+// Round 100 (registered at startup, so -ExecCmds can set them)
+static TAutoConsoleVariable<int32> CVarOff(TEXT("rr.Results.KeepObstacles"), 0, TEXT("1: the results camera leaves what stands in its way as it is (round 100 ghosts off)."));
+static TAutoConsoleVariable<float> CVarTestYaw(TEXT("rr.Results.TestYaw"), 0.f, TEXT("Degrees added to the results camera's angle (tests)."));
+static TAutoConsoleVariable<float> CVarTestDistance(TEXT("rr.Results.TestDistance"), 0.f, TEXT("The results camera's distance, if over 0 (tests)."));
 
 namespace
 {
@@ -140,6 +147,16 @@ void ARRRandomResultsDirector::Setup(ARRRandomCharacter* InMVP, const FMinimalVi
 	{
 		BrawlerReach = UE_BIG_NUMBER;
 	}
+	// (for captures: rr.Results.TestYaw turns the camera round from the angle it picked, rr.Results.TestDistance moves it
+	// back, to put it behind buildings on purpose)
+	StartYaw += CVarTestYaw.GetValueOnGameThread();
+	if (CVarTestDistance.GetValueOnGameThread() > 0.f)
+	{
+		Distance = CVarTestDistance.GetValueOnGameThread();
+	}
+	// Round 100: what still stands in the way from there is put away and ghosted (before the camera's reach is measured, so
+	// it isn't pulled in by something that is no longer there)
+	ClearView(LineYaw, LineHalfWidth);
 	const float BestReach = GetClearReach(FRotator(Pitch, StartYaw, 0.f), FMath::Min(Distance * Scale, BrawlerReach));
 	UpdateCamera();
 
@@ -183,6 +200,7 @@ void ARRRandomResultsDirector::Setup(ARRRandomCharacter* InMVP, const FMinimalVi
 
 void ARRRandomResultsDirector::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	RestoreView();
 	for (const TPair<TWeakObjectPtr<ULightComponent>, float>& Light : DimmedLights)
 	{
 		if (Light.Key.IsValid())
@@ -198,6 +216,49 @@ void ARRRandomResultsDirector::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		}
 	}
 	Super::EndPlay(EndPlayReason);
+}
+
+void ARRRandomResultsDirector::ClearView(float LineYaw, float LineHalfWidth)
+{
+	const ARRRandomCharacter* Hero = MVP.Get();
+	if (!Hero || CVarOff.GetValueOnGameThread() != 0)
+	{
+		return;
+	}
+	const float Scale = Hero->GetActorScale3D().Z;
+	const FVector Target = GetTarget();
+	// Whom the camera has to see: the dance line from end to end (or the MVP where it stands), feet to head
+	TArray<FVector> Seen;
+	const float HalfWidth = bDanceLine ? LineHalfWidth : 70.f * Scale;
+	const FVector Along = FRotator(0.f, bDanceLine ? LineYaw : StartYaw, 0.f).RotateVector(FVector::RightVector);
+	for (const float Across : { -1.f, -0.5f, 0.f, 0.5f, 1.f })
+	{
+		for (const float Up : { -40.f, 60.f, 170.f })
+		{
+			Seen.Add(Target + Along * (Across * HalfWidth) + FVector(0.f, 0.f, Up * Scale));
+		}
+	}
+	// From where: the camera at each end and the middle of its sway, as far back as it wants to be
+	TArray<FVector> Eyes;
+	const float Reach = FMath::Min(Distance * Scale, BrawlerReach);
+	for (const float Sway : { -SwayAngle, 0.f, SwayAngle })
+	{
+		Eyes.Add(Target - FRotator(Pitch, StartYaw + Sway, 0.f).Vector() * Reach);
+	}
+	FRRViewCut::FParams Params;
+	Params.Radius = ViewClearRadius;
+	// (the lines stop short of the dancers, so what they stand beside stays; not the ground they dance on, nor anything
+	// under knee height)
+	Params.EndGap = 140.f;
+	Params.MinTop = Target.Z - 30.f * Scale;
+	Params.GhostOpacity = GhostOpacity;
+	ViewCut.Update(this, Eyes, Seen, Params);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: results camera puts %d pieces in its way away (ghosts instead)."), ViewCut.Num());
+}
+
+void ARRRandomResultsDirector::RestoreView()
+{
+	ViewCut.Restore();
 }
 
 FVector ARRRandomResultsDirector::GetTarget() const

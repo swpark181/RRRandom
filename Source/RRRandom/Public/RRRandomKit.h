@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "RRRandomRounds.h"
 #include "RRRandomKit.generated.h"
 
 class ARRRandomCharacter;
@@ -48,6 +49,19 @@ struct FRRKit
 	/** The roll's word over the head ("5 HOP"); empty when its own die is the giant or flight die. */
 	const TCHAR* DieWord = TEXT("");
 	FLinearColor DieColor = FLinearColor::White;
+
+	/**
+	 * Round 98, the main mode's role (the user's table in Docs/TPSOverhaulQuestions.md): its name and line, the weapon it
+	 * always holds there (a FRRWeapon type name: no weapon dice there), and its Q ability (AbilityPower: seconds, or hops)
+	 * with its cooldown.
+	 */
+	const TCHAR* RoleName = TEXT("");
+	const TCHAR* RoleLine = TEXT("");
+	const TCHAR* RoleWeapon = TEXT("");
+	ERRAbility Ability = ERRAbility::None;
+	float AbilityPower = 0.f;
+	float AbilityCooldown = 10.f;
+	const TCHAR* AbilityLine = TEXT("");
 };
 
 namespace RRKit
@@ -87,6 +101,22 @@ public:
 	void ApplyOwnDie(int32 Face);
 	/** Server: knocked out; every power of its own die ends. */
 	void ClearPowers();
+
+	// Round 98: the Q ability (FRRKit::Ability), the cards' powers, the red fox's disguise
+	/** Server: uses the Q ability if it is ready; false if not (cooling down, knocked out, play locked, nothing to do). */
+	bool UseAbility();
+	/** Seconds until Q is ready again (0: ready), and its full cooldown. */
+	float GetAbilityCooldown() const { return AbilityCooldown; }
+	float GetAbilityCooldownMax() const { return GetKit().AbilityCooldown; }
+	/** Server: Q ready at once (a new round). */
+	void ResetAbility() { AbilityCooldown = 0.f; }
+	/** Server: the cards' powers (any species). */
+	void GrantCloak(float Seconds);
+	void GrantShield(float Amount, float Seconds);
+	bool IsDisguised() const { return DisguiseRemaining > 0.f; }
+	float GetDisguiseRemaining() const { return DisguiseRemaining; }
+	/** Within this distance an opponent sees through a disguise. */
+	static constexpr float DisguiseNoticeRange = 200.f;
 
 	// The fox's invisibility
 	bool IsCloaked() const { return CloakRemaining > 0.f; }
@@ -152,6 +182,18 @@ private:
 
 	UPROPERTY(Replicated)
 	float MagnetRemaining = 0.f;
+
+	UPROPERTY(Replicated)
+	float AbilityCooldown = 0.f;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Disguise)
+	float DisguiseRemaining = 0.f;
+
+	UFUNCTION()
+	void OnRep_Disguise();
+	/** Every machine: the body's team tint follows the disguise (a puff as it changes). */
+	bool bDisguiseShown = false;
+	void UpdateDisguiseLook();
 
 	/** Server clock: the ambush bonus lasts until this; an invisible brawler shows after a hit until this. */
 	float AmbushUntil = -1.f;

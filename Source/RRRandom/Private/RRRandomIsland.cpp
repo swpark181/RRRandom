@@ -726,6 +726,8 @@ void ARRRandomIsland::Build()
 				const FTransform Placed(FRotator(0.f, Yaw, 0.f), CellCenter(Row, Col) + FVector(Spot.X * CellSize, Spot.Y * CellSize, Top), FVector(Size));
 				Props[KindIndex]->AddInstance(Placed);
 				++PropCount;
+				// (where the big ones stand, for scripted captures)
+				UE_CLOG(Kind.Letter == 'M' || Kind.Letter == 'H' || Kind.Letter == 'V', LogTemp, Verbose, TEXT("RRRandom: island prop %c at %s, size %.2f."), Kind.Letter, *Placed.GetLocation().ToCompactString(), Size);
 
 				// What it stops: a hidden box over its bounds, narrowed to its solid part, turned with it
 				if (Kind.Block != EPropBlock::None)
