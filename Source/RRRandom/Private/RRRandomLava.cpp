@@ -13,6 +13,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
 #include "NavAreas/NavArea_Null.h"
@@ -31,6 +32,10 @@ namespace
 	/** Shares of a column's rise that count as lava for burns. */
 	constexpr float BurnRise = 0.6f;
 	constexpr float HopEvery = 0.6f;
+	// Round 101: a bot stuck in it presses jump this often; the leap out, sideways and up (over the crater's rim)
+	constexpr float BotPressEvery = 0.22f;
+	constexpr float LeapSpeed = 520.f;
+	constexpr float LeapRise = 980.f;
 	constexpr float HotEvery = 0.7f;
 	/** Columns per light, and how bright they glow. */
 	constexpr int32 ColumnsPerLight = 10;
@@ -351,15 +356,40 @@ void ARRRandomLava::BurnPeople(float Now)
 		{
 			continue;
 		}
+		// Round 101: on foot it is stuck and has to struggle out (ARRRandomCharacter::StruggleInLava: jump, pressed over
+		// and over; a bot presses by itself). On a ride or in the robot it hops out by itself as before
+		const bool bOnFoot = !Who->GetVehicle() && !Who->IsInRobot();
+		Who->SetInLava(bInLava && bOnFoot);
 		if (bInLava)
 		{
 			LastInLava.Add(Who, Now);
 			float& Hopped = LastHop.FindOrAdd(Who, -100.f);
-			if (Now - Hopped >= HopEvery)
+			if (!bOnFoot)
+			{
+				if (Now - Hopped >= HopEvery)
+				{
+					Hopped = Now;
+					Who->LaunchCharacter(FVector(0.f, 0.f, HopSpeed), false, true);
+				}
+			}
+			else if (!Who->IsPlayerControlled() && Now - Hopped >= BotPressEvery)
 			{
 				Hopped = Now;
-				Who->LaunchCharacter(FVector(0.f, 0.f, HopSpeed), false, true);
+				Who->StruggleInLava();
 			}
+		}
+		if (Who->TakeLavaLeap())
+		{
+			// Thrown clear: the way it was trying to go if that leads to dry ground, or to the nearest dry ground
+			const FVector Wanted = Who->GetCharacterMovement()->GetCurrentAcceleration().GetSafeNormal2D();
+			FVector Way = GetWayOut(Town, Feet, Wanted);
+			if (Way.IsNearlyZero())
+			{
+				Way = Wanted.IsNearlyZero() ? Who->GetActorForwardVector().GetSafeNormal2D() : Wanted;
+			}
+			Who->LaunchCharacter(Way * LeapSpeed + FVector(0.f, 0.f, LeapRise), true, true);
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s leaps out of the lava from %s toward %s."), *Who->GetName(), *Feet.ToCompactString(), *Way.ToCompactString());
+			LastInLava.Add(Who, Now);
 		}
 		if (!bTick)
 		{
@@ -394,6 +424,39 @@ void ARRRandomLava::BurnPeople(float Now)
 			UGameplayStatics::ApplyDamage(Who, Damage, nullptr, this, UDamageType::StaticClass());
 		}
 	}
+}
+
+FVector ARRRandomLava::GetWayOut(const ARRRandomDiceTown* Town, const FVector& Feet, const FVector& Wanted) const
+{
+	// The nearest column that isn't lava, a ring of cells at a time; among those as near, the one most the way it wants
+	const FIntPoint Here = Town->GetCellAt(Feet);
+	for (int32 Ring = 1; Ring <= 8; ++Ring)
+	{
+		FVector Best = FVector::ZeroVector;
+		float BestScore = -UE_BIG_NUMBER;
+		for (int32 X = -Ring; X <= Ring; ++X)
+		{
+			for (int32 Y = -Ring; Y <= Ring; ++Y)
+			{
+				if (FMath::Max(FMath::Abs(X), FMath::Abs(Y)) != Ring || IsRisenAt(Here + FIntPoint(X, Y)))
+				{
+					continue;
+				}
+				const FVector Out = FVector(X, Y, 0.f).GetSafeNormal();
+				const float Score = FVector::DotProduct(Out, Wanted) - FVector2D(X, Y).Size() * 0.3f;
+				if (Score > BestScore)
+				{
+					BestScore = Score;
+					Best = Out;
+				}
+			}
+		}
+		if (!Best.IsNearlyZero())
+		{
+			return Best;
+		}
+	}
+	return FVector::ZeroVector;
 }
 
 void ARRRandomLava::UpdateNavBlockers()

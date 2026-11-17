@@ -23,9 +23,9 @@ public:
 	virtual FString GetTitle() const override { return TEXT("FOX CLONES"); }
 	virtual FString GetStatusLine() const override;
 
-	/** How long the clones last. */
+	/** How long the clones last (round 100: 7 s, was 12, now that they have health and their shots hurt). */
 	UPROPERTY(EditAnywhere, Category = "Fox Clones")
-	float Duration = 12.f;
+	float Duration = 7.f;
 
 	/** How far round the fox the clones spring up, and how hard they scatter from there. */
 	UPROPERTY(EditAnywhere, Category = "Fox Clones")

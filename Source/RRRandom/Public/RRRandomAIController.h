@@ -148,7 +148,7 @@ private:
 	 */
 	bool UpdateStarRobot(ARRRandomCharacter* Self, bool bInFight, FVector& Wanted, bool& bOnRoute, float DeltaSeconds);
 	/** Gets on and off vehicles (see RideTripDistance). Returns true and sets Wanted while walking over to one. */
-	bool UpdateVehicles(ARRRandomCharacter* Self, const ARRRandomCharacter* Target, bool bInFight, FVector& Wanted, float DeltaSeconds);
+	bool UpdateVehicles(ARRRandomCharacter* Self, const ARRRandomCharacter* Target, bool bInFight, FVector& Wanted, bool& bOnRoute, float DeltaSeconds);
 	/** The vehicle worth walking to now, if any: a teammate's stopped car with room behind, or a free one for a long trip. */
 	ARRRandomVehicle* FindVehicleToRide(const ARRRandomCharacter* Self, const ARRRandomCharacter* Target) const;
 	/** Whether a vehicle can still be ridden the way the bot set out to (driver's seat free, or the car still stopped for it). */
@@ -157,11 +157,11 @@ private:
 	 * On a map with walking routes: the way toward Goal (feet height) along the route to it, asking for a new route now
 	 * and then or when the goal moves; jumps when it stops moving against a ledge (a jump climbs it).
 	 */
-	FVector FollowRoute(ARRRandomCharacter* Self, const FVector& Goal, float DeltaSeconds);
+	FVector FollowRoute(ARRRandomCharacter* Self, const FVector& Goal, float DeltaSeconds, bool bErrand = false);
 	/** This map has walking routes: a navmesh, or Dice Town's walking graph. */
 	bool HasRoutes() const;
 	/** A route on the navmesh from Feet toward Goal (its corners after the start; partway when Goal can't be reached), or false. */
-	bool FindNavRoute(const FVector& Feet, const FVector& Goal, TArray<FVector>& OutPoints) const;
+	bool FindNavRoute(const FVector& Feet, const FVector& Goal, TArray<FVector>& OutPoints, bool& bOutOffMesh, bool& bOutPartial) const;
 
 public:
 	/** The vehicle this bot is walking over to, so teammates don't all head for the same one. */
@@ -222,6 +222,37 @@ private:
 	float RouteStuckTimer = 0.f;
 	/** The route came from the navmesh (else Dice Town's walking graph). */
 	bool bNavRoute = false;
+	/**
+	 * Round 99 (the user: "길 못 찾는 문제", "벽으로 계속 이동하려는 문제"). The route starts off the navmesh (the bot stands on
+	 * something with none: a roof's trim, a block, a ledge; the route then begins somewhere near, perhaps on the floor
+	 * below); it ends short of the goal (no way all the way).
+	 */
+	bool bRouteOffMesh = false;
+	bool bRoutePartial = false;
+	/**
+	 * This frame the way along the route is not to be walked blind: off the navmesh, no route, past the end of one that
+	 * stops short, or something in the way that can't be climbed. The steering (SteerAroundObstacles) takes it.
+	 */
+	bool bRouteSteer = false;
+	/** No ledge jump before this (so one press climbs, not a string of them). */
+	float NextLedgeJumpTime = 0.f;
+	/**
+	 * The route to somewhere on the way (a ride to get on, the robot): kept apart from the one to where the bot is really
+	 * going, which is still asked for every frame. One memory for both made each ask for its route again every frame.
+	 */
+	struct FRouteMemo
+	{
+		TArray<FVector> Route;
+		int32 RouteIndex = 0;
+		FVector RouteGoal = FVector::ZeroVector;
+		float RouteTimer = 0.f;
+		float RouteStuckTimer = 0.f;
+		bool bNavRoute = false;
+		bool bRouteOffMesh = false;
+		bool bRoutePartial = false;
+	};
+	FRouteMemo ErrandRoute;
+	void SwapErrandRoute();
 
 	/**
 	 * Stalls (wanting to move but getting nowhere): where the bot was at the start of the current window and how long the
@@ -231,6 +262,11 @@ private:
 	float ProgressTimer = 0.f;
 	bool bStallLogged = false;
 	void WatchProgress(const ARRRandomCharacter* Self, const FVector& Move, const TCHAR* Mode, float DeltaSeconds);
+	/** Round 99, with rr.Bot.LogStalls: seconds walked on foot, of those barely moving, of those with a wall right ahead. */
+	float WalkSeconds = 0.f;
+	float StoppedSeconds = 0.f;
+	float PushSeconds = 0.f;
+	float NextWalkReport = 20.f;
 
 	/**
 	 * Getting unstuck: wedged (meaning to walk on the ground but barely moving) for a moment, the bot goes round whatever
@@ -238,12 +274,18 @@ private:
 	 * gives that goal up (a cover spot it can't reach is avoided for a while, a roaming spot or route is picked again).
 	 */
 	FVector Unstick(ARRRandomCharacter* Self, const FVector& Move, float DeltaSeconds);
+	/** Round 99: a ledge right ahead on the way that a jump climbs: jumps now. */
+	void ClimbLedgeAhead(ARRRandomCharacter* Self, const FVector& Move);
+	/** Round 99: seconds perched in the air (falling but still) on something that can't be stood on. */
+	float PerchedTimer = 0.f;
 	/** Whether the bot's body (from knee height up) fits along a way this far: cover, walls and the island's rim. */
 	bool IsWayClear(const ARRRandomCharacter* Self, const FVector& Direction, float Distance, FHitResult* OutHit = nullptr) const;
 	float WedgedTimer = 0.f;
 	FVector DetourWay = FVector::ZeroVector;
 	float DetourTimer = 0.f;
 	int32 WedgeCount = 0;
+	/** What the bot is walking for this frame (route, cover, rush, fight, roam): for the stall logs. */
+	const TCHAR* MoveMode = TEXT("");
 	FVector BadCoverSpot = FVector::ZeroVector;
 	float BadCoverTimer = 0.f;
 
@@ -285,6 +327,18 @@ private:
 	/** Meteor Rush (UpdateRushGoal): where to go, whether there is anywhere, keeping the ore safe, until the next look. */
 	FVector RushGoal = FVector::ZeroVector;
 	bool bHasRushGoal = false;
+	/** Round 99: the rush goal is a piece of ore (not a spot to wait for a meteor at, nor home). */
+	bool bRushOre = false;
 	bool bGuardingOre = false;
 	float RushTimer = 0.f;
+
+	// Round 98, the main mode
+	/** The cards dealt: a moment, then the one that suits the moment (hurt: health or a shield; fighting: power...). */
+	void UpdateCards(ARRRandomCharacter* Self, float Distance, float DeltaSeconds);
+	/** The Q ability when its moment comes (each species its own); the rabbit then double jumps into a super hop. */
+	void UpdateAbility(ARRRandomCharacter* Self, const ARRRandomCharacter* Target, float Distance, bool bCanSee, float DeltaSeconds);
+	float CardTimer = 0.f;
+	float AbilityThinkTimer = 0.f;
+	float HopTimer = 0.f;
+	float HopReleaseTimer = 0.f;
 };

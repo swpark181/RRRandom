@@ -84,10 +84,18 @@ namespace
 		{ TEXT("/Game/Props/Weapons97/SM_Sniper.SM_Sniper"), 54.f, FVector(83.f, -1.f, 7.f), FVector(-7.f, 0.f, 7.f), FRotator::ZeroRotator },
 		{ TEXT("/Game/Props/Weapons97/SM_Shotgun.SM_Shotgun"), 44.f, FVector(90.f, -11.f, 18.f), FVector(-1.f, 0.f, 14.f), FRotator::ZeroRotator },
 		{ TEXT("/Game/Props/Weapons97/SM_LightSword.SM_LightSword"), 72.f, FVector(82.f, -1.f, 0.f), FVector(-9.f, 0.f, 5.f), FRotator::ZeroRotator },
+		// Round 98, the roles' own (Midjourney in Tripo, Smart Mesh, char-pipeline/input/weapons_r98): the tiger's hammer and
+		// the red fox's dagger (grip at the origin, the head or blade along +X), the squirrel's acorn launcher (muzzle +X)
+		// (char-pipeline/scripts/blender_melee_r98.py: the hammer and the dagger held at the origin, a quarter and a fifth along
+		// from the pommel; the launcher by blender_guns_r90.py with its grip set by hand: tip and grip as the scripts reported)
+		// (the red squeaky hammer, 뿅망치: its bellows head lies across the handle)
+		{ TEXT("/Game/Props/Weapons98/SM_Hammer.SM_Hammer"), 86.f, FVector(74.f, -1.f, 12.f), FVector(0.f, 0.f, 0.f), FRotator::ZeroRotator },
+		{ TEXT("/Game/Props/Weapons98/SM_Dagger.SM_Dagger"), 34.f, FVector(81.f, -5.f, -1.f), FVector(0.f, 0.f, 0.f), FRotator::ZeroRotator },
+		{ TEXT("/Game/Props/Weapons98/SM_AcornLauncher.SM_AcornLauncher"), 48.f, FVector(32.f, -3.f, 11.f), FVector(-59.f, 0.f, 11.f), FRotator::ZeroRotator },
 	};
-	const TCHAR* GunNames[] = { TEXT("PISTOL"), TEXT("SMG"), TEXT("MINIGUN"), TEXT("RIFLE"), TEXT("BLASTER"), TEXT("CANNON"), TEXT("SNIPER"), TEXT("SHOTGUN"), TEXT("SWORD") };
+	const TCHAR* GunNames[] = { TEXT("PISTOL"), TEXT("SMG"), TEXT("MINIGUN"), TEXT("RIFLE"), TEXT("BLASTER"), TEXT("CANNON"), TEXT("SNIPER"), TEXT("SHOTGUN"), TEXT("SWORD"), TEXT("HAMMER"), TEXT("DAGGER"), TEXT("ACORN") };
 	/** A look whose model isn't in yet shows another's: the sniper the rifle, the shotgun the blaster, the sword the pistol. */
-	const int32 FallbackLooks[] = { 0, 1, 2, 3, 4, 5, 3, 4, 0 };
+	const int32 FallbackLooks[] = { 0, 1, 2, 3, 4, 5, 3, 4, 0, 5, 0, 5 };
 	/**
 	 * The light sword's strokes (round 97): each blow of a combo this long (the third a quarter longer, as its body motion),
 	 * along its own arc in the body's frame, yaw (right +) and pitch (up +) at the start and the end of the sweep:
@@ -206,7 +214,7 @@ void URRRandomGunComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	const bool bHands = Body && Body->GetBoneIndex(RightHandBone) != INDEX_NONE && Body->GetBoneIndex(RightPalmBone) != INDEX_NONE
 		&& Body->GetBoneIndex(LeftHandBone) != INDEX_NONE;
 	// Put away while knocked out and while dancing after a win; a defense villain has none
-	const bool bShow = bHands && Brawler->IsAlive() && !Brawler->IsVillain() && !Brawler->IsCelebrating() && !Brawler->IsDespairing() && !Brawler->IsUsingUltimate()
+	const bool bShow = bHands && Brawler->IsAlive() && !Brawler->IsVillain() && !Brawler->IsCelebrating() && !Brawler->IsDespairing() && !Brawler->IsEmoting() && !Brawler->IsUsingUltimate()
 		&& !Brawler->IsDriving();
 	if (IsVisible() != bShow)
 	{
@@ -313,7 +321,26 @@ void URRRandomGunComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	// 0 .. 1 into a stroke (a parry's too: the guard gives way to it)
 	float StrokeWeight = 0.f;
 	bool bParryStroke = false;
-	if (bSword && !bTwoHanded)
+	// Round 98: the hammer and the dagger with their own blows stay in the fist and follow the arm (no cosmetic arc), a
+	// streak off the tip while they swing
+	const bool bRoleMotion = bSword && Brawler->HasRoleMeleeMotion();
+	if (bRoleMotion)
+	{
+		bSwinging = Brawler->GetTimeSinceShot() < Brawler->GetSwordAttackDuration();
+		const FVector WeaponTip = HandLocation + HandRotation.RotateVector(Tip) * Length / 100.f * Size;
+		const float TipSpeed = DeltaTime > 0.f ? FVector::Dist(LastSwordTip, WeaponTip) / DeltaTime : 0.f;
+		if (bSwinging && bSwordTipKnown && TipSpeed > 180.f * Size)
+		{
+			if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+			{
+				const float SpeedShare = FMath::Clamp(TipSpeed / (900.f * Size), 0.f, 1.f);
+				Effects->StarTail(LastSwordTip, WeaponTip, FMath::Lerp(3.f, 10.f, SpeedShare) * Size, FMath::Lerp(30.f, 90.f, SpeedShare) * Size,
+					Brawler->GetWeapon().IsHammer() ? FLinearColor(1.f, 0.8f, 0.25f) : FLinearColor(1.f, 0.35f, 0.45f), DeltaTime);
+			}
+		}
+		LastSwordTip = WeaponTip;
+	}
+	if (bSword && !bTwoHanded && !bRoleMotion)
 	{
 		const float SinceSwing = Brawler->GetTimeSinceShot();
 		const float SinceParry = Brawler->GetTimeSinceDeflect();
@@ -374,7 +401,7 @@ void URRRandomGunComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	// pointing left and a little ahead and up, jolting up at each shot it turns away; giving way to each parry's stroke. The
 	// sword stays in the hand (the guard motion raises the arm)
 	GuardBlend = FMath::FInterpConstantTo(GuardBlend, bSword && Brawler->IsDeflecting() ? 1.f : 0.f, DeltaTime, 7.f);
-	if (bSword && !bTwoHanded && GuardBlend > 0.f)
+	if (bSword && !bTwoHanded && !bRoleMotion && GuardBlend > 0.f)
 	{
 		const FQuat Facing = Actor.GetRotation();
 		const float Jolt = FMath::Max(0.f, 1.f - Brawler->GetTimeSinceDeflect() / 0.18f);
@@ -449,7 +476,8 @@ void URRRandomGunComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	const float SpitTime = FMath::Clamp(Brawler->GetWeapon().FireIntervalMultiplier * SpitShare, SpitMinTime, SpitMaxTime);
 	// (a sword swings, it doesn't spit)
 	SetWorldScale3D(bSword ? BaseScale * FVector(BladeStretch, 1.f, 1.f) : BaseScale * GetSpitScale(Brawler->GetTimeSinceShot(), SpitTime));
-	UpdateBladeGlow(bSword, BladeStretch);
+	// (the light sword's own glowing core: not the hammer's or the dagger's)
+	UpdateBladeGlow(bSword && Brawler->GetWeapon().GetHitEffect() == ERRHitEffect::Sword, BladeStretch);
 
 	// Settled in the aiming pose: remember where this gun's muzzle is, from the brawler, for the shots
 	// (ARRRandomCharacter::ShootAt), so they leave the barrel even when the first one comes before the pose does

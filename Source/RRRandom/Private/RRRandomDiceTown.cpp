@@ -1,4 +1,5 @@
 #include "RRRandomDiceTown.h"
+#include "RRRandomViewCut.h"
 #include "RRRandomBattleRoyale.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomDefense.h"
@@ -2283,6 +2284,9 @@ void ARRRandomDiceTown::Build()
 
 	Blocks = MakeInstances(BlockMesh, nullptr, false, 6);
 	DieBlocks = MakeInstances(DieMesh, nullptr, false, 6);
+	// Round 99: the grid's own plain blocks go in BlockChunks (GetBlockSet), made as cells come to need them
+	BlockChunks.Reset();
+	BlockChunkMesh = BlockMesh;
 	// Round 91 (reflections here and there): the plaza's tiles polished, the dice a glossy plastic, and puddles on the
 	// roads mirror smooth, so the sky and the town show in them (Lumen reflections, DefaultEngine.ini)
 	GlossBlocks = MakeInstances(BlockMesh, nullptr, false, 6);
@@ -2334,9 +2338,16 @@ void ARRRandomDiceTown::Build()
 		Neon->CastShadow = false;
 		Stars = MakeInstances(StarMesh, StarGlow, false, 6);
 		Stars->CastShadow = false;
+		// (round 99: they turn every frame; in the distance field scene and Lumen's that meant taking them in again every frame)
+		Stars->bAffectDistanceFieldLighting = false;
+		Stars->bAffectDynamicIndirectLighting = false;
+		Stars->MarkRenderStateDirty();
 		Moons = MakeInstances(MoonMesh, MoonGlow, false, 6);
 		Moons->CastShadow = false;
 		FloatDice = MakeInstances(DieMesh, nullptr, false, 6);
+		FloatDice->bAffectDistanceFieldLighting = false;
+		FloatDice->bAffectDynamicIndirectLighting = false;
+		FloatDice->MarkRenderStateDirty();
 		if (RoofMesh)
 		{
 			Roofs = MakeInstances(RoofMesh, nullptr, false, 6);
@@ -2424,6 +2435,7 @@ void ARRRandomDiceTown::Build()
 	DugDepth.Reset();
 	LavaColumns.Reset();
 	Falling.Reset();
+	FallStandIns.Clear();
 	if (IsBattleTile())
 	{
 		LayOutBattle();
@@ -4179,13 +4191,8 @@ void ARRRandomDiceTown::AnimateFloaters(float Time)
 		const FQuat Tumble(FRotator(Time * Floater.Tumble * 0.7f, 0.f, Time * Floater.Tumble));
 		Floater.Instances->UpdateInstanceTransform(Floater.Index, FTransform(Spin * FQuat(Floater.Turn) * Tumble, Where, FVector(Floater.bWrecked ? 0.f : Floater.Scale)), true, false, true);
 	}
-	for (UInstancedStaticMeshComponent* Instances : { Stars.Get(), FloatDice.Get() })
-	{
-		if (Instances)
-		{
-			Instances->MarkRenderStateDirty();
-		}
-	}
+	// (round 99: moved instances reach the renderer by themselves; marking the render state dirty made the whole mesh's
+	// proxy again every frame)
 }
 
 void ARRRandomDiceTown::MakeDreamSky()
@@ -4795,16 +4802,39 @@ FTransform ARRRandomDiceTown::GetCellTransform(int32 X, int32 Y, int32 Level) co
 	return FTransform(FRotator::ZeroRotator, At(CellCenter(FIntPoint(X, Y)), (Level - 0.5f) * BlockSize));
 }
 
-UInstancedStaticMeshComponent* ARRRandomDiceTown::GetBlockSet(bool bDie, bool bGloss) const
+UInstancedStaticMeshComponent* ARRRandomDiceTown::GetBlockSet(bool bDie, bool bGloss, int32 X, int32 Y)
 {
-	return bDie ? DieBlocks.Get() : bGloss && GlossBlocks ? GlossBlocks.Get() : Blocks.Get();
+	if (bDie || (bGloss && GlossBlocks))
+	{
+		return bDie ? DieBlocks.Get() : GlossBlocks.Get();
+	}
+	// Round 99 (the user: "파괴순간 생기는 히치도 해결해줘"). The town's plain blocks were one instanced mesh of some fifty
+	// thousand instances, and showing, hiding or adding a single one makes the renderer take the whole mesh into the
+	// distance field scene again (about 30 ms on the render thread, measured: the one long frame left as something
+	// broke). The grid's blocks are now in a mesh per square of BlockChunkCells cells, so a blow only touches the few
+	// hundred instances of the squares it reaches. (A battle map tile is small enough as it is: one mesh.)
+	if (IsBattleTile() || !BlockChunkMesh)
+	{
+		return Blocks.Get();
+	}
+	const int32 Across = FMath::Max(1, FMath::DivideAndRoundUp(GridCells, BlockChunkCells));
+	const int32 Chunk = FMath::Clamp((Y + HalfCells) / BlockChunkCells, 0, Across - 1) * Across + FMath::Clamp((X + HalfCells) / BlockChunkCells, 0, Across - 1);
+	if (BlockChunks.Num() < Across * Across)
+	{
+		BlockChunks.SetNum(Across * Across);
+	}
+	if (!BlockChunks[Chunk])
+	{
+		BlockChunks[Chunk] = MakeInstances(BlockChunkMesh, nullptr, false, 6);
+	}
+	return BlockChunks[Chunk].Get();
 }
 
 void ARRRandomDiceTown::AddCellBlock(int32 X, int32 Y, int32 Level)
 {
 	const FLook& Look = Looks[Grid[GridIndex(X, Y, Level)] - 1];
 	const float Jitter = 0.95f + 0.1f * float(CellHash(X, Y, Level) % 1000) / 1000.f;
-	UInstancedStaticMeshComponent* Instances = GetBlockSet(Look.bDie, Look.bGloss);
+	UInstancedStaticMeshComponent* Instances = GetBlockSet(Look.bDie, Look.bGloss, X, Y);
 	AddColored(Instances, GetCellTransform(X, Y, Level), Shade(Look.Body, Jitter), Shade(Look.Accent, Jitter));
 	CellBlocks.Add(GridIndex(X, Y, Level), { Look.bDie, Instances->GetInstanceCount() - 1, true, Look.bGloss && !Look.bDie });
 }
@@ -4879,7 +4909,7 @@ void ARRRandomDiceTown::RefreshCellBlock(int32 X, int32 Y, int32 Level, bool bGr
 		return;
 	}
 	Block->bShown = bWant;
-	UInstancedStaticMeshComponent* Instances = GetBlockSet(Block->bDie, Block->bGloss);
+	UInstancedStaticMeshComponent* Instances = GetBlockSet(Block->bDie, Block->bGloss, X, Y);
 	const FTransform Where = GetCellTransform(X, Y, Level);
 	Instances->UpdateInstanceTransform(Block->Index, bWant ? Where : Shrunk(Where), true, false, false);
 	if (bWant && bGrow)
@@ -4957,8 +4987,9 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 				return *Was;
 			}
 		}
+		// (round 100: where it really stands, if a view cut put it away on this screen)
 		FTransform Transform;
-		Instances->GetInstanceTransform(Index, Transform, true);
+		FRRViewCut::GetTrueTransform(Instances, Index, Transform);
 		return Transform;
 	};
 	auto BoundsOf = [&](UInstancedStaticMeshComponent* Instances, int32 Index)
@@ -4999,6 +5030,31 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 			{
 				WantGone.FindOrAdd(Instances).Add(Index);
 				ForCellsIn(Box, [&](int32 Cell) { if (IsUnderMesh(Cell)) { Break(Cell); } });
+				// Round 100: a roof a crushing wreck (the dragon's breath) takes off takes the walls under it with it,
+				// Crush layers down over the roof's whole footprint
+				if (Instances == Roofs)
+				{
+					int32 Crush = 0;
+					for (const FRRWreck& Wreck : InWrecks)
+					{
+						if (Wreck.Crush > Crush && Touches(Wreck, Box))
+						{
+							Crush = Wreck.Crush;
+						}
+					}
+					if (Crush > 0)
+					{
+						const FBox Under(FVector(Box.Min.X, Box.Min.Y, Box.Min.Z - Crush * BlockSize), FVector(Box.Max.X, Box.Max.Y, Box.Min.Z + 20.f));
+						ForCellsIn(Under, [&](int32 Cell)
+						{
+							const uint8 Value = Grid[Cell];
+							if (Value != 0 && Value != HiddenSolid && !Looks[Value - 1].bUnderMesh)
+							{
+								Break(Cell);
+							}
+						});
+					}
+				}
 			}
 		}
 	}
@@ -5353,7 +5409,7 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 		if (Block && Block->bShown)
 		{
 			const FIntVector Cell = CellOf(Index);
-			FallingBlocks.Add({ GetBlockSet(Block->bDie, Block->bGloss), Block->Index, GetCellTransform(Cell.X, Cell.Y, Cell.Z), Index });
+			FallingBlocks.Add({ GetBlockSet(Block->bDie, Block->bGloss, Cell.X, Cell.Y), Block->Index, GetCellTransform(Cell.X, Cell.Y, Cell.Z), Index });
 		}
 	}
 	Broken = MoveTemp(Now);
@@ -5378,15 +5434,6 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 	{
 		const FIntVector Cell = CellOf(Index);
 		RefreshCellBlock(Cell.X, Cell.Y, Cell.Z, Mended.Contains(Index), OutRegrow);
-	}
-	if (Refresh.Num() > 0)
-	{
-		Blocks->MarkRenderStateDirty();
-		DieBlocks->MarkRenderStateDirty();
-		if (GlossBlocks)
-		{
-			GlossBlocks->MarkRenderStateDirty();
-		}
 	}
 
 	// What stops: each merged box with a broken cell in it goes under the island, and boxes merged again from what's left
@@ -5534,7 +5581,7 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 			if (!Mine.Contains(Index))
 			{
 				FTransform Was;
-				Pair.Key->GetInstanceTransform(Index, Was, true);
+				FRRViewCut::GetTrueTransform(Pair.Key, Index, Was);
 				Mine.Add(Index, Was);
 				Pair.Key->UpdateInstanceTransform(Index, Pair.Key == Solid ? Stowed(Was) : Shrunk(Was), true, false, true);
 				Touched.Add(Pair.Key);
@@ -5583,10 +5630,6 @@ void ARRRandomDiceTown::ApplyWrecks(TConstArrayView<FRRWreck> InWrecks, TArray<F
 		{
 			UNavigationSystemV1::UpdateComponentInNavOctree(*WreckSolid);
 		}
-	}
-	for (UInstancedStaticMeshComponent* Instances : Touched)
-	{
-		Instances->MarkRenderStateDirty();
 	}
 	// What falls just now comes down (on every machine; the server's landings hurt)
 	if (NewlyFallen.Num() > 0)
@@ -5887,11 +5930,14 @@ void ARRRandomDiceTown::StartFalling(const TArray<int32>& Cells, const TArray<FF
 		}
 	}
 	// Its looks: its blocks, the giant dice and the models standing in it (roofs, trees, lamps)
+	// (round 99: each as a copy in a small mesh of its own, FRRStandIns: the big meshes' own instances, hidden as their
+	// cells broke, are left alone while it comes down)
 	auto Add = [&](int32 Part, const FFallingPiece& Look)
 	{
 		if (Falling[First + Part].Pieces.Num() < FallMaxPieces)
 		{
-			Falling[First + Part].Pieces.Add(Look);
+			FFallingPiece& Added = Falling[First + Part].Pieces.Add_GetRef(Look);
+			Added.Stand = FallStandIns.Add(this, Added.Instances.Get(), Added.Index, Added.Was);
 		}
 	};
 	for (const FFallingPiece& Look : BlockPieces)
@@ -5931,7 +5977,6 @@ void ARRRandomDiceTown::StartFalling(const TArray<int32>& Cells, const TArray<FF
 
 void ARRRandomDiceTown::TickFalling(float DeltaSeconds)
 {
-	TSet<UInstancedStaticMeshComponent*> Dirty;
 	for (int32 Index = Falling.Num() - 1; Index >= 0; --Index)
 	{
 		FFalling& Piece = Falling[Index];
@@ -5939,13 +5984,6 @@ void ARRRandomDiceTown::TickFalling(float DeltaSeconds)
 		if (Piece.Age >= Piece.Duration)
 		{
 			LandFalling(Piece);
-			for (const FFallingPiece& Look : Piece.Pieces)
-			{
-				if (UInstancedStaticMeshComponent* Instances = Look.Instances.Get())
-				{
-					Dirty.Add(Instances);
-				}
-			}
 			Falling.RemoveAtSwap(Index);
 			continue;
 		}
@@ -5955,19 +5993,8 @@ void ARRRandomDiceTown::TickFalling(float DeltaSeconds)
 		const FVector Down(0.f, 0.f, -Piece.Drop * Share * Share);
 		for (const FFallingPiece& Look : Piece.Pieces)
 		{
-			UInstancedStaticMeshComponent* Instances = Look.Instances.Get();
-			if (!Instances)
-			{
-				continue;
-			}
-			const FTransform Now(Tip * Look.Was.GetRotation(), Piece.Pivot + Tip.RotateVector(Look.Was.GetLocation() - Piece.Pivot) + Down, Look.Was.GetScale3D());
-			Instances->UpdateInstanceTransform(Look.Index, Now, true, false, false);
-			Dirty.Add(Instances);
+			FallStandIns.Move(Look.Stand, FTransform(Tip * Look.Was.GetRotation(), Piece.Pivot + Tip.RotateVector(Look.Was.GetLocation() - Piece.Pivot) + Down, Look.Was.GetScale3D()));
 		}
-	}
-	for (UInstancedStaticMeshComponent* Instances : Dirty)
-	{
-		Instances->MarkRenderStateDirty();
 	}
 }
 
@@ -5979,7 +6006,8 @@ void ARRRandomDiceTown::LandFalling(FFalling& Piece)
 	const int32 Every = FMath::Max(1, Piece.Pieces.Num() / FallRubble);
 	for (int32 Look = 0; Look < Piece.Pieces.Num(); ++Look)
 	{
-		const FFallingPiece& Fell = Piece.Pieces[Look];
+		FFallingPiece& Fell = Piece.Pieces[Look];
+		FallStandIns.Remove(Fell.Stand);
 		UInstancedStaticMeshComponent* Instances = Fell.Instances.Get();
 		if (!Instances)
 		{
@@ -5987,7 +6015,11 @@ void ARRRandomDiceTown::LandFalling(FFalling& Piece)
 		}
 		const TMap<int32, FTransform>* Mine = Gone.Find(Instances);
 		const bool bStillGone = Fell.Cell != INDEX_NONE ? Broken.IsValidIndex(Fell.Cell) && Broken[Fell.Cell] : Mine && Mine->Contains(Fell.Index);
-		Instances->UpdateInstanceTransform(Fell.Index, bStillGone ? Shrunk(Fell.Was) : Fell.Was, true, false, false);
+		// (still gone: its own instance is hidden already; mended while it fell: back where it was)
+		if (!bStillGone)
+		{
+			Instances->UpdateInstanceTransform(Fell.Index, Fell.Was, true, false, false);
+		}
 		if (!bStillGone || Look % Every != 0)
 		{
 			continue;
@@ -6095,6 +6127,13 @@ TArray<UPrimitiveComponent*> ARRRandomDiceTown::GetDetailComponents() const
 		if (Set)
 		{
 			Out.Add(const_cast<UInstancedStaticMeshComponent*>(Set));
+		}
+	}
+	for (UInstancedStaticMeshComponent* Chunk : BlockChunks)
+	{
+		if (Chunk)
+		{
+			Out.Add(Chunk);
 		}
 	}
 	for (UInstancedStaticMeshComponent* Trees : PropTrees)

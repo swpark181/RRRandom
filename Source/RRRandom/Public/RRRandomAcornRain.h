@@ -32,7 +32,7 @@ public:
 
 	/** Acorns a second, how high they fall from and how long it takes. */
 	UPROPERTY(EditAnywhere, Category = "Acorn Rain")
-	float AcornsPerSecond = 32.f;
+	float AcornsPerSecond = 80.f;
 	UPROPERTY(EditAnywhere, Category = "Acorn Rain")
 	float DropHeight = 1400.f;
 	UPROPERTY(EditAnywhere, Category = "Acorn Rain")
@@ -66,7 +66,7 @@ private:
 	/** Acorn Index of the rain: when it lands (seconds after the start) and where. */
 	void GetAcorn(int32 Index, float& OutLandTime, FVector& OutWhere, float& OutSpin) const;
 	/** An acorn down: a pop here, damage on the server. */
-	void LandAcorn(const FVector& Where);
+	void LandAcorn(const FVector& Where, bool bGolden = false);
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UInstancedStaticMeshComponent> Nuts;

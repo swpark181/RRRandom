@@ -12,6 +12,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "NavigationSystem.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -463,6 +464,29 @@ void ARRRandomOre::UpdateFlight(float DeltaSeconds)
 	{
 		if (Hit.ImpactNormal.Z > 0.6f && Velocity.Z <= 0.f)
 		{
+			// Round 99 (the user: bots "먹으러 안 가는것 같다"): a piece that comes down where nobody can walk (a lamp post's
+			// top, a roof's trim, a tree, a giant die: no navmesh there) used to stay, and every bot gathered under it
+			// hopping for the rest of the round while the other drops lay about. It hops on instead, toward the nearest
+			// ground that can be walked, a few times at most; then it is simply put there
+			FVector Walkable;
+			if (HasAuthority() && FindWalkableNear(Hit.ImpactPoint, Walkable))
+			{
+				if (++RestHops <= MaxRestHops)
+				{
+					const FVector Away = (Walkable - Hit.ImpactPoint) * FVector(1.f, 1.f, 0.f);
+					const float Rise = 420.f;
+					// (up Rise, then down to the ground there: how long that takes, and so how fast across)
+					const float Drop = FMath::Max(0.f, Hit.ImpactPoint.Z - Walkable.Z);
+					const float Air = Rise / Gravity + FMath::Sqrt(2.f * (Rise * Rise / (2.f * Gravity) + Drop) / Gravity);
+					Velocity = Away / FMath::Max(Air, 0.2f) + FVector(0.f, 0.f, Rise);
+					SetActorLocation(FVector(Hit.Location.X, Hit.Location.Y, Hit.ImpactPoint.Z + 2.f));
+					return;
+				}
+				SetActorLocation(Walkable);
+				Velocity = FVector::ZeroVector;
+				bResting = true;
+				return;
+			}
 			// Down on the floor: rest here
 			SetActorLocation(FVector(Hit.Location.X, Hit.Location.Y, Hit.ImpactPoint.Z));
 			Velocity = FVector::ZeroVector;
@@ -481,6 +505,28 @@ void ARRRandomOre::UpdateFlight(float DeltaSeconds)
 	{
 		Destroy();
 	}
+}
+
+bool ARRRandomOre::FindWalkableNear(const FVector& Spot, FVector& OutWalkable) const
+{
+	// False where Spot itself can be walked to (the navmesh is right there), or the map has no navmesh at all; true with
+	// the nearest walkable ground otherwise
+	UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+	const ANavigationData* Data = Nav ? Nav->GetDefaultNavDataInstance(FNavigationSystem::DontCreate) : nullptr;
+	FNavLocation Found;
+	if (!Data || Nav->ProjectPointToNavigation(Spot, Found, FVector(70.f, 70.f, 90.f), Data))
+	{
+		return false;
+	}
+	for (const float Reach : { 300.f, 700.f, 1500.f })
+	{
+		if (Nav->ProjectPointToNavigation(Spot, Found, FVector(Reach, Reach, 3000.f), Data))
+		{
+			OutWalkable = Found.Location;
+			return true;
+		}
+	}
+	return false;
 }
 
 void ARRRandomOre::PullToward(const ARRRandomCharacter* InPuller)
@@ -529,8 +575,9 @@ void ARRRandomOre::TryPickUp()
 		if (Offset.Size2D() <= Reach + Capsule->GetScaledCapsuleRadius() && FMath::Abs(Offset.Z) <= Reach + Capsule->GetScaledCapsuleHalfHeight())
 		{
 			Carry->Add(Kind);
-			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) picks up a %s; carries %d."), *Brawler->GetName(), Brawler->GetTeam(),
-				*StaticEnum<ERROreKind>()->GetNameStringByValue(int64(Kind)), Carry->GetPoints());
+			// (round 99: and how long it lay there, to see how keenly the bots go for it)
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) picks up a %s; carries %d; it was %.1f s old."), *Brawler->GetName(), Brawler->GetTeam(),
+				*StaticEnum<ERROreKind>()->GetNameStringByValue(int64(Kind)), Carry->GetPoints(), GetGameTimeSinceCreation());
 			Destroy();
 			return;
 		}

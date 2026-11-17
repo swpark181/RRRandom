@@ -128,6 +128,11 @@ private:
 	bool bLandingShown = false;
 
 	FVector Velocity = FVector::ZeroVector;
+	/** Round 99: hops taken off places nobody can walk to (FindWalkableNear), and the most before it is just put down. */
+	int32 RestHops = 0;
+	static constexpr int32 MaxRestHops = 3;
+	/** Round 99: true (with the nearest walkable ground) where Spot has no navmesh under it though the map has one. */
+	bool FindWalkableNear(const FVector& Spot, FVector& OutWalkable) const;
 	float Age = 0.f;
 	/** Server: pulled by a squirrel's ore magnet, from where, and for how long so far. */
 	TWeakObjectPtr<const ARRRandomCharacter> Puller;

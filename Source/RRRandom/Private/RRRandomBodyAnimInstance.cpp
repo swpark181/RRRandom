@@ -12,6 +12,16 @@
 
 namespace
 {
+	// Round 99 (the user: "캐릭터 머리가 좌우 90도 초과해서 돌아가는건 어색하다. 90도를 넘어서 돌려야 할 때는 아예 몸통까지 실제
+	// 포워드가 바뀌도록"): the head turns at most this far to either side of the chest; a look further round than
+	// HeadTurnBodyAt is the body's to make, which then swings round at the faster rates instead of leaving the head to
+	// crane back over the shoulder while the legs catch up (turning back the way it came, the head used to lead the body
+	// by over a hundred degrees for a moment)
+	constexpr float HeadTurnMax = 80.f;
+	constexpr float HeadTurnBodyAt = 90.f;
+	TAutoConsoleVariable<int32> CVarLogHeadTurn(TEXT("rr.Anim.LogHeadTurn"), 0,
+		TEXT("1: log when a head was asked to turn over 90 degrees from its chest (it is held to 80 now)."));
+
 	// Long frames are simulated in steps this short, so the spring stays steady
 	constexpr float MaxStep = 1.f / 60.f;
 	// A turn or a speed change bigger than this in one frame is a teleport (respawn), not something to swing from
@@ -463,7 +473,7 @@ void URRRandomBodyAnimInstance::UpdateAim(float DeltaSeconds)
 		return;
 	}
 	const bool bGaze = Brawler->IsAlive() && !Brawler->IsClimbing() && !Brawler->GetVehicle() && !Brawler->GetRobot()
-		&& !Brawler->IsRidingCannon() && !Brawler->IsCelebrating() && !Brawler->IsDespairing() && !Brawler->IsUsingUltimate();
+		&& !Brawler->IsRidingCannon() && !Brawler->IsCelebrating() && !Brawler->IsDespairing() && !Brawler->IsEmoting() && !Brawler->IsUsingUltimate();
 	const bool bAimGaze = bGaze && Brawler->WantsAimFacing();
 	Aim.bCombatFacing = bAimGaze;
 	const bool bMoving = bGaze && Brawler->GetAnimationMoveSpeed() > 10.f;
@@ -486,10 +496,15 @@ void URRRandomBodyAnimInstance::UpdateAim(float DeltaSeconds)
 			const float Delta = FMath::FindDeltaAngleDegrees(From, To);
 			return FRotator::NormalizeAxis(From + FMath::Clamp(Delta * FMath::Min(DeltaSeconds * Ease, 1.f), -Rate * DeltaSeconds, Rate * DeltaSeconds));
 		};
-		Aim.LowerYaw = FollowYaw(Aim.LowerYaw, LowerTarget, 360.f, 12.f);
-		Aim.UpperYaw = FollowYaw(Aim.UpperYaw, bAimGaze ? ActorYaw : Aim.LowerYaw, 540.f, 14.f);
+		// (round 99: a look more than a quarter turn off the chest: the whole body comes round fast)
+		const float WantLook = bAimGaze ? ActorYaw : bMoving ? Brawler->GetVelocity().Rotation().Yaw : Aim.UpperYaw;
+		const bool bTurnBody = FMath::Abs(FMath::FindDeltaAngleDegrees(Aim.UpperYaw, WantLook)) > HeadTurnBodyAt;
+		Aim.LowerYaw = FollowYaw(Aim.LowerYaw, LowerTarget, bTurnBody ? 900.f : 360.f, bTurnBody ? 22.f : 12.f);
+		Aim.UpperYaw = FollowYaw(Aim.UpperYaw, bAimGaze ? ActorYaw : Aim.LowerYaw, bTurnBody ? 1080.f : 540.f, bTurnBody ? 26.f : 14.f);
 		const float LookTarget = bAimGaze ? ActorYaw : bMoving ? Brawler->GetVelocity().Rotation().Yaw : Aim.UpperYaw;
 		Aim.GazeYaw = FollowYaw(Aim.GazeYaw, LookTarget, 900.f, 22.f);
+		// (and the head no further round than its limit from the chest, however far ahead of the body the look is)
+		Aim.GazeYaw = FRotator::NormalizeAxis(Aim.UpperYaw + FMath::Clamp(FMath::FindDeltaAngleDegrees(Aim.UpperYaw, Aim.GazeYaw), -HeadTurnMax, HeadTurnMax));
 	}
 	Aim.KeepLocomotion = FMath::FInterpConstantTo(Aim.KeepLocomotion, Aim.bSeparateBody && bMoving ? 1.f : 0.f, DeltaSeconds, 8.f);
 	Aim.GazeWeight = bAimGaze ? 1.f : FMath::FInterpConstantTo(Aim.GazeWeight, bMoving ? 1.f : 0.f, DeltaSeconds, 10.f);
@@ -742,7 +757,7 @@ bool FRRRandomBodyAnimInstanceProxy::Evaluate(FPoseContext& Output)
 	}
 	// The light sword's slash and guard over the upper body (round 97)
 	UpdateSwordContacts(Output);
-	if (Melee.SlashWeight > 0.f || Melee.GuardWeight > 0.f || ContactWeight > 0.f)
+	if (Melee.SlashWeight > 0.f || Melee.GuardWeight > 0.f || ContactWeight > 0.f || (Melee.Carry && Melee.CarryWeight > 0.f))
 	{
 		EvaluateMelee(Output);
 	}
@@ -940,8 +955,19 @@ void URRRandomBodyAnimInstance::UpdateMelee(float DeltaSeconds)
 {
 	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetOwningActor());
 	const bool bSword = Brawler && Brawler->IsAlive() && Brawler->GetWeapon().bSword && !Brawler->IsDriving()
-		&& !Brawler->IsClimbing() && !Brawler->IsUsingUltimate() && !Brawler->IsCelebrating() && !Brawler->IsDespairing();
+		&& !Brawler->IsClimbing() && !Brawler->IsUsingUltimate() && !Brawler->IsCelebrating() && !Brawler->IsDespairing() && !Brawler->IsEmoting();
 	Melee.Guard = bSword ? Brawler->GetSwordGuard() : nullptr;
+	// Round 101: carrying the hammer and the shield, the arms hold their own pose over whatever the legs are doing
+	const UAnimSequence* Carry = bSword ? Brawler->GetShieldCarry() : nullptr;
+	if (Carry)
+	{
+		Melee.Carry = Carry;
+	}
+	Melee.CarryWeight = FMath::FInterpConstantTo(Melee.CarryWeight, Carry ? 1.f : 0.f, DeltaSeconds, 5.f);
+	if (Melee.CarryWeight <= 0.f)
+	{
+		Melee.Carry = nullptr;
+	}
 	Melee.bDedicated = bSword && Brawler->HasDedicatedSwordMotion();
 	if (Melee.bDedicated)
 	{
@@ -1072,10 +1098,15 @@ void URRRandomBodyAnimInstance::UpdateMelee(float DeltaSeconds)
 		const int32 Step = FMath::Clamp(Brawler->GetComboStep(), 0, 2);
 		UAnimSequence* ParryMotion = Brawler->GetSwordParry();
 		Melee.Slash = bParry ? (ParryMotion ? ParryMotion : Brawler->GetSwordSlash(0)) : Brawler->GetSwordSlash(Step);
-		const float From = bParry ? (ParryMotion ? ParryFrom : SlashFrom[0]) : (Melee.bDedicated ? 0.f : SlashFrom[Step]);
-		const float To = bParry ? (ParryMotion ? ParryTo : SlashTo[0]) : (Melee.bDedicated ? 1.f : SlashTo[Step]);
+		// (round 98: the hammer and the dagger have their own blows, with their own windows and pace)
+		const bool bRole = Brawler->HasRoleMeleeMotion() && !bParry;
+		float RoleFrom = 0.f;
+		float RoleTo = 1.f;
+		Brawler->GetMeleeWindow(Step, RoleFrom, RoleTo);
+		const float From = bRole ? RoleFrom : bParry ? (ParryMotion ? ParryFrom : SlashFrom[0]) : (Melee.bDedicated ? 0.f : SlashFrom[Step]);
+		const float To = bRole ? RoleTo : bParry ? (ParryMotion ? ParryTo : SlashTo[0]) : (Melee.bDedicated ? 1.f : SlashTo[Step]);
 		const float Since = bParry ? SinceParry : SinceSwing;
-		const float Time = bParry ? ParryTime : (Melee.bDedicated ? Brawler->GetSwordAttackDuration() : SlashTime * (Step == 2 ? FinisherTimeShare : 1.f));
+		const float Time = bRole ? Brawler->GetSwordAttackDuration() : bParry ? ParryTime : (Melee.bDedicated ? Brawler->GetSwordAttackDuration() : SlashTime * (Step == 2 ? FinisherTimeShare : 1.f));
 		const bool bConnected = Melee.bDedicated && !bParry;
 		const float Stamp = GetWorld()->GetTimeSeconds() - Since;
 		if (!FMath::IsNearlyEqual(Melee.SwingStamp, Stamp, 0.005f))
@@ -1267,6 +1298,26 @@ void FRRRandomBodyAnimInstanceProxy::EvaluateMelee(FPoseContext& Output) const
 			for (const FCompactPoseBoneIndex Index : SlashPose.ForEachBoneIndex())
 			{
 				SlashPose[Index].Blend(Previous[Index], SlashPose[Index], Melee.SlashBlend);
+			}
+		}
+	}
+	// Round 101: first the carry pose on both arms (shoulder joint down), under the guard and the swings
+	if (Melee.Carry && Melee.CarryWeight > 0.f)
+	{
+		FCompactPose CarryPose;
+		Sample(Melee.Carry, 0.f, CarryPose);
+		const FCompactPoseBoneIndex Arms[] = { FindBone(Bones, TEXT("LeftArm")), FindBone(Bones, TEXT("RightArm")) };
+		const float Weight = FMath::SmoothStep(0.f, 1.f, Melee.CarryWeight);
+		for (const FCompactPoseBoneIndex Index : Output.Pose.ForEachBoneIndex())
+		{
+			bool bArm = false;
+			for (FCompactPoseBoneIndex Walk = Index; Walk.IsValid() && !bArm; Walk = Output.Pose.GetParentBoneIndex(Walk))
+			{
+				bArm = Walk == Arms[0] || Walk == Arms[1];
+			}
+			if (bArm)
+			{
+				Output.Pose[Index].SetRotation(FQuat::Slerp(Output.Pose[Index].GetRotation(), CarryPose[Index].GetRotation(), Weight).GetNormalized());
 			}
 		}
 	}
@@ -1611,7 +1662,24 @@ void FRRRandomBodyAnimInstanceProxy::EvaluateGaze(FPoseContext& Output) const
 		FCompactPose Reference;
 		Reference.SetBoneContainer(&Bones);
 		Reference.ResetToRefPose();
-		const FQuat Desired = FQuat::FindBetweenNormals(FVector::RightVector, Aim.GazeFacing)
+		// Round 99: whatever asked for the look, the head goes no further than HeadTurnMax to either side of where the chest
+		// faces now (the pose as it stands: the aim, a sword's wind-up, a turn under way)
+		FVector Facing = Aim.GazeFacing;
+		if (const FCompactPoseBoneIndex Chest = FindBone(Bones, TEXT("Spine2")); Chest.IsValid())
+		{
+			const FVector ChestForward = (GetMeshSpaceTransform(Output.Pose, Chest).GetRotation() * GetMeshSpaceTransform(Reference, Chest).GetRotation().Inverse()).RotateVector(FVector::RightVector);
+			const float Off = FMath::FindDeltaAngleRadians(FMath::Atan2(-ChestForward.X, ChestForward.Y), FMath::Atan2(-Facing.X, Facing.Y));
+			const float Limit = FMath::DegreesToRadians(HeadTurnMax);
+			if (FMath::Abs(Off) > Limit)
+			{
+				Facing = FQuat(FVector::UpVector, FMath::Clamp(Off, -Limit, Limit) - Off).RotateVector(Facing);
+				if (FMath::Abs(Off) > FMath::DegreesToRadians(HeadTurnBodyAt) && CVarLogHeadTurn.GetValueOnAnyThread() != 0)
+				{
+					UE_LOG(LogTemp, Log, TEXT("RRRandom: head turn: asked %.0f degrees off the chest, held to %.0f."), FMath::RadiansToDegrees(Off), HeadTurnMax);
+				}
+			}
+		}
+		const FQuat Desired = FQuat::FindBetweenNormals(FVector::RightVector, Facing)
 			* GetMeshSpaceTransform(Reference, Head).GetRotation();
 		const FQuat Current = GetMeshSpaceTransform(Output.Pose, Head).GetRotation();
 		const FQuat Correction = (Desired * Current.Inverse()).GetNormalized();

@@ -24,6 +24,10 @@ enum class ERRHitEffect : uint8
 	Sniper,
 	Shotgun,
 	Sword,
+	// Round 98's animal friend weapons (the main mode's roles)
+	Hammer,
+	Dagger,
+	Acorn,
 	Count UMETA(Hidden),
 };
 
@@ -99,6 +103,31 @@ struct RRRANDOM_API FRRWeapon
 	bool bSword = false;
 
 	/**
+	 * Round 98, the melee weapons' own reach (from the holder's middle, at normal size), half angle in front and push (a
+	 * sword's are SwordReach / SwordHalfAngle and none). The HAMMER pushes hard and its third blow slams the ground round it;
+	 * the DAGGER is short and quick and hits much harder from behind (DaggerBackstab).
+	 */
+	UPROPERTY()
+	float MeleeReach = 0.f;
+	UPROPERTY()
+	float MeleeHalfAngle = 0.f;
+	UPROPERTY()
+	float MeleeKnock = 0.f;
+	/** Round 98: the right button raises a shield that stops everything from the front (the HAMMER's): no deflecting back. */
+	UPROPERTY()
+	bool bShieldGuard = false;
+	/** Round 98: its shots fly in an arc and burst where they land (the ACORN launcher). */
+	UPROPERTY()
+	bool bLob = false;
+	static constexpr float DaggerBackstab = 2.f;
+	float GetMeleeReach() const { return MeleeReach > 0.f ? MeleeReach : SwordReach; }
+	float GetMeleeHalfAngle() const { return MeleeHalfAngle > 0.f ? MeleeHalfAngle : SwordHalfAngle; }
+	bool IsHammer() const { return GetHitEffect() == ERRHitEffect::Hammer; }
+	bool IsDagger() const { return GetHitEffect() == ERRHitEffect::Dagger; }
+	/** Round 98: a Make type by name (e.g. "HAMMER"), or INDEX_NONE. */
+	static int32 FindType(const TCHAR* TypeName);
+
+	/**
 	 * Round 97, the SNIPER's scope: aiming (the right button, over the shoulder) looks through it, this many times closer than
 	 * the plain sights; better a tier up (GetScopeZoom). 0 for a gun without one.
 	 */
@@ -155,7 +184,10 @@ struct RRRANDOM_API FRRWeapon
 
 	/** The sticker its hits show (by gun type). */
 	ERRHitEffect GetHitEffect() const;
-	/** Its model in the hands (URRRandomGunComponent): 0 pistol, 1 SMG, 2 minigun, 3 rifle, 4 blaster, 5 cannon, 6 sniper, 7 shotgun, 8 sword. */
+	/**
+	 * Its model in the hands (URRRandomGunComponent): 0 pistol, 1 SMG, 2 minigun, 3 rifle, 4 blaster, 5 cannon, 6 sniper,
+	 * 7 shotgun, 8 sword, 9 hammer, 10 dagger, 11 acorn launcher.
+	 */
 	int32 GetLookIndex() const;
 	/** How many dots a tier shows on the bag's cards (common 1 .. legendary 4). */
 	static int32 GetTierStars(ERRWeaponTier Tier) { return static_cast<int32>(Tier) + 1; }

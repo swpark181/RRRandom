@@ -17,6 +17,11 @@
 #include "RRRandomUltimateMeteor.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "RRRandomMeteorRush.h"
+#include "RRRandomMeteor.h"
+#include "RRRandomProjectile.h"
+#include "RRRandomRounds.h"
+#include "RRRandomSpecies.h"
+#include "RRRandomDiceBuffComponent.h"
 #include "RRRandomOre.h"
 #include "RRRandomHUD.h"
 #include "RRRandomPlayerController.h"
@@ -122,6 +127,18 @@ void ARRRandomGameMode::InitGame(const FString& MapName, const FString& Options,
 		bStudio = false;
 		bSplitPlayersAcrossTeams = false;
 	}
+	// Round 98, the main mode: 3 vs 3 in Dice Town's arena (the studio too, for tests)
+	bRounds = !bBattleRoyale && !bDefense && Sessions && Sessions->GetMatchRule() == ERRMatchRule::Rounds;
+	if (bRounds && !bStudio)
+	{
+		bDiceTown = true;
+		TeamSpawnDistance = ARRRandomDiceTown::TeamSpawnDistance;
+	}
+	// (told now: the host's own animal friend is spawned as it logs in, before StartPlay, and takes its role's weapon)
+	if (ARRRandomGameState* State = GetGameState<ARRRandomGameState>())
+	{
+		State->SetRounds(bRounds);
+	}
 	TeamSlots.SetNum(GetTeamCount());
 }
 
@@ -162,7 +179,7 @@ void ARRRandomGameMode::StartPlay()
 	// The rule picked on this machine's title (or -RRRule=MeteorRush): Meteor Rush holds ore points instead of counting
 	// knockouts, and has a clock
 	const URRRandomSessionSubsystem* Sessions = GetGameInstance() ? GetGameInstance()->GetSubsystem<URRRandomSessionSubsystem>() : nullptr;
-	bMeteorRush = Sessions && Sessions->GetMatchRule() == ERRMatchRule::MeteorRush;
+	bMeteorRush = !bRounds && Sessions && Sessions->GetMatchRule() == ERRMatchRule::MeteorRush;
 	if (bMeteorRush)
 	{
 		ScoreToWin = ARRRandomMeteorRushDirector::ScoreToWin;
@@ -240,7 +257,8 @@ void ARRRandomGameMode::StartPlay()
 		SetUpBattleRoyale();
 	}
 	// Dice Town's human cannons and plane stations (round 88), on open ground by each team's base and out on the flanks
-	if (bDiceTown && !bDefense)
+	// (not in the main mode's arena: they fly out of it)
+	if (bDiceTown && !bDefense && !bRounds)
 	{
 		if (const ARRRandomDiceTown* Town = TActorIterator<ARRRandomDiceTown>(GetWorld()) ? *TActorIterator<ARRRandomDiceTown>(GetWorld()) : nullptr; Town && Town->IsBuilt())
 		{
@@ -264,12 +282,237 @@ void ARRRandomGameMode::StartPlay()
 	{
 		SpawnDummiesIfNoneExist();
 	}
+	// Round 98: the main mode's fence, then the first round (its rule die and countdown)
+	if (bRounds)
+	{
+		RoundStream.GenerateNewSeed();
+		if (ARRRandomGameState* State = GetGameState<ARRRandomGameState>())
+		{
+			State->SetRounds(true);
+		}
+		SetUpRoundsArena();
+		StartRound(1);
+		GetWorldTimerManager().SetTimer(RoundTimer, this, &ARRRandomGameMode::UpdateRound, 0.2f, true);
+	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Round 98, the main mode
+
+void ARRRandomGameMode::SetUpRoundsArena()
+{
+	const ARRRandomDiceTown* Town = TActorIterator<ARRRandomDiceTown>(GetWorld()) ? *TActorIterator<ARRRandomDiceTown>(GetWorld()) : nullptr;
+	if (!Town || bStudio)
+	{
+		return;
+	}
+	const FVector Center(GetArenaCenter().X, GetArenaCenter().Y, Town->GetFloorZ());
+	const FTransform Where(Center);
+	if (ARRRandomArenaFence* Fence = GetWorld()->SpawnActorDeferred<ARRRandomArenaFence>(ARRRandomArenaFence::StaticClass(), Where))
+	{
+		Fence->Setup(RRRounds::ArenaHalf, Town->GetFloorZ());
+		Fence->FinishSpawning(Where);
+	}
+	// The rides parked outside the fence go, and the star team's cars (their robot would take a whole round to build and
+	// ride: not this mode's fight)
+	int32 Removed = 0;
+	for (TActorIterator<ARRRandomVehicle> It(GetWorld()); It; ++It)
+	{
+		const FVector Offset = It->GetActorLocation() - Center;
+		if (FMath::Abs(Offset.X) > RRRounds::ArenaHalf - 150.f || FMath::Abs(Offset.Y) > RRRounds::ArenaHalf - 150.f || It->GetStarPart() >= 0)
+		{
+			It->Destroy();
+			++Removed;
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: rounds arena fenced %.0f each way round (%.0f, %.0f); %d rides outside put away."), RRRounds::ArenaHalf, Center.X, Center.Y, Removed);
+}
+
+void ARRRandomGameMode::StartRound(int32 Round)
+{
+	ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
+	if (!State)
+	{
+		return;
+	}
+	GetWorldTimerManager().ClearTimer(NextRoundTimer);
+	// The rule die: a rule not played yet this match (-RRRoundRule=N forces one, for tests)
+	int32 Face = RoundStream.RandRange(1, 6);
+	for (int32 Try = 0; Try < 30 && (State->GetPlayedRules() & (1 << static_cast<int32>(RRRounds::GetRuleForFace(Face)))); ++Try)
+	{
+		Face = RoundStream.RandRange(1, 6);
+	}
+	int32 Forced = -1;
+	if (FParse::Value(FCommandLine::Get(), TEXT("RRRoundRule="), Forced) && Forced >= 0 && Forced < static_cast<int32>(ERRRoundRule::Count))
+	{
+		Face = Forced * 2 + 1;
+	}
+	const ERRRoundRule Rule = RRRounds::GetRuleForFace(Face);
+	if (Round > 1)
+	{
+		ResetForRound();
+	}
+	else
+	{
+		// The first round: everyone already in (spawned before the game state knew the mode) takes its role's weapon and the
+		// round's dice
+		for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+		{
+			if (!It->IsDecoy() && !It->IsVillain())
+			{
+				It->EquipWeapon(It->GetRoleWeapon());
+				It->GetDiceBuffs()->ResetForRound(RRRounds::StartDice);
+			}
+		}
+	}
+	State->StartRound(Round, Rule, Face);
+	SuddenDeathStart = 0.f;
+
+	const float Now = GetWorld()->GetTimeSeconds();
+	float Length = RRRounds::RoundLength;
+	FParse::Value(FCommandLine::Get(), TEXT("RRRoundLength="), Length);
+	const float PlayStart = Now + RRRounds::RuleRollTime + RRRounds::IntroCountdown;
+	State->SetPlayStartTime(PlayStart);
+	State->SetMatchEndTime(PlayStart + FMath::Max(10.f, Length));
+	State->SetOvertime(false);
+
+	// The meteor round: the ore rule, shortened to a round
+	bMeteorRush = Rule == ERRRoundRule::MeteorRush;
+	State->SetMeteorRush(bMeteorRush);
+	// (round 99, for trying round lengths in bot matches: -RRKillTarget=N, -RRMeteorGoal=N, -RRMeteorInterval=N; the
+	// game's own values are RRRounds')
+	int32 KillTarget = RRRounds::KillTarget;
+	int32 MeteorGoal = RRRounds::MeteorGoal;
+	float MeteorInterval = RRRounds::MeteorInterval;
+	FParse::Value(FCommandLine::Get(), TEXT("RRKillTarget="), KillTarget);
+	FParse::Value(FCommandLine::Get(), TEXT("RRMeteorGoal="), MeteorGoal);
+	FParse::Value(FCommandLine::Get(), TEXT("RRMeteorInterval="), MeteorInterval);
+	ScoreToWin = Rule == ERRRoundRule::Deathmatch ? KillTarget : bMeteorRush ? MeteorGoal : 0;
+	FParse::Value(FCommandLine::Get(), TEXT("RRScoreToWin="), ScoreToWin);
+	State->SetScoreToWin(ScoreToWin);
+	if (bMeteorRush)
+	{
+		if (ARRRandomMeteorRushDirector* Director = GetWorld()->SpawnActor<ARRRandomMeteorRushDirector>())
+		{
+			Director->SetRoundPace(RRRounds::MeteorFirst, MeteorInterval, RRRounds::MeteorHold);
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: ROUND %d starts: the rule die shows %d, %s (score %d - %d in rounds)."), Round, Face, *RRRounds::GetRuleName(Rule),
+		State->GetRoundWins(0), State->GetRoundWins(1));
+}
+
+void ARRRandomGameMode::UpdateRound()
+{
+	ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
+	if (!State || State->IsMatchOver() || State->IsRoundOver() || !State->HasPlayStarted())
+	{
+		return;
+	}
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (State->IsOvertime())
+	{
+		if (SuddenDeathStart <= 0.f)
+		{
+			SuddenDeathStart = Now;
+		}
+		// Sudden death ran out: each team rolls a die, the higher takes the round
+		if (Now - SuddenDeathStart > RRRounds::SuddenDeathLength)
+		{
+			int32 Blue = RoundStream.RandRange(1, 6);
+			int32 Red = RoundStream.RandRange(1, 6);
+			while (Blue == Red)
+			{
+				Red = RoundStream.RandRange(1, 6);
+			}
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: sudden death runs out; the teams' dice say %d : %d."), Blue, Red);
+			EndRound(Blue > Red ? 0 : 1, Blue, Red);
+		}
+		return;
+	}
+	// A meteor round's clock is its director's (the golden meteor on a tie)
+	if (bMeteorRush || State->GetMatchTimeRemaining() > 0.f)
+	{
+		return;
+	}
+	const int32 Blue = State->GetTeamScore(0);
+	const int32 Red = State->GetTeamScore(1);
+	if (Blue != Red)
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: the round's time is up at %d : %d."), Blue, Red);
+		EndRound(Blue > Red ? 0 : 1);
+		return;
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: the round's time is up at %d : %d; sudden death, the next KO wins."), Blue, Red);
+	State->SetOvertime(true);
+	SuddenDeathStart = Now;
+}
+
+void ARRRandomGameMode::EndRound(int32 Winner, int32 DieBlue, int32 DieRed)
+{
+	ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
+	if (!State || State->IsRoundOver() || State->IsMatchOver())
+	{
+		return;
+	}
+	State->EndRound(Winner, DieBlue, DieRed);
+	// The meteor round's director stops here (the ore stays on the ground till the next round clears it)
+	for (TActorIterator<ARRRandomMeteorRushDirector> It(GetWorld()); It; ++It)
+	{
+		It->Destroy();
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: ROUND %d (%s) goes to team %d at %d : %d; rounds %d - %d; played %.1f s%s."), State->GetRound(), *RRRounds::GetRuleName(State->GetRoundRule()), Winner,
+		State->GetTeamScore(0), State->GetTeamScore(1), State->GetRoundWins(0), State->GetRoundWins(1), State->GetSincePlayStart(),
+		State->IsOvertime() ? TEXT(", after sudden death") : TEXT(""));
+	const bool bDecided = State->GetRoundWins(Winner) >= RRRounds::RoundsToWin || State->GetRound() >= RRRounds::MaxRounds;
+	if (bDecided)
+	{
+		const int32 MatchWinner = State->GetRoundWins(0) > State->GetRoundWins(1) ? 0 : 1;
+		GetWorldTimerManager().SetTimer(NextRoundTimer, FTimerDelegate::CreateWeakLambda(this, [this, MatchWinner]()
+		{
+			bFinalEnd = true;
+			EndMatch(MatchWinner);
+		}), RRRounds::RoundOverTime * 0.6f, false);
+		return;
+	}
+	const int32 Next = State->GetRound() + 1;
+	GetWorldTimerManager().SetTimer(NextRoundTimer, FTimerDelegate::CreateWeakLambda(this, [this, Next]() { StartRound(Next); }), RRRounds::RoundOverTime, false);
+}
+
+void ARRRandomGameMode::ResetForRound()
+{
+	UWorld* World = GetWorld();
+	// The last round's leftovers
+	TArray<AActor*> Clear;
+	for (TActorIterator<ARRRandomMeteorRushDirector> It(World); It; ++It) { Clear.Add(*It); }
+	for (TActorIterator<ARRRandomMeteor> It(World); It; ++It) { Clear.Add(*It); }
+	for (TActorIterator<ARRRandomOre> It(World); It; ++It) { Clear.Add(*It); }
+	for (TActorIterator<ARRRandomProjectile> It(World); It; ++It) { Clear.Add(*It); }
+	for (TActorIterator<ARRRandomAcornTrap> It(World); It; ++It) { Clear.Add(*It); }
+	for (TActorIterator<ARRRandomCharacter> It(World); It; ++It)
+	{
+		if (It->IsDecoy())
+		{
+			Clear.Add(*It);
+		}
+	}
+	for (AActor* Actor : Clear)
+	{
+		Actor->Destroy();
+	}
+	for (TActorIterator<ARRRandomCharacter> It(World); It; ++It)
+	{
+		if (IsValid(*It) && !It->IsDecoy())
+		{
+			It->ResetForRound();
+		}
+	}
 }
 
 void ARRRandomGameMode::OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRandomCharacter* Attacker, bool bFell)
 {
 	ARRRandomGameState* State = GetGameState<ARRRandomGameState>();
-	if (State && State->IsMatchOver())
+	// (round 98: nothing counts between rounds)
+	if (State && (State->IsMatchOver() || State->IsRoundOver()))
 	{
 		return;
 	}
@@ -311,7 +554,8 @@ void ARRRandomGameMode::OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRando
 		{
 			Carry->DropAll(bFell);
 		}
-		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) knocked out by %s (r77 film remakes)."), *Victim->GetName(), Victim->GetTeam(), Attacker ? *Attacker->GetName() : TEXT("a fall"));
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d, %s) knocked out by %s (%s); ore dropped."), *Victim->GetName(), Victim->GetTeam(), RRSpecies::GetAssetName(Victim->GetSpecies()),
+			Attacker ? *Attacker->GetName() : TEXT("a fall"), Attacker ? RRSpecies::GetAssetName(Attacker->GetSpecies()) : TEXT("-"));
 		return;
 	}
 	// A knockout without an opposing attacker still goes to the other team
@@ -324,9 +568,10 @@ void ARRRandomGameMode::OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRando
 	{
 		State->AddTeamScore(ScoringTeam);
 	}
-	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d) knocked out by %s; point to team %d."), *Victim->GetName(), Victim->GetTeam(),
-		Attacker ? *Attacker->GetName() : TEXT("a fall"), ScoringTeam);
-	if (State && State->GetTeamScore(ScoringTeam) >= ScoreToWin)
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s (team %d, %s) knocked out by %s (%s); point to team %d."), *Victim->GetName(), Victim->GetTeam(), RRSpecies::GetAssetName(Victim->GetSpecies()),
+		Attacker ? *Attacker->GetName() : TEXT("a fall"), Attacker ? RRSpecies::GetAssetName(Attacker->GetSpecies()) : TEXT("-"), ScoringTeam);
+	// (round 98: a MOST KO round has no target; in sudden death the next KO takes the round)
+	if (State && ((ScoreToWin > 0 && State->GetTeamScore(ScoringTeam) >= ScoreToWin) || (bRounds && State->IsOvertime())))
 	{
 		EndMatch(ScoringTeam);
 	}
@@ -334,6 +579,12 @@ void ARRRandomGameMode::OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRando
 
 void ARRRandomGameMode::EndMatch(int32 Winner)
 {
+	// Round 98: in the main mode this ends a round; the match ends once one team has its rounds (EndRound)
+	if (bRounds && !bFinalEnd)
+	{
+		EndRound(Winner);
+		return;
+	}
 	// MVP: the winning team's one with the most knockouts (the results show the winners dancing round it), then whoever
 	// is still standing; anyone's only if the winners have nobody
 	// (Meteor Rush: the most ore picked up, then knockouts)
@@ -341,6 +592,12 @@ void ARRRandomGameMode::EndMatch(int32 Winner)
 	auto Rank = [Winner, this](const ARRRandomCharacter* Brawler)
 	{
 		const int32 Ore = bMeteorRush && Brawler->GetOreCarry() ? Brawler->GetOreCarry()->GetCollected() : 0;
+		// (round 98, the main mode: the whole match counts: knockouts first, the ore picked up a little; not just the last round)
+		if (bRounds)
+		{
+			const int32 Picked = Brawler->GetOreCarry() ? Brawler->GetOreCarry()->GetCollected() : 0;
+			return (Brawler->GetTeam() == Winner ? 100000 : 0) + Brawler->GetKills() * 40 + Picked * 4 + (Brawler->IsAlive() ? 1 : 0);
+		}
 		return (Brawler->GetTeam() == Winner ? 100000 : 0) + Ore * 400 + Brawler->GetKills() * 4 + (Brawler->IsAlive() ? 1 : 0);
 	};
 	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
@@ -910,6 +1167,12 @@ APawn* ARRRandomGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPla
 {
 	EnsureSlots();
 
+	// Round 98, -RRSpectate (bot matches for tests): this machine's player takes no spot; bots fill every one, it watches
+	if (NewPlayer && NewPlayer->IsLocalController() && FParse::Param(FCommandLine::Get(), TEXT("RRSpectate")))
+	{
+		return nullptr;
+	}
+
 	// The battle royale under way: no spot to start from; a standing bot's place, or watching
 	const ARRRandomGameState* Match = GetGameState<ARRRandomGameState>();
 	if (bBattleRoyale && Match && Match->HasPlayStarted() && TeamStarts.Num() > 0)
@@ -1067,7 +1330,28 @@ void ARRRandomGameMode::FillEmptySlotsWithBots()
 			// Bots are any of the brawlers (-RRBotSpecies=Fox makes them all one, for tests)
 			FString BotSpeciesName;
 			const int32 BotSpecies = FParse::Value(FCommandLine::Get(), TEXT("RRBotSpecies="), BotSpeciesName) ? RRSpecies::FromName(BotSpeciesName) : INDEX_NONE;
-			ARRRandomCharacter* Bot = SpawnBrawler(BotClass, Team, Slot, BotSpecies != INDEX_NONE ? BotSpecies : FMath::RandRange(0, RRSpecies::Count - 1));
+			int32 Picked = BotSpecies != INDEX_NONE ? BotSpecies : FMath::RandRange(0, RRSpecies::Count - 1);
+			// Round 98, the main mode: no two of one kind on a team (each role once), the same as a team picking its roles
+			if (bRounds && BotSpecies == INDEX_NONE)
+			{
+				TArray<int32> Free;
+				for (int32 Kind = 0; Kind < RRSpecies::Count; ++Kind)
+				{
+					Free.Add(Kind);
+				}
+				for (const FTeamSlot& Other : TeamSlots[Team])
+				{
+					if (Other.Brawler.IsValid())
+					{
+						Free.Remove(Other.Brawler->GetSpecies());
+					}
+				}
+				if (Free.Num() > 0)
+				{
+					Picked = Free[FMath::RandRange(0, Free.Num() - 1)];
+				}
+			}
+			ARRRandomCharacter* Bot = SpawnBrawler(BotClass, Team, Slot, Picked);
 			if (!Bot)
 			{
 				continue;

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameStateBase.h"
+#include "RRRandomRounds.h"
 #include "RRRandomGameState.generated.h"
 
 class ARRRandomCharacter;
@@ -181,7 +182,62 @@ public:
 		}
 	}
 
+	/**
+	 * Round 98, the main mode (ERRMatchRule::Rounds, RRRandomRounds.h): which round (1..MaxRounds) is on, the rule its die
+	 * picked (and the face it showed), each team's rounds won, when the round's intro began (the rule die tumbling), and
+	 * once it is over, who took it (and when; INDEX_NONE for no one yet). The round's clock is GetMatchTimeRemaining, its
+	 * sudden death IsOvertime. A sudden death settled by dice keeps both teams' faces.
+	 */
+	bool IsRounds() const { return bRounds; }
+	static bool IsRounds(const UObject* WorldContext);
+	int32 GetRound() const { return Round; }
+	ERRRoundRule GetRoundRule() const { return RoundRule; }
+	int32 GetRuleFace() const { return RuleFace; }
+	int32 GetRoundWins(int32 Team) const { return Team == 0 || Team == 1 ? RoundWins[Team] : 0; }
+	float GetSinceRoundIntro() const { return GetServerWorldTimeSeconds() - RoundIntroTime; }
+	bool IsRoundOver() const { return bRounds && RoundWinner != INDEX_NONE; }
+	int32 GetRoundWinner() const { return RoundWinner; }
+	float GetSinceRoundOver() const { return GetServerWorldTimeSeconds() - RoundOverTime; }
+	int32 GetTiebreakDie(int32 Team) const { return Team == 0 || Team == 1 ? TiebreakDice[Team] : 0; }
+	/** The rules played so far in this match (bit per ERRRoundRule). */
+	uint8 GetPlayedRules() const { return PlayedRules; }
+
+	/** Server only. */
+	void SetRounds(bool bOn) { bRounds = bOn; }
+	void StartRound(int32 InRound, ERRRoundRule InRule, int32 InFace);
+	void EndRound(int32 Winner, int32 DieBlue = 0, int32 DieRed = 0);
+
 private:
+	UPROPERTY(Replicated)
+	bool bRounds = false;
+
+	UPROPERTY(Replicated)
+	int32 Round = 0;
+
+	UPROPERTY(Replicated)
+	ERRRoundRule RoundRule = ERRRoundRule::Deathmatch;
+
+	UPROPERTY(Replicated)
+	int32 RuleFace = 1;
+
+	UPROPERTY(Replicated)
+	int32 RoundWins[2];
+
+	UPROPERTY(Replicated)
+	float RoundIntroTime = 0.f;
+
+	UPROPERTY(Replicated)
+	int32 RoundWinner = INDEX_NONE;
+
+	UPROPERTY(Replicated)
+	float RoundOverTime = 0.f;
+
+	UPROPERTY(Replicated)
+	int32 TiebreakDice[2];
+
+	UPROPERTY(Replicated)
+	uint8 PlayedRules = 0;
+
 	UPROPERTY(Replicated)
 	float PrepEndTime = 0.f;
 

@@ -74,7 +74,14 @@ public:
 	/** The battle royale's get-ready time (round 97): a player's team wants to start at this spot (ARRRandomGameState::GetStartSpots). */
 	void PickTeamStart(AController* Who, int32 Spot);
 	/** The get-ready time, in seconds (-RRBRPrep=N; 0 skips it and starts as before round 97). */
-	static constexpr float DefaultPrepTime = 180.f;
+	static constexpr float DefaultPrepTime = 60.f;
+
+	/**
+	 * Round 98, the main mode (ERRMatchRule::Rounds, RRRandomRounds.h): three rounds in the arena cut out of Dice Town, two
+	 * to win. EndMatch during it ends the round (a deathmatch's target, a meteor round's hold, the win cheat); the match ends
+	 * once a team has won RoundsToWin.
+	 */
+	bool IsRounds() const { return bRounds; }
 
 protected:
 	/** Seconds of countdown once the arena has loaded before anybody can move or shoot. */
@@ -254,4 +261,24 @@ private:
 	APawn* TakeOverBot(AController* NewPlayer, int32 Species);
 
 	mutable TOptional<FVector> ArenaCenter;
+
+	// Round 98: the main mode
+	bool bRounds = false;
+	/** The results are for the whole match now (not a round's end). */
+	bool bFinalEnd = false;
+	FTimerHandle RoundTimer;
+	FTimerHandle NextRoundTimer;
+	/** World time sudden death began (0: none yet this round). */
+	float SuddenDeathStart = 0.f;
+	FRandomStream RoundStream;
+	/** The rule die picks a rule not played yet this match, and the round starts: the intro, then play. */
+	void StartRound(int32 Round);
+	/** Every few ticks: the round's clock, sudden death, its dice once that runs out. */
+	void UpdateRound();
+	/** Winner takes the round (DieBlue/DieRed: a sudden death settled by dice); the next round, or the results. */
+	void EndRound(int32 Winner, int32 DieBlue = 0, int32 DieRed = 0);
+	/** Everyone back home on their feet, the ground cleared of ore, meteors, shots and traps, for the next round. */
+	void ResetForRound();
+	/** The arena's fence, and the rides outside it put away. */
+	void SetUpRoundsArena();
 };

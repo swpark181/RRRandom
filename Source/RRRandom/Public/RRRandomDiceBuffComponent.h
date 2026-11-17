@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Math/RandomStream.h"
+#include "RRRandomRounds.h"
 #include "RRRandomDiceBuffComponent.generated.h"
 
 UENUM(BlueprintType)
@@ -61,6 +62,9 @@ struct FRRDiceRoll
 	/** The owner's species' own die (FRRKit: the fox's invisibility, the rabbit's super hops, the squirrel's shield); Stat is unused then. */
 	UPROPERTY(BlueprintReadOnly, Category = "RRRandom")
 	bool bOwn = false;
+	/** Round 98, the main mode: the die deals cards (three to keep one of) at its face; Stat is unused then. */
+	UPROPERTY(BlueprintReadOnly, Category = "RRRandom")
+	bool bCards = false;
 };
 
 /** Fired when a weapon die lands, with its face. */
@@ -75,6 +79,8 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FRRFlightDieSignature, int32 /*Face*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FRRUltimateDieSignature, int32 /*Face*/);
 /** Fired when the owner's own die lands, with its face. */
 DECLARE_MULTICAST_DELEGATE_OneParam(FRROwnDieSignature, int32 /*Face*/);
+/** Round 98: fired when a card is kept that the owner plays out itself (giant, wings, shield, cloak, heal), with the die's face. */
+DECLARE_MULTICAST_DELEGATE_TwoParams(FRRCardSignature, ERRCard /*Card*/, int32 /*Face*/);
 
 /**
  * A gauge fills over time; each full gauge stores one die. Rolling spends one stored die, which tumbles
@@ -157,6 +163,20 @@ public:
 	FRRUltimateDieSignature OnUltimateDie;
 	/** The owner listens to this for its own die's power. */
 	FRROwnDieSignature OnOwnDie;
+	/** Round 98: the owner listens to this for the cards it plays itself. */
+	FRRCardSignature OnCard;
+
+	/**
+	 * Round 98, the main mode: the cards dealt and waiting for a pick (empty: none), and the face they were dealt at. Only
+	 * the owner's machine sees them. A new die can't be rolled until one is kept.
+	 */
+	const TArray<ERRCard>& GetCards() const { return Cards; }
+	int32 GetCardFace() const { return CardFace; }
+	bool HasCards() const { return Cards.Num() > 0; }
+	/** Server: keeps the card at Index of the ones dealt (the others go). False without one there. */
+	bool ChooseCard(int32 Index);
+	/** Server: a new round: this many dice, the gauge empty, no cards or ultimate dice waiting. */
+	void ResetForRound(int32 Dice);
 
 	/** Chance for each die the gauge fills to be an ultimate die; 0 for owners without an ultimate. One at a time. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RRRandom", meta = (ClampMin = "0", ClampMax = "1"))
@@ -266,4 +286,13 @@ private:
 
 	UPROPERTY(Replicated)
 	int32 UltimateCharges = 0;
+
+	UPROPERTY(Replicated)
+	TArray<ERRCard> Cards;
+
+	UPROPERTY(Replicated)
+	int32 CardFace = 0;
+
+	/** Server: the cards the tumbling die will deal when it lands. */
+	TArray<ERRCard> PendingCards;
 };

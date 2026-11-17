@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "RRRandomWreckage.h"
 #include "RRRandomDiceTown.generated.h"
 
 class UInstancedStaticMeshComponent;
@@ -494,7 +495,7 @@ private:
 	/** Round 91: the sun's light shafts and the sky light's reflections, on the level's own lights (BeginPlay). */
 	void SetUpLightEffects();
 	/** The draw set a cell's block is in. */
-	UInstancedStaticMeshComponent* GetBlockSet(bool bDie, bool bGloss) const;
+	UInstancedStaticMeshComponent* GetBlockSet(bool bDie, bool bGloss, int32 X, int32 Y);
 	/** Floating islands near the rim joined by a rainbow of dice, moons, floating dice and stars over the town. */
 	void MakeDreamSky();
 	void AddFloater(UInstancedStaticMeshComponent* Instances, const FVector& Base, const FRotator& Turn, float Scale, const FColor& Body, const FColor& Accent,
@@ -511,6 +512,14 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UStaticMesh> Cube;
 
 	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> Blocks;
+	/**
+	 * Round 99: the grid's own plain blocks, in a mesh per square of BlockChunkCells cells (made when its first block is),
+	 * so a blow touches a few hundred instances, not the whole town's. Blocks keeps what is built outside the grid (the
+	 * sky, trees made of blocks, the rim), which nothing smashes, and a battle map tile's blocks.
+	 */
+	UPROPERTY(Transient) TArray<TObjectPtr<UInstancedStaticMeshComponent>> BlockChunks;
+	UPROPERTY(Transient) TObjectPtr<UStaticMesh> BlockChunkMesh;
+	static constexpr int32 BlockChunkCells = 22;
 	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> DieBlocks;
 	/** Round 91: polished blocks (FLook::bGloss), and the puddles' discs (the engine cylinder) with their cells. */
 	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> GlossBlocks;
@@ -644,6 +653,8 @@ private:
 		FTransform Was;
 		/** The cell it is the block of (it stays gone if it still is when the fall ends); INDEX_NONE for a model. */
 		int32 Cell;
+		/** Round 99: the copy of it that comes down (FRRStandIns); its own instance stays hidden meanwhile. */
+		FRRStandIns::FPiece Stand;
 	};
 	struct FFalling
 	{
@@ -659,6 +670,7 @@ private:
 		float LandZ;
 	};
 	TArray<FFalling> Falling;
+	FRRStandIns FallStandIns;
 	/** Server: big things the last ApplyWrecks made, for the wreckage (ConsumeBigAreas). */
 	TArray<FBox> NewBigAreas;
 	int32 MapVersion = 0;

@@ -975,7 +975,7 @@ void ARRRandomDiePickup::Tick(float DeltaSeconds)
 		if (To.Size() <= PickupTakeRadius)
 		{
 			Friend->GetDiceBuffs()->AddCharge(bUltimate);
-			ARRRandomHUD::PopComicWord(this, bUltimate ? TEXT("+ULTIMATE DIE!") : TEXT("+1 DIE"), Friend->GetActorLocation() + FVector(0.f, 0.f, 180.f), bUltimate ? URRRandomDiceBuffComponent::GetUltimateColor() : RRUI::Gold, 0.9f);
+			ARRRandomHUD::PopComicWord(this, bUltimate ? TEXT("+ULTIMATE DICE!") : TEXT("+1 DICE"), Friend->GetActorLocation() + FVector(0.f, 0.f, 180.f), bUltimate ? URRRandomDiceBuffComponent::GetUltimateColor() : RRUI::Gold, 0.9f);
 			Destroy();
 			return;
 		}

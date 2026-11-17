@@ -1,4 +1,5 @@
 #include "RRRandomVehicle.h"
+#include "RRRandomMovementComponent.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomEffects.h"
 #include "RRRandomGameState.h"
@@ -217,9 +218,8 @@ ARRRandomVehicle::ARRRandomVehicle()
 	// Scenery: brawlers, shots and sight pass through
 	Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Body->SetCanEverAffectNavigation(false);
-	// Inside the toon silhouette line, like the brawlers
-	Body->SetRenderCustomDepth(true);
-	Body->SetCustomDepthStencilValue(1);
+	// (round 99: its friend-or-foe line is its rider's, Tick; parked, none)
+	Body->SetRenderCustomDepth(false);
 	// Tyre marks are for the ground
 	Body->SetReceivesDecals(false);
 
@@ -584,9 +584,29 @@ void ARRRandomVehicle::RemovePassenger(ARRRandomCharacter* Who)
 void ARRRandomVehicle::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	// Round 99: the friend-or-foe line round it (M_PP_TeamOutline) is its rider's: a parked ride is nobody's
+	const int32 WantedStencil = Rider && !bCombined ? Rider->GetOutlineStencil() : 0;
+	if (WantedStencil != OutlineStencil && Body)
+	{
+		OutlineStencil = WantedStencil;
+		Body->SetRenderCustomDepth(WantedStencil != 0);
+		Body->SetCustomDepthStencilValue(WantedStencil);
+	}
 	if (bCombined)
 	{
 		return;
+	}
+	// Round 100: under its rider where the rider is drawn. On another machine the rider's body glides from one network
+	// update to the next while its capsule (which this hangs on) jumps: the ride jumped under a smooth rider
+	if (Rider && GetAttachParentActor() == Rider)
+	{
+		const URRRandomMovementComponent* RiderMovement = Cast<URRRandomMovementComponent>(Rider->GetCharacterMovement());
+		const FVector Glide = RiderMovement && URRRandomMovementComponent::IsNetSmoothOn() ? RiderMovement->GetNetSmoothOffset() : FVector::ZeroVector;
+		if (!Glide.IsNearlyZero() || bHadGlide)
+		{
+			SetActorRelativeLocation(FVector(-GetHandling().DriverSeatX, -GetHandling().DriverSeatY, -Rider->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight()) + Glide);
+			bHadGlide = !Glide.IsNearlyZero();
+		}
 	}
 	UpdateLights(DeltaSeconds, Rider ? Rider->GetVelocity().Size2D() : 0.f);
 	if (IsPlane())
@@ -704,10 +724,17 @@ void ARRRandomVehicle::UpdateRam()
 		FHitResult Hit(Victim, Victim->GetCapsuleComponent(), Victim->GetActorLocation(), -Direction);
 		// A knockout from this throws the body off through the air
 		Victim->SetRamImpact(Velocity);
-		UGameplayStatics::ApplyPointDamage(Victim, Damage, Direction, Hit, Rider->GetController(), this, UDamageType::StaticClass());
+		ARRRandomCharacter* const Driver = Rider;
+		UGameplayStatics::ApplyPointDamage(Victim, Damage, Direction, Hit, Driver->GetController(), this, UDamageType::StaticClass());
 		if (Victim->IsAlive())
 		{
 			Victim->LaunchCharacter(Direction * RamKnock.X * Speed / FMath::Max(WalkSpeed, 1.f) + FVector(0.f, 0.f, RamKnock.Y), true, true);
+		}
+		// The knockout can end the match on the spot, and the winners leave their vehicles to dance:
+		// with the rider gone (or the car going away) there's nobody left to ram with
+		if (Rider != Driver || !IsValid(this) || !IsValid(Driver) || !Driver->IsAlive())
+		{
+			return;
 		}
 	}
 }

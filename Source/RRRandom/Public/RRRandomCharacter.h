@@ -7,6 +7,7 @@
 #include "RRRandomAimAnimations.h"
 #include "RRRandomSpecies.h"
 #include "RRRandomStarRobot.h"
+#include "RRRandomRounds.h"
 #include "RRRandomCharacter.generated.h"
 
 class ARRRandomProjectile;
@@ -14,6 +15,7 @@ class ARRRandomVehicle;
 class ARRRandomUltimate;
 class UAnimSequence;
 class UCameraComponent;
+class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class USpringArmComponent;
 class URRRandomEventComponent;
@@ -96,6 +98,32 @@ public:
 	 * at the first hit, scores nothing, holds no team spot and leaves no trace in the results.
 	 */
 	bool IsDecoy() const { return bDecoy; }
+
+	/**
+	 * Round 101 (the user: "용암에 빠졌을 때 스페이스바를 연타해서 빠져나올 수 있게 / 닿았을 때 데미지 (열심히 빠져나오지 않으면
+	 * 죽을 정도)"). In lava on foot an animal friend is stuck: it wades at LavaMoveShare of its speed and burns fast, and
+	 * jump is a struggle instead (StruggleInLava): each press hops it a little and adds a notch, LavaEscapePresses notches
+	 * and the lava throws it clear onto dry ground. Notches slip away when it stops pressing. Bots press by themselves.
+	 */
+	bool IsInLava() const { return bInLava; }
+	int32 GetLavaStruggle() const { return LavaStruggle; }
+	static constexpr int32 LavaEscapePresses = 6;
+	static constexpr float LavaMoveShare = 0.3f;
+	/** Server, from the lava every frame: in it or out of it. */
+	void SetInLava(bool bIn);
+	/** A press of jump while in lava (the owner's machine, or the server for a bot). */
+	void StruggleInLava();
+	/** Server, from the lava: true once when the struggle is won (the lava then throws it out). */
+	bool TakeLavaLeap();
+	/**
+	 * Round 100: the body where it belongs on its capsule: its own offset, the seat of what it rides, a landing's crouch,
+	 * and the glide that smooths another machine's body between updates (URRRandomMovementComponent::GetNetSmoothOffset).
+	 * Every frame, and again right after the engine's smoothing set the body itself.
+	 */
+	void PlaceBodyMesh();
+	/** Round 100: a fox's clone has this share of the fox's full health, and its shots do this share of their damage. */
+	static constexpr float DecoyHealthShare = 0.4f;
+	static constexpr float DecoyDamageShare = 0.35f;
 	/** Server, before begin play: a clone of Source (look, team, health, gun). */
 	void MakeDecoyOf(const ARRRandomCharacter* Source);
 	/** Server: the clone goes up in smoke. */
@@ -154,6 +182,10 @@ public:
 	/** Climbs onto cover in front if its top is within reach, otherwise jumps. */
 	virtual void Jump() override;
 	bool IsClimbing() const { return bClimbing; }
+	/** Round 99: what this body is to the one looking at this screen (1 a teammate, 2 an opponent, 3 the viewer's own). */
+	int32 GetOutlineStencil() const { return OutlineStencil; }
+	/** Round 99 (the bots): whether a jump now, going this way, would climb what is in front. */
+	bool CanClimbToward(const FVector& Direction, float ExtraReach = 0.f, float MaxRise = UE_BIG_NUMBER) const;
 
 	/** Starts refilling the magazine unless it is already full or reloading. Spare ammo is unlimited. On a client, asks the server. */
 	void StartReload();
@@ -357,6 +389,43 @@ public:
 	/** Server only: back on its feet at its starting spot right away (the match's MVP when the match ends). */
 	void ReviveNow();
 
+	// Round 98, the main mode (ERRMatchRule::Rounds)
+	/**
+	 * Server: a blast (a shell, an acorn, a trap, an ultimate) pushing this way, said just before its damage lands: a knockout
+	 * from it throws the body off through the air spinning (the user's "날아가는 장면 과장"), like being run over but further.
+	 */
+	void SetBlastImpact(const FVector& Velocity);
+	/** Server, a new round: back home on its feet, full health, its role's weapon, no powers, ore or cards, the round's dice. */
+	void ResetForRound();
+	/** The weapon its role always holds in the main mode (FRRKit::RoleWeapon), or the pistol. */
+	FRRWeapon GetRoleWeapon() const;
+	/** Q: the species' ability (FRRKit::Ability); on a client, asks the server. */
+	void UseAbility();
+	/** 1 / 2 / 3: keeps that card of the ones dealt (URRRandomDiceBuffComponent::GetCards); on a client, asks the server. */
+	void ChooseCard(int32 Index);
+	/** Who knocked it out last (the killcam), and this knockout's wait in all and the quick-knockout part of it. */
+	ARRRandomCharacter* GetLastKiller() const { return LastKiller; }
+	float GetRespawnTotal() const { return RespawnTotal; }
+	float GetRespawnQuick() const { return RespawnQuick; }
+	/** The team its body shows: the other one while a red fox is disguised. */
+	int32 GetShownTeam() const;
+	/** The team it seems to be on to a viewer of ViewerTeam (a disguised red fox seems one of theirs to its opponents). */
+	int32 GetApparentTeam(int32 ViewerTeam) const;
+	/** The team tint on the body (GetShownTeam), on this machine. */
+	void ApplyTeamColor();
+	/** The weapon guards with the right button: the LIGHT SWORD (deflects) or the HAMMER's shield (stops). */
+	bool CanGuard() const { return Weapon.GetHitEffect() == ERRHitEffect::Sword || Weapon.bShieldGuard; }
+	/**
+	 * Round 98, the emote wheel (hold T): one of EmoteCount motions (FRRSpeciesLook::Emotes) on every machine; moving,
+	 * attacking or getting hurt ends it. 0 for none. On a client, asks the server.
+	 */
+	void PlayEmote(int32 Index);
+	int32 GetEmote() const { return EmoteIndex; }
+	bool IsEmoting() const { return EmoteIndex > 0 && bAlive; }
+	bool HasEmote(int32 Index) const { return EmoteAnimations.IsValidIndex(Index - 1) && EmoteAnimations[Index - 1] != nullptr; }
+	static constexpr int32 EmoteCount = 6;
+	static FString GetEmoteName(int32 Index);
+
 	bool IsGiant() const { return bGiant; }
 	/**
 	 * Where flying is allowed on this map (round 65): the map's GetFlightArea (Dice Town, Dice Land, the island, the studio),
@@ -427,9 +496,19 @@ public:
 	const FRRAimAnimations& GetAimAnimations() const { return AimAnimations; }
 	/** Round 97: the light sword's slash and guard motions (null when this species has none: the sword swings by itself). */
 	UAnimSequence* GetSwordSlash() const { return SwordSlash; }
-	UAnimSequence* GetSwordGuard() const { return SwordGuard; }
+	/** (round 98: the hammer holder braces its shield arm instead, when it has that motion) */
+	UAnimSequence* GetSwordGuard() const { return Weapon.bShieldGuard && ShieldBlock ? ShieldBlock.Get() : SwordGuard.Get(); }
+	/** Round 101: the arms' pose while carrying the hammer and the shield (the tiger's), or none. */
+	UAnimSequence* GetShieldCarry() const { return Weapon.bShieldGuard ? ShieldCarry.Get() : nullptr; }
+	/**
+	 * Round 98: the HAMMER and the DAGGER have their own blows (Tripo text-to-motion, one per combo step): played on the
+	 * upper body like the light sword first motions, the weapon following the fist. GetMeleeWindow: the part of a step
+	 * clip that is the blow (shares of its length).
+	 */
+	bool HasRoleMeleeMotion() const;
+	void GetMeleeWindow(int32 Step, float& OutFrom, float& OutTo) const;
 	/** Round 97: the blow of a combo step (0 .. 2; the first blow when a step has no motion of its own), the parry flick. */
-	UAnimSequence* GetSwordSlash(int32 Step) const { return SwordSlashes[FMath::Clamp(Step, 0, 2)]; }
+	UAnimSequence* GetSwordSlash(int32 Step) const;
 	UAnimSequence* GetSwordParry() const { return SwordParry; }
 	bool HasDedicatedSwordMotion() const;
 	/** The shared sword choreography's mesh-space distances relative to the original fox. */
@@ -465,6 +544,8 @@ public:
 	/** 0 top-down .. 1 third person, and 0 .. 1 into the sights: how far the camera has moved (eased). */
 	float GetThirdPersonBlend() const { return ThirdPersonBlend; }
 	float GetSightsBlend() const { return SightsBlend; }
+	/** Round 99: 0 .. 1, how far this screen's camera is into its sprint look (the HUD's wind lines go by it). */
+	float GetSprintCameraBlend() const { return SprintCameraBlend; }
 
 	/** How long damage numbers stay up. */
 	static constexpr float DamagePopupLifetime = 0.8f;
@@ -773,8 +854,9 @@ private:
 	void ApplyKnockedOutBody();
 	/** Back on its feet with movement and collision, on every machine. */
 	void ApplyStandingBody();
-	void ApplyTeamColor();
 	void OnWeaponDie(int32 Face);
+	/** Round 98: the card kept (URRRandomDiceBuffComponent::OnCard) does its thing. */
+	void OnCard(ERRCard Card, int32 Face);
 	/** Server, round 97: the LIGHT SWORD's swing toward a spot: every opponent within its reach in front is hit at once. */
 	void SwingSword(const FVector& TargetLocation);
 	void OnGiantDie(int32 Face);
@@ -811,6 +893,21 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerSuperHop();
 
+	// Round 98
+	UFUNCTION(Server, Reliable)
+	void ServerUseAbility();
+	UFUNCTION(Server, Reliable)
+	void ServerChooseCard(uint8 Index);
+	UFUNCTION(Server, Reliable)
+	void ServerPlayEmote(uint8 Index);
+	UFUNCTION()
+	void OnRep_Emote();
+	/** Server: a hammer's third blow slams the ground round its holder. */
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastHammerSlam(FVector_NetQuantize Where, float Radius);
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastShieldBlock(FVector_NetQuantize Where);
+
 	/** The dragon's glide: whether jump is held, told to the server by a remote player (the engine's own flag lets go early). */
 	UFUNCTION(Server, Reliable)
 	void ServerSetJumpHeld(bool bHeld);
@@ -837,6 +934,8 @@ private:
 	void EndDash();
 	/** Starts climbing if cover is in front with a reachable top and room to stand there. Only where the brawler is controlled. */
 	bool TryClimb();
+	/** The climb a jump toward Forward (flat, unit) would be: where it ends standing, and the wall's facing. False: none. */
+	bool FindClimb(const FVector& Forward, FVector& OutDestination, FVector& OutWallFacing, float ExtraReach = 0.f) const;
 	void StartClimb(const FVector& Destination, const FVector& WallFacing);
 	void UpdateClimb(float DeltaSeconds);
 	/**
@@ -1111,6 +1210,51 @@ private:
 	UPROPERTY(Replicated)
 	float RespawnRemaining = 0.f;
 
+	// Round 98: who knocked it out (the killcam), the wait in all and its quick part (owner only); this round's knockouts and
+	// when the last one was (server)
+	UPROPERTY(Replicated)
+	TObjectPtr<ARRRandomCharacter> LastKiller;
+	UPROPERTY(Replicated)
+	float RespawnTotal = 0.f;
+	UPROPERTY(Replicated)
+	float RespawnQuick = 0.f;
+	int32 RoundKnockouts = 0;
+	float LastKnockoutTime = -1000.f;
+	/** A blast this very moment (SetBlastImpact) and the way it pushes; the knockout from it spins (bFlingSpin, every machine). */
+	FVector BlastImpact = FVector::ZeroVector;
+	float BlastImpactTime = -1.f;
+	UPROPERTY(Replicated)
+	bool bFlingSpin = false;
+	float FlingSpin = 0.f;
+	/** The emote playing (1..EmoteCount, 0 none) and a count that tells a replay of the same one apart. */
+	UPROPERTY(ReplicatedUsing = OnRep_Emote)
+	uint8 EmoteIndex = 0;
+	UPROPERTY(ReplicatedUsing = OnRep_Emote)
+	uint8 EmoteSerial = 0;
+	float EmoteStartTime = 0.f;
+	FVector EmoteStartLocation = FVector::ZeroVector;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UAnimSequence>> EmoteAnimations;
+	/** Round 98: the tiger's shield (the HAMMER's): on its back, in front of it while guarding (every machine, UpdateShield). */
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> ShieldMesh;
+	float ShieldBlend = 0.f;
+	/** Round 101: the shield's size in the world (1 = its mesh, about 100 across; it was 0.62 at most), how far along the
+	 * forearm from the elbow its middle sits, and how far off the arm (outside it). */
+	float ShieldSize = 0.9f;
+	float ShieldOnArm = 0.62f;
+	float ShieldOffArm = 9.f;
+	float ShieldCarryForward = 0.35f;
+	void UpdateShield(float DeltaSeconds);
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequence> HammerSwings[3];
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequence> DaggerStabs[3];
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequence> ShieldBlock;
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequence> ShieldCarry;
+
 	/** Every machine grows the body while this is set. */
 	UPROPERTY(Replicated)
 	bool bGiant = false;
@@ -1267,6 +1411,52 @@ private:
 	float FlightCameraPull = 0.f;
 	/** 0..1, eased: my own sprint, for the over-the-shoulder camera's pull back. */
 	float SprintCameraBlend = 0.f;
+	/** Round 99: this screen's camera has been pushed inside my own body (against a wall): the body is hidden from it. */
+	bool bCameraInBody = false;
+	/** rr.Net.LogSmooth: last frame's body and capsule, and this second's jumps (LogNetSmooth). */
+	void LogNetSmooth(float DeltaSeconds);
+	FVector NetLogBody = FVector::ZeroVector;
+	FVector NetLogCapsule = FVector::ZeroVector;
+	float NetLogTime = -1.f;
+	float NetLogBodyWorst = 0.f;
+	float NetLogCapsuleWorst = 0.f;
+	float NetLogBodySum = 0.f;
+	float NetLogCapsuleSum = 0.f;
+	int32 NetLogBodyJumps = 0;
+	int32 NetLogCapsuleJumps = 0;
+	int32 NetLogFrames = 0;
+	UFUNCTION(Server, Reliable)
+	void ServerStruggleInLava();
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastLavaStruggle(bool bOut);
+	UPROPERTY(Replicated)
+	bool bInLava = false;
+	UPROPERTY(Replicated)
+	uint8 LavaStruggle = 0;
+	/** Server: the struggle is won, the lava hasn't thrown it out yet. */
+	bool bLavaLeap = false;
+	float LavaStruggleTime = -100.f;
+	float LavaPressTime = -100.f;
+	float LavaOutTime = -100.f;
+	float LavaTouchTime = -100.f;
+	static constexpr float LavaLetGo = 0.45f;
+	/** A struggle's little hop; presses closer together than LavaPressGap don't count; a notch is kept LavaStruggleKeep
+	 * seconds without a press; after leaping out the lava can't catch it again for LavaFreeTime. */
+	static constexpr float LavaStruggleHop = 230.f;
+	static constexpr float LavaPressGap = 0.09f;
+	static constexpr float LavaStruggleKeep = 0.7f;
+	static constexpr float LavaFreeTime = 0.9f;
+	/** Server: the fox this clone was made of (what the clone knocks out counts as the fox's). */
+	TWeakObjectPtr<ARRRandomCharacter> DecoyOwner;
+	/** Round 99: the friend-or-foe lines' post process material, this player's instance of it, and the screen height its line width was set for. */
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> TeamOutlineMaterial;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> TeamOutlineInstance;
+	float OutlineWidthFor = 0.f;
+	/** Round 99: the custom stencil this body writes on this machine (1 teammate, 2 opponent, 3 the viewer's own), kept up every frame. */
+	int32 OutlineStencil = 1;
+	void UpdateOutlineStencil();
 	/** 0..1, eased: rushing through the air (cannon, ramp leap), for the over-the-shoulder camera's wider view. */
 	float RushCameraBlend = 0.f;
 	/** A jump ramp's heavier fall while its leap lasts (StartRampLeap); 0 when not leaping. */

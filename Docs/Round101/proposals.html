@@ -1,0 +1,311 @@
+<title>RRRandom 101차 제안</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+:root{
+  --bg:#fff7ef; --panel:#ffffff; --ink:#2b2540; --muted:#6c6485; --line:#eadfd6;
+  --pink:#ff5f93; --lav:#7c69f0; --mint:#16a383; --gold:#d98a00; --sky:#2b8fd6;
+  --pink-soft:#ffe3ec; --lav-soft:#ebe7ff; --mint-soft:#dcf5ee; --gold-soft:#fff0cf; --sky-soft:#dff0fc;
+  --shadow:0 6px 22px rgba(70,40,90,.10);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#1c1826; --panel:#27223a; --ink:#f3eefc; --muted:#b3abc9; --line:#3a3350;
+  --pink:#ff86ad; --lav:#a99bff; --mint:#5fd6b8; --gold:#f2b84b; --sky:#7cc4f5;
+  --pink-soft:#4a2536; --lav-soft:#332c57; --mint-soft:#1d3f38; --gold-soft:#4a3a17; --sky-soft:#1e3a50;
+  --shadow:0 6px 22px rgba(0,0,0,.35); color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#1c1826; --panel:#27223a; --ink:#f3eefc; --muted:#b3abc9; --line:#3a3350;
+  --pink:#ff86ad; --lav:#a99bff; --mint:#5fd6b8; --gold:#f2b84b; --sky:#7cc4f5;
+  --pink-soft:#4a2536; --lav-soft:#332c57; --mint-soft:#1d3f38; --gold-soft:#4a3a17; --sky-soft:#1e3a50;
+  --shadow:0 6px 22px rgba(0,0,0,.35); color-scheme:dark }
+body{background:var(--bg);color:var(--ink);font-family:'Noto Sans KR',system-ui,'Malgun Gothic',sans-serif;font-size:15px;line-height:1.7}
+.wrap{max-width:1080px;margin:0 auto;padding-block:28px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1,h2,h3{font-family:'Jua','Noto Sans KR',sans-serif;font-weight:400;text-wrap:balance;line-height:1.25;margin:0}
+h1{font-size:clamp(30px,5vw,44px)}
+h2{font-size:clamp(23px,3.4vw,30px);margin-top:56px;padding-top:10px}
+h3{font-size:19px;margin-top:6px}
+p{margin:.5em 0}
+a{color:var(--lav)}
+.lead{color:var(--muted);max-width:66ch}
+.tag{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.04em;padding:2px 10px;border-radius:999px;margin-right:6px;vertical-align:middle}
+.t-done{background:var(--mint-soft);color:var(--mint)} .t-idea{background:var(--lav-soft);color:var(--lav)}
+.t-art{background:var(--pink-soft);color:var(--pink)} .t-warn{background:var(--gold-soft);color:var(--gold)} .t-info{background:var(--sky-soft);color:var(--sky)}
+nav{display:flex;flex-wrap:wrap;gap:8px;margin:22px 0 6px}
+nav a{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:5px 14px;text-decoration:none;color:var(--ink);font-size:13px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px 20px;box-shadow:var(--shadow);margin-top:16px;min-width:0}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.grid3{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.grid > *, .grid3 > *{min-width:0}
+figure{margin:12px 0 0}
+figure img, .shot{width:100%;height:auto;border-radius:12px;border:1px solid var(--line);display:block;cursor:zoom-in;background:var(--bg)}
+figcaption{font-size:12.5px;color:var(--muted);margin-top:6px}
+.tablewrap{overflow-x:auto;margin-top:10px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:520px}
+th,td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{font-weight:700;color:var(--muted);font-size:12px;letter-spacing:.03em}
+td.num, th.num{text-align:right;font-variant-numeric:tabular-nums}
+ul{margin:.4em 0;padding-left:1.2em}
+li{margin:.2em 0}
+.pick{border-left:5px solid var(--pink);padding-left:14px}
+.small{font-size:13px;color:var(--muted)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px;margin-top:8px}
+.kv b{color:var(--lav);font-weight:700;white-space:nowrap}
+.pair{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.pair > *{min-width:0}
+.rec{background:var(--gold-soft);border-radius:12px;padding:10px 14px;margin-top:12px;font-size:14px}
+#zoom{position:fixed;inset:0;background:rgba(15,10,25,.88);display:flex;align-items:center;justify-content:center;z-index:50;cursor:zoom-out;padding:12px}
+#zoom img{max-width:100%;max-height:100%;border-radius:10px}
+code{background:var(--lav-soft);border-radius:6px;padding:1px 6px;font-size:13px}
+</style>
+
+<div class="wrap">
+<h1>RRRandom 101차 — 적용한 것과 제안</h1>
+<p class="lead">요청 21가지 가운데 게임에 바로 넣을 것은 넣었고(빌드·화면 확인), 조사·디자인 제안과 시안은 고르실 수 있게 이 페이지에 모았습니다. 그림을 누르면 크게 보입니다.</p>
+<nav>
+  <a href="#applied">적용한 것</a><a href="#tiger">호랑이 방패·모션</a><a href="#cute">귀엽게 보이는 방법</a><a href="#ratio">4등신?</a>
+  <a href="#ults">궁극기 제안</a><a href="#friends">새 동물친구 4종</a><a href="#star">별 가로등</a><a href="#kick">킥보드</a>
+  <a href="#bubble">말풍선</a><a href="#gloss">블록 광택</a><a href="#light">쨍한 빛</a><a href="#r100">100차 확인</a><a href="#open">남은 것</a>
+</nav>
+
+<h2 id="applied"><span class="tag t-done">적용</span>게임에 넣은 것</h2>
+<div class="grid">
+  <div class="card">
+    <h3>용암: 스페이스 연타로 탈출 + 큰 데미지</h3>
+    <ul>
+      <li>걸어서 용암에 빠지면 <b>갇힙니다</b>: 이동 속도 30%, 점프 대신 "발버둥".</li>
+      <li><b>SPACE 6번</b>(사이가 0.7초 넘게 뜨면 한 칸씩 풀림)이면 가장 가까운 마른 땅 쪽으로 튀어나옵니다. 누른 방향이 마른 땅이면 그쪽으로.</li>
+      <li>데미지 초당 25 → <b>34</b>. 가만히 있으면 체력 100인 여우가 약 3.6초에 쓰러짐(측정). 연타하면 약 1.2초에 탈출.</li>
+      <li>화면 아래에 <code>SPACE · MASH TO ESCAPE!</code> 안내와 진행 칸 6개. 봇은 스스로 연타합니다. 탈것·로봇은 예전처럼 자동으로 튀어나옴.</li>
+    </ul>
+    <figure><img src="img/lava.jpg" alt="용암에 빠졌을 때 안내"><figcaption>위: 가만히 있을 때(HOT!, 체력이 깎임) · 아래: 연타 중. 진행 칸은 누른 만큼 분홍으로 찹니다.</figcaption></figure>
+  </div>
+  <div class="card">
+    <h3>DICE를 DIE로 줄이지 않기</h3>
+    <p>화면에 나오는 글자 12곳을 모두 바꿨습니다: <code>ULTIMATE DICE!</code>, <code>ULTIMATE DICE READY</code>, <code>+1 DICE</code>, <code>INVISIBLE / SUPER HOP / ACORN SHIELD / GIANT / FLIGHT DICE</code>, 카드 고르기의 <code>DICE n</code>, 치트 안내 줄.</p>
+    <p class="small">개발 로그(영문)에는 die가 남아 있습니다. 화면에는 안 나옵니다.</p>
+    <h3 style="margin-top:18px">봇 길찾기, 네트워크에서도 괜찮은가</h3>
+    <p>괜찮습니다. 봇과 길찾기(내비메시)는 <b>호스트에서만</b> 돌고 참가자는 결과만 받아 봅니다. 온라인 방(지연 60±30ms, 손실 1%)과 혼자 하는 판을 100초씩 돌려 비교했습니다.</p>
+    <div class="tablewrap"><table>
+      <tr><th></th><th class="num">정체</th><th class="num">끼임 풀기</th><th class="num">멈춰 있던 시간</th><th class="num">벽 밀기</th></tr>
+      <tr><td>온라인 방(호스트)</td><td class="num">0</td><td class="num">2</td><td class="num">2.8%</td><td class="num">0.1%</td></tr>
+      <tr><td>혼자</td><td class="num">0</td><td class="num">0</td><td class="num">2.2%</td><td class="num">0.1%</td></tr>
+    </table></div>
+    <p class="small">차이는 오차 범위라 고칠 것은 없었습니다. 표본은 판마다 봇 4~5명 × 100초로 작습니다. 참가자 화면에서 봇이 끊겨 보이던 것은 100차의 보간 수정으로 줄었습니다(아래 100차 확인).</p>
+  </div>
+  <div class="card">
+    <h3>쓰러진 뒤 다른 캐릭터를 볼 때 건물 반투명</h3>
+    <p>쓰러지면 나를 쓰러뜨린 상대를 도는 카메라(킬캠)가 벽을 그냥 뚫고 지나가서 상대가 건물에 가려졌습니다. 이제 카메라와 그 캐릭터 사이에 낀 블록·지붕·나무는 <b>이 화면에서만</b> 치우고 옅은 유령으로 그립니다(배틀로얄의 팀원 관전도 같음). 100차의 탑뷰·승리 화면과 같은 장치입니다.</p>
+    <figure><img src="img/watch.jpg" alt="관전 중 건물 반투명"><figcaption>벽 너머 카메라에서 본 같은 장면. 왼쪽 = 끔(흰 벽이 가림), 오른쪽 = 켬(시야 선상의 블록만 걷힘). 시험 옵션으로 고정해 찍었습니다.</figcaption></figure>
+    <p class="small">충돌은 그대로라 총알·이동에는 영향이 없습니다.</p>
+  </div>
+</div>
+
+<h2 id="tiger"><span class="tag t-done">적용</span>호랑이: 뿅망치와 한 벌인 방패, 들고 다니기, 새 모션</h2>
+<div class="card">
+  <div class="pair">
+    <div>
+      <h3>바뀐 점</h3>
+      <ul>
+        <li><b>방패 디자인</b>: 호랑이 얼굴 튜브 → 빨강 주름 + 노랑 테 + 파랑 단추. 뿅망치(빨강 주름 머리·노랑·파랑)와 같은 장난감 한 벌.</li>
+        <li><b>들고 다님</b>: 등 뒤가 아니라 <b>오른손 망치, 왼팔 방패</b>. 막기(우클릭)를 누르면 왼팔을 가슴 앞으로 올려 막습니다.</li>
+        <li><b>크기</b>: 0.62 → <b>0.9</b>(약 1.45배).</li>
+        <li><b>모션</b>: Tripo Animate로 방패 막기 1 + 망치 공격 3(가로·백핸드·내려찍기)을 새로 생성 → 팔은 직접 다듬음(아래).</li>
+      </ul>
+      <p class="small">Tripo 사용: 모션 4개 80 + 방패 Smart Mesh 100 + 텍스처 30 = 210크레딧(20,710 → 20,500). 시안 이미지는 무료 횟수(120 → 168/1000).</p>
+    </div>
+    <div>
+      <figure><img src="img/shield_model.jpg" alt="새 방패 모델"><figcaption>새 방패(Midjourney 시안 → Smart Mesh P2.0, 5,543면). 뒷면은 단색으로 정리.</figcaption></figure>
+    </div>
+  </div>
+  <figure><img src="img/tiger_before.jpg" alt="전"><figcaption><b>전</b> — 두 손으로 망치, 방패는 등 뒤에 있다가 막을 때만 앞에 뜸(호랑이 얼굴 방패).</figcaption></figure>
+  <figure><img src="img/tiger_after_a.jpg" alt="후 1"><figcaption><b>후</b> — 뒤에서: 들고 다님 / 막기(망치를 어깨 뒤로 젖히고 방패를 앞으로). 앞에서: 들고 다님 / 막기로 넘어가는 중.</figcaption></figure>
+  <figure><img src="img/tiger_after_b.jpg" alt="후 2"><figcaption><b>후</b> — 한 손 망치 공격 1·2·3타. 방패 팔은 옆으로 빠집니다.</figcaption></figure>
+  <h3 style="margin-top:18px">"이상한 부분은 직접 다듬어줘" — 무엇을 다듬었나</h3>
+  <div class="pair">
+    <div>
+      <p>Tripo의 글→모션은 프롬프트에 팔 동작을 아무리 적어도 <b>두 팔을 가슴에 붙인 채</b> 몸만 돌리거나 웅크렸습니다(4개 모두). 그래서 몸통·다리의 무게 이동과 비틀기는 Tripo 것을 쓰고, <b>두 팔은 호랑이 자기 리그 위에서 방향을 직접 잡았습니다</b>: 순간마다 위팔·아래팔·손이 가리킬 방향(가슴 기준)을 정해 부드럽게 이음.</p>
+      <ul>
+        <li>들고 다니는 자세(새 <code>ShieldCarry</code>): 걷든 뛰든 두 팔은 이 자세.</li>
+        <li>막기: 왼 아래팔을 가슴·턱 앞에 가로로, 망치는 오른 어깨 뒤로.</li>
+        <li>1타 오른쪽→왼쪽, 2타 왼쪽→오른쪽, 3타 머리 위→바닥.</li>
+      </ul>
+    </div>
+    <figure><img src="img/tripo_raw.jpg" alt="Tripo 원본"><figcaption>Tripo 원본("한 손으로 크게 가로 휘두르기"): 팔이 가슴에 붙어 있고 몸이 한 바퀴 돕니다.</figcaption></figure>
+  </div>
+  <p class="small">확인 못 한 것: 실제로 조작하며 달릴 때의 느낌, 탈것·로봇 탑승 전후 전환, 온라인 참가자 화면. 망치 타격 판정 시간은 그대로입니다.</p>
+</div>
+
+<h2 id="cute"><span class="tag t-idea">조사·제안</span>동물친구를 더 귀엽게 보이게 하는 방법 15가지</h2>
+<p class="lead">다른 게임 개발자 인터뷰·분석에서 근거를 찾고, 우리 게임에 넣는다면 무엇을 하면 되는지 적었습니다. 난이도는 제 추정입니다. <span class="tag t-info">읽음</span>은 조사 에이전트가 원문을 열어 확인한 것, <span class="tag t-warn">요약만</span>은 검색 요약으로만 본 것입니다.</p>
+<div class="grid" id="cutegrid"></div>
+<div class="rec"><b>제 추천 순서</b> — 적은 작업으로 티가 많이 나는 것부터: ① 표정 바꾸기(맞을 때·KO·승리) ② 스쿼시&amp;스트레치 ③ 귀·꼬리 흔들림 ④ KO를 웃기게(별 빙빙) ⑤ 종마다 다른 대기 버릇. 소리(옹알이)는 효과가 크지만 음원이 필요합니다.</div>
+
+<h2 id="ratio"><span class="tag t-idea">조사·제안</span>4등신으로 키우는 게 좋을까?</h2>
+<div class="card pick">
+  <h3>결론: 4등신까지는 권하지 않고, 3~3.5등신을 권합니다</h3>
+  <p>지금 동물친구는 약 2~2.5등신입니다(화면 기준 추정). 조사한 게임 가운데 <b>2.5등신 이하는 모두 뒤에서 조준하지 않는 게임</b>(탑뷰·파티·1인칭)이었고, <b>캐릭터 뒤에서 총을 겨누는 카툰 게임은 3~4.5등신</b>이었습니다. 4등신부터는 "귀여운 동물"보다 "카툰 액션 주인공"으로 읽힙니다.</p>
+  <ul>
+    <li><b>왜 지금보다 커지면 좋은가</b>: 2등신은 팔 길이가 머리 0.6~0.7개라 두 손이 가슴 앞에서 못 만나고 머리 위로 못 올라갑니다 → 소총 두 손 파지, 망치 내려찍기, 방패 들기, 난간 잡기가 어색(이번 호랑이 작업에서도 겪음). 3.5등신이면 약 1.4개.</li>
+    <li><b>왜 4가 아닌가</b>: 귀여움은 주로 얼굴(둥근 얼굴·큰 눈·작은 코입)이 만듭니다. 3~3.5등신 + 지금 얼굴이면 귀여움은 남고 동작이 삽니다. 스플래툰(귀여운 팀 슈터, 약 3~3.5)은 낮은 등신을 일부러 유지하면서 손발을 크게 했습니다.</li>
+    <li><b>비용</b>: 체형이 바뀌면 애니메이션을 그대로 못 씁니다(리깅·17개 모션·탑승 자세 다시). 키와 캡슐을 그대로 두고 <b>머리를 줄이고 팔다리를 늘리면</b> 히트박스·카메라·엄폐 높이는 안 바뀝니다.</li>
+  </ul>
+  <div class="rec"><b>권장</b>: 한 종(호랑이나 여우)만 3.5등신 시안을 Midjourney로 뽑아 지금 것과 나란히 보고 결정. 작은 종(다람쥐·토끼)은 3, 덩치(호랑이)는 3.5~4로 종마다 다르게 가는 것도 방법입니다.</div>
+</div>
+<div class="card">
+  <h3>게임별 등신과 카메라</h3>
+  <p class="small">공식 수치를 밝힌 게임은 하나도 없어, 전부 공식 그림을 보고 어림한 값(±0.3~0.5)입니다. 귀·머리털은 뺐습니다.</p>
+  <div class="tablewrap"><table id="ratiotable"></table></div>
+  <p class="small">개발자 발언 — 스플래툰(패미통 2015): 머리가 크면 잉크에 맞은 게 잘 보인다, 손발을 크게 해 동작이 읽히게. 사쿠라이(스매시): 내려다보는 시점은 "몸이 실제보다 짧아 보이게" 하고, 체형이 다르면 "애니메이션이 하나도 같지 않다". 브롤스타즈: 2025년 4월 멜로디 키를 줄였다가 "bobblehead"라는 불만. 귀여움 연구: Lorenz 1943, Glocker 외 2009(얼굴 특징을 다룸, 등신은 아님).
+  출처: <a href="https://www.famitsu.com/news/201509/09087846.html">Famitsu</a> · <a href="https://sourcegaming.info/2018/09/26/sakurai-discusses-isabelle-echoes-and-newcomers">Source Gaming</a> · <a href="https://knowyourmeme.com/editorials/guides/whats-up-with-the-melodie-height-nerf-memes-on-reddit-the-jokes-about-brawl-stars-controversial-melodie-update-explained">Know Your Meme</a> · <a href="https://repository.upenn.edu/cog_neuro_pubs/11">Glocker 2009</a> · <a href="https://dev.epicgames.com/documentation/en-us/unreal-engine/animation-retargeting-in-unreal-engine">UE 리타게팅 문서</a></p>
+</div>
+
+<h2 id="ults"><span class="tag t-idea">제안</span>드래곤에 비해 약한 궁극기 다시 디자인</h2>
+<p class="lead">드래곤이 센 이유는 한 방 피해가 아니라 <b>맵 끝까지 닿는 범위 + 건물 파괴 + 쓰는 동안 무적</b>입니다. 그래서 다른 종은 피해 숫자를 올리기보다 "판을 바꾸는 효과"를 하나씩 주는 쪽을 권합니다. 지금 수치는 코드에서 읽은 값입니다.</p>
+<div class="tablewrap card"><table>
+  <tr><th>종</th><th>지금</th><th>약한 점</th><th>추천 궁극기</th><th>이유</th></tr>
+  <tr><td><b>호랑이</b><br>탱커</td><td>호랑이 기운: 주사위 눈만큼 앞발 내려찍기, 한 번에 70(가장자리 35), 땅을 팜</td><td>이미 강한 편. 찍는 사이가 길어 피하기 쉬움</td><td><b>산군의 포효</b> — 지금 것에 더해 첫 포효가 주변 적을 1초 움찔하게 하고, 마지막 내려찍기 자리에 6초간 "호랑이 굴"(팀원이 안에서 받는 피해 −30%)</td><td>탱커답게 팀이 모일 자리를 만듦. 구현은 지금 것에 덧붙이기</td></tr>
+  <tr><td><b>토끼</b><br>정찰·저격</td><td>달토끼 낙하: 눈만큼 점프해 찍기, 한 번에 45(가장자리 25), 반경 380</td><td>범위가 작고 건물·지형에 영향 없음</td><td><b>달 절구</b> — 착지 자리마다 5초간 저중력 달빛 원: 적은 붕 떠서 느려지고(쉬운 표적), 팀원은 높이 뜀. 마지막 착지는 반경 1.5배·70</td><td>저격수가 스스로 표적과 고지를 만듦. 점프 정체성 유지</td></tr>
+  <tr><td><b>다람쥐</b><br>함정</td><td>도토리 비: 3+눈 초 동안 도토리(개당 8), 반경 1300(100차에 2배)</td><td>나가 버리면 끝. 서 있어도 초당 약 6</td><td><b>왕도토리</b> — 비가 끝날 때 가운데에 왕도토리가 떨어져 80 + 밖으로 밀어냄, 주변에 도토리 함정 5개가 10초 남음</td><td>"빨리 나가야 하는 곳"에 마무리 한 방. 함정 역할과 이어짐</td></tr>
+  <tr><td><b>여우</b><br>돌격·은신</td><td>둔갑술: 분신 눈만큼, 7초, 체력 40%·피해 35%(100차)</td><td>분신이 사라지면 아무 일도 없음</td><td><b>여우불 바꿔치기</b> — 분신 하나와 자리 바꾸기(분신마다 1번, Q), 분신이 터질 때 여우불(20, 작은 범위)</td><td>분신이 미끼에서 "이동 수단 + 위협"으로. 돌격형에 맞음</td></tr>
+  <tr><td><b>레드 폭스</b><br>암살</td><td>여우와 같은 둔갑술</td><td>자기 궁극기가 없음</td><td><b>구미호 각성</b> — 8초간 꼬리 아홉: 주변 적이 벽 너머로 팀 전체에 보이고, 단검 3번이 무조건 뒤치기 판정, 이동 30% 빠름</td><td>예정된 구미호 변신과 이어짐. 팀에 정보를 주는 유일한 궁극기</td></tr>
+  <tr><td><b>드래곤</b><br>공중</td><td>비행 브레스: 닿으면 25 + 불탄 자리 초당 16(3초), 폭 한쪽 280+110×눈, 길이 최대 7000, 건물 파괴</td><td>(기준) 100차에서 폭 2배가 되어 더 강해짐</td><td><b>그대로 두되 대응 수단을</b> — 경고 띠가 뜨는 시간을 조금 늘리거나, 브레스 중 드래곤 본체를 맞히면 일찍 끝나게</td><td>다른 종을 올리는 것과 함께 "피할 수 있는 강함"으로</td></tr>
+</table></div>
+<p class="small">먼저 하나만 만들어 본다면 <b>레드 폭스의 구미호 각성</b>(지금 아무것도 없는 자리)과 <b>다람쥐 왕도토리</b>(가장 약함)를 권합니다.</p>
+
+<h2 id="friends"><span class="tag t-idea">제안</span>동물친구 4종을 더한다면</h2>
+<p class="lead">지금 6종은 탱커 1 · 돌격 1 · 저격 1 · 함정 1 · 공중 1 · 암살 1입니다. 100차 조사에서 3:3은 최소 12종(역할당 2), 넉넉히 15~18종이 좋다고 나왔고, 지금 <b>없는 역할</b>은 회복·제어·건축·두 번째 앞줄입니다. 그 넷을 채우면서 위에서 봐도 실루엣이 다른 동물을 골랐습니다(고양이·쥐는 디펜스의 적이라 제외).</p>
+<div class="grid">
+  <div class="card"><h3>🐼 판다 — 회복 (대나무 의사)</h3>
+    <div class="kv"><b>무기</b><span>대나무 물대포: 중거리 물줄기. 적에겐 약한 피해, 팀원에게 맞히면 회복(초당 12쯤)</span>
+    <b>스킬 Q</b><span>만두 도시락: 바닥에 놓으면 반경 안 팀원이 3초간 +30</span>
+    <b>전용 주사위</b><span>낮잠: 2초 못 움직이는 대신 체력 절반 회복</span>
+    <b>궁극기</b><span>대나무 숲: 찍은 자리에 대나무가 솟아 6초간 엄폐 벽 + 안의 팀원 회복, 적 둔화(눈 = 크기·시간)</span></div>
+    <p class="small"><b>이유</b> 회복 역할이 하나도 없어 한 번 밀리면 끝. 흑백 대비라 탑뷰에서 가장 잘 보임. 느긋한 성격이 귀여움에 맞음.</p></div>
+  <div class="card"><h3>🐧 펭귄 — 제어 (빙판 장난꾸러기)</h3>
+    <div class="kv"><b>무기</b><span>눈덩이 발사기: 곡사. 맞으면 1.5초 둔화, 세 번 맞으면 0.8초 얼음</span>
+    <b>스킬 Q</b><span>배치기: 앞으로 미끄러지며 얼음길(4초). 팀원은 빨라지고 적은 미끄러짐</span>
+    <b>전용 주사위</b><span>눈사람: 그 자리에 눈사람 미끼(맞으면 눈보라가 터져 둔화)</span>
+    <b>궁극기</b><span>눈보라: 넓은 원이 8초간 빙판(적 조작이 미끄러짐). <b>용암을 식혀 굳히고</b>, 끝날 때 얼음 기둥이 엄폐물로 남음</span></div>
+    <p class="small"><b>이유</b> 군중 제어가 없음. 용암·파괴 시스템과 엮여 맵 싸움이 깊어짐. 뒤뚱 걸음은 조사에서 "아기 걸음 = 귀여움" 사례 그대로.</p></div>
+  <div class="card"><h3>🦫 비버 — 건축 (블록 목수)</h3>
+    <div class="kv"><b>무기</b><span>못총: 중거리 연사</span>
+    <b>스킬 Q</b><span>블록 쌓기: 겨눈 곳에 캔디 블록 벽 3칸(15초, 부서짐) / 부서진 곳에 쓰면 바로 수리</span>
+    <b>전용 주사위</b><span>통나무 다리: 틈·용암 위에 다리</span>
+    <b>궁극기</b><span>댐: 그은 선을 따라 2칸 높이 벽이 12초(팀 총알은 통과)</span></div>
+    <p class="small"><b>이유</b> 이 게임의 특징이 "부서지는 블록 마을"인데 부수는 쪽(호랑이·드래곤·로봇)만 있고 <b>짓는 쪽이 없음</b>. 길 막기·고지 만들기라는 새 전략. 넓적 꼬리 실루엣.</p></div>
+  <div class="card"><h3>🐑 양 — 두 번째 앞줄 (솜뭉치 돌격수)</h3>
+    <div class="kv"><b>무기</b><span>솜사탕 산탄총: 근거리, 크게 밀쳐냄</span>
+    <b>스킬 Q</b><span>박치기 돌진: 4m. 맞은 적이 벽에 부딪히면 추가 피해 + 0.6초 어질</span>
+    <b>패시브</b><span>털옷: 추가 체력막 30, 5초 안 맞으면 다시 자람(털이 깎였다 자라는 모습)</span>
+    <b>궁극기</b><span>양떼 몰이: 찍은 방향으로 양 8마리가 달려가 길 위의 적을 밀어냄. 지나간 길에서 팀원이 빨라짐</span></div>
+    <p class="small"><b>이유</b> 앞줄이 호랑이 하나뿐이라 조합이 좁음. 지금 있는 털 셰이더를 가장 잘 살림. 둥근 솜 + 뿔 실루엣.</p></div>
+</div>
+<p class="small">순서를 정한다면 판다(회복) → 비버(건축) → 펭귄 → 양. 앞의 둘이 지금 조합에 가장 큰 변화를 줍니다. 수치는 모두 출발점이고, 넣게 되면 봇전으로 맞춥니다.</p>
+
+<h2 id="star"><span class="tag t-art">시안</span>별이 돌고 있는 가로등 3가지</h2>
+<p class="lead">지금은 줄무늬 기둥 위에 납작한 노란 별입니다. Tripo 안의 Midjourney로 이미지만 뽑았습니다(3D는 고르신 뒤에).</p>
+<div class="grid3">
+  <figure><img src="img/starA.jpg" alt="별 A"><figcaption><b>A. 웃는 별 + 꼬마 별 고리</b> — 지금 것과 가장 가깝고 얼굴이 생겨 귀여움. 고리가 돌면 "별이 돈다"가 그대로 읽힘.</figcaption></figure>
+  <figure><img src="img/starB.jpg" alt="별 B"><figcaption><b>B. 젤리 별 랜턴</b> — 반투명 젤리 안에 흰 별이 빛남. 밤(승리 화면이 어두워질 때)에 가장 예쁨. 꽈배기 사탕 기둥.</figcaption></figure>
+  <figure><img src="img/starC.jpg" alt="별 C"><figcaption><b>C. 별 바람개비</b> — 별 둘레의 파스텔 날개가 돎. 움직임이 가장 큼. 민트 기둥이라 분홍 기둥이 많은 마을에서 눈에 띔.</figcaption></figure>
+</div>
+<p class="small">제 추천은 <b>A</b>(가로등 40개가 마을 전체에 있으니 얼굴이 있으면 마을이 살아 보임), 광장 쪽만 <b>B</b>를 섞는 안.</p>
+
+<h2 id="kick"><span class="tag t-art">시안</span>킥보드 3가지</h2>
+<div class="grid3">
+  <figure><img src="img/kickA.jpg" alt="킥보드 A"><figcaption><b>A. 젤리빈 킥보드</b> — 민트 몸통, 별 전조등, 도넛 바퀴. 색이 마을과 가장 잘 섞임. (Midjourney가 발판을 안장처럼 그렸습니다. 3D 전에 평평한 발판으로 고쳐야 함)</figcaption></figure>
+  <figure><img src="img/kickB.jpg" alt="킥보드 B"><figcaption><b>B. 구름 로켓 킥보드</b> — 구름 발판 + 작은 로켓, 무지개 바퀴. "빠르다"가 가장 잘 읽힘.</figcaption></figure>
+  <figure><img src="img/kickC.jpg" alt="킥보드 C"><figcaption><b>C. 과자 킥보드</b> — 와플 발판에 딸기 아이싱, 롤리팝 바퀴, 지팡이 사탕 손잡이. 캔디 마을 컨셉과 가장 맞음.</figcaption></figure>
+</div>
+<p class="small">제 추천은 <b>C</b>(서서 타는 발판이 평평해서 지금 탑승 자세가 그대로 맞음), 다음이 B.</p>
+
+<h2 id="bubble"><span class="tag t-art">시안</span>큰 말풍선 3가지 (합체 로봇 등)</h2>
+<div class="grid3">
+  <figure><img src="img/bubbleA.jpg" alt="말풍선 A"><figcaption><b>A. 풍선 말풍선</b> — 통통한 흰 풍선 + 라벤더·노랑 테, 주변에 별. 지금 파스텔 HUD와 가장 잘 어울림.</figcaption></figure>
+  <figure><img src="img/bubbleB.jpg" alt="말풍선 B"><figcaption><b>B. 코믹 폭발</b> — 분홍·노랑·흰 세 겹, 망점. CRASH!·BONK! 같은 타격 글자에 가장 셈.</figcaption></figure>
+  <figure><img src="img/bubbleC.jpg" alt="말풍선 C"><figcaption><b>C. 젤리 로봇 패널</b> — 민트~라벤더 젤리 틀, 위에 주사위 눈 전구. 로봇의 "COMBINE!"·좌석 안내용.</figcaption></figure>
+</div>
+<p class="small">제 추천은 <b>용도를 나눠 둘 다</b>: 로봇·안내는 C, 타격 글자는 B. 하나만이라면 A. 글자는 게임에서 얹습니다(시안은 일부러 비움).</p>
+
+<h2 id="gloss"><span class="tag t-art">제안(화면)</span>블록 광택 — 색은 그대로, 더 반짝이게</h2>
+<p class="lead">AI 그림이 아니라 <b>실제 게임 화면</b>입니다. 시험 명령(<code>RRLook</code>)으로 블록 재질의 거칠기만 바꿔 같은 자리에서 찍었고, 게임 기본값은 건드리지 않았습니다.</p>
+<div class="grid3">
+  <figure><img src="img/look_0.jpg" alt="지금"><figcaption><b>지금</b> — 거칠기 0.6(광장 거울 타일·주사위만 0.12~0.22).</figcaption></figure>
+  <figure><img src="img/look_1.jpg" alt="광택 1"><figcaption><b>1단계</b> — 0.35. 햇빛 받는 윗면과 모서리에 하이라이트가 생김. 색은 거의 그대로.</figcaption></figure>
+  <figure><img src="img/look_2.jpg" alt="광택 2"><figcaption><b>2단계</b> — 0.18. 사탕·플라스틱 느낌. 하늘이 비쳐 밝은 면은 약간 하얘짐.</figcaption></figure>
+</div>
+<div class="rec"><b>추천</b>: 벽은 0.35, <b>바닥·지붕만 0.25</b>로 나누기. 전부 0.18로 내리면 넓은 면이 하늘색으로 떠서 "색을 잃지 않게"와 어긋납니다. 더 가려면 거칠기 대신 <b>클리어 코트</b>(색 위에 투명 광택층)를 얹는 방법이 색을 가장 잘 지킵니다. 이 각도에서는 차이가 작게 보입니다 — 해를 마주 보는 각도에서 더 큽니다.</div>
+
+<h2 id="light"><span class="tag t-art">제안(화면)</span>빛을 조금 더 쨍하게</h2>
+<p class="lead">역시 실제 화면이고 적용하지 않았습니다. 해를 세게, 하늘빛(그늘을 채우는 빛)을 약하게, 대비·채도를 조금 올린 조합입니다.</p>
+<div class="grid3">
+  <figure><img src="img/look_3.jpg" alt="빛 A"><figcaption><b>A. 살짝</b> — 해 ×1.6, 하늘 ×0.85, 대비 1.08, 채도 1.06. 그림자 경계가 또렷해짐.</figcaption></figure>
+  <figure><img src="img/look_4.jpg" alt="빛 B"><figcaption><b>B. 확실히</b> — 해 ×2.2, 하늘 ×0.7, 대비 1.15, 채도 1.10, 노출 −0.3. 한낮 느낌, 그늘이 짙어짐.</figcaption></figure>
+  <figure><img src="img/look_5.jpg" alt="빛+광택"><figcaption><b>C. 빛 + 광택</b> — 해 ×1.8, 하늘 ×0.8, 대비 1.10, 채도 1.08, 노출 −0.15, 블록 0.30.</figcaption></figure>
+</div>
+<div class="rec"><b>추천</b>: <b>A</b>에서 시작. B는 그늘 속 캐릭터와 피아 식별 외곽선이 어두워져 싸울 때 불리할 수 있어, 넣는다면 그늘 밝기를 따로 확인해야 합니다. 맨 위 "지금" 그림과 비교해 보세요.</div>
+
+<h2 id="r100"><span class="tag t-done">확인</span>지난 요청(100차)에서 확인 못 했던 것</h2>
+<div class="grid">
+  <div class="card"><h3>네트워크 지연 보완</h3>
+    <p>다른 사람 캐릭터의 위치 보간이 전혀 적용되지 않고 있던 것을 고쳤고, 지연·흔들림에 따라 보간을 늘립니다. 같은 PC의 호스트+참가에 패킷 지연을 걸어 잰 값(참가자 화면, 1초 중 가장 크게 튄 거리의 중앙값 / 튀는 프레임):</p>
+    <div class="tablewrap"><table>
+      <tr><th>회선</th><th class="num">전</th><th class="num">후</th></tr>
+      <tr><td>100±60ms, 손실 3%</td><td class="num">27 / 12.7%</td><td class="num">5 / 1.4%</td></tr>
+      <tr><td>200±100ms, 손실 5%</td><td class="num">39 / 15.8%</td><td class="num">6 / 1.1%</td></tr>
+    </table></div>
+    <p class="small">IP 직접 참가(<code>RRJoinIP</code>, 실행 파일 "RRRandom 친구 방 참가 (IP).bat")도 같은 PC에서 확인. 인터넷 너머는 못 해 봤습니다.</p></div>
+  <div class="card"><h3>분신 · 도토리 비</h3>
+    <figure><img src="img/ults.jpg" alt="분신과 도토리 비"><figcaption>위: 레드 폭스 분신 4(7초, 체력 40%·피해 35%). 아래: 도토리 비(범위 2배, 세 가지 색 + 황금 도토리, 떨어지는 궤적).</figcaption></figure>
+    <p class="small">도토리가 화면을 많이 가립니다. 크기를 줄일지 봐 주세요.</p></div>
+  <div class="card"><h3>드래곤 브레스</h3>
+    <figure><img src="img/dragon.jpg" alt="드래곤"><figcaption>폭 2배(3레벨 한쪽 610). 지나간 길의 집은 바닥까지, 가장자리 건물은 지붕 + 한 층.</figcaption></figure></div>
+  <div class="card"><h3>탑뷰 · 승리 화면</h3>
+    <figure><img src="img/topview.jpg" alt="탑뷰"><figcaption>탑뷰(섬 맵): 위 = 끔, 아래 = 켬. 버섯·집 지붕 아래의 캐릭터가 보임.</figcaption></figure>
+    <figure><img src="img/victory.jpg" alt="승리 화면"><figcaption>승리 화면: 왼쪽 = 예전, 오른쪽 = 가리던 주사위·상자가 유령으로.</figcaption></figure></div>
+</div>
+
+<h2 id="open"><span class="tag t-warn">남은 것</span>확인 못 한 것과 정해 주실 것</h2>
+<div class="card">
+  <ul>
+    <li><b>직접 해 봐야 아는 것</b>: 용암 연타의 손맛(6번이 적당한지), 호랑이 방패를 든 채 달리고 싸우는 느낌, 관전 중 유령 처리의 깜빡임.</li>
+    <li><b>온라인</b>: 용암 탈출·방패·유령 처리를 참가자 화면에서는 못 봤습니다. 인터넷 너머 접속도 미확인.</li>
+    <li><b>정해 주실 것</b>: 별 가로등·킥보드·말풍선 시안 중 무엇을 3D/게임에 넣을지 · 블록 광택과 빛을 어느 단계로 적용할지 · 3.5등신 시안을 뽑아 볼지 · 궁극기와 새 동물친구 중 무엇부터 만들지 · 판 길이 기본값(12 KO / 원석 50 / 35초, 99차 제안).</li>
+  </ul>
+</div>
+</div>
+
+<script>
+const CUTE=[
+ ["표정 바꾸기 (눈 모양 스왑)","애스트로 봇: LED 눈 모양이 바뀌며 감정 표현 · 스플래툰: 입꼬리·아래 눈꺼풀을 올려 장난스러운 표정","맞을 때 > <, KO 때 @ @, 승리 때 ^ ^ — 눈 텍스처만 바꿔도 됨","중","읽음","https://blog.playstation.com/?p=395223"],
+ ["스쿼시 & 스트레치","커비: 늘 찌그러지고 늘어나는 둥근 몸 · 케나의 Rot: 부피를 지키는 말랑한 덩어리","점프·착지·피격·대시에 몸 비율을 살짝 늘이고 줄이기(착지 웅크림은 이미 있음)","하~중","읽음","https://www.nintendo.com/sg/interview/arzg/index.html"],
+ ["귀·꼬리 2차 흔들림","Kawaii Physics(무료 UE 플러그인, 노드 하나)","꼬리 뼈는 이미 있음. 귀·머리털에 흔들림 추가","하","요약만","https://80.lv/articles/kawaii-physics-plug-in-now-supports-unreal-engine-5-5"],
+ ["시선과 호기심","동물의 숲: 물건을 바라보고 궁금해한 뒤 행동","지금 조준 방향만 보는 고개를 팀원·아이템·나를 때린 상대로도","하~중","읽음","https://www.siliconera.com/nintendo-on-how-animal-crossing-new-horizons-lovable-villagers-were-created/"],
+ ["종마다 다른 대기 버릇","동물의 숲: 음악 좋아하는 주민은 더 자주 노래 · 케나: Rot이 주인공 어깨·머리에 올라탐","가만히 있을 때 여우는 꼬리 손질, 토끼는 귀 털기, 다람쥐는 도토리 깨물기","하~중","읽음","https://80.lv/articles/ember-lab-on-art-animation-behind-kena-bridge-of-spirits/"],
+ ["이모트 + 머리 위 기호","동물의 숲: 리액션 44종(출시)→약 88종 · 브롤스타즈 핀: 캐릭터마다 애니메이션+목소리","이모트 휠 6개에 머리 위 말풍선 그림(하트·땀·물음표) 붙이기","하~중","읽음","https://nookipedia.com/wiki/Reaction"],
+ ["승패를 캐릭터의 순간으로","폴가이즈: 이길 땐 우스꽝스럽게, 질 땐 웃기게 · 애스트로 봇: 스테이지 끝 세리머니","승리 춤·좌절은 있음 → 종마다 대표 포즈 하나씩","중","읽음","https://blog.playstation.com/?p=224711"],
+ ["KO를 아프지 않고 웃기게","커비 팀: 주인공을 괴롭히는 연출을 피함 · 파티 애니멀즈: 기절했다 깨어남","쓰러지면 머리 위 별 빙빙 + 납작 눌림. (별 빙빙을 직접 다룬 개발자 자료는 못 찾음)","하~중","요약만","https://twinfinite.net/guides/how-to-wake-up-faster-party-animals/"],
+ ["말 없는 옹알이 목소리","애스트로 봇: 영어·일본어를 섞은 의성어 · 피크민 4: 낮은 카메라라 목소리·발소리가 잘 들림","점프·피격·이모트·승리에 짧은 소리(높낮이 랜덤)","하 (음원 필요)","읽음","https://www.nintendo.com/sg/interview/ampy/03.html"],
+ ["만지고 싶은 재질","파티 애니멀즈: 인형이 아니라 진짜 작은 동물 털처럼 · 폴가이즈: 통통한 비닐 장난감","털 셸은 이미 있음 → 가장자리 빛(림)과 볼터치 추가","하","읽음","https://gamingbolt.com/?p=519411"],
+ ["낮고 가까운 카메라","피크민 4: 사람이 아니라 피크민 눈높이","TPS 카메라를 조금 낮추고 당겨 보기(조준·엄폐 시야는 다시 확인)","하","읽음","https://www.nintendo.com/sg/interview/ampy/03.html"],
+ ["작게 봐도 읽히는 의상","폴가이즈: 캐릭터가 작아 디테일이 묻힘 → 크고 대담하게","모자·스카프·가방 같은 소켓 장식부터","중","읽음","https://blog.playstation.com/?p=224711"],
+ ["캐릭터끼리 제스처","폴가이즈: 둘이 동시에 팔 벌리면 포옹(Fall Bae) · 오버쿡드 2 이모트 휠","한쪽 손 흔들기는 쉬움, 하이파이브(둘이 맞추기)는 중","하~중","읽음","https://gamertweak.com/fall-guys-how-to-hug-fall-bae"],
+ ["아기 걸음 (낮은 엉덩이)","애스트로 봇: 아기처럼 뒤뚱 · 폴가이즈: 미니언에 가까운 골격, 아주 낮은 엉덩이","달리기에 엉덩이 좌우 흔들림을 덧입히기","중","요약만","https://www.ggrecon.com/articles/fall-guys-developers-reveal-what-makes-their-jelly-beans-so-lovable"],
+ ["머리 비율 시험","스플래툰: 큰 머리는 귀여움만이 아니라 맞은 게 잘 보이게","머리뼈만 1.1~1.2배로 키워 보기(모델 수정 없이). 아래 등신 제안과 반대 방향이라 같이 보고 정해야 함","하 (시험)","읽음","http://nintendoeverything.com/splatoon-staff-talk-about-the-inkling-design-more-on-the-squid-sisters-and-other-topics/"]
+];
+document.getElementById('cutegrid').innerHTML=CUTE.map((c,i)=>`<div class="card"><h3>${i+1}. ${c[0]}</h3><p><b>사례</b> ${c[1]}</p><p><b>우리 게임에</b> ${c[2]}</p><p class="small">난이도 ${c[3]} · <span class="tag ${c[4]==='읽음'?'t-info':'t-warn'}">${c[4]}</span><a href="${c[5]}" target="_blank" rel="noopener">출처</a></p></div>`).join('');
+const RATIO=[
+ ["브롤스타즈","2.5~3","탑뷰"],["스쿼드 버스터즈","2~2.5 (미확인)","탑뷰"],["폴가이즈","약 2","3인칭, 조준 없음"],["파티 애니멀즈","2~2.2","3인칭 난투"],
+ ["에그 파티","1.2~1.5","3인칭 파티"],["슈퍼 애니멀 로얄","약 2","탑뷰 2D"],["메이플스토리 2","2~2.5","높은 시점"],["동물의 숲","약 2","높은 시점"],
+ ["건파이어 리본","2.5~3","1인칭"],["크래시 밴디쿳","2.7~3","플랫포머"],
+ ["<b>스플래툰 3</b>","<b>3~3.5</b>","<b>3인칭 슈터</b>"],["닌자라","3~3.5","3인칭 근접"],["PvZ 가든 워페어 (좀비)","3~3.5","3인칭 슈터"],["쿵푸 팬더 (포)","약 3.3","영화"],
+ ["라쳇 & 클랭크","약 4.1","3인칭 슈터"],["슬라이 쿠퍼","약 4.3","3인칭"],["바이오뮤턴트","4~4.5","3인칭"],["스타폭스 (폭스)","4.5~5","3인칭"],["주토피아 (주디)","4.5~5","영화"],
+ ["폼스타즈 · 선셋 오버드라이브","6.5~7","3인칭 슈터"],["오버워치 2","6.5~8","1인칭"]
+];
+document.getElementById('ratiotable').innerHTML='<tr><th>게임</th><th>등신(어림)</th><th>카메라</th></tr>'+RATIO.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('');
+document.addEventListener('click',e=>{
+  const z=document.getElementById('zoom');
+  if(z){z.remove();return;}
+  if(e.target.tagName==='IMG'){const d=document.createElement('div');d.id='zoom';const i=document.createElement('img');i.src=e.target.src;d.appendChild(i);document.body.appendChild(d);}
+});
+</script>

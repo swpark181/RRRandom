@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Camera/CameraTypes.h"
+#include "RRRandomViewCut.h"
 #include "RRRandomResultsDirector.generated.h"
 
 class ARRRandomCharacter;
@@ -87,6 +88,17 @@ private:
 	float GetClearReach(const FRotator& View, float Reach) const;
 	/** How far the camera can back off from the MVP along a view (up to Reach) before another brawler is in the way: hiding the MVP, or in the frame well in front of it. */
 	float GetBrawlerReach(const FRotator& View, float Reach) const;
+	/**
+	 * Round 100 (the user: "승리 화면에서 시야를 가리는 큰 장애물은 투명화"): the pieces of the town standing between the
+	 * camera and the winners (walls, roofs, trees, giant dice: whatever rises over knee height on the lines from where the
+	 * camera sways to the dance line) are put away on this machine and drawn as faint ghosts in their place, until the
+	 * show is over. GhostOpacity: how much of them still shows.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Camera")
+	float GhostOpacity = 0.1f;
+	UPROPERTY(EditAnywhere, Category = "Camera")
+	float ViewClearRadius = 70.f;
+
 	/** How open a view is, 0 to 1: its middle and sides near the camera checked for cover, hills and other brawlers. */
 	float GetViewOpenness(const FRotator& View) const;
 
@@ -121,4 +133,9 @@ private:
 	/** Dimmed lights and their own brightness, to put back. */
 	TArray<TPair<TWeakObjectPtr<ULightComponent>, float>> DimmedLights;
 	TArray<TPair<TWeakObjectPtr<class USkyLightComponent>, float>> DimmedSkies;
+
+	/** What ClearView put away (to put back), and the ghosts drawn instead (FRRViewCut). */
+	FRRViewCut ViewCut;
+	void ClearView(float LineYaw, float LineHalfWidth);
+	void RestoreView();
 };

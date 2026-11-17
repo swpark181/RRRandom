@@ -29,3 +29,7 @@
 - [Tripo Smart Mesh](tripo-smart-mesh.md) — 100cr mesh only + 30cr texture click; export ignores file name; topology resets to Quad 5000
 - [Tripo: always Smart Mesh](feedback-tripo-always-smart-mesh.md) — every Tripo 3D model (characters, props, all) is Smart Mesh P2.0, never HD/Ultra (2026-11-11)
 - [Props keep proportions](feedback-props-keep-proportions.md) — never stretch models to cells; even scale, may overhang slightly; check with RRPropBeside
+- [TPS overhaul plan](tps-overhaul-plan.md) — rounds 98–101 (main mode, playtest fixes, net smoothing, view ghosts, lava, tiger shield) shipped 2026-11-18; open choices listed; bash for UE imports
+- [UE commandlet hangs at exit](ue-commandlet-hangs-at-exit.md) — pythonscript commandlet stays alive after DONE; poll its log, then kill
+- [DICE, never DIE](feedback-dice-not-die.md) — RRRandom on-screen text always says DICE (user asked 2026-11-18)
+- [Tripo Animate motions](tripo-animate-motions.md) — text-to-motion 20cr keeps arms tucked; multi-motion FBX; fix arms on the own rig in Blender

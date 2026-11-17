@@ -45,6 +45,12 @@ enum class ERRTitleChoice : uint8
 	BattleRoyale,
 	BRFull,
 	BRTest,
+	/**
+	 * Round 98: QUICK PLAY on the first page (an animal friend, then straight into the main mode against bots), and EVENTS
+	 * (the battle royale and the defense, off the main page).
+	 */
+	QuickPlay,
+	Events,
 };
 
 /**
@@ -77,6 +83,7 @@ public:
 	bool IsOnStagePage() const { return bStagePage; }
 	bool IsOnRoomPage() const { return bRoomPage; }
 	bool IsOnBattleRoyalePage() const { return bBRPage; }
+	bool IsOnEventsPage() const { return bEventsPage; }
 	/** A button's words and its line under the buttons, as they stand (the rooms found, a locked stage). */
 	FString GetButtonLabel(int32 Index) const;
 	FString GetButtonDescription(int32 Index) const;
@@ -146,6 +153,10 @@ private:
 	bool bStagePage = false;
 	/** Round 92: the battle royale's map page (full or test). */
 	bool bBRPage = false;
+	/** Round 98: the events page (the battle royale, the defense). */
+	bool bEventsPage = false;
+	/** Round 98: the animal friend page was opened by QUICK PLAY (back goes to the first page). */
+	bool bQuick = false;
 	bool bRoomPage = false;
 	int32 PickedRoom = INDEX_NONE;
 	void OpenStagePage();

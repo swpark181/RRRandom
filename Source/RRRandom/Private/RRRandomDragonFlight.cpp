@@ -512,7 +512,8 @@ void ARRRandomDragonFlight::TickUltimate(float DeltaSeconds)
 		PoseBody(FlightTime, true);
 		if (Effects)
 		{
-			Effects->DragonBreath(GetMouth(), OnLine(FMath::Min(Front, LineLength)), BreathRadius, DeltaSeconds,
+			// (round 100: down onto whatever is under the line there, a roof or a hill or a crater's floor: GroundUnder)
+			Effects->DragonBreath(GetMouth(), GroundUnder(OnLine(FMath::Min(Front, LineLength))), BreathRadius, DeltaSeconds,
 				Front < LineLength ? LineDirection * FlySpeed : FVector::ZeroVector);
 		}
 		if (Front >= LineLength)
@@ -563,20 +564,29 @@ void ARRRandomDragonFlight::TickUltimate(float DeltaSeconds)
 		const float Back = FMath::Max(0.f, (PassTime - BurnSeconds) * FlySpeed);
 		if (Effects && Front > Back)
 		{
-			for (float Along = Back; Along <= Front; Along += 170.f)
+			// Round 100 (the user: "타격지점을 바닥쪽으로 레이를 쏴서 울퉁불퉁한 곳을 지나쳐도 바닥에 골고루"): the fire used to be
+			// lit along the straight line from the dragon's start to the line's end, so over a hill, a roof or a crater it
+			// burned inside the ground or in the air. Each patch of it is now put down by a ray from above onto what is
+			// really there, three abreast across the breath's width so the whole strip burns
+			const FVector AcrossWay = FVector::CrossProduct(FVector::UpVector, LineDirection);
+			const float PatchStep = FMath::Max(170.f, BreathRadius * 0.55f);
+			for (float Along = Back; Along <= Front; Along += PatchStep)
 			{
 				// Flames where the breath just went by, dying down into embers that glow on to the end of the burn (the two
 				// overlap a little, so the embers are there as the flames go)
 				const float Age = PassTime - Along / FlySpeed;
-				const FVector Spot = OnLine(Along);
-				if (Age < BlazeSeconds)
+				for (const float Side : { -0.6f, 0.f, 0.6f })
 				{
-					Effects->GroundFire(Spot, BreathRadius * 0.85f, 1.f - FMath::Clamp(Age / BlazeSeconds, 0.f, 1.f) * 0.8f, DeltaSeconds);
-				}
-				if (Age > BlazeSeconds * 0.5f)
-				{
-					const float Out = FMath::Clamp((Age - BlazeSeconds) / FMath::Max(BurnSeconds - BlazeSeconds, 0.1f), 0.f, 1.f);
-					Effects->GroundEmbers(Spot, BreathRadius * 0.9f, 1.f - 0.7f * Out * Out, DeltaSeconds);
+					const FVector Spot = GroundUnder(OnLine(Along) + AcrossWay * (Side * BreathRadius));
+					if (Age < BlazeSeconds)
+					{
+						Effects->GroundFire(Spot, BreathRadius * 0.42f, (1.f - FMath::Clamp(Age / BlazeSeconds, 0.f, 1.f) * 0.8f) * 0.6f, DeltaSeconds);
+					}
+					if (Age > BlazeSeconds * 0.5f)
+					{
+						const float Out = FMath::Clamp((Age - BlazeSeconds) / FMath::Max(BurnSeconds - BlazeSeconds, 0.1f), 0.f, 1.f);
+						Effects->GroundEmbers(Spot, BreathRadius * 0.45f, (1.f - 0.7f * Out * Out) * 0.6f, DeltaSeconds);
+					}
 				}
 			}
 		}
@@ -607,7 +617,7 @@ void ARRRandomDragonFlight::TickUltimate(float DeltaSeconds)
 			while (WreckedTo < Front - 1.f && (Front - WreckedTo >= WreckStep || Front >= LineLength))
 			{
 				const float To = FMath::Min(WreckedTo + WreckStep, Front);
-				ARRRandomWreckage::Wreck(this, OnLine(WreckedTo), OnLine(To), BreathRadius * WreckShare, true);
+				ARRRandomWreckage::Wreck(this, OnLine(WreckedTo), OnLine(To), BreathRadius * WreckShare, true, 0, false, RoofCrushLayers);
 				WreckedTo = To;
 			}
 		}
@@ -648,6 +658,24 @@ void ARRRandomDragonFlight::FollowWithView(float DeltaSeconds)
 		FQuat::Slerp(ViewFrom.GetRotation(), Follow.GetRotation(), Alpha));
 }
 
+FVector ARRRandomDragonFlight::GroundUnder(const FVector& Spot) const
+{
+	// Straight down from the dragon's height onto the first thing that can be stood on (not anyone's body)
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomDragonGround), false, this);
+	const float Top = FMath::Max(LineStart.Z, LineEnd.Z) + Height;
+	TArray<FHitResult> Below;
+	GetWorld()->LineTraceMultiByObjectType(Below, FVector(Spot.X, Spot.Y, Top), FVector(Spot.X, Spot.Y, FMath::Min(LineStart.Z, LineEnd.Z) - 3000.f),
+		FCollisionObjectQueryParams(ECC_WorldStatic), Params);
+	for (const FHitResult& Hit : Below)
+	{
+		if (Hit.ImpactNormal.Z > 0.5f)
+		{
+			return Hit.ImpactPoint;
+		}
+	}
+	return Spot;
+}
+
 void ARRRandomDragonFlight::BurnEnemies(float DeltaSeconds)
 {
 	if (!Brawler)
@@ -678,8 +706,9 @@ void ARRRandomDragonFlight::BurnEnemies(float DeltaSeconds)
 		}
 		const FVector Where = Victim->GetActorLocation();
 		const float Reach = BreathRadius + Victim->GetCapsuleComponent()->GetScaledCapsuleRadius();
-		// Not someone flying high over it
-		if (Where.Z > FMath::Max(LineStart.Z, LineEnd.Z) + 700.f)
+		// Not someone flying high over it (round 100: over the ground under them, found by a ray, not over the height the
+		// line started at: someone up on a hill or a roof was "flying" and went unhurt)
+		if (Where.Z - Victim->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() > GroundUnder(Where).Z + 700.f)
 		{
 			continue;
 		}

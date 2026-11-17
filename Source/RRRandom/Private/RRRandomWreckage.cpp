@@ -124,6 +124,98 @@ ARRRandomWreckage::ARRRandomWreckage()
 	bAlwaysRelevant = true;
 }
 
+FRRStandIns::FPiece FRRStandIns::Add(AActor* Owner, UInstancedStaticMeshComponent* Source, int32 Index, const FTransform& Transform)
+{
+	FPiece Piece;
+	if (!Owner || !Source || !Source->GetStaticMesh() || Owner->GetNetMode() == NM_DedicatedServer)
+	{
+		return Piece;
+	}
+	FSet& Set = Sets.FindOrAdd(Source);
+	UInstancedStaticMeshComponent* StandIn = Set.StandIn.Get();
+	if (!StandIn)
+	{
+		StandIn = NewObject<UInstancedStaticMeshComponent>(Owner, NAME_None, RF_Transient);
+		StandIn->SetStaticMesh(Source->GetStaticMesh());
+		for (int32 Slot = 0; Slot < Source->GetNumMaterials(); ++Slot)
+		{
+			StandIn->SetMaterial(Slot, Source->GetMaterial(Slot));
+		}
+		StandIn->NumCustomDataFloats = Source->NumCustomDataFloats;
+		StandIn->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
+		StandIn->SetGenerateOverlapEvents(false);
+		StandIn->SetCanEverAffectNavigation(false);
+		StandIn->SetCastShadow(Source->CastShadow);
+		// (what makes moving the big mesh's instances dear)
+		StandIn->bAffectDistanceFieldLighting = false;
+		StandIn->bAffectDynamicIndirectLighting = false;
+		StandIn->SetMobility(EComponentMobility::Movable);
+		StandIn->SetupAttachment(Owner->GetRootComponent());
+		StandIn->SetUsingAbsoluteLocation(true);
+		StandIn->SetUsingAbsoluteRotation(true);
+		StandIn->SetUsingAbsoluteScale(true);
+		StandIn->RegisterComponent();
+		StandIn->SetWorldTransform(FTransform::Identity);
+		Set.StandIn = StandIn;
+		Set.Free.Reset();
+	}
+	Piece.StandIn = StandIn;
+	if (Set.Free.Num() > 0)
+	{
+		Piece.Slot = Set.Free.Pop(EAllowShrinking::No);
+		StandIn->UpdateInstanceTransform(Piece.Slot, Transform, true, false, true);
+	}
+	else
+	{
+		Piece.Slot = StandIn->AddInstance(Transform, true);
+	}
+	const int32 Floats = Source->NumCustomDataFloats;
+	if (Floats > 0 && Source->PerInstanceSMCustomData.IsValidIndex(Index * Floats + Floats - 1))
+	{
+		StandIn->SetCustomData(Piece.Slot, MakeArrayView(&Source->PerInstanceSMCustomData[Index * Floats], Floats), false);
+	}
+	return Piece;
+}
+
+void FRRStandIns::Move(const FPiece& Piece, const FTransform& Transform)
+{
+	if (UInstancedStaticMeshComponent* StandIn = Piece.StandIn.Get())
+	{
+		StandIn->UpdateInstanceTransform(Piece.Slot, Transform, true, false, true);
+	}
+}
+
+void FRRStandIns::Remove(FPiece& Piece)
+{
+	UInstancedStaticMeshComponent* StandIn = Piece.StandIn.Get();
+	if (StandIn && Piece.Slot != INDEX_NONE)
+	{
+		StandIn->UpdateInstanceTransform(Piece.Slot, FTransform(FQuat::Identity, FVector::ZeroVector, FVector::ZeroVector), true, false, true);
+		for (TPair<TWeakObjectPtr<UInstancedStaticMeshComponent>, FSet>& Pair : Sets)
+		{
+			if (Pair.Value.StandIn == StandIn)
+			{
+				Pair.Value.Free.Add(Piece.Slot);
+				break;
+			}
+		}
+	}
+	Piece.StandIn = nullptr;
+	Piece.Slot = INDEX_NONE;
+}
+
+void FRRStandIns::Clear()
+{
+	for (TPair<TWeakObjectPtr<UInstancedStaticMeshComponent>, FSet>& Pair : Sets)
+	{
+		if (UInstancedStaticMeshComponent* StandIn = Pair.Value.StandIn.Get())
+		{
+			StandIn->DestroyComponent();
+		}
+	}
+	Sets.Reset();
+}
+
 float ARRRandomWreckage::GetRestoreSeconds()
 {
 	return FMath::Max(1.f, CVarRestoreSeconds.GetValueOnGameThread());
@@ -154,7 +246,7 @@ void ARRRandomWreckage::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	DOREPLIFETIME(ARRRandomWreckage, Wrecks);
 }
 
-void ARRRandomWreckage::Wreck(const UObject* WorldContext, const FVector& From, const FVector& To, float Radius, bool bColumn, int32 Dig, bool bLasting)
+void ARRRandomWreckage::Wreck(const UObject* WorldContext, const FVector& From, const FVector& To, float Radius, bool bColumn, int32 Dig, bool bLasting, int32 Crush)
 {
 	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
 	if (!World || !World->IsGameWorld() || World->GetNetMode() == NM_Client || Radius <= 0.f)
@@ -182,6 +274,7 @@ void ARRRandomWreckage::Wreck(const UObject* WorldContext, const FVector& From, 
 	Added.Radius = Radius;
 	Added.bColumn = bColumn;
 	Added.Dig = uint8(FMath::Clamp(Dig, 0, 9));
+	Added.Crush = uint8(FMath::Clamp(Crush, 0, 20));
 	Wreckage->MadeAt.Add(Added.Id, World->GetTimeSeconds());
 	if (bLasting)
 	{
@@ -212,6 +305,9 @@ void ARRRandomWreckage::BeginPlay()
 	Rubble->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
 	Rubble->SetGenerateOverlapEvents(false);
 	Rubble->SetCanEverAffectNavigation(false);
+	// (round 99: flying bits don't belong in the distance field scene or Lumen's; taking them in again every frame cost)
+	Rubble->bAffectDistanceFieldLighting = false;
+	Rubble->bAffectDynamicIndirectLighting = false;
 	Rubble->SetMobility(EComponentMobility::Movable);
 	Rubble->SetupAttachment(RootComponent);
 	Rubble->SetUsingAbsoluteLocation(true);
@@ -232,12 +328,14 @@ void ARRRandomWreckage::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Chunks.Reset();
 	Growing.Reset();
+	GrowStandIns.Clear();
 	Super::EndPlay(EndPlayReason);
 }
 
 void ARRRandomWreckage::OnRep_Wrecks()
 {
-	Apply();
+	// (at the next tick, no more often than ApplyGap)
+	bPending = true;
 }
 
 bool ARRRandomWreckage::FindPieces()
@@ -388,15 +486,7 @@ void ARRRandomWreckage::Apply()
 
 	// Whatever is still growing back is done at once (what goes again now goes from where it stands)
 	TSet<UInstancedStaticMeshComponent*> Dirty;
-	for (const FGrowing& Grow : Growing)
-	{
-		if (UInstancedStaticMeshComponent* Instances = Grow.Regrow.Instances.Get())
-		{
-			Instances->UpdateInstanceTransform(Grow.Regrow.Index, Grow.Regrow.Target, true, false, false);
-			Dirty.Add(Instances);
-		}
-	}
-	Growing.Reset();
+	FinishGrowing();
 
 	TArray<FRRBrokenBit> BrokenBits;
 	TArray<FRRRegrow> Regrow;
@@ -515,15 +605,11 @@ void ARRRandomWreckage::Apply()
 		{
 			if (UInstancedStaticMeshComponent* Instances = Grow.Instances.Get())
 			{
+				// (round 99: its copy grows, the big mesh's own stays hidden till the batch is back: FinishGrowing)
 				Instances->UpdateInstanceTransform(Grow.Index, Shrunk(Grow.Target), true, false, false);
-				Dirty.Add(Instances);
-				Growing.Add({ Grow, -Grow.Delay });
+				Growing.Add({ Grow, -Grow.Delay, GrowStandIns.Add(this, Instances, Grow.Index, Shrunk(Grow.Target)) });
 			}
 		}
-	}
-	for (UInstancedStaticMeshComponent* Instances : Dirty)
-	{
-		Instances->MarkRenderStateDirty();
 	}
 }
 
@@ -603,8 +689,13 @@ bool ARRRandomWreckage::IsOccupied(const FRRWreck& Wreck) const
 void ARRRandomWreckage::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (bPending)
+	// Round 99: a volley (a robot's combo, missiles, a dragon's breath sweeping along) used to smash something every frame,
+	// and each time the town's big meshes are touched the renderer takes them in again whole (a 30 ms frame, measured): the
+	// changes are gathered and applied a few times a second instead
+	const float Clock = GetWorld()->GetTimeSeconds();
+	if (bPending && Clock - LastApplyTime >= ApplyGap)
 	{
+		LastApplyTime = Clock;
 		Apply();
 	}
 	TickRubble(DeltaSeconds);
@@ -650,7 +741,7 @@ void ARRRandomWreckage::Tick(float DeltaSeconds)
 	if (Mended > 0)
 	{
 		UE_LOG(LogTemp, Log, TEXT("RRRandom: %d wrecks mend, nobody in them (%d left)."), Mended, Wrecks.Num());
-		Apply();
+		bPending = true;
 		ForceNetUpdate();
 	}
 }
@@ -771,7 +862,6 @@ void ARRRandomWreckage::TickRubble(float DeltaSeconds)
 		const float Scale = Chunk.Size * (Left < RubbleShrink ? Left / RubbleShrink : 1.f);
 		Rubble->UpdateInstanceTransform(Chunk.Slot, FTransform(Chunk.Turn, Chunk.Location, FVector(Scale)), true, false, false);
 	}
-	Rubble->MarkRenderStateDirty();
 }
 
 void ARRRandomWreckage::TickGrowing(float DeltaSeconds)
@@ -780,14 +870,13 @@ void ARRRandomWreckage::TickGrowing(float DeltaSeconds)
 	{
 		return;
 	}
-	TSet<UInstancedStaticMeshComponent*> Dirty;
-	for (int32 Index = Growing.Num() - 1; Index >= 0; --Index)
+	// Each piece's copy swells into place (from the bottom up, each after its delay); the big meshes are left alone until
+	// every piece of the batch is back
+	bool bAllBack = true;
+	for (FGrowing& Grow : Growing)
 	{
-		FGrowing& Grow = Growing[Index];
-		UInstancedStaticMeshComponent* Instances = Grow.Regrow.Instances.Get();
-		if (!Instances)
+		if (Grow.Age >= GrowSeconds)
 		{
-			Growing.RemoveAtSwap(Index);
 			continue;
 		}
 		Grow.Age += DeltaSeconds;
@@ -796,16 +885,25 @@ void ARRRandomWreckage::TickGrowing(float DeltaSeconds)
 		if (Alpha < 1.f)
 		{
 			Now.SetScale3D(Grow.Regrow.Target.GetScale3D() * FMath::Max(0.f, BackOut(Alpha)));
+			bAllBack = false;
 		}
-		Instances->UpdateInstanceTransform(Grow.Regrow.Index, Now, true, false, false);
-		Dirty.Add(Instances);
-		if (Alpha >= 1.f)
-		{
-			Growing.RemoveAtSwap(Index);
-		}
+		GrowStandIns.Move(Grow.Stand, Now);
 	}
-	for (UInstancedStaticMeshComponent* Instances : Dirty)
+	if (bAllBack)
 	{
-		Instances->MarkRenderStateDirty();
+		FinishGrowing();
 	}
+}
+
+void ARRRandomWreckage::FinishGrowing()
+{
+	for (FGrowing& Grow : Growing)
+	{
+		if (UInstancedStaticMeshComponent* Instances = Grow.Regrow.Instances.Get())
+		{
+			Instances->UpdateInstanceTransform(Grow.Regrow.Index, Grow.Regrow.Target, true, false, false);
+		}
+		GrowStandIns.Remove(Grow.Stand);
+	}
+	Growing.Reset();
 }

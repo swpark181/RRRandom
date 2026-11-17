@@ -22,6 +22,8 @@ void URRRandomDiceBuffComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProp
 	DOREPLIFETIME(URRRandomDiceBuffComponent, GaugeTime);
 	DOREPLIFETIME(URRRandomDiceBuffComponent, Charges);
 	DOREPLIFETIME(URRRandomDiceBuffComponent, UltimateCharges);
+	DOREPLIFETIME_CONDITION(URRRandomDiceBuffComponent, Cards, COND_OwnerOnly);
+	DOREPLIFETIME_CONDITION(URRRandomDiceBuffComponent, CardFace, COND_OwnerOnly);
 }
 
 void URRRandomDiceBuffComponent::OnRep_RollCount()
@@ -73,7 +75,13 @@ void URRRandomDiceBuffComponent::TickComponent(float DeltaTime, ELevelTick TickT
 	{
 		GaugeTime += DeltaTime;
 	}
-	const float FillTime = bBattle ? BattleGaugeFillTime : GaugeFillTime;
+	// (round 98: the main mode's gauge waits for play too, and has its own pace)
+	const bool bRounds = ARRRandomGameState::IsRounds(this);
+	if (bRounds && State && !State->HasPlayStarted() && GaugeTime > 0.f)
+	{
+		GaugeTime -= DeltaTime;
+	}
+	const float FillTime = bBattle ? BattleGaugeFillTime : bRounds ? RRRounds::GaugeFillTime : GaugeFillTime;
 	if (FillTime > 0.f && GaugeTime >= FillTime)
 	{
 		GaugeTime -= FillTime;
@@ -100,7 +108,8 @@ void URRRandomDiceBuffComponent::TickComponent(float DeltaTime, ELevelTick TickT
 
 bool URRRandomDiceBuffComponent::RollDice()
 {
-	if (Charges <= 0 || IsRolling() || !GetOwner()->HasAuthority())
+	// (round 98: the cards dealt wait for a pick first)
+	if (Charges <= 0 || IsRolling() || !GetOwner()->HasAuthority() || Cards.Num() > 0)
 	{
 		return false;
 	}
@@ -119,6 +128,22 @@ bool URRRandomDiceBuffComponent::RollDice()
 	{
 		--UltimateCharges;
 		LastRoll.bUltimate = true;
+	}
+	// Round 98, the main mode: the die deals three different cards at its face
+	else if (ARRRandomGameState::IsRounds(this))
+	{
+		LastRoll.bCards = true;
+		TArray<ERRCard> Deck;
+		for (int32 Card = 0; Card < static_cast<int32>(ERRCard::Count); ++Card)
+		{
+			Deck.Add(static_cast<ERRCard>(Card));
+		}
+		PendingCards.Reset();
+		for (int32 Deal = 0; Deal < RRRounds::CardsDealt && Deck.Num() > 0; ++Deal)
+		{
+			PendingCards.Add(Deck[Stream.RandRange(0, Deck.Num() - 1)]);
+			Deck.Remove(PendingCards.Last());
+		}
 	}
 	else
 	{
@@ -195,7 +220,12 @@ void URRRandomDiceBuffComponent::AddCharge(bool bUltimate)
 
 void URRRandomDiceBuffComponent::ApplyRoll(const FRRDiceRoll& Roll)
 {
-	if (Roll.bUltimate)
+	if (Roll.bCards)
+	{
+		Cards = PendingCards;
+		CardFace = Roll.Face;
+	}
+	else if (Roll.bUltimate)
 	{
 		OnUltimateDie.Broadcast(Roll.Face);
 	}
@@ -283,6 +313,45 @@ FLinearColor URRRandomDiceBuffComponent::GetStatColor(ERRDiceBuffStat Stat)
 float URRRandomDiceBuffComponent::GetGaugeProgress() const
 {
 	// (the battle royale's fills once a minute: round 97)
-	const float FillTime = ARRRandomGameState::IsBattleRoyale(this) ? BattleGaugeFillTime : GaugeFillTime;
+	const float FillTime = ARRRandomGameState::IsBattleRoyale(this) ? BattleGaugeFillTime : ARRRandomGameState::IsRounds(this) ? RRRounds::GaugeFillTime : GaugeFillTime;
 	return FillTime > 0.f ? FMath::Clamp(GaugeTime / FillTime, 0.f, 1.f) : 1.f;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Round 98: the main mode's cards
+
+bool URRRandomDiceBuffComponent::ChooseCard(int32 Index)
+{
+	if (!GetOwner()->HasAuthority() || !Cards.IsValidIndex(Index))
+	{
+		return false;
+	}
+	const ERRCard Card = Cards[Index];
+	const int32 Face = CardFace;
+	Cards.Reset();
+	// The stat cards are buffs of their own; the rest the owner plays
+	if (Card == ERRCard::Power || Card == ERRCard::Rapid || Card == ERRCard::Swift)
+	{
+		FRRDiceBuff& Buff = ActiveBuffs.AddDefaulted_GetRef();
+		Buff.Stat = Card == ERRCard::Power ? ERRDiceBuffStat::AttackPower : Card == ERRCard::Rapid ? ERRDiceBuffStat::AttackSpeed : ERRDiceBuffStat::MoveSpeed;
+		Buff.Bonus = Face * (Card == ERRCard::Power ? 0.06f : 0.05f);
+		Buff.RemainingTime = RRRounds::CardSeconds;
+	}
+	OnCard.Broadcast(Card, Face);
+	return true;
+}
+
+void URRRandomDiceBuffComponent::ResetForRound(int32 Dice)
+{
+	if (!GetOwner()->HasAuthority())
+	{
+		return;
+	}
+	Charges = Dice;
+	UltimateCharges = 0;
+	GaugeTime = 0.f;
+	Cards.Reset();
+	PendingCards.Reset();
+	ActiveBuffs.Reset();
+	bRollPending = false;
 }

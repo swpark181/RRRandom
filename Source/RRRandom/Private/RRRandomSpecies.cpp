@@ -190,6 +190,18 @@ const TArray<FRRSpeciesLook>& FRRSpeciesLook::GetAll()
 		Look.SwordSlash2 = Anim(TEXT("SwordSlash2"));
 		Look.SwordSlash3 = Anim(TEXT("SwordSlash3"));
 		Look.SwordParry = Anim(TEXT("SwordParry"));
+		// Round 98: the emote wheel (always six places, a missing one null) and the roles' melee blows
+		for (const TCHAR* Emote : { TEXT("EmoteWave"), TEXT("EmoteClap"), TEXT("EmoteCheer"), TEXT("EmoteLaugh"), TEXT("EmoteDance"), TEXT("EmoteTaunt") })
+		{
+			Look.Emotes.Add(Anim(Emote));
+		}
+		for (int32 Step = 0; Step < 3; ++Step)
+		{
+			Look.HammerSwings[Step] = Anim(*FString::Printf(TEXT("HammerSwing%d"), Step + 1));
+			Look.DaggerStabs[Step] = Anim(*FString::Printf(TEXT("DaggerStab%d"), Step + 1));
+		}
+		Look.ShieldBlock = Anim(TEXT("ShieldBlock"));
+		Look.ShieldCarry = Anim(TEXT("ShieldCarry"));
 		// Each playable rig gets its own retargeted copy of the connected phrase.
 		if (Species < RRSpecies::Count)
 		{

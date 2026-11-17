@@ -72,6 +72,15 @@ namespace
 	constexpr float CannonSplashShare = 0.7f;
 	constexpr float PlasmaSplashRadius = 150.f;
 	constexpr float PlasmaSplashShare = 0.5f;
+	// Round 98: the squirrel's ACORN bursts wider (its trapper role), throwing those it knocks out spinning far off
+	constexpr float AcornSplashRadius = 300.f;
+	constexpr float AcornSplashShare = 1.f;
+	constexpr float AcornBlastSize = AcornSplashRadius / 350.f;
+	// A blast's knockout throws the body (ARRRandomCharacter::SetBlastImpact) this fast out from it, and up
+	constexpr float BlastFlingSpeed = 900.f;
+	constexpr float BlastFlingLift = 420.f;
+	// An acorn's arc: how high it bows (0 flat .. 1 straight up) and how far it may land
+	constexpr float LobArc = 0.42f;
 	// Round 91 (the user: the blasts looked huge; keep them to three or four friends across): a blast as wide as its splash,
 	// whatever the shell's size: ARRRandomEffects::RocketBlast's shock ring and smoke reach about this far at size 1
 	constexpr float BlastReachPerSize = 350.f;
@@ -177,6 +186,7 @@ void ARRRandomProjectile::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	DOREPLIFETIME(ARRRandomProjectile, Tier);
 	DOREPLIFETIME(ARRRandomProjectile, HitEffect);
 	DOREPLIFETIME(ARRRandomProjectile, bPoke);
+	DOREPLIFETIME(ARRRandomProjectile, bLob);
 	DOREPLIFETIME(ARRRandomProjectile, RocketArm);
 	DOREPLIFETIME(ARRRandomProjectile, bMissile);
 	DOREPLIFETIME(ARRRandomProjectile, MissileTarget);
@@ -209,6 +219,11 @@ void ARRRandomProjectile::BeginPlay()
 		}
 	}
 
+	// Round 98: an acorn falls on every machine as it flies
+	if (bLob)
+	{
+		Movement->ProjectileGravityScale = 1.f;
+	}
 	// A poke is the finger itself reaching out: nothing flies
 	if (bPoke)
 	{
@@ -256,6 +271,17 @@ void ARRRandomProjectile::BeginPlay()
 			Visual->SetRelativeLocation(-Bounds.Origin * Fit);
 			bOwnModel = true;
 		}
+	}
+	// Round 99: the gun's own flash at the muzzle and its own trail behind the shot (every machine plays its own)
+	if (!bPoke && !bRocket && !bMissile && GetNetMode() != NM_DedicatedServer)
+	{
+		bGunTrail = true;
+		LastTrailLocation = GetActorLocation();
+		if (ARRRandomEffects* Effects = ARRRandomEffects::Get(this))
+		{
+			Effects->MuzzleFlash(HitEffect, GetActorLocation(), GetActorForwardVector(), GetActorScale3D().X, ShotColor);
+		}
+		SetActorTickEnabled(true);
 	}
 	if (!bPoke && !bRocket && !bMissile)
 	{
@@ -340,6 +366,22 @@ void ARRRandomProjectile::Tick(float DeltaSeconds)
 	if (Trail)
 	{
 		Trail->SetWorldLocation(GetActorLocation());
+	}
+	if (bGunTrail && !bImpacted)
+	{
+		const FVector Here = GetActorLocation();
+		// (not across a jump: a client's copy set right by the server, a shot turned back by a sword)
+		const float Most = FMath::Max(float(Movement->Velocity.Size()), Movement->InitialSpeed) * DeltaSeconds * 3.f + 50.f;
+		if (ARRRandomEffects* Effects = FVector::Dist(Here, LastTrailLocation) < Most ? ARRRandomEffects::Get(this) : nullptr)
+		{
+			Effects->ShotTrail(HitEffect, LastTrailLocation, Here, GetActorScale3D().X, ShotColor, DeltaSeconds);
+		}
+		LastTrailLocation = Here;
+		// An acorn tumbles end over end as it flies
+		if (bLob)
+		{
+			Visual->AddLocalRotation(FRotator(-540.f * DeltaSeconds, 0.f, 0.f));
+		}
 	}
 	// A rocket fist spins round the way it flies, its exhaust streaming out of the elbow end
 	if (RocketArm != 0 && !bImpacted)
@@ -535,6 +577,30 @@ void ARRRandomProjectile::RunOutOfRange()
 	SetLifeSpan(ImpactLingerTime);
 }
 
+void ARRRandomProjectile::MakeLob(const FVector& Target)
+{
+	// Before the movement component initializes: an arc through Target (or as near as its speed gets it), falling as it goes
+	const FVector Start = GetActorLocation();
+	FVector Launch;
+	if (!UGameplayStatics::SuggestProjectileVelocity_CustomArc(this, Launch, Start, Target, 0.f, LobArc))
+	{
+		Launch = (Target - Start).GetSafeNormal() * Movement->InitialSpeed + FVector(0.f, 0.f, 500.f);
+	}
+	bLob = true;
+	Movement->ProjectileGravityScale = 1.f;
+	Movement->InitialSpeed = Launch.Size();
+	Movement->MaxSpeed = FMath::Max(Launch.Size() * 2.f, 4000.f);
+	// Round 99 (the user: "유탄이 이상하게 발사됨"): Launch is a way in the world. The movement component takes its starting
+	// velocity as one in the shot's own frame unless told otherwise, so the arc was turned again by the way the muzzle
+	// pointed: right only when shooting along +X, off to the side or backward any other way
+	Movement->bInitialVelocityInLocalSpace = false;
+	Movement->Velocity = Launch.GetSafeNormal();
+	SetActorRotation(Launch.Rotation());
+	MaxRange = 0.f;
+	LobTarget = Target;
+	UE_LOG(LogTemp, Verbose, TEXT("RRRandom: lob from %s at %s, launched %s (%.0f a second)."), *Start.ToCompactString(), *Target.ToCompactString(), *Launch.GetSafeNormal().ToCompactString(), Launch.Size());
+}
+
 void ARRRandomProjectile::SetSpeedMultiplier(float Multiplier)
 {
 	// Before the movement component initializes, which turns InitialSpeed into the starting velocity
@@ -572,6 +638,12 @@ void ARRRandomProjectile::SpawnImpactEffects(const FVector& Location, const FVec
 			{
 				Effects->RocketBlast(Location, Normal, CannonBlastSize);
 				ARRRandomHUD::PopComicWord(this, TEXT("BOOM!"), Location + FVector(0.f, 0.f, 120.f), FLinearColor(1.f, 0.55f, 0.2f), 1.1f);
+			}
+			else if (HitEffect == ERRHitEffect::Acorn)
+			{
+				Effects->AcornPop(Location, 1.3f);
+				Effects->RocketBlast(Location, Normal, AcornBlastSize);
+				ARRRandomHUD::PopComicWord(this, TEXT("POP!"), Location + FVector(0.f, 0.f, 110.f), FLinearColor::FromSRGBColor(FColor(233, 169, 63)), 1.f);
 			}
 			else
 			{
@@ -690,6 +762,8 @@ void ARRRandomProjectile::OnHit(UPrimitiveComponent* HitComponent, AActor* Other
 	// A CANNON's shell or a BLASTER's plasma (round 90): everything else round where it lands takes a share of the hit too
 	Splash(Hit.ImpactPoint + Hit.ImpactNormal * 25.f, OtherActor, BaseDamage);
 
+	// (round 99: how near an arc came down to where it was aimed, for checking the launcher)
+	UE_CLOG(bLob, LogTemp, Log, TEXT("RRRandom: lob lands at %s, %.0f from its aim (flat) on %s."), *Hit.ImpactPoint.ToCompactString(), FVector::Dist2D(Hit.ImpactPoint, LobTarget), *GetNameSafe(OtherActor));
 	// Tell the clients where it landed, then go once they've had time to hear it
 	bImpacted = true;
 	bHitBrawler = Cast<ARRRandomCharacter>(OtherActor) != nullptr;
@@ -703,8 +777,8 @@ void ARRRandomProjectile::OnHit(UPrimitiveComponent* HitComponent, AActor* Other
 
 void ARRRandomProjectile::GetSplash(ERRHitEffect Effect, float& OutRadius, float& OutShare)
 {
-	OutRadius = Effect == ERRHitEffect::Cannon ? CannonSplashRadius : Effect == ERRHitEffect::Blaster ? PlasmaSplashRadius : 0.f;
-	OutShare = Effect == ERRHitEffect::Cannon ? CannonSplashShare : Effect == ERRHitEffect::Blaster ? PlasmaSplashShare : 0.f;
+	OutRadius = Effect == ERRHitEffect::Cannon ? CannonSplashRadius : Effect == ERRHitEffect::Blaster ? PlasmaSplashRadius : Effect == ERRHitEffect::Acorn ? AcornSplashRadius : 0.f;
+	OutShare = Effect == ERRHitEffect::Cannon ? CannonSplashShare : Effect == ERRHitEffect::Blaster ? PlasmaSplashShare : Effect == ERRHitEffect::Acorn ? AcornSplashShare : 0.f;
 }
 
 void ARRRandomProjectile::Splash(const FVector& Where, AActor* Hit, float BaseDamage)
@@ -724,8 +798,44 @@ void ARRRandomProjectile::Splash(const FVector& Where, AActor* Hit, float BaseDa
 		Spared.Add(Hit);
 	}
 	const float Full = BaseDamage * Share;
+	// Round 98 (the user's "날아가는 장면 과장"): a shell's or an acorn's blast throws whoever it knocks out spinning off, away
+	// from it; the acorn's pops the ones it doesn't up a little too
+	if (HitEffect == ERRHitEffect::Cannon || HitEffect == ERRHitEffect::Acorn)
+	{
+		const ARRRandomCharacter* Shooter = Cast<ARRRandomCharacter>(GetInstigator());
+		for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+		{
+			FVector Away = It->GetActorLocation() - Where;
+			if (!It->IsAlive() || (Shooter && It->GetTeam() == Shooter->GetTeam()) || Away.Size() > Radius + It->GetCapsuleComponent()->GetScaledCapsuleRadius())
+			{
+				continue;
+			}
+			Away = Away.GetSafeNormal2D().IsNearlyZero() ? FVector::ForwardVector : Away.GetSafeNormal2D();
+			It->SetBlastImpact(Away * BlastFlingSpeed + FVector(0.f, 0.f, BlastFlingLift));
+			if (HitEffect == ERRHitEffect::Acorn && *It != Hit)
+			{
+				It->LaunchCharacter(Away * 300.f + FVector(0.f, 0.f, 380.f), true, true);
+			}
+		}
+	}
 	UGameplayStatics::ApplyRadialDamageWithFalloff(this, Full, Full * 0.5f, Where, Radius * 0.3f, Radius, 1.f, UDamageType::StaticClass(), Spared, this,
 		GetInstigatorController(), ECC_Visibility);
+}
+
+void ARRRandomProjectile::PreloadShotModels()
+{
+	// Round 99: every gun's shot model, loaded once as the first animal friend begins play. They used to load the moment a
+	// gun of that kind first fired, a frame's hitch each ("Waiting on static mesh ... being ready before playing")
+	static bool bLoaded = false;
+	if (bLoaded)
+	{
+		return;
+	}
+	bLoaded = true;
+	for (int32 Effect = 0; Effect < static_cast<int32>(ERRHitEffect::Count); ++Effect)
+	{
+		LoadShotModel(static_cast<ERRHitEffect>(Effect));
+	}
 }
 
 UStaticMesh* ARRRandomProjectile::LoadShotModel(ERRHitEffect Effect)
@@ -740,6 +850,16 @@ UStaticMesh* ARRRandomProjectile::LoadShotModel(ERRHitEffect Effect)
 	if (Missing.Contains(Effect))
 	{
 		return nullptr;
+	}
+	// Round 98: the squirrel's acorn launcher fires real acorns (the acorn rain's nut)
+	if (Effect == ERRHitEffect::Acorn)
+	{
+		UStaticMesh* Nut = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Effects/Acorn/SM_AcornNut.SM_AcornNut"));
+		if (Nut)
+		{
+			Found.Add(Effect, Nut);
+		}
+		return Nut;
 	}
 	const TCHAR* Names[] = { TEXT("Pistol"), TEXT("Smg"), TEXT("Minigun"), TEXT("Rifle"), TEXT("Blaster"), TEXT("Cannon") };
 	// (round 97: the sniper fires the rifle's shot, the shotgun's pellets are the SMG's)
@@ -777,6 +897,7 @@ float ARRRandomProjectile::GetShotLength(ERRHitEffect Effect)
 	case ERRHitEffect::Cannon: return 36.f;
 	case ERRHitEffect::Sniper: return 52.f;
 	case ERRHitEffect::Shotgun: return 20.f;
+	case ERRHitEffect::Acorn: return 30.f;
 	default: return 30.f;
 	}
 }

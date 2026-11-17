@@ -49,17 +49,21 @@ TArray<ERRTitleChoice> ARRRandomTitlePlayerController::GetChoices() const
 	{
 		return { ERRTitleChoice::DiceTown, ERRTitleChoice::DiceLand, ERRTitleChoice::Back };
 	}
+	if (bEventsPage)
+	{
+		return { ERRTitleChoice::BattleRoyale, ERRTitleChoice::Defense, ERRTitleChoice::Back };
+	}
 	if (bViewPage)
 	{
-		// Round 90: the top view and Dice Land are put away (still there for -RRMap and the code); a battle is third person in
-		// Dice Town, or the defense
-		return { ERRTitleChoice::Battle, ERRTitleChoice::BattleRoyale, ERRTitleChoice::Defense, ERRTitleChoice::Back };
+		// Round 90: the top view and Dice Land are put away (still there for -RRMap and the code); round 98: the main mode
+		// (BATTLE: three dice-picked rounds in Dice Town), the rest under EVENTS
+		return { ERRTitleChoice::Battle, ERRTitleChoice::Events, ERRTitleChoice::Back };
 	}
 	if (bNetworkPage)
 	{
 		return { ERRTitleChoice::Host, ERRTitleChoice::Join, ERRTitleChoice::Back };
 	}
-	return { ERRTitleChoice::Single, ERRTitleChoice::Network, ERRTitleChoice::Quit };
+	return { ERRTitleChoice::QuickPlay, ERRTitleChoice::Single, ERRTitleChoice::Network, ERRTitleChoice::Quit };
 }
 
 void ARRRandomTitlePlayerController::SetSelected(int32 Index)
@@ -105,6 +109,8 @@ FString ARRRandomTitlePlayerController::GetLabel(ERRTitleChoice Choice)
 	case ERRTitleChoice::BattleRoyale: return TEXT("BATTLE ROYALE");
 	case ERRTitleChoice::BRFull: return TEXT("BIG MAP");
 	case ERRTitleChoice::BRTest: return TEXT("TEST MAP");
+	case ERRTitleChoice::QuickPlay: return TEXT("QUICK PLAY");
+	case ERRTitleChoice::Events: return TEXT("EVENTS");
 	}
 	return FString();
 }
@@ -131,17 +137,20 @@ FString ARRRandomTitlePlayerController::GetDescription(ERRTitleChoice Choice)
 	case ERRTitleChoice::TopView: return TEXT("The camera high above the arena. Fog of war: you only see what your team sees.");
 	case ERRTitleChoice::ThirdPerson: return TEXT("Over the shoulder: the mouse looks, right button aims. No fog of war.");
 	case ERRTitleChoice::Quit: return TEXT("Close the game.");
-	case ERRTitleChoice::Fox: return TEXT("Quick-witted fox with a bushy tail.");
-	case ERRTitleChoice::Rabbit: return TEXT("Bouncy rabbit with tall ears.");
-	case ERRTitleChoice::Squirrel: return TEXT("Cheeky squirrel with a big curly tail.");
-	case ERRTitleChoice::Tiger: return TEXT("Bold little tiger in stripes.");
-	case ERRTitleChoice::Dragon: return TEXT("Little red dragon. Its true form breathes fire.");
-	case ERRTitleChoice::RedFox: return TEXT("Red fennec fox girl with a bell on her ear. Fox tricks.");
+	// Round 98: each one by its role in the main mode
+	case ERRTitleChoice::Fox: return TEXT("ASSAULT  ·  SMG up close, Q goes invisible.");
+	case ERRTitleChoice::Rabbit: return TEXT("SCOUT  ·  sniper with a scope, Q super hops onto the roofs.");
+	case ERRTitleChoice::Squirrel: return TEXT("TRAPPER  ·  lobs bursting acorns over cover, Q sets an acorn mine.");
+	case ERRTitleChoice::Tiger: return TEXT("TANK  ·  big hammer and a shield (right button), Q turns giant.");
+	case ERRTitleChoice::Dragon: return TEXT("AIR STRIKE  ·  fireballs, Q takes off and shoots from the sky.");
+	case ERRTitleChoice::RedFox: return TEXT("AMBUSH  ·  dagger x2 from behind, Q disguises her as the other team.");
 	case ERRTitleChoice::DiceTown: return TEXT("Big block town: climb houses and towers, fight on rooftops, by canals and in the woods.");
 	case ERRTitleChoice::DiceLand: return TEXT("Small round island of candy dice. Quick fights in the open.");
 	case ERRTitleChoice::Knockout: return TEXT("The first team to 10 knockouts wins.");
 	case ERRTitleChoice::MeteorRush: return TEXT("Grab the dice ore meteors drop. Hold 30 points for 12 seconds to win.");
-	case ERRTitleChoice::Battle: return TEXT("Team against team in Dice Town, over the shoulder.");
+	case ERRTitleChoice::Battle: return TEXT("3 vs 3, best of three rounds. The dice pick each round's rule.");
+	case ERRTitleChoice::QuickPlay: return TEXT("Pick an animal friend and jump straight into a match against bots.");
+	case ERRTitleChoice::Events: return TEXT("The battle royale and the dice tower defense.");
 	case ERRTitleChoice::Defense: return TEXT("Together, hold the giant dice tower against 7 waves of rats and their cat boss.");
 	case ERRTitleChoice::Stage1: return TEXT("A small island. Kickboards and motorbikes to ride.");
 	case ERRTitleChoice::Stage2: return TEXT("A bigger village. Cars and human cannons join the rides.");
@@ -161,7 +170,7 @@ namespace
 	{
 		const FString What = Room.Rule == ERRMatchRule::Defense ? FString::Printf(TEXT("DEFENSE STAGE %d"), FMath::Max(1, Room.Stage))
 			: Room.Rule == ERRMatchRule::BattleRoyale ? TEXT("BATTLE ROYALE")
-			: Room.Rule == ERRMatchRule::MeteorRush ? TEXT("METEOR RUSH") : TEXT("KNOCKOUT");
+			: Room.Rule == ERRMatchRule::MeteorRush ? TEXT("METEOR RUSH") : Room.Rule == ERRMatchRule::Rounds ? TEXT("BATTLE") : TEXT("KNOCKOUT");
 		return FString::Printf(TEXT("%s  ·  %s  ·  %d/%d"), *Room.HostName.Left(14).ToUpper(), *What, Room.Players, Room.MaxPlayers);
 	}
 }
@@ -281,26 +290,39 @@ void ARRRandomTitlePlayerController::Choose(ERRTitleChoice Choice)
 		OpenRulePage();
 		break;
 	case ERRTitleChoice::Battle:
-		// Third person in Dice Town, then the rule
+		// Round 98: the main mode, third person in Dice Town's arena (the dice pick each round's rule), then the animal friend
 		Sessions->SetThirdPersonMode(true);
 		Sessions->SetThirdPersonMap(ERRThirdPersonMap::DiceTown);
-		if (Sessions->GetMatchRule() == ERRMatchRule::Defense || Sessions->GetMatchRule() == ERRMatchRule::BattleRoyale)
-		{
-			Sessions->SetMatchRule(ERRMatchRule::Knockout);
-		}
+		Sessions->SetMatchRule(ERRMatchRule::Rounds);
 		bViewPage = false;
-		OpenRulePage();
+		bQuick = false;
+		OpenSpeciesPage(bViewForHost ? EStart::Host : EStart::Solo);
+		break;
+	case ERRTitleChoice::QuickPlay:
+		Sessions->SetThirdPersonMode(true);
+		Sessions->SetThirdPersonMap(ERRThirdPersonMap::DiceTown);
+		Sessions->SetMatchRule(ERRMatchRule::Rounds);
+		bViewForHost = false;
+		bQuick = true;
+		OpenSpeciesPage(EStart::Solo);
+		break;
+	case ERRTitleChoice::Events:
+		bViewPage = false;
+		bEventsPage = true;
+		Selected = 0;
 		break;
 	case ERRTitleChoice::Defense:
 		Sessions->SetThirdPersonMode(true);
 		Sessions->SetMatchRule(ERRMatchRule::Defense);
 		bViewPage = false;
+		bEventsPage = false;
 		OpenStagePage();
 		break;
 	case ERRTitleChoice::BattleRoyale:
 		Sessions->SetThirdPersonMode(true);
 		Sessions->SetMatchRule(ERRMatchRule::BattleRoyale);
 		bViewPage = false;
+		bEventsPage = false;
 		bBRPage = true;
 		Selected = Sessions->IsBattleRoyaleTest() ? 1 : 0;
 		break;
@@ -373,16 +395,32 @@ void ARRRandomTitlePlayerController::Choose(ERRTitleChoice Choice)
 				Selected = Sessions->IsBattleRoyaleTest() ? 1 : 0;
 				break;
 			}
+			// (round 98: the main mode goes back to what to play, or the first page for QUICK PLAY)
+			if (Sessions->GetMatchRule() == ERRMatchRule::Rounds)
+			{
+				bViewPage = !bQuick;
+				Selected = GetChoices().IndexOfByKey(bQuick ? ERRTitleChoice::QuickPlay : ERRTitleChoice::Battle);
+				break;
+			}
 			OpenRulePage();
 			break;
 		}
-		if (bRulePage || bStagePage || bBRPage)
+		if (bStagePage || bBRPage)
 		{
-			// Back to what to play
-			const ERRTitleChoice Was = bStagePage ? ERRTitleChoice::Defense : bBRPage ? ERRTitleChoice::BattleRoyale : ERRTitleChoice::Battle;
-			bRulePage = false;
+			// Back to the events
+			const ERRTitleChoice Was = bStagePage ? ERRTitleChoice::Defense : ERRTitleChoice::BattleRoyale;
 			bStagePage = false;
 			bBRPage = false;
+			bEventsPage = true;
+			Selected = GetChoices().IndexOfByKey(Was);
+			break;
+		}
+		if (bRulePage || bEventsPage)
+		{
+			// Back to what to play
+			const ERRTitleChoice Was = bEventsPage ? ERRTitleChoice::Events : ERRTitleChoice::Battle;
+			bRulePage = false;
+			bEventsPage = false;
 			bViewPage = true;
 			Selected = GetChoices().IndexOfByKey(Was);
 			break;

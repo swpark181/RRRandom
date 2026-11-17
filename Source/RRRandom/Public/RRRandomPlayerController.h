@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "RRRandomViewCut.h"
 #include "RRRandomPlayerController.generated.h"
 
 class ARRRandomCharacter;
@@ -57,6 +58,9 @@ public:
 	/** Joins an online game (F2). */
 	UFUNCTION(Exec)
 	void RRJoin();
+	/** Round 100: joins the game hosted at an address (console: RRJoinIP 192.168.0.12), for hosts the room list can't find. */
+	UFUNCTION(Exec)
+	void RRJoinIP(const FString& Address);
 
 	/** Leaves the online game and plays alone again (F3). */
 	UFUNCTION(Exec)
@@ -189,6 +193,23 @@ public:
 	UFUNCTION(Exec)
 	void RRShoot();
 
+	/** Round 98 (console, for scripted tests): Q, a card kept (1-3), an emote (1-6), and a die rolled straight into cards. */
+	UFUNCTION(Exec)
+	void RRAbility();
+	UFUNCTION(Exec)
+	void RRCard(int32 Number = 1);
+	UFUNCTION(Exec)
+	void RREmote(int32 Number = 1);
+	UFUNCTION(Exec)
+	void RRDeal();
+	/** Presses / lets go of jump (scripted tests). */
+	UFUNCTION(Exec)
+	void RRJump();
+	UFUNCTION(Exec)
+	void RRJumpStop();
+	UFUNCTION(Server, Reliable)
+	void ServerDeal();
+
 	/**
 	 * Cheat: the star team's three cars park in a ring in front of my animal friend, ready to combine (Ctrl + 0; anyone
 	 * riding them is put off, and a robot already about comes apart first). Not in shipping builds.
@@ -311,6 +332,13 @@ public:
 	 * of me (or my robot), facing me, its team's bots in it; and that rival robot's crew doing something at me: "fire" (its
 	 * sword), "missiles", "shield", or "hurt" (down to a little health, to knock it down).
 	 */
+	/** Cheat for scripted captures (round 100): clicks my ultimate this far ahead of my animal friend. */
+	UFUNCTION(Exec)
+	void RRStrike(float Ahead = 1500.f);
+	/** Round 101, proposal captures only: block gloss (roughness, under 0 = leave), sun and sky brightness (times), and this
+	 * screen's contrast, saturation and exposure. Nothing of it is on unless this is typed. */
+	UFUNCTION(Exec)
+	void RRLook(float Roughness = -1.f, float Sun = 1.f, float Sky = 1.f, float Contrast = 1.f, float Saturation = 1.f, float Exposure = 0.f);
 	UFUNCTION(Exec)
 	void RRRivalRobot(float Distance = 1100.f);
 	UFUNCTION(Exec)
@@ -367,6 +395,7 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void PlayerTick(float DeltaTime) override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void SetupInputComponent() override;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
@@ -507,6 +536,14 @@ private:
 	float WatchTimer = 0.f;
 	/** Out (knocked out for good) in a battle royale: watch a teammate standing, or the nearest one standing. */
 	void UpdateWatching(float DeltaTime);
+	/** Round 100: the top view's see-through roofs and walls over the animal friend on this screen (FRRViewCut). */
+	void UpdateTopViewCut(float DeltaTime);
+	FRRViewCut TopViewCut;
+	float TopViewCutTimer = 0.f;
+	/** How much room round the body is kept clear, for a body of size 1. */
+	float TopViewCutRoom = 90.f;
+	/** How much of what the top view puts away still shows (so a stem or a wall one bumps into can be seen). */
+	float TopViewGhostOpacity = 0.3f;
 	UFUNCTION(Server, Reliable)
 	void ServerCheatCannon(int32 Index);
 	UFUNCTION(Server, Reliable)
@@ -566,6 +603,30 @@ private:
 	TArray<TObjectPtr<UInputAction>> HandActions;
 	void OnBag();
 	void OnHand(int32 Hand);
+
+	// Round 98, the main mode: Q the ability, T (held) the emote wheel, 1 / 2 / 3 the cards dealt, F4 the developer lines;
+	// knocked out, the view goes to whoever did it (the killcam); the results go on to the next match by themselves
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> AbilityAction;
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> EmoteAction;
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> DebugAction;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UInputAction>> CardActions;
+	void OnAbility();
+	void OnEmoteStart();
+	void OnEmoteStop();
+	void OnDebug();
+	void OnCardKey(int32 Index);
+	UPROPERTY(Transient)
+	TObjectPtr<class ACameraActor> KillCam;
+	bool bKillCamOn = false;
+	float KillCamYaw = 0.f;
+	void UpdateKillCam(float DeltaTime);
+	/** The host results screen in the main mode: on to the next match after RRRounds::NextMatchDelay (not while picking). */
+	void UpdateNextMatch();
+	bool bNextMatchAsked = false;
 public:
 	UFUNCTION(Server, Reliable)
 	void ServerPickStart(int32 Spot);
