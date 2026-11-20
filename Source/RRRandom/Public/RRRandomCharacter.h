@@ -186,6 +186,8 @@ public:
 	int32 GetOutlineStencil() const { return OutlineStencil; }
 	/** Round 99 (the bots): whether a jump now, going this way, would climb what is in front. */
 	bool CanClimbToward(const FVector& Direction, float ExtraReach = 0.f, float MaxRise = UE_BIG_NUMBER) const;
+	/** Test (RRClimbTest): climbs to a spot Rise up and a step ahead whatever is there, to look at the climbing clips on the studio map. */
+	void CheatClimb(float Rise);
 
 	/** Starts refilling the magazine unless it is already full or reloading. Spare ammo is unlimited. On a client, asks the server. */
 	void StartReload();
@@ -420,6 +422,11 @@ public:
 	 * attacking or getting hurt ends it. 0 for none. On a client, asks the server.
 	 */
 	void PlayEmote(int32 Index);
+
+	/** Shows face part <Variant> (FacePart) instead of the body's own muzzle: "Default" = SK_<Name>Muzzle, anything else =
+	 *  SK_<Name>Muzzle_<Variant>; None or "Off" goes back to the body's own. False when the species has no such part. */
+	UFUNCTION(BlueprintCallable, Category = "Look")
+	bool SetFacePart(FName Variant);
 	int32 GetEmote() const { return EmoteIndex; }
 	bool IsEmoting() const { return EmoteIndex > 0 && bAlive; }
 	bool HasEmote(int32 Index) const { return EmoteAnimations.IsValidIndex(Index - 1) && EmoteAnimations[Index - 1] != nullptr; }
@@ -516,6 +523,20 @@ public:
 	float GetSwordAttackDuration() const;
 	/** Input-driven locomotion speed; the sword's planted step must not trigger a walk clip. */
 	float GetAnimationMoveSpeed() const;
+	/**
+	 * Motion matching test (2026-11-20, RRRandomMotionMatching.h): the hidden body that runs the Motion Matching node, if
+	 * this animal friend has a set and rr.MotionMatch is on; and whether its pose should be the base of the body's now
+	 * (walking about on the ground: not in the air, riding, emoting, knocked out ...).
+	 */
+	USkeletalMeshComponent* GetMotionDriver() const { return MotionDriver; }
+	bool WantsMotionMatch() const;
+	/**
+	 * The driver is playing a climbing clip (onto a low ledge or up a high one, the user 2026-11-20: "장애물 넘어갈때나
+	 * 점프해서 높은 장애물 올라갈때 모션 추가해줘"): the body takes the driver's whole pose then, arms too.
+	 */
+	bool WantsClimbMotion() const { return ClimbDriver && ClimbMotionHold > 0.f; }
+	/** The second hidden body, which plays the climbing clip by itself while WantsClimbMotion. */
+	USkeletalMeshComponent* GetClimbDriver() const { return ClimbDriver; }
 	/** Which blow of the combo the last swing was (0 .. 2): within ComboWindow of the one before it counts on, else it starts over. */
 	int32 GetComboStep() const { return ComboStep; }
 	static constexpr float ComboWindow = 0.9f;
@@ -588,6 +609,12 @@ protected:
 	/** Round 95: shell fur over the body, for the species that have it (SK_<Name>Fur; the fox). */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Look")
 	TObjectPtr<URRRandomFurComponent> Fur;
+
+	/** 2026-11-20: a swappable face part on the body's pose (SK_<Name>Muzzle[_<Variant>], the tiger first: nose underside,
+	 *  mouth, chin, whiskers; char-pipeline/scripts/blender_split_part.py + ue_import_part.py). While it shows, the body's
+	 *  own "Muzzle" material section is hidden; for expressions and talking later. Hidden = the body's own muzzle. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Look")
+	TObjectPtr<USkeletalMeshComponent> FacePart;
 
 	/** The shadow right under the brawler, dust on take-off and landing, wind streaks in flight: height read from above. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Flight")
@@ -1346,6 +1373,31 @@ private:
 	bool bNavInvoker = false;
 	FVector MeshRelativeLocation = FVector::ZeroVector;
 	FRotator MeshRelativeRotation = FRotator::ZeroRotator;
+
+	/** Motion matching test: made, kept in step with the body mesh, or removed (rr.MotionMatch, the species shown). */
+	void UpdateMotionDriver();
+	UPROPERTY(Transient)
+	TObjectPtr<USkeletalMeshComponent> MotionDriver;
+	/** The species a set was last looked for (found or not), so a missing one is not searched every frame. */
+	int32 MotionDriverSpecies = -1;
+	/**
+	 * The set's climbing clips (/Game/Characters/<Name>MM/Traversal/A_<Name>MM_ClimbLow and _ClimbHigh: the sample's 1 m
+	 * mantle and 2.5 m climb), played on a second hidden body (ClimbDriver, made at the first climb) while the capsule makes the climb (UpdateClimb): the
+	 * clip's rise is stretched over the climb's way up and its step onto the top over the climb's way over the edge, then
+	 * it runs out by itself while the body eases back to the matched walk. Per clip: when its root starts to rise, when
+	 * it is up, and when it has stepped over (seconds into the clip, measured from its root motion when loaded).
+	 */
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequence> ClimbClips[2];
+	float ClimbMarks[2][3] = {};
+	UPROPERTY(Transient)
+	TObjectPtr<USkeletalMeshComponent> ClimbDriver;
+	int32 ClimbClip = 0;
+	bool bClimbMotionOver = false;
+	/** Seconds the body still takes the driver's whole pose (the clip running out after the climb). */
+	float ClimbMotionHold = 0.f;
+	void StartClimbMotion();
+	void UpdateClimbMotion(float Alpha, float DeltaSeconds);
 
 	/**
 	 * Riding: where the body goes from its own place (the capsule's middle, put on the seat's spot by the vehicle), eased in

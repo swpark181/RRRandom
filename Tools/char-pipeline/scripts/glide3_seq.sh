@@ -1,0 +1,13 @@
+# Prints the RR_SEQ for a glide check (capture_game_seq.ps1 -Seq, -RRMap=Studio): flight cheat, slow motion 0.25, rise on a
+# held jump, then three glides (let go of jump) of 22 shots 0.4 s apart (0.1 s of game time), from the side, from behind
+# and from the front, rising again between them. Round 85 (the dragon's glide pose).
+seq="6:RRGod;6.5:showhud;7:goto=0,8000,0;7.5:RRFly;8:RRSlomo 0.25;9:walk=1,0,90;9.5:jump"
+T=17
+for cam in "-90" "180" "0"; do
+  seq="$seq;$T:unjump;$T:RRStudioCam $cam 480 20"
+  for i in $(seq 0 21); do seq="$seq;$(awk "BEGIN{print $T+2+$i*0.4}"):shot"; done
+  T=$(awk "BEGIN{print $T+11.5}")
+  seq="$seq;$T:jump"
+  T=$(awk "BEGIN{print $T+4}")
+done
+echo "$seq;$T:quit"

@@ -1601,6 +1601,23 @@ void ARRRandomPlayerController::RREmote(int32 Number)
 	}
 }
 
+void ARRRandomPlayerController::RRFacePart(const FString& Variant)
+{
+	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		const bool bOk = Mine->SetFacePart(FName(*Variant));
+		ClientMessage(FString::Printf(TEXT("RRFacePart %s: %s"), *Variant, bOk ? TEXT("ok") : TEXT("no such part")));
+	}
+}
+
+void ARRRandomPlayerController::RRAim(int32 On)
+{
+	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		Mine->SetAimingDownSights(On != 0);
+	}
+}
+
 void ARRRandomPlayerController::RRJump()
 {
 	OnJump();
@@ -3055,4 +3072,14 @@ void ARRRandomPlayerController::RRSights(int32 bOn)
 	{
 		Mine->SetAimingDownSights(bOn != 0);
 	}
+}
+
+void ARRRandomPlayerController::RRClimbTest(float Rise)
+{
+#if !UE_BUILD_SHIPPING
+	if (ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn()))
+	{
+		Mine->CheatClimb(Rise);
+	}
+#endif
 }

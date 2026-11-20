@@ -1,7 +1,7 @@
 """Tidy the Tripo combiner robot and cut it into the parts that fly together when it combines (run inside Blender).
 
 Usage: blender -b --factory-startup --python blender_robot_parts.py -- <out dir> <tripo fbx> <height> <turn>
-           [<hip z> <neck z> <arm y> [<low arm y>]]
+           [<hip z> <neck z> <arm y> [<low arm y> [<legs z> <back x> [<front x>]]]]
 
 The robot: all meshes joined, turned <turn> degrees about Z so its front is on +X (Unreal's forward), pivot in the
 middle of its bottom, scaled to <height> Unreal units, decimated to about TARGET_TRIS triangles, written as
@@ -83,13 +83,27 @@ if len(cuts) < 3:
 hip, neck, arm = (c / 100.0 for c in cuts[:3])
 # The fists hang down past the hips, out beside the legs
 arm_low = cuts[3] / 100.0 if len(cuts) > 3 else arm * 2
+# Optional (the haetae robot, round 79): below <legs z> it is all legs (wheels on the calves reach out as far as the
+# fists), and above the hips anything further back than <back x> is the body's (a tail light rising behind one
+# shoulder); with these the fists' reach is <low arm y> all the way up to the hips
+legs_z = cuts[4] / 100.0 if len(cuts) > 4 else None
+back_x = cuts[5] / 100.0 if len(cuts) > 5 else None
+# And within 45 below the hips, anything further forward than <front x> is the body's too (the chest's bumper hangs
+# down there, in front of the thighs)
+front_x = cuts[6] / 100.0 if len(cuts) > 6 else None
 
 
 def part_of(center):
+    if legs_z is not None and center.z < legs_z:
+        return "Legs"
+    if front_x is not None and center.x > front_x and hip - 0.45 < center.z < hip:
+        return "Torso"
     if center.z < hip:
         # The legs' flaps reach out to <low arm y> only near the feet; up by the thighs the rocket arms come closer in
-        reach = arm_low if center.z < hip * 0.65 else arm * 1.35
+        reach = arm_low if legs_z is not None or center.z < hip * 0.65 else arm * 1.35
         return "Legs" if abs(center.y) <= reach else ("ArmL" if center.y > 0 else "ArmR")
+    if back_x is not None and center.x < -back_x and abs(center.y) > 1.15:
+        return "Torso"
     if center.y > arm:
         return "ArmL"
     if center.y < -arm:
@@ -108,6 +122,9 @@ for part in ("Legs", "Torso", "Head", "ArmL", "ArmR"):
     bm.from_mesh(copy.data)
     bm.faces.ensure_lookup_table()
     bmesh.ops.delete(bm, geom=[f for f, label in zip(bm.faces, labels) if label != part], context="FACES")
+    # Drop the vertices no face uses any more: they would stretch the part's bounds (the game fires the forearm from
+    # the middle of its bounds)
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context="VERTS")
     bm.to_mesh(copy.data)
     bm.free()
     copy.data.update()

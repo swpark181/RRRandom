@@ -18,6 +18,8 @@ texture this also writes (<out>_strands.png: R = distance to the strand's centre
 
 Usage: blender -b --factory-startup --python blender_fur_shells_skel.py -- <rig fbx> <base color> <out fbx>
        [--layers 12] [--length 0.02] [--cell 0.005] [--mask orange|cream|all]
+       with --mask orange: [--orange-g 0.38] [--orange-r 0] (the G / R floor and an R floor for the fur colour)
+       [--eye-r 0.035] (how far round the eye whites stays bare, x the height)
        with --mask all: [--band <z lo>,<z hi>,<torso radius>] (fractions of the height: the clothes' heights and the
        torso's radius round its middle there) [--cloth white,beige,green,dark,red] (clothing colours anywhere in that band,
        for sleeves) [--dark-head] (a black eye mask) [--iris yellow|green] (eyes with no white round them)
@@ -139,15 +141,41 @@ else:
     if mask == "cream":
         fur = (mx > 0.62) & (sat < 0.32)
     else:
-        fur = (r - b > 0.2) & (g / np.maximum(r, 1e-3) > 0.38)
-    eye_white = (face_col.min(1) > 0.85) & (face_col.max(1) - face_col.min(1) < 0.08) & (centres[:, 2] > zlo + 0.6 * height)
+        # --orange-g / --orange-r: the new fox (2026-11-19) is a redder orange (G / R about 0.33) than the film fox;
+        # with the G / R floor lowered, a floor on R keeps its dark red shorts and brown paws out
+        fur = (r - b > 0.2) & (g / np.maximum(r, 1e-3) > opt("--orange-g", 0.38)) & (r > opt("--orange-r", 0.0))
+    # eye whites: a face counts when its middle OR a point halfway to any corner is white (2026-11-20: on a blank-face
+    # model the eyes are only paint on a few big faces, and the middle texel alone missed most of the white, so fur grew
+    # over the orange irises); --eye-r = how far round a white face stays bare (x the height)
+    def white(c):
+        return (c.min(1) > 0.85) & (c.max(1) - c.min(1) < 0.08)
+
+    eye_white = white(face_col)
+    for f in bm.faces:
+        if zrel[f.index] > 0.6 and not eye_white[f.index]:
+            mid = sum((l[uv_layer].uv for l in f.loops), Vector((0, 0))) / len(f.loops)
+            eye_white[f.index] = bool(white(np.array([sample((mid + l[uv_layer].uv) / 2) for l in f.loops])).any())
+    eye_white &= centres[:, 2] > zlo + 0.6 * height
     for e in centres[eye_white][:: max(1, int(eye_white.sum()) // 400)]:
-        bare |= np.linalg.norm(centres - e, axis=1) < 0.035 * height
+        bare |= np.linalg.norm(centres - e, axis=1) < opt("--eye-r", 0.035) * height
     # the waist band on the front half: the leather belt and pouches are brown like fur (the tail is behind)
     front = centres[:, 1] < (centres[:, 1].min() + centres[:, 1].max()) / 2 + 0.05 * height
     bare |= (centres[:, 2] > zlo + 0.15 * height) & (centres[:, 2] < zlo + 0.40 * height) & front
+# --face-bare <rx>,<rz>,<zc> (fractions of the height): the front of the face kept bare round the head's middle line at
+# height zc, an ellipse rx wide and rz tall seen from the front (2026-11-20, the blank-face tiger: on its painted eyes,
+# brows and mouth the shells grew in jagged chunks over the white eye patches and the nose; the face is texture only)
+face_bare = opt("--face-bare", "", str)
+if face_bare:
+    frx, frz, fzc = (float(c) for c in face_bare.split(","))
+    head = centres[zrel > fzc - frz]
+    hx = np.median(head[:, 0])
+    hy_mid = (head[:, 1].min() + head[:, 1].max()) / 2
+    fn = np.array([tuple((mw3 @ f.normal).normalized()) for f in bm.faces])
+    ell = ((centres[:, 0] - hx) / (frx * height)) ** 2 + ((zrel - fzc) / frz) ** 2 < 1.0
+    bare |= ell & (centres[:, 1] < hy_mid) & (fn[:, 1] < -0.15)
+    print(f"SHELLS face bare: {int((ell & (centres[:, 1] < hy_mid)).sum())} faces round x {hx:.3f}")
 fur &= ~bare
-nbrs = [[g2.index for e in f.edges for g2 in e.link_faces if g2.index != f.index] for f in bm.faces]
+nbrs =[[g2.index for e in f.edges for g2 in e.link_faces if g2.index != f.index] for f in bm.faces]
 for _ in range(2):
     vote = np.array([fur[n].mean() if n else 0.0 for n in nbrs])
     fur = (fur | (vote >= 0.6)) & ~bare

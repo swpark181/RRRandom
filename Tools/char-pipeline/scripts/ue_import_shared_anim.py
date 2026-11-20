@@ -49,9 +49,14 @@ for name, hips_height in targets:
     ui.import_textures = False
     ui.skeleton = skeleton
     ui.mesh_type_to_import = unreal.FBXImportType.FBXIT_ANIMATION
-    ui.anim_sequence_import_data.set_editor_property("use_default_sample_rate", True)
     ui.anim_sequence_import_data.set_editor_property(
         "animation_length", unreal.FBXAnimationLengthImportType.FBXALIT_EXPORTED_TIME)
+    # RR_ANIM_FPS=30 (environment): resample to that rate (a Mixamo clip that comes in at an odd rate: round 98 cheer was
+    # read as 1920 fps, 5568 frames for 2.9 s)
+    import os
+    if os.environ.get("RR_ANIM_FPS"):
+        ui.anim_sequence_import_data.set_editor_property("use_default_sample_rate", False)
+        ui.anim_sequence_import_data.set_editor_property("custom_sample_rate", int(os.environ["RR_ANIM_FPS"]))
     task = unreal.AssetImportTask()
     task.filename = fbx
     task.destination_path = f"{folder}/Anims"
@@ -78,24 +83,19 @@ for name, hips_height in targets:
     n = AL.get_num_keys(anim)
     tracks = [str(t) for t in AL.get_animation_track_names(anim)]
     worst = 0.0
-    keys_by_bone = {bone: [AL.get_bone_pose_for_frame(anim, bone, i, False) for i in range(n)] for bone in tracks}
-    anim.controller.open_bracket("Retarget shared motion", False)
-    try:
-        for bone in tracks:
-            keys = keys_by_bone[bone]
-            if bone.lower() == "hips":
-                first = keys[0].translation
-                pos = [unreal.Vector(first.x, first.y, k.translation.z * hips_height / source_hips) for k in keys]
-                log(f"{name}: hips z {min(p.z for p in pos):.1f}..{max(p.z for p in pos):.1f}, held at ({first.x:.1f},{first.y:.1f})")
-            elif bone.lower() in ref:
-                own = ref[bone.lower()].translation
-                worst = max(worst, max((k.translation - own).length() for k in keys))
-                pos = [own] * n
-            else:
-                continue
-            anim.controller.set_bone_track_keys(bone, pos, [k.rotation for k in keys], [k.scale3d for k in keys], False)
-    finally:
-        anim.controller.close_bracket(False)
+    for bone in tracks:
+        keys = [AL.get_bone_pose_for_frame(anim, bone, i, False) for i in range(n)]
+        if bone.lower() == "hips":
+            first = keys[0].translation
+            pos = [unreal.Vector(first.x, first.y, k.translation.z * hips_height / source_hips) for k in keys]
+            log(f"{name}: hips z {min(p.z for p in pos):.1f}..{max(p.z for p in pos):.1f}, held at ({first.x:.1f},{first.y:.1f})")
+        elif bone.lower() in ref:
+            own = ref[bone.lower()].translation
+            worst = max(worst, max((k.translation - own).length() for k in keys))
+            pos = [own] * n
+        else:
+            continue
+        anim.controller.set_bone_track_keys(bone, pos, [k.rotation for k in keys], [k.scale3d for k in keys], False)
     eal.save_asset(anim.get_path_name().split(".")[0])
     log(f"{name}: {asset} {AL.get_sequence_length(anim):.2f} s, {n} keys, {len(tracks)} tracks; bone lengths changed by up to {worst:.1f}")
 log("DONE")

@@ -66,32 +66,45 @@ namespace
 		FVector Tip;
 		FVector Grip;
 		FRotator GripTurn;
+		/**
+		 * 2026-11-20 (the user: "총기류에 손 위치를 어디에 둬야 적당한지 파악해서 체크해두고 ... 해당 위치에 손을 맞쳐줘. 지금은 공중에 뜨거나
+		 * 허공에 손을 올리는 장면이 많이 나온다"): where the middle of the LEFT fist goes, on the 100-long mesh (zero: one-handed,
+		 * the melee weapons and the acorn launcher), and that fist's turn from the right fist's hold (zero: the same hold
+		 * mirrored, as on a front grip). Measured on the side views (char-pipeline/scripts/blender_gun_support.py,
+		 * output/gun_hands): the SMG's front grip; on the others, none has a second grip, the underside of the body just ahead
+		 * of the trigger guard, a fist's half height (3.5 cm) below it, the fist pitched 60 degrees so it cups the underside
+		 * (picked from 0 / 60 / 90 / -45 pitch and +-60 yaw in the game; unturned, the fingers stuck out past the muzzle).
+		 * URRRandomBodyAnimInstance bends the left arm onto it.
+		 * Live: console "RRGunSupport <gun> x y z pitch yaw roll"; "rr.Gun.Debug 1" marks it green.
+		 */
+		FVector Support;
+		FRotator SupportTurn;
 	};
 	// By ERRHitEffect, pistol to cannon. Round 90: new models (Midjourney sheet, Tripo, char-pipeline/scripts/blender_guns_r90.py:
 	// grip at the origin, muzzle +X, 100 long): chubby pastel toys with eyes and a round mouth for a muzzle, about as big as
 	// an animal friend's fist (the user's ask). Not const: RRGunGrip tunes them live.
 	FRRGunLook GunLooks[] =
 	{
-		{ TEXT("/Game/Props/GunsR90/SM_Pistol.SM_Pistol"), 34.f, FVector(83.f, 0.f, 48.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator },
-		{ TEXT("/Game/Props/GunsR90/SM_Smg.SM_Smg"), 36.f, FVector(84.f, -1.f, 47.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator },
-		{ TEXT("/Game/Props/GunsR90/SM_Minigun.SM_Minigun"), 40.f, FVector(80.f, -3.f, 40.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator },
-		{ TEXT("/Game/Props/GunsR90/SM_Rifle.SM_Rifle"), 42.f, FVector(82.f, 0.f, 38.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator },
-		{ TEXT("/Game/Props/GunsR90/SM_Blaster.SM_Blaster"), 38.f, FVector(75.f, 0.f, 39.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator },
-		{ TEXT("/Game/Props/GunsR90/SM_Cannon.SM_Cannon"), 44.f, FVector(74.f, -1.f, 33.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator },
+		{ TEXT("/Game/Props/GunsR90/SM_Pistol.SM_Pistol"), 34.f, FVector(83.f, 0.f, 48.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator, FVector(52.f, 0.f, 17.f), FRotator(60.f, 0.f, 0.f) },
+		{ TEXT("/Game/Props/GunsR90/SM_Smg.SM_Smg"), 36.f, FVector(84.f, -1.f, 47.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator, FVector(50.f, 0.f, 6.f), FRotator::ZeroRotator },
+		{ TEXT("/Game/Props/GunsR90/SM_Minigun.SM_Minigun"), 40.f, FVector(80.f, -3.f, 40.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator, FVector(48.f, 0.f, 12.f), FRotator(60.f, 0.f, 0.f) },
+		{ TEXT("/Game/Props/GunsR90/SM_Rifle.SM_Rifle"), 42.f, FVector(82.f, 0.f, 38.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator, FVector(46.f, 0.f, 12.f), FRotator(60.f, 0.f, 0.f) },
+		{ TEXT("/Game/Props/GunsR90/SM_Blaster.SM_Blaster"), 38.f, FVector(75.f, 0.f, 39.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator, FVector(44.f, 0.f, 11.f), FRotator(60.f, 0.f, 0.f) },
+		{ TEXT("/Game/Props/GunsR90/SM_Cannon.SM_Cannon"), 44.f, FVector(74.f, -1.f, 33.f), FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator, FVector(46.f, 0.f, 4.f), FRotator(60.f, 0.f, 0.f) },
 		// Round 97 (Midjourney concepts in Tripo: A-3 orchid, B-1 peach, C-7 sky blue; Smart Mesh; blender_guns_r90.py; tip and
 		// grip as it reported): the sniper, the shotgun, the light sword (its
 		// hilt at the origin, the blade along +X). Until a model is in, FallbackLooks stands in.
-		{ TEXT("/Game/Props/Weapons97/SM_Sniper.SM_Sniper"), 54.f, FVector(83.f, -1.f, 7.f), FVector(-7.f, 0.f, 7.f), FRotator::ZeroRotator },
-		{ TEXT("/Game/Props/Weapons97/SM_Shotgun.SM_Shotgun"), 44.f, FVector(90.f, -11.f, 18.f), FVector(-1.f, 0.f, 14.f), FRotator::ZeroRotator },
-		{ TEXT("/Game/Props/Weapons97/SM_LightSword.SM_LightSword"), 72.f, FVector(82.f, -1.f, 0.f), FVector(-9.f, 0.f, 5.f), FRotator::ZeroRotator },
+		{ TEXT("/Game/Props/Weapons97/SM_Sniper.SM_Sniper"), 54.f, FVector(83.f, -1.f, 7.f), FVector(-7.f, 0.f, 7.f), FRotator::ZeroRotator, FVector(45.f, 0.f, 0.f), FRotator(60.f, 0.f, 0.f) },
+		{ TEXT("/Game/Props/Weapons97/SM_Shotgun.SM_Shotgun"), 44.f, FVector(90.f, -11.f, 18.f), FVector(-1.f, 0.f, 14.f), FRotator::ZeroRotator, FVector(50.f, 0.f, -4.f), FRotator(60.f, 0.f, 0.f) },
+		{ TEXT("/Game/Props/Weapons97/SM_LightSword.SM_LightSword"), 72.f, FVector(82.f, -1.f, 0.f), FVector(-9.f, 0.f, 5.f), FRotator::ZeroRotator, FVector::ZeroVector, FRotator::ZeroRotator },
 		// Round 98, the roles' own (Midjourney in Tripo, Smart Mesh, char-pipeline/input/weapons_r98): the tiger's hammer and
 		// the red fox's dagger (grip at the origin, the head or blade along +X), the squirrel's acorn launcher (muzzle +X)
 		// (char-pipeline/scripts/blender_melee_r98.py: the hammer and the dagger held at the origin, a quarter and a fifth along
 		// from the pommel; the launcher by blender_guns_r90.py with its grip set by hand: tip and grip as the scripts reported)
 		// (the red squeaky hammer, 뿅망치: its bellows head lies across the handle)
-		{ TEXT("/Game/Props/Weapons98/SM_Hammer.SM_Hammer"), 86.f, FVector(74.f, -1.f, 12.f), FVector(0.f, 0.f, 0.f), FRotator::ZeroRotator },
-		{ TEXT("/Game/Props/Weapons98/SM_Dagger.SM_Dagger"), 34.f, FVector(81.f, -5.f, -1.f), FVector(0.f, 0.f, 0.f), FRotator::ZeroRotator },
-		{ TEXT("/Game/Props/Weapons98/SM_AcornLauncher.SM_AcornLauncher"), 48.f, FVector(32.f, -3.f, 11.f), FVector(-59.f, 0.f, 11.f), FRotator::ZeroRotator },
+		{ TEXT("/Game/Props/Weapons98/SM_Hammer.SM_Hammer"), 86.f, FVector(74.f, -1.f, 12.f), FVector(0.f, 0.f, 0.f), FRotator::ZeroRotator, FVector::ZeroVector, FRotator::ZeroRotator },
+		{ TEXT("/Game/Props/Weapons98/SM_Dagger.SM_Dagger"), 34.f, FVector(81.f, -5.f, -1.f), FVector(0.f, 0.f, 0.f), FRotator::ZeroRotator, FVector::ZeroVector, FRotator::ZeroRotator },
+		{ TEXT("/Game/Props/Weapons98/SM_AcornLauncher.SM_AcornLauncher"), 48.f, FVector(32.f, -3.f, 11.f), FVector(-59.f, 0.f, 11.f), FRotator::ZeroRotator, FVector::ZeroVector, FRotator::ZeroRotator },
 	};
 	const TCHAR* GunNames[] = { TEXT("PISTOL"), TEXT("SMG"), TEXT("MINIGUN"), TEXT("RIFLE"), TEXT("BLASTER"), TEXT("CANNON"), TEXT("SNIPER"), TEXT("SHOTGUN"), TEXT("SWORD"), TEXT("HAMMER"), TEXT("DAGGER"), TEXT("ACORN") };
 	/** A look whose model isn't in yet shows another's: the sniper the rifle, the shotgun the blaster, the sword the pistol. */
@@ -158,6 +171,24 @@ namespace
 			}
 		}));
 
+	FAutoConsoleCommand GunSupportCommand(TEXT("RRGunSupport"),
+		TEXT("RRGunSupport <PISTOL|SMG|...> <left fist x y z on the 100-long gun> <pitch yaw roll from the mirrored hold>: moves where that gun's left hand goes. Alone: logs every gun's."),
+		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+		{
+			for (int32 Gun = 0; Gun < UE_ARRAY_COUNT(GunLooks); ++Gun)
+			{
+				FVector Support = FVector::ZeroVector;
+				FRotator Turn = FRotator::ZeroRotator;
+				if (Args.Num() > 0 && Args[0].Equals(GunNames[Gun], ESearchCase::IgnoreCase) && ParseNumbers(Args, 1, Support, Turn))
+				{
+					GunLooks[Gun].Support = Support;
+					GunLooks[Gun].SupportTurn = Turn;
+				}
+				UE_LOG(LogTemp, Log, TEXT("RRGunSupport %s support (%.1f, %.1f, %.1f) turn (%.1f, %.1f, %.1f)"), GunNames[Gun], GunLooks[Gun].Support.X,
+					GunLooks[Gun].Support.Y, GunLooks[Gun].Support.Z, GunLooks[Gun].SupportTurn.Pitch, GunLooks[Gun].SupportTurn.Yaw, GunLooks[Gun].SupportTurn.Roll);
+			}
+		}));
+
 	FAutoConsoleCommand GunHandCommand(TEXT("RRGunHand"),
 		TEXT("RRGunHand <species> <offset forward right up, cm> <pitch yaw roll from the hand bone>: the species' fist for every gun, live."),
 		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
@@ -205,17 +236,61 @@ URRRandomGunComponent::URRRandomGunComponent()
 	SetUsingAbsoluteScale(true);
 }
 
+bool URRRandomGunComponent::IsHeld() const
+{
+	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetOwner());
+	const USkeletalMeshComponent* Body = Brawler ? Brawler->GetMesh() : nullptr;
+	const bool bHands = Body && Body->GetBoneIndex(RightHandBone) != INDEX_NONE && Body->GetBoneIndex(RightPalmBone) != INDEX_NONE
+		&& Body->GetBoneIndex(LeftHandBone) != INDEX_NONE;
+	// Put away while knocked out and while dancing after a win; a defense villain has none
+	return bHands && Brawler->IsAlive() && !Brawler->IsVillain() && !Brawler->IsCelebrating() && !Brawler->IsDespairing() && !Brawler->IsEmoting()
+		&& !Brawler->IsUsingUltimate() && !Brawler->IsDriving();
+}
+
+bool URRRandomGunComponent::GetSupportHold(FRRGunSupportHold& Out) const
+{
+	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetOwner());
+	if (!Brawler || !IsHeld() || Brawler->IsClimbing() || Brawler->GetWeapon().bFoamFinger || Brawler->GetWeapon().bSword)
+	{
+		return false;
+	}
+	// The model shown (as TickComponent picks it); the old rifle (no model of its own) already points at the left hand
+	int32 Kind = Brawler->GetWeapon().GetLookIndex();
+	if (!(GunMeshes.IsValidIndex(Kind) && GunMeshes[Kind]) && Kind < UE_ARRAY_COUNT(FallbackLooks))
+	{
+		Kind = FallbackLooks[Kind];
+	}
+	if (!(GunMeshes.IsValidIndex(Kind) && GunMeshes[Kind]) || Kind >= UE_ARRAY_COUNT(GunLooks) || GunLooks[Kind].Support.IsZero())
+	{
+		return false;
+	}
+	const int32 Species = Brawler->GetSpecies();
+	const TArray<FRRSpeciesLook>& Looks = FRRSpeciesLook::GetAll();
+	FVector FixOffset = Looks.IsValidIndex(Species) ? Looks[Species].GunHandOffset : FVector::ZeroVector;
+	FRotator FixTurn = Looks.IsValidIndex(Species) ? Looks[Species].GunHandTurn : FRotator::ZeroRotator;
+	if (const TPair<FVector, FRotator>* Live = LiveHandFixes.Find(Species))
+	{
+		FixOffset = Live->Key;
+		FixTurn = Live->Value;
+	}
+	Out.FixTurn = FixTurn.Quaternion();
+	Out.FixOffset = FixOffset;
+	Out.GripTurn = GunLooks[Kind].GripTurn.Quaternion();
+	Out.Grip = GunLooks[Kind].Grip;
+	Out.Support = GunLooks[Kind].Support;
+	Out.SupportTurn = GunLooks[Kind].SupportTurn.Quaternion();
+	Out.Length = GunLooks[Kind].Length;
+	Out.Size = Brawler->GetActorScale3D().Z;
+	return true;
+}
+
 void URRRandomGunComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetOwner());
 	const USkeletalMeshComponent* Body = Brawler ? Brawler->GetMesh() : nullptr;
-	const bool bHands = Body && Body->GetBoneIndex(RightHandBone) != INDEX_NONE && Body->GetBoneIndex(RightPalmBone) != INDEX_NONE
-		&& Body->GetBoneIndex(LeftHandBone) != INDEX_NONE;
-	// Put away while knocked out and while dancing after a win; a defense villain has none
-	const bool bShow = bHands && Brawler->IsAlive() && !Brawler->IsVillain() && !Brawler->IsCelebrating() && !Brawler->IsDespairing() && !Brawler->IsEmoting() && !Brawler->IsUsingUltimate()
-		&& !Brawler->IsDriving();
+	const bool bShow = IsHeld();
 	if (IsVisible() != bShow)
 	{
 		SetVisibility(bShow);
@@ -449,6 +524,10 @@ void URRRandomGunComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		DrawDebugPoint(GetWorld(), Palm, 10.f, FColor::Red);
 		DrawDebugPoint(GetWorld(), Body->GetBoneLocation(LeftHandBone), 10.f, FColor::Blue);
 		DrawDebugPoint(GetWorld(), HandLocation + HandRotation.RotateVector(Tip) * Length / 100.f * Size, 10.f, FColor::Cyan);
+		if (bOwnLook && Kind < UE_ARRAY_COUNT(GunLooks) && !GunLooks[Kind].Support.IsZero())
+		{
+			DrawDebugPoint(GetWorld(), HandLocation + HandRotation.RotateVector(GunLooks[Kind].Support) * Length / 100.f * Size, 10.f, FColor::Green);
+		}
 		const double Now = GetWorld()->GetTimeSeconds();
 		if (Now - DebugLogTime >= 1.0)
 		{

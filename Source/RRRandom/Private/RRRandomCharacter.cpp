@@ -19,6 +19,7 @@
 #include "RRRandomIsland.h"
 #include "RRRandomStudio.h"
 #include "Components/PoseableMeshComponent.h"
+#include "Misc/PackageName.h"
 #include "RRRandomEventComponent.h"
 #include "RRRandomFlightEffectsComponent.h"
 #include "RRRandomGunComponent.h"
@@ -26,6 +27,7 @@
 #include "RRRandomGameState.h"
 #include "RRRandomKit.h"
 #include "RRRandomLoadout.h"
+#include "RRRandomMotionMatching.h"
 #include "RRRandomMovementComponent.h"
 #include "RRRandomOre.h"
 #include "RRRandomOverheadDieComponent.h"
@@ -39,6 +41,8 @@
 #include "RRRandomVehicle.h"
 #include "RRRandomWingsComponent.h"
 #include "RRRandomFurComponent.h"
+#include "Animation/AnimInstance.h"
+
 #include "Animation/AnimSequence.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -370,6 +374,13 @@ ARRRandomCharacter::ARRRandomCharacter(const FObjectInitializer& ObjectInitializ
 	// Shell fur following the body's pose (only the species with SK_<Name>Fur get a mesh in it, UseLook)
 	Fur = CreateDefaultSubobject<URRRandomFurComponent>(TEXT("Fur"));
 	Fur->SetupAttachment(BodyMesh);
+	// Swappable face part (SetFacePart), empty until asked for
+	FacePart = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FacePart"));
+	FacePart->SetupAttachment(BodyMesh);
+	FacePart->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FacePart->SetGenerateOverlapEvents(false);
+	FacePart->bUseBoundsFromLeaderPoseComponent = true;
+	FacePart->SetVisibility(false);
 	const bool bFox = SpeciesLooks.IsValidIndex(RRSpecies::Fox) && SpeciesLooks[RRSpecies::Fox].IsUsable();
 	if (bFox)
 	{
@@ -417,11 +428,65 @@ ARRRandomCharacter::ARRRandomCharacter(const FObjectInitializer& ObjectInitializ
 	Gun->SetupAttachment(BodyMesh);
 }
 
+bool ARRRandomCharacter::SetFacePart(FName Variant)
+{
+	USkeletalMeshComponent* BodyMesh = GetMesh();
+	USkeletalMesh* Body = BodyMesh ? BodyMesh->GetSkeletalMeshAsset() : nullptr;
+	if (!FacePart)
+	{
+		return false;
+	}
+	const int32 Slot = Body ? BodyMesh->GetMaterialIndex(TEXT("Muzzle")) : INDEX_NONE;
+	auto ShowBodyMuzzle = [BodyMesh, Slot](bool bShow)
+	{
+		if (Slot != INDEX_NONE)
+		{
+			for (int32 Lod = 0; Lod < BodyMesh->GetNumLODs(); ++Lod)
+			{
+				BodyMesh->ShowMaterialSection(Slot, 0, bShow, Lod);
+			}
+		}
+	};
+	if (Variant.IsNone() || Variant == TEXT("Off") || !Body)
+	{
+		FacePart->SetLeaderPoseComponent(nullptr);
+		FacePart->SetSkeletalMeshAsset(nullptr);
+		FacePart->SetVisibility(false);
+		ShowBodyMuzzle(true);
+		return true;
+	}
+	// /Game/Characters/Tiger/SK_Tiger -> /Game/Characters/Tiger/SK_TigerMuzzle or SK_TigerMuzzle_<Variant>
+	const FString Name = Variant == TEXT("Default") ? Body->GetName() + TEXT("Muzzle")
+		: FString::Printf(TEXT("%sMuzzle_%s"), *Body->GetName(), *Variant.ToString());
+	const FString Folder = FPackageName::GetLongPackagePath(Body->GetOutermost()->GetName());
+	USkeletalMesh* Part = LoadObject<USkeletalMesh>(nullptr, *FString::Printf(TEXT("%s/%s.%s"), *Folder, *Name, *Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (!Part || Slot == INDEX_NONE)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FacePart: %s/%s %s"), *Folder, *Name,
+			Part ? TEXT("found, but the body has no \"Muzzle\" material slot") : TEXT("not found"));
+		return false;
+	}
+	FacePart->SetSkeletalMeshAsset(Part);
+	FacePart->SetLeaderPoseComponent(BodyMesh);
+	for (int32 Index = 0; Index < FacePart->GetNumMaterials(); ++Index)
+	{
+		FacePart->SetMaterial(Index, BodyMesh->GetMaterial(Slot));
+	}
+	FacePart->SetVisibility(true);
+	ShowBodyMuzzle(false);
+	UE_LOG(LogTemp, Log, TEXT("FacePart: %s on, body section %d hidden"), *Name, Slot);
+	return true;
+}
+
 void ARRRandomCharacter::UseLook(const FRRSpeciesLook& Look)
 {
 	USkeletalMeshComponent* BodyMesh = GetMesh();
 	BodyMesh->SetSkeletalMeshAsset(Look.Mesh);
 	BodyMesh->SetRelativeScale3D(FVector(Look.MeshScale));
+	if (FacePart)
+	{
+		SetFacePart(NAME_None);
+	}
 	if (Fur)
 	{
 		Fur->SetFur(Look.FurMesh, BodyMesh, Look.Material);
@@ -1211,6 +1276,31 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	UpdateOutlineStencil();
+	if (FacePart && FacePart->GetSkeletalMeshAsset())
+	{
+		// the face part looks like the body's muzzle section it stands in for: same material (hit flash, cloak ...),
+		// overlay, outline stencil, and hidden with the body
+		USkeletalMeshComponent* BodyMesh = GetMesh();
+		const int32 Slot = BodyMesh->GetMaterialIndex(TEXT("Muzzle"));
+		UMaterialInterface* Wanted = BodyMesh->GetMaterial(Slot != INDEX_NONE ? Slot : 0);
+		for (int32 Index = 0; Index < FacePart->GetNumMaterials(); ++Index)
+		{
+			if (FacePart->GetMaterial(Index) != Wanted)
+			{
+				FacePart->SetMaterial(Index, Wanted);
+			}
+		}
+		if (FacePart->GetOverlayMaterial() != BodyMesh->GetOverlayMaterial())
+		{
+			FacePart->SetOverlayMaterial(BodyMesh->GetOverlayMaterial());
+		}
+		FacePart->SetRenderCustomDepth(BodyMesh->bRenderCustomDepth);
+		if (FacePart->CustomDepthStencilValue != BodyMesh->CustomDepthStencilValue)
+		{
+			FacePart->SetCustomDepthStencilValue(BodyMesh->CustomDepthStencilValue);
+		}
+		FacePart->SetHiddenInGame(BodyMesh->bHiddenInGame || !BodyMesh->IsVisible());
+	}
 	if (!bAlive || !Weapon.bSword || bDeflecting || IsDriving() || GetCharacterMovement()->IsFalling())
 	{
 		GetCharacterMovement()->RemoveRootMotionSource(FName(TEXT("SwordStep")));
@@ -1358,8 +1448,234 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 	UpdatePlaneFlight(DeltaSeconds);
 	UpdateRobotIntroTurn(DeltaSeconds);
 	UpdateWalkSpeed();
+	UpdateMotionDriver();
 	UpdateLocomotionAnimation();
 	UpdateCamera(DeltaSeconds);
+}
+
+namespace
+{
+	// Motion matching (2026-11-20): animal friends that have a set (/Game/Characters/<Name>MM, the fox so far) move by
+	// Unreal's Motion Matching. On in the game since the user asked ("이렇게 해서 게임속 여우에도 적용해줘"); 0 here or
+	// -RRNoMotionMatch on the command line gives the old single-animation walk back.
+	TAutoConsoleVariable<int32> CVarMotionMatch(TEXT("rr.MotionMatch"), 1,
+		TEXT("1: animal friends with a motion matching set (the fox) take their legs, hips, spine and head from Unreal's Motion Matching; 0: the old walk."));
+
+	// Climbing with a clip (2026-11-20): a rise over this, from where the climb starts, is the high ledge's pull-up; under
+	// it the low ledge's step up. The clip blends in and out over these seconds and runs out this fast once on top.
+	constexpr float ClimbHighRise = 110.f;
+	constexpr float ClimbMotionBlendIn = 0.06f;
+	constexpr float ClimbMotionBlendOut = 0.3f;
+	constexpr float ClimbMotionTailRate = 1.5f;
+
+	/**
+	 * When a climbing clip's root starts to rise (a touch earlier), when it is up, and when it has stepped over onto the
+	 * top (a touch later), in seconds, from its root motion.
+	 */
+	void MeasureClimbClip(const UAnimSequence* Clip, float Marks[3])
+	{
+		const float Length = Clip->GetPlayLength();
+		const auto At = [Clip](float Time) { return Clip->ExtractRootMotionFromRange(0.0, double(Time), FAnimExtractContext()).GetLocation(); };
+		const FVector End = At(Length);
+		Marks[0] = 0.f;
+		Marks[1] = Marks[2] = Length;
+		bool bRising = false, bUp = false;
+		FVector Up = End;
+		constexpr int32 Steps = 120;
+		for (int32 Step = 0; Step <= Steps; ++Step)
+		{
+			const float Time = Length * Step / Steps;
+			const FVector Place = At(Time);
+			if (!bRising && Place.Z > End.Z * 0.04f)
+			{
+				bRising = true;
+				Marks[0] = FMath::Max(0.f, Time - 0.1f);
+			}
+			if (!bUp && Place.Z > End.Z * 0.96f)
+			{
+				bUp = true;
+				Marks[1] = Time;
+				Up = Place;
+			}
+			if (bUp && FVector::Dist2D(Place, End) <= FMath::Max(1.f, 0.08f * FVector::Dist2D(Up, End)))
+			{
+				Marks[2] = FMath::Min(Length, Time + 0.1f);
+				break;
+			}
+		}
+		Marks[2] = FMath::Clamp(Marks[2], FMath::Min(Marks[1] + 0.15f, Length), Length);
+	}
+}
+
+void ARRRandomCharacter::UpdateMotionDriver()
+{
+	static const bool bCommandLineOff = FParse::Param(FCommandLine::Get(), TEXT("RRNoMotionMatch"));
+	// (a fox's clones too: they must not be told from the fox by how they walk)
+	const bool bOn = !bCommandLineOff && CVarMotionMatch.GetValueOnGameThread() != 0 && GetNetMode() != NM_DedicatedServer;
+	USkeletalMeshComponent* BodyMesh = GetMesh();
+	if (MotionDriver && (!bOn || MotionDriverSpecies != ShownSpecies))
+	{
+		BodyMesh->RemoveTickPrerequisiteComponent(MotionDriver);
+		MotionDriver->DestroyComponent();
+		MotionDriver = nullptr;
+		if (ClimbDriver)
+		{
+			BodyMesh->RemoveTickPrerequisiteComponent(ClimbDriver);
+			ClimbDriver->DestroyComponent();
+			ClimbDriver = nullptr;
+			ClimbMotionHold = 0.f;
+		}
+	}
+	if (!bOn)
+	{
+		MotionDriverSpecies = -1;
+		return;
+	}
+	if (!MotionDriver && MotionDriverSpecies != ShownSpecies)
+	{
+		MotionDriverSpecies = ShownSpecies;
+		const FString Name = FString(RRSpecies::GetAssetName(ShownSpecies)) + TEXT("MM");
+		const FString Folder = FString::Printf(TEXT("/Game/Characters/%s/"), *Name);
+		USkeletalMesh* DriverMesh = LoadObject<USkeletalMesh>(nullptr, *(Folder + TEXT("SK_") + Name + TEXT(".SK_") + Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		UClass* AnimClass = LoadClass<UAnimInstance>(nullptr, *(Folder + TEXT("ABP_") + Name + TEXT(".ABP_") + Name + TEXT("_C")), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		if (DriverMesh && AnimClass)
+		{
+			MotionDriver = NewObject<USkeletalMeshComponent>(this, TEXT("MotionDriver"));
+			MotionDriver->SetupAttachment(BodyMesh->GetAttachParent());
+			MotionDriver->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			MotionDriver->SetCastShadow(false);
+			MotionDriver->SetVisibility(false);
+			// Never drawn, always posed: the body reads its bones
+			MotionDriver->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+			MotionDriver->SetSkeletalMeshAsset(DriverMesh);
+			MotionDriver->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+			MotionDriver->SetAnimInstanceClass(AnimClass);
+			MotionDriver->RegisterComponent();
+			// Posed before the body, which takes its pose over the same frame
+			BodyMesh->AddTickPrerequisiteComponent(MotionDriver);
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s moves by motion matching (%s)."), *GetName(), *Name);
+			// The climbing clips, if the set has them, and when each one rises and steps over
+			const TCHAR* Climbs[] = { TEXT("ClimbLow"), TEXT("ClimbHigh") };
+			for (int32 Clip = 0; Clip < 2; ++Clip)
+			{
+				const FString ClipName = TEXT("A_") + Name + TEXT("_") + Climbs[Clip];
+				ClimbClips[Clip] = LoadObject<UAnimSequence>(nullptr, *(Folder + TEXT("Traversal/") + ClipName + TEXT(".") + ClipName), nullptr, LOAD_NoWarn | LOAD_Quiet);
+				if (ClimbClips[Clip])
+				{
+					MeasureClimbClip(ClimbClips[Clip], ClimbMarks[Clip]);
+					UE_LOG(LogTemp, Log, TEXT("RRRandom: %s climbs with %s: rises %.2f..%.2f s, over the edge by %.2f s of %.2f."), *GetName(), *ClipName,
+						ClimbMarks[Clip][0], ClimbMarks[Clip][1], ClimbMarks[Clip][2], ClimbClips[Clip]->GetPlayLength());
+				}
+			}
+		}
+	}
+	// The climbing clip runs out for a moment after the climb itself
+	if (!bClimbing && ClimbMotionHold > 0.f)
+	{
+		ClimbMotionHold = FMath::Max(0.f, ClimbMotionHold - GetWorld()->GetDeltaSeconds());
+		if (ClimbMotionHold <= 0.f && ClimbDriver)
+		{
+			// (posed only while a climbing clip is on)
+			ClimbDriver->SetComponentTickEnabled(false);
+		}
+	}
+	if (MotionDriver)
+	{
+		// Where the body stands and faces without its stance turn and leans (its pose is taken over bone by bone); how
+		// fast it thinks it goes is brought down to the clips' size and speed by DistanceScale
+		MotionDriver->SetRelativeLocationAndRotation(MeshRelativeLocation, MeshRelativeRotation);
+		MotionDriver->SetRelativeScale3D(BodyMesh->GetRelativeScale3D());
+		if (ClimbDriver)
+		{
+			ClimbDriver->SetRelativeLocationAndRotation(MeshRelativeLocation, MeshRelativeRotation);
+			ClimbDriver->SetRelativeScale3D(BodyMesh->GetRelativeScale3D());
+		}
+		if (URRRandomMotionMatchInstance* Instance = Cast<URRRandomMotionMatchInstance>(MotionDriver->GetAnimInstance()))
+		{
+			Instance->DistanceScale = 1.f / FMath::Max(BodyMesh->GetComponentScale().Z * RRMotionMatch::PlayRate, KINDA_SMALL_NUMBER);
+		}
+		// Worked out only where its pose is used: on the host always (shots leave from the gun in the hands, so it poses
+		// every animal friend), elsewhere only for bodies on screen
+		const bool bPose = HasAuthority() || BodyMesh->WasRecentlyRendered(0.3f);
+		if (MotionDriver->IsComponentTickEnabled() != bPose)
+		{
+			MotionDriver->SetComponentTickEnabled(bPose);
+		}
+	}
+}
+
+void ARRRandomCharacter::StartClimbMotion()
+{
+	ClimbMotionHold = 0.f;
+	if (!MotionDriver)
+	{
+		return;
+	}
+	// The pull up a high ledge for a rise over ClimbHighRise, the step up onto a low one under it
+	const float Rise = ClimbTarget.Z - ClimbStart.Z;
+	ClimbClip = Rise > ClimbHighRise ? 1 : 0;
+	if (!ClimbClips[ClimbClip])
+	{
+		ClimbClip = 1 - ClimbClip;
+	}
+	if (!ClimbClips[ClimbClip])
+	{
+		return;
+	}
+	USkeletalMeshComponent* BodyMesh = GetMesh();
+	if (!ClimbDriver)
+	{
+		// A second hidden body like the motion driver's, playing one clip by itself (the driver's own animation
+		// blueprint has no montage slot)
+		ClimbDriver = NewObject<USkeletalMeshComponent>(this, TEXT("ClimbDriver"));
+		ClimbDriver->SetupAttachment(BodyMesh->GetAttachParent());
+		ClimbDriver->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		ClimbDriver->SetCastShadow(false);
+		ClimbDriver->SetVisibility(false);
+		ClimbDriver->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+		ClimbDriver->SetSkeletalMeshAsset(MotionDriver->GetSkeletalMeshAsset());
+		ClimbDriver->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+		ClimbDriver->RegisterComponent();
+		BodyMesh->AddTickPrerequisiteComponent(ClimbDriver);
+	}
+	ClimbDriver->SetComponentTickEnabled(true);
+	// From where the clip starts to rise, at the rate that has it up when the capsule is (ClimbUpShare of the climb)
+	const float* Marks = ClimbMarks[ClimbClip];
+	ClimbDriver->PlayAnimation(ClimbClips[ClimbClip], false);
+	ClimbDriver->SetPosition(Marks[0], false);
+	ClimbDriver->SetPlayRate(FMath::Max(Marks[1] - Marks[0], 0.05f) / FMath::Max(ClimbDuration * ClimbUpShare, 0.05f));
+	bClimbMotionOver = false;
+	ClimbMotionHold = ClimbDuration + ClimbMotionBlendOut;
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s climbs %.0f up with %s."), *GetName(), Rise, *ClimbClips[ClimbClip]->GetName());
+}
+
+void ARRRandomCharacter::UpdateClimbMotion(float Alpha, float DeltaSeconds)
+{
+	if (!ClimbDriver || ClimbMotionHold <= 0.f)
+	{
+		return;
+	}
+	const float* Marks = ClimbMarks[ClimbClip];
+	if (!bClimbMotionOver && Alpha >= ClimbUpShare)
+	{
+		// Up: now the step over the edge, in the time the capsule takes for it
+		bClimbMotionOver = true;
+		ClimbDriver->SetPlayRate(FMath::Max(Marks[2] - Marks[1], 0.05f) / FMath::Max(ClimbDuration * (1.f - ClimbUpShare), 0.05f));
+	}
+	if (Alpha >= 1.f)
+	{
+		// On top: the rest of the clip (straightening up) runs on while the body eases back into the matched walk
+		ClimbDriver->SetPlayRate(ClimbMotionTailRate);
+		ClimbMotionHold = ClimbMotionBlendOut;
+	}
+}
+
+bool ARRRandomCharacter::WantsMotionMatch() const
+{
+	return MotionDriver && bAlive && !Vehicle && !Robot && !IsInFlight() && !IsJumping() && LandSquash <= 0.f && !IsEmoting()
+		&& !IsCelebrating() && !IsDespairing() && !IsClimbing() && !IsUsingUltimate() && !IsRidingCannon() && !IsDashing()
+		&& GetCharacterMovement()->IsMovingOnGround()
+		&& (CurrentAnimation == IdleAnimation || CurrentAnimation == WalkAnimation || CurrentAnimation == RunAnimation || CurrentAnimation == FireAnimation);
 }
 
 void ARRRandomCharacter::SetJumpHeld(bool bHeld)
@@ -1660,12 +1976,23 @@ void ARRRandomCharacter::StartClimb(const FVector& Destination, const FVector& W
 	ClimbStart = GetActorLocation();
 	ClimbTarget = Destination;
 	SetActorRotation(WallFacing.Rotation());
+	// (an animal friend with a motion matching set plays its climbing clip meanwhile)
+	StartClimbMotion();
 	// Movement off while the climb moves the capsule; input does nothing meanwhile.
 	// The server leaves a remote climber's movement alone: that client moves itself and the server follows its position.
 	if (IsLocallyControlled())
 	{
 		GetCharacterMovement()->StopMovementImmediately();
 		GetCharacterMovement()->DisableMovement();
+	}
+}
+
+void ARRRandomCharacter::CheatClimb(float Rise)
+{
+	if (bAlive && !bClimbing)
+	{
+		const FVector Forward = GetActorForwardVector().GetSafeNormal2D();
+		StartClimb(GetActorLocation() + Forward * 60.f + FVector(0.f, 0.f, Rise), Forward);
 	}
 }
 
@@ -1844,6 +2171,7 @@ void ARRRandomCharacter::UpdateClimb(float DeltaSeconds)
 {
 	ClimbElapsed += DeltaSeconds;
 	const float Alpha = ClimbDuration > 0.f ? FMath::Clamp(ClimbElapsed / ClimbDuration, 0.f, 1.f) : 1.f;
+	UpdateClimbMotion(Alpha, DeltaSeconds);
 
 	// Only where the brawler is controlled; the server just times a remote client's climb
 	if (IsLocallyControlled())

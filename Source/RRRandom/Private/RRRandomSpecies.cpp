@@ -36,14 +36,16 @@ namespace
 		// bring it down to between the fox's hips and head heights
 		// Round 77 (film-style remakes of the fox, squirrel and tiger): still 100 units to the ear tips, same sizes; the hips
 		// are the new rigs'
-		{ TEXT("Fox"), 1.8f, 19.8f, FVector::ZeroVector, FVector::ZeroVector, FRotator(14.3f, -77.5f, 137.7f) },
+		// 2026-11-19: the fox remade once more as a blank-face T-pose Smart Mesh (texture expressions), its own Mixamo rig:
+		// hips 20.7, and the gun hand turn measured on it (gun_hand_turn_log.pl: rifle run and the settled aim)
+		{ TEXT("Fox"), 1.8f, 20.7f, FVector::ZeroVector, FVector::ZeroVector, FRotator(29.0f, -82.0f, 89.7f) },
 		// T-pose Smart Mesh rabbit, rigged by the user in Mixamo: 100 units to the ear, hips 26.6716.
 		// Its longer legs put the hips alongside the other animal friends at scale 1.9.
 		{ TEXT("Rabbit"), 1.9f, 26.6716f, FVector(0.f, 0.f, -6.f), FVector::ZeroVector, FRotator(27.f, -79.3f, 115.2f) },
 		{ TEXT("Squirrel"), 1.93f, 21.5f, FVector::ZeroVector, FVector::ZeroVector, FRotator(22.5f, -73.1f, 130.1f) },
 		// The fluffy tiger (round 72) kept the round-70 tiger's size, and so does the round-77 one. Round 85: re-rigged in
 		// Mixamo (the user placed the markers by hand), hips at 25.6
-		{ TEXT("Tiger"), 1.75f, 25.6f, FVector::ZeroVector, FVector::ZeroVector, FRotator(25.2f, -70.5f, 137.8f) },
+		{ TEXT("Tiger"), 1.75f, 22.47f, FVector::ZeroVector, FVector::ZeroVector, FRotator(16.5f, -86.7f, 109.2f) },
 		// Its horns stand tall: between the fox's hips height (2.43) and head height (1.8), a little toward the hips
 		// Round 77 film-style dragon: same size; its rig (Mixamo body, arm joints refitted, tail and wing chains) has hips at 16.1
 		// Round 85: remodeled with its arms held away from the body (the old arms were fused to its sides, so Mixamo's weights

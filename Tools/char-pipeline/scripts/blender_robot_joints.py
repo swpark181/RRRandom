@@ -63,6 +63,9 @@ def split(obj, label_of, names):
         bm.from_mesh(copy.data)
         bm.faces.ensure_lookup_table()
         bmesh.ops.delete(bm, geom=[f for f, label in zip(bm.faces, labels) if label != part], context="FACES")
+        # Drop the vertices no face uses any more: they would stretch the part's bounds (the game fires the forearm from
+        # the middle of its bounds)
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context="VERTS")
         bm.to_mesh(copy.data)
         bm.free()
         copy.data.update()

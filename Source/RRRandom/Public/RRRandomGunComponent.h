@@ -5,6 +5,27 @@
 #include "RRRandomGunComponent.generated.h"
 
 /**
+ * The left hand on the held gun (2026-11-20), in the right fist's terms, worked out on the game thread for
+ * URRRandomBodyAnimInstance: it rebuilds the gun from the posed right hand the way URRRandomGunComponent places it
+ * and bends the left arm onto Support.
+ */
+struct FRRGunSupportHold
+{
+	/** The species' fist: its right hand bone turned and moved into the standard hold (FRRSpeciesLook::GunHandTurn / Offset). */
+	FQuat FixTurn = FQuat::Identity;
+	FVector FixOffset = FVector::ZeroVector;
+	/** The gun turned in that fist, and its point in the middle of the fist, on the 100-long mesh. */
+	FQuat GripTurn = FQuat::Identity;
+	FVector Grip = FVector::ZeroVector;
+	/** The middle of the left fist on the 100-long mesh, and that fist's turn from the right one's hold, mirrored. */
+	FVector Support = FVector::ZeroVector;
+	FQuat SupportTurn = FQuat::Identity;
+	/** The gun's length at normal size and the holder's size (a giant's gun grows with it). */
+	float Length = 0.f;
+	float Size = 1.f;
+};
+
+/**
  * The rifle (/Game/Props/Rifle/SM_Rifle, origin in its pistol grip, muzzle +X) held in both of the brawler's hands,
  * on every machine. Every frame, after the animation has posed the body, it puts the grip in the right palm and
  * points the muzzle at the left hand (which holds the front of the gun), keeping the gun's top toward the sky.
@@ -90,6 +111,12 @@ public:
 	 * finger, the brawler's MuzzleOffset.
 	 */
 	FVector GetAimMuzzleOffset() const;
+
+	/** Whether the gun is in the hands now (put away while knocked out, emoting, driving and so on). */
+	bool IsHeld() const;
+
+	/** The left hand's place on the gun held now; false when it is one-handed (melee, the foam finger) or put away. */
+	bool GetSupportHold(FRRGunSupportHold& Out) const;
 
 	/** From this far into the aiming pose (0 .. 1) the gun counts as aimed, for GetAimMuzzleOffset. */
 	UPROPERTY(EditAnywhere, Category = "Gun")

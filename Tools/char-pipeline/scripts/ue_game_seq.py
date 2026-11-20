@@ -32,6 +32,14 @@ def world():
     return found
 
 
+def subject(pc):
+    # Whose face and fur the fur commands work on: the character picked with target=, or my animal friend
+    t = state.get("target")
+    if t is not None and unreal.SystemLibrary.is_valid(t):
+        return t
+    return pc.get_controlled_pawn()
+
+
 def veh_cam(w, pc):
     # vehcam=<mesh part>,<yaw round from its front>,<distance>,<height>: every frame the studio camera's actor sits round
     # the first vehicle with that mesh, looking at its middle (round 91: its lamps and paint)
@@ -221,6 +229,18 @@ def tick(dt):
                     v.set_actor_location(v.get_actor_location() + unreal.Vector(float(dx), float(dy), 50.0), False, True)
                     unreal.log(f"GAMESEQ moved {v.get_name()}")
                     break
+        elif cmd.startswith("walkyaw="):
+            # walkyaw=<degrees to the right of where my animal friend faces now>,<seconds>
+            deg, secs = (float(v) for v in cmd.split("=")[1].split(","))
+            r = pc.get_controlled_pawn().get_actor_rotation()
+            f = unreal.MathLibrary.get_forward_vector(unreal.Rotator(0.0, 0.0, r.yaw + deg))
+            state["walk_dir"] = unreal.Vector(f.x, f.y, 0.0)
+            state["walk_until"] = t + secs
+        elif cmd.startswith("walkfwd="):
+            # walkfwd=<seconds>: like walk=, the way my animal friend faces now (2026-11-20: toward a cover it was put in front of)
+            f = pc.get_controlled_pawn().get_actor_forward_vector()
+            state["walk_dir"] = unreal.Vector(f.x, f.y, 0.0)
+            state["walk_until"] = t + float(cmd.split("=")[1])
         elif cmd.startswith("walk="):
             x, y, secs = (float(v) for v in cmd.split("=")[1].split(","))
             state["walk_dir"] = unreal.Vector(x, y, 0.0)
@@ -286,6 +306,168 @@ def tick(dt):
                 cam.set_actor_rotation(unreal.MathLibrary.find_look_at_rotation(spot, base + unreal.Vector(0.0, 0.0, 20.0)), True)
                 pc.set_view_target_with_blend(cam, 0.0)
                 unreal.log(f"GAMESEQ frontcam at {spot}")
+        elif cmd.startswith("facecam="):
+            # 2026-11-20: a fixed camera looking at my animal friend's face: facecam=<distance>,<yaw round from its front>
+            # [,<up from the head bone, 14>[,<camera height over the face, 0>]] (fur close-ups at set distances)
+            vals = [float(v) for v in cmd.split("=")[1].split(",")]
+            dist, yaw_off = vals[0], vals[1]
+            up = vals[2] if len(vals) > 2 else 14.0
+            rise = vals[3] if len(vals) > 3 else 0.0
+            pawn = subject(pc)
+            unreal.SystemLibrary.execute_console_command(w, "RRStudioCam 0", pc)
+            unreal.SystemLibrary.execute_console_command(w, "RRStudioCamOff", pc)
+            cams = unreal.GameplayStatics.get_all_actors_of_class(w, unreal.CameraActor)
+            head = None
+            front_yaw = pawn.get_actor_rotation().yaw
+            for c in pawn.get_components_by_class(unreal.SkeletalMeshComponent):
+                if c.is_visible() and c.get_num_bones() > 0:
+                    for bi in range(c.get_num_bones()):
+                        if str(c.get_bone_name(bi)).endswith("Head"):
+                            head = c.get_socket_location(c.get_bone_name(bi))
+                            break
+                if head is not None:
+                    # (for a target= character, the front its shoulders face as posed now: a villain's body isn't always
+                    # turned the way its actor is; front = up x (left - right). My own animal friend: its actor's front,
+                    # the shoulders twist with the aim)
+                    sh = {}
+                    for bi in range(c.get_num_bones()):
+                        bn = str(c.get_bone_name(bi))
+                        if bn.endswith("LeftShoulder") or bn.endswith("RightShoulder"):
+                            sh[bn[-13:-8] if bn.endswith("RightShoulder") else "Left"] = c.get_socket_location(c.get_bone_name(bi))
+                    if "Left" in sh and "Right" in sh and pawn != pc.get_controlled_pawn():
+                        side = sh["Left"] - sh["Right"]
+                        f = unreal.Vector(-side.y, side.x, 0.0)
+                        if f.length() > 0.01:
+                            front_yaw = unreal.MathLibrary.make_rot_from_x(f).yaw
+                    break
+            if cams and head is not None:
+                cam = cams[0]
+                face = head + unreal.Vector(0.0, 0.0, up)
+                way = unreal.MathLibrary.get_forward_vector(unreal.Rotator(0.0, 0.0, front_yaw + yaw_off))
+                spot = face + way * dist + unreal.Vector(0.0, 0.0, rise)
+                cam.set_actor_location(spot, False, True)
+                cam.set_actor_rotation(unreal.MathLibrary.find_look_at_rotation(spot, face), True)
+                pc.set_view_target_with_blend(cam, 0.0)
+                unreal.log(f"GAMESEQ facecam at {spot} looking at {face}")
+            else:
+                unreal.log("GAMESEQ facecam: no head bone or camera")
+        elif cmd.startswith("furparam="):
+            # furparam=<name>,<value>[,<name>,<value>...]: sets scalar parameters on my animal friend's shell fur material
+            # (through a dynamic instance, this run only), to compare values in one run: furparam=TidyNear,-1,TidyFar,-1
+            vals = cmd.split("=")[1].split(",")
+            pawn = subject(pc)
+            for c in pawn.get_components_by_class(unreal.RRRandomFurComponent):
+                # (on every slot: the fur mesh keeps the body's material slots, and the game has instances on them all)
+                for k in range(0, len(vals) - 1, 2):
+                    c.set_scalar_parameter_value_on_materials(vals[k], float(vals[k + 1]))
+                unreal.log(f"GAMESEQ furparam {vals} on {c.get_name()}")
+        elif cmd.startswith("furvec="):
+            # furvec=<name>,<x>,<y>,<z>: a vector parameter on the fur material, like furparam (the face ellipsoid)
+            vals = cmd.split("=")[1].split(",")
+            pawn = subject(pc)
+            for c in pawn.get_components_by_class(unreal.RRRandomFurComponent):
+                c.set_vector_parameter_value_on_materials(vals[0], unreal.Vector(float(vals[1]), float(vals[2]), float(vals[3])))
+                unreal.log(f"GAMESEQ furvec {vals} on {c.get_name()}")
+        elif cmd.startswith("target="):
+            # target=<part of a body mesh name>: the nearest character wearing that mesh (target=SK_Cat) becomes the one
+            # facecam, furparam, furvec, faceguess, furinfo and headinfo work on (a defense villain); target= alone: me again
+            want = cmd.split("=")[1]
+            me = pc.get_controlled_pawn()
+            best = None
+            if want:
+                for c in unreal.GameplayStatics.get_all_actors_of_class(w, unreal.RRRandomCharacter):
+                    names = [m.get_skeletal_mesh_asset().get_name() for m in c.get_components_by_class(unreal.SkeletalMeshComponent)
+                             if m.get_skeletal_mesh_asset() and m.is_visible()]
+                    if c != me and any(want in nm for nm in names):
+                        d = (c.get_actor_location() - me.get_actor_location()).length()
+                        if best is None or d < best[0]:
+                            best = (d, c)
+            state["target"] = best[1] if best else None
+            unreal.log(f"GAMESEQ target {best[1].get_name() if best else None} {('%.0f' % best[0]) if best else ''}")
+        elif cmd.startswith("tplace="):
+            # tplace=<dx>,<dy>,<dz>,<yaw>: puts the target= character at my animal friend + (dx, dy, dz), turned to that
+            # yaw (a villain lifted out of the crowd into the open sky; with RRSlomo 0.01 it hangs there)
+            dx, dy, dz, yaw = (float(v) for v in cmd.split("=")[1].split(","))
+            who = subject(pc)
+            me = pc.get_controlled_pawn()
+            if who != me:
+                who.set_actor_location(me.get_actor_location() + unreal.Vector(dx, dy, dz), False, True)
+                who.set_actor_rotation(unreal.Rotator(0.0, 0.0, yaw), True)
+                unreal.log(f"GAMESEQ tplace {who.get_name()} at {who.get_actor_location()}")
+        elif cmd == "bones":
+            # Logs every bone of the subject's body with its place in the mesh's own space, as it stands now
+            pawn = subject(pc)
+            for c in pawn.get_components_by_class(unreal.SkeletalMeshComponent):
+                if not c.is_visible() or c.get_num_bones() == 0 or isinstance(c, unreal.RRRandomFurComponent):
+                    continue
+                inv = c.get_world_transform().inverse()
+                unreal.log(f"GAMESEQ bones {c.get_skeletal_mesh_asset().get_name()} scale {c.get_world_scale()}")
+                for bi in range(c.get_num_bones()):
+                    here = unreal.MathLibrary.transform_location(inv, c.get_socket_location(c.get_bone_name(bi)))
+                    unreal.log(f"GAMESEQ bone {c.get_bone_name(bi)} {here.x:.1f},{here.y:.1f},{here.z:.1f}")
+                break
+        elif cmd.startswith("faceguess"):
+            # faceguess[=<ahead>,<up>,<rx>,<ry>,<rz>] (shares of the head's height, Head bone to HeadTop_End; the fox's:
+            # 0.63,0.38,0.585,0.43,0.41): a first inner-face ellipsoid for the fur material, from the head bones as they
+            # stand now, set on the fur and logged as "x,y,z,rx,ry,rz" (then look at it with furparam=TidyShow,1)
+            k = [float(v) for v in cmd.split("=")[1].split(",")] if "=" in cmd else [0.63, 0.38, 0.585, 0.43, 0.41]
+            pawn = subject(pc)
+            head = top = None
+            for c in pawn.get_components_by_class(unreal.SkeletalMeshComponent):
+                if not c.is_visible() or c.get_num_bones() == 0 or isinstance(c, unreal.RRRandomFurComponent):
+                    continue
+                inv = c.get_world_transform().inverse()
+                for bi in range(c.get_num_bones()):
+                    bn = str(c.get_bone_name(bi))
+                    if not (bn.endswith("HeadTop_End") or bn.endswith("Head")):
+                        continue
+                    # (the material's ellipsoid is in the reference pose: a running villain's head leans well ahead of it)
+                    try:
+                        here = c.get_ref_pose_position(bi)
+                        state["guess_pose"] = "reference pose"
+                    except Exception:
+                        here = unreal.MathLibrary.transform_location(inv, c.get_socket_location(c.get_bone_name(bi)))
+                        state["guess_pose"] = "the pose now"
+                    if bn.endswith("HeadTop_End"):
+                        top = here
+                    else:
+                        head = here
+                break
+            if head is not None and top is not None:
+                hgt = (top - head).length()
+                g = [head.x, head.y + k[0] * hgt, head.z + k[1] * hgt, k[2] * hgt, k[3] * hgt, k[4] * hgt]
+                for c in pawn.get_components_by_class(unreal.RRRandomFurComponent):
+                    c.set_vector_parameter_value_on_materials("TidyFaceAt", unreal.Vector(g[0], g[1], g[2]))
+                    c.set_vector_parameter_value_on_materials("TidyFaceSize", unreal.Vector(g[3], g[4], g[5]))
+                unreal.log("GAMESEQ faceguess (%s) head %.1f,%.1f,%.1f height %.1f -> %s" % (state.get("guess_pose"), head.x, head.y, head.z, hgt, ",".join("%.1f" % v for v in g)))
+            else:
+                unreal.log("GAMESEQ faceguess: no Head / HeadTop_End bones")
+        elif cmd == "furinfo":
+            # Logs my animal friend's fur mesh, its material on every slot and that material's scalar parameters
+            pawn = subject(pc)
+            for c in pawn.get_components_by_class(unreal.RRRandomFurComponent):
+                unreal.log(f"GAMESEQ furinfo {c.get_name()} mesh {c.get_skeletal_mesh_asset().get_name() if c.get_skeletal_mesh_asset() else None} slots {c.get_num_materials()}")
+                for si in range(c.get_num_materials()):
+                    m = c.get_material(si)
+                    base = m.get_base_material() if m else None
+                    unreal.log(f"GAMESEQ furinfo slot {si} {m.get_path_name() if m else None} base {base.get_path_name() if base else None}")
+                    if base and si == 0:
+                        names = [str(n) for n in unreal.MaterialEditingLibrary.get_scalar_parameter_names(base)]
+                        unreal.log(f"GAMESEQ furinfo scalars {names}")
+        elif cmd == "headinfo":
+            # Logs where my animal friend's head, neck and eye bones are in its body mesh's own space (now, and in the
+            # reference pose where the engine tells), to place the fur's face ellipsoid
+            pawn = subject(pc)
+            for c in pawn.get_components_by_class(unreal.SkeletalMeshComponent):
+                if not c.is_visible() or c.get_num_bones() == 0 or isinstance(c, unreal.RRRandomFurComponent):
+                    continue
+                inv = c.get_world_transform().inverse()
+                for bi in range(c.get_num_bones()):
+                    bn = str(c.get_bone_name(bi))
+                    if any(k in bn for k in ("Head", "Neck", "Eye", "Jaw")):
+                        here = unreal.MathLibrary.transform_location(inv, c.get_socket_location(c.get_bone_name(bi)))
+                        unreal.log(f"GAMESEQ headinfo {c.get_name()} {bn} local {here.x:.1f},{here.y:.1f},{here.z:.1f}")
+                break
         elif cmd.startswith("pathcam="):
             # Round 97: a fixed camera beside the line ahead of my animal friend (side, height, ahead), looking at the spot that
             # far ahead: frames me and a target in front of me together (pathcam=1100,250,450)

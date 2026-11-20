@@ -1,14 +1,17 @@
 #include "RRRandomBodyAnimInstance.h"
 #include "RRRandomCharacter.h"
 #include "RRRandomSpecies.h"
+#include "RRRandomMotionMatching.h"
 #include "RRRandomMovementComponent.h"
 #include "RRRandomVehicle.h"
 #include "AnimationRuntime.h"
+#include "Animation/AnimClassInterface.h"
 #include "Animation/AnimNodeBase.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AttributesRuntime.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "PoseSearch/AnimNode_MotionMatching.h"
 
 namespace
 {
@@ -21,6 +24,20 @@ namespace
 	constexpr float HeadTurnBodyAt = 90.f;
 	TAutoConsoleVariable<int32> CVarLogHeadTurn(TEXT("rr.Anim.LogHeadTurn"), 0,
 		TEXT("1: log when a head was asked to turn over 90 degrees from its chest (it is held to 80 now)."));
+	TAutoConsoleVariable<int32> CVarMotionUpper(TEXT("rr.MotionMatch.Upper"), 1,
+		TEXT("Motion matching test: 1 the spine, neck and head come from the matched clips too; 0 only the hips and legs."));
+	TAutoConsoleVariable<float> CVarMotionLean(TEXT("rr.MotionMatch.Lean"), -1.f,
+		TEXT("Motion matching test: degrees the upper body leans forward at the walking speed (below 0: the built-in amount, URRRandomBodyAnimInstance::MotionRunLean)."));
+	TAutoConsoleVariable<int32> CVarGunTwoHands(TEXT("rr.Gun.TwoHands"), 1,
+		TEXT("1: the left hand holds the gun (its fist on each gun's support point, URRRandomGunComponent); 0: the animation's own left hand."));
+	TAutoConsoleVariable<int32> CVarGunFingers(TEXT("rr.Gun.Fingers"), 1,
+		TEXT("1: the left hand's fingers on the gun curl like the right hand's (mirrored); 0: as the animation has them."));
+	// The most the left collarbone swings forward to bring a gun's support point within the short arm's reach (degrees)
+	constexpr float GunShoulderReach = 25.f;
+	TAutoConsoleVariable<int32> CVarGunHandsLog(TEXT("rr.Gun.HandsLog"), 0,
+		TEXT("1: log, twice a second, how far my left hand is from its place on the gun and how far its arm can reach."));
+	TAutoConsoleVariable<int32> CVarLogMotion(TEXT("rr.MotionMatch.Log"), 0,
+		TEXT("1: log, twice a second, the motion matching driver's root and hips and what my animal friend's body takes from them (test)."));
 
 	// Long frames are simulated in steps this short, so the spring stays steady
 	constexpr float MaxStep = 1.f / 60.f;
@@ -375,8 +392,10 @@ FAnimInstanceProxy* URRRandomBodyAnimInstance::CreateAnimInstanceProxy()
 void URRRandomBodyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
 	Super::NativeUpdateAnimation(DeltaSeconds);
+	UpdateMotion(DeltaSeconds);
 	UpdateAim(DeltaSeconds);
 	UpdateMelee(DeltaSeconds);
+	UpdateGunHands(DeltaSeconds);
 	if (DeltaSeconds > 0.f)
 	{
 		UpdateFlightPose(DeltaSeconds);
@@ -462,6 +481,163 @@ void URRRandomBodyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	}
 }
 
+void URRRandomBodyAnimInstance::UpdateMotion(float DeltaSeconds)
+{
+	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetOwningActor());
+	const USkeletalMeshComponent* Mesh = GetSkelMeshComponent();
+	USkeletalMeshComponent* Driver = Brawler ? Brawler->GetMotionDriver() : nullptr;
+	const USkeletalMesh* DriverMesh = Driver ? Driver->GetSkeletalMeshAsset() : nullptr;
+	const USkeletalMesh* BodyMesh = Mesh ? Mesh->GetSkeletalMeshAsset() : nullptr;
+	if (!DriverMesh || !BodyMesh)
+	{
+		MotionWeight = 0.f;
+		MotionLean = 0.f;
+		MotionMappedMesh.Reset();
+		return;
+	}
+	const FReferenceSkeleton& Body = BodyMesh->GetRefSkeleton();
+	const FReferenceSkeleton& Source = DriverMesh->GetRefSkeleton();
+	const int32 UpperMode = CVarMotionUpper.GetValueOnGameThread();
+	if (MotionMappedMesh.Get() != DriverMesh || MotionBoneMap.Num() != Body.GetNum() || MotionUpperMode != UpperMode)
+	{
+		// Bone for bone by name. 1: taken whenever matched (hips, legs, and with rr.MotionMatch.Upper 1 the spine and head);
+		// 2: taken only while the driver's whole pose is (a climbing clip): the arms, which otherwise keep the gun-holding
+		// animation, and the spine with Upper 0; 0: never (the tail, bent by code)
+		MotionMappedMesh = DriverMesh;
+		MotionUpperMode = UpperMode;
+		MotionBoneMap.Init(INDEX_NONE, Body.GetNum());
+		MotionMask.Init(0, Body.GetNum());
+		const int32 Arms[] = { Body.FindBoneIndex(TEXT("LeftShoulder")), Body.FindBoneIndex(TEXT("RightShoulder")),
+			UpperMode == 0 ? Body.FindBoneIndex(TEXT("Spine")) : INDEX_NONE };
+		const int32 Tail = Body.FindBoneIndex(TEXT("Tail1"));
+		for (int32 Bone = 0; Bone < Body.GetNum(); ++Bone)
+		{
+			bool bWhole = false, bNever = false;
+			for (int32 Walk = Bone; Walk != INDEX_NONE; Walk = Body.GetParentIndex(Walk))
+			{
+				bWhole |= Walk == Arms[0] || Walk == Arms[1] || Walk == Arms[2];
+				bNever |= Walk == Tail;
+			}
+			MotionBoneMap[Bone] = Source.FindBoneIndex(Body.GetBoneName(Bone));
+			MotionMask[Bone] = bNever || MotionBoneMap[Bone] == INDEX_NONE ? 0 : bWhole ? 2 : 1;
+		}
+	}
+	// (waits for the driver's pose if it is still being worked out)
+	const TArrayView<const FTransform> Local = Driver->GetBoneSpaceTransformsView();
+	const bool bPosed = Local.Num() == Source.GetNum();
+	if (bPosed)
+	{
+		MotionPose.SetNum(Body.GetNum());
+		for (int32 Bone = 0; Bone < Body.GetNum(); ++Bone)
+		{
+			if (!MotionMask[Bone])
+			{
+				continue;
+			}
+			// A bone that is a root here but has parents in the driver (the hips, under the driver's root bone) takes them along
+			FTransform Pose = Local[MotionBoneMap[Bone]];
+			if (Body.GetParentIndex(Bone) == INDEX_NONE)
+			{
+				for (int32 Parent = Source.GetParentIndex(MotionBoneMap[Bone]); Parent != INDEX_NONE; Parent = Source.GetParentIndex(Parent))
+				{
+					Pose = Pose * Local[Parent];
+				}
+			}
+			MotionPose[Bone] = Pose;
+		}
+	}
+	if (bPosed && CVarLogMotion.GetValueOnGameThread() != 0 && Brawler->IsPlayerControlled() && Brawler->IsLocallyControlled() && (GFrameCounter % 15) == 0)
+	{
+		// Which clip the Motion Matching node is playing now
+		FString Clip = TEXT("?");
+		float ClipTime = 0.f;
+		if (const UAnimInstance* DriverInstance = Driver->GetAnimInstance())
+		{
+			if (const IAnimClassInterface* AnimClass = IAnimClassInterface::GetFromClass(DriverInstance->GetClass()))
+			{
+				for (const FStructProperty* Property : AnimClass->GetAnimNodeProperties())
+				{
+					if (Property->Struct->IsChildOf(FAnimNode_MotionMatching::StaticStruct()))
+					{
+						const FAnimNode_MotionMatching* Node = Property->ContainerPtrToValuePtr<FAnimNode_MotionMatching>(DriverInstance);
+						if (const UAnimationAsset* Asset = Node->GetAnimAsset()) { Clip = Asset->GetName(); }
+						ClipTime = Node->GetAccumulatedTime();
+					}
+				}
+			}
+		}
+		UE_LOG(LogTemp, Log, TEXT("MOTIONCLIP %s at %.2f | base clip %s | actor yaw %.0f velocity yaw %.0f control yaw %.0f"), *Clip, ClipTime,
+			*GetNameSafe(GetCurrentAsset()), Brawler->GetActorRotation().Yaw, Brawler->GetVelocity().Rotation().Yaw, Brawler->GetControlRotation().Yaw);
+		// What the search is asked: how far the trajectory's first (past) and last (future) samples are from now, in the clips' units
+		if (const URRRandomMotionMatchInstance* Matcher = Cast<URRRandomMotionMatchInstance>(Driver->GetAnimInstance()))
+		{
+			const TArray<FTransformTrajectorySample>& Samples = Matcher->Trajectory.Samples;
+			int32 Now = 0;
+			for (int32 Index = 1; Index < Samples.Num(); ++Index)
+			{
+				if (FMath::Abs(Samples[Index].TimeInSeconds) < FMath::Abs(Samples[Now].TimeInSeconds)) { Now = Index; }
+			}
+			const FVector Velocity = Brawler->GetVelocity();
+			UE_LOG(LogTemp, Log, TEXT("MOTIONTRAJ speed %.0f accel %.0f max %.0f wants %d weight %.2f driver tick %d scale %.3f | samples %d now %d | past t %.2f dist %.1f | future t %.2f dist %.1f | time dilation %.2f"),
+				Velocity.Size2D(), Brawler->GetCharacterMovement()->GetCurrentAcceleration().Size2D(), Brawler->GetCharacterMovement()->GetMaxSpeed(),
+				Brawler->WantsMotionMatch(), MotionWeight, Driver->IsComponentTickEnabled(), Matcher->DistanceScale, Samples.Num(), Now,
+				Samples.Num() ? Samples[0].TimeInSeconds : 0.f, Samples.Num() ? FVector::Dist2D(Samples[0].Position, Samples[Now].Position) : 0.f,
+				Samples.Num() ? Samples.Last().TimeInSeconds : 0.f, Samples.Num() ? FVector::Dist2D(Samples.Last().Position, Samples[Now].Position) : 0.f,
+				Brawler->GetActorTimeDilation());
+		}
+		const int32 Hips = Body.FindBoneIndex(TEXT("Hips"));
+		const int32 Foot = Body.FindBoneIndex(TEXT("LeftFoot"));
+		const int32 SourceRoot = Source.FindBoneIndex(TEXT("Root"));
+		const int32 SourceHips = Source.FindBoneIndex(TEXT("Hips"));
+		UE_LOG(LogTemp, Log, TEXT("MOTIONMATCH weight %.2f | body ref hips %s | driver ref root %s hips %s | driver now root %s hips %s | taken hips %s foot %s"),
+			MotionWeight, *Body.GetRefBonePose()[Hips].ToHumanReadableString().Replace(TEXT("\n"), TEXT(" ")),
+			SourceRoot != INDEX_NONE ? *Source.GetRefBonePose()[SourceRoot].ToHumanReadableString().Replace(TEXT("\n"), TEXT(" ")) : TEXT("-"),
+			*Source.GetRefBonePose()[SourceHips].ToHumanReadableString().Replace(TEXT("\n"), TEXT(" ")),
+			SourceRoot != INDEX_NONE ? *Local[SourceRoot].ToHumanReadableString().Replace(TEXT("\n"), TEXT(" ")) : TEXT("-"),
+			*Local[SourceHips].ToHumanReadableString().Replace(TEXT("\n"), TEXT(" ")),
+			*MotionPose[Hips].ToHumanReadableString().Replace(TEXT("\n"), TEXT(" ")),
+			Foot != INDEX_NONE ? *MotionPose[Foot].ToHumanReadableString().Replace(TEXT("\n"), TEXT(" ")) : TEXT("-"));
+	}
+	// A climbing clip on the second hidden body: its whole pose, arms too, in place (its root kept where the reference
+	// pose has it: the capsule does the climbing), until the clip has run out
+	USkeletalMeshComponent* Climber = bPosed && Brawler->WantsClimbMotion() ? Brawler->GetClimbDriver() : nullptr;
+	const TArrayView<const FTransform> ClimbLocal = Climber ? Climber->GetBoneSpaceTransformsView() : TArrayView<const FTransform>();
+	const bool bClimb = Climber && ClimbLocal.Num() == Source.GetNum();
+	if (bClimb)
+	{
+		MotionWholePose.SetNum(Body.GetNum());
+		for (int32 Bone = 0; Bone < Body.GetNum(); ++Bone)
+		{
+			if (!MotionMask[Bone])
+			{
+				continue;
+			}
+			FTransform Pose = ClimbLocal[MotionBoneMap[Bone]];
+			if (Body.GetParentIndex(Bone) == INDEX_NONE)
+			{
+				for (int32 Parent = Source.GetParentIndex(MotionBoneMap[Bone]); Parent != INDEX_NONE; Parent = Source.GetParentIndex(Parent))
+				{
+					Pose = Pose * Source.GetRefBonePose()[Parent];
+				}
+			}
+			MotionWholePose[Bone] = Pose;
+		}
+	}
+	const bool bWalk = bPosed && !bClimb && Brawler->WantsMotionMatch();
+	const bool bWanted = bWalk || bClimb;
+	// (in quickly, out as slowly as the clip runs out)
+	MotionWholeWeight = FMath::FInterpConstantTo(MotionWholeWeight, bClimb ? 1.f : 0.f, DeltaSeconds, bClimb ? 1.f / 0.06f : 1.f / 0.3f);
+	MotionWeight = FMath::FInterpConstantTo(MotionWeight, bWanted ? 1.f : 0.f, DeltaSeconds, 1.f / FMath::Max(MotionBlendTime, KINDA_SMALL_NUMBER));
+	// The matched clips are of people running empty-handed and upright (the user, 2026-11-20: "총을 들고 달리는데 너무 꼿꼿하게
+	// 서서 간다. 자연스럽게 살짝 숙이고 뛸 수 있도록"): the upper body leans into the run, in step with its ground speed up to
+	// the walking speed (a sprint adds the whole body's own lean on top, ARRRandomCharacter::SprintLean). Only with the
+	// upper body matched; with the hips and legs only the torso already is the gun-holding animation's.
+	const float WalkMax = FMath::Max(Brawler->GetCharacterMovement()->MaxWalkSpeed, 1.f);
+	const float Pace = bWalk && UpperMode != 0 ? FMath::Clamp(Brawler->GetAnimationMoveSpeed() / WalkMax, 0.f, 1.f) : 0.f;
+	const float LeanAtRun = CVarMotionLean.GetValueOnGameThread() >= 0.f ? CVarMotionLean.GetValueOnGameThread() : MotionRunLean;
+	MotionLean = FMath::FInterpTo(MotionLean, LeanAtRun * FMath::SmoothStep(0.15f, 0.9f, Pace), DeltaSeconds, 6.f);
+}
+
 void URRRandomBodyAnimInstance::UpdateAim(float DeltaSeconds)
 {
 	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetOwningActor());
@@ -479,7 +655,9 @@ void URRRandomBodyAnimInstance::UpdateAim(float DeltaSeconds)
 	const bool bMoving = bGaze && Brawler->GetAnimationMoveSpeed() > 10.f;
 	const float ActorYaw = Brawler->GetActorRotation().Yaw;
 	const FVector Location = Brawler->GetActorLocation();
-	Aim.bSeparateBody = bGaze && Brawler->GetCharacterMovement()->IsMovingOnGround() && !Brawler->IsDashing();
+	// (motion matching test: the matched clips strafe and turn by themselves, so the legs are not turned to the way it goes)
+	const bool bMatched = MotionWeight > 0.5f;
+	Aim.bSeparateBody = bGaze && Brawler->GetCharacterMovement()->IsMovingOnGround() && !Brawler->IsDashing() && !bMatched;
 	if (!bHasBodyHeading || !Aim.bSeparateBody || FVector::DistSquared(Location, LastBodyLocation) > FMath::Square(300.f))
 	{
 		Aim.LowerYaw = Aim.UpperYaw = Aim.GazeYaw = ActorYaw;
@@ -506,7 +684,8 @@ void URRRandomBodyAnimInstance::UpdateAim(float DeltaSeconds)
 		// (and the head no further round than its limit from the chest, however far ahead of the body the look is)
 		Aim.GazeYaw = FRotator::NormalizeAxis(Aim.UpperYaw + FMath::Clamp(FMath::FindDeltaAngleDegrees(Aim.UpperYaw, Aim.GazeYaw), -HeadTurnMax, HeadTurnMax));
 	}
-	Aim.KeepLocomotion = FMath::FInterpConstantTo(Aim.KeepLocomotion, Aim.bSeparateBody && bMoving ? 1.f : 0.f, DeltaSeconds, 8.f);
+	// (matched: the aiming set never takes the legs, standing or moving)
+	Aim.KeepLocomotion = FMath::FInterpConstantTo(Aim.KeepLocomotion, bMatched || (Aim.bSeparateBody && bMoving) ? 1.f : 0.f, DeltaSeconds, 8.f);
 	Aim.GazeWeight = bAimGaze ? 1.f : FMath::FInterpConstantTo(Aim.GazeWeight, bMoving ? 1.f : 0.f, DeltaSeconds, 10.f);
 	if (!Brawler->GetAimAnimations().IsComplete()) { Aim.Weight = 0.f; return; }
 	const FRRAimAnimations& Animations = Brawler->GetAimAnimations();
@@ -529,7 +708,7 @@ void URRRandomBodyAnimInstance::UpdateAim(float DeltaSeconds)
 	const float Side = FVector::DotProduct(Velocity, FRotator(0.f, LegYaw + 90.f, 0.f).Vector());
 	const float LegAngle = FMath::Abs(FMath::RadiansToDegrees(FMath::Atan2(Side, Ahead)));
 	Aim.StrafeWeight = FMath::FInterpConstantTo(Aim.StrafeWeight,
-		Aim.KeepLocomotion * FMath::SmoothStep(25.f, 65.f, LegAngle), DeltaSeconds, 6.f);
+		bMatched ? 0.f : Aim.KeepLocomotion * FMath::SmoothStep(25.f, 65.f, LegAngle), DeltaSeconds, 6.f);
 	// (in flight no running legs: the standing aim over the flying pose)
 	Aim.MoveWeight = FMath::FInterpTo(Aim.MoveWeight, Brawler->IsInFlight() || Brawler->IsJumping() ? 0.f : FMath::Clamp(Speed / FMath::Max(AimRunSpeed, 1.f), 0.f, 1.f), DeltaSeconds, MoveBlendSpeed);
 	if (Speed > MinStrafeSpeed)
@@ -608,6 +787,51 @@ void FRRRandomBodyAnimInstanceProxy::PreUpdate(UAnimInstance* InAnimInstance, fl
 	WingBends = Instance->GetWingBends();
 	Aim = Instance->GetAimFrame();
 	Melee = Instance->GetMeleeFrame();
+	GunHands = Instance->GetGunHandsFrame();
+	MotionWeight = Instance->GetMotionWeight();
+	MotionLean = Instance->GetMotionLean();
+	MotionWholeWeight = Instance->GetMotionWholeWeight();
+	if (MotionWholeWeight > 0.f)
+	{
+		MotionWholePose = Instance->GetMotionWholePose();
+	}
+	if (MotionWeight > 0.f)
+	{
+		MotionPose = Instance->GetMotionPose();
+		MotionMask = Instance->GetMotionMask();
+	}
+}
+
+void FRRRandomBodyAnimInstanceProxy::EvaluateMotion(FPoseContext& Output) const
+{
+	const FBoneContainer& Bones = Output.Pose.GetBoneContainer();
+	for (const FCompactPoseBoneIndex Index : Output.Pose.ForEachBoneIndex())
+	{
+		const int32 MeshBone = Bones.MakeMeshPoseIndex(Index).GetInt();
+		if (MotionMask.IsValidIndex(MeshBone) && MotionMask[MeshBone] && MotionPose.IsValidIndex(MeshBone))
+		{
+			if (MotionMask[MeshBone] == 1) { Output.Pose[Index].BlendWith(MotionPose[MeshBone], MotionWeight); }
+			// (a climbing clip over that, on the arms as well)
+			if (MotionWholeWeight > 0.f && MotionWholePose.IsValidIndex(MeshBone)) { Output.Pose[Index].BlendWith(MotionWholePose[MeshBone], MotionWholeWeight); }
+		}
+	}
+	Output.Pose.NormalizeRotations();
+	if (MotionLean > KINDA_SMALL_NUMBER)
+	{
+		// Forward about the mesh's side axis (+X is its left, +Y its front; a negative turn tips the front down), spread up
+		// the spine like the aim's turn; the neck and head lift most of it back so it keeps looking where it runs
+		const float Lean = -FMath::DegreesToRadians(MotionLean * MotionWeight);
+		for (int32 Bone = 0; Bone < UE_ARRAY_COUNT(SpineBones); ++Bone)
+		{
+			const FCompactPoseBoneIndex Spine = FindBone(Bones, SpineBones[Bone]);
+			if (Spine.IsValid()) { TurnBone(Output.Pose, Spine, FQuat(FVector::ForwardVector, Lean * SpineShares[Bone])); }
+		}
+		for (const TCHAR* Name : { TEXT("Neck"), TEXT("Head") })
+		{
+			const FCompactPoseBoneIndex Bone = FindBone(Bones, Name);
+			if (Bone.IsValid()) { TurnBone(Output.Pose, Bone, FQuat(FVector::ForwardVector, -Lean * MotionHeadLift * 0.5f)); }
+		}
+	}
 }
 
 void FRRRandomBodyAnimInstanceProxy::PreEvaluateAnimation(UAnimInstance* InAnimInstance)
@@ -745,9 +969,173 @@ void FRRRandomBodyAnimInstanceProxy::PointGun(FPoseContext& Output) const
 	TurnBone(Output.Pose, Spine[UE_ARRAY_COUNT(SpineBones) - 1], FQuat(FVector::CrossProduct(Facing, FVector::UpVector), Pitch));
 }
 
+void URRRandomBodyAnimInstance::UpdateGunHands(float DeltaSeconds)
+{
+	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(GetOwningActor());
+	const URRRandomGunComponent* Gun = Brawler ? Brawler->GetGun() : nullptr;
+	FRRGunSupportHold Hold;
+	// (not while a climbing clip has the whole body: its hands are on the ledge)
+	const bool bWanted = Gun && CVarGunTwoHands.GetValueOnGameThread() != 0 && MotionWholeWeight <= 0.f && Gun->GetSupportHold(Hold);
+	if (bWanted)
+	{
+		GunHands.Hold = Hold;
+	}
+	GunHands.Weight = DeltaSeconds > 0.f ? FMath::FInterpConstantTo(GunHands.Weight, bWanted ? 1.f : 0.f, DeltaSeconds, 1.f / 0.15f) : (bWanted ? 1.f : 0.f);
+}
+
+void FRRRandomBodyAnimInstanceProxy::EvaluateGunHands(FPoseContext& Output) const
+{
+	// 2026-11-20 (the user: "총기류에 손 위치를 어디에 둬야 적당한지 파악해서 체크해두고 모션 매칭을 사용해서 해당 위치에 손을 맞쳐줘.
+	// 지금은 공중에 뜨거나 허공에 손을 올리는 장면이 많이 나온다"): the toy guns sit in the right fist like in a socket, but the
+	// left hand kept wherever its animation had it (the Mixamo rifle poses and the matched clips alike): out in front where a
+	// rifle's barrel would be, open, holding nothing. Here, after every layer that moves the arms, the gun is rebuilt from the
+	// posed right hand exactly as URRRandomGunComponent places it, and the left arm is bent (two bones, elbow out and down)
+	// so the left fist sits on the gun's support point, turned like the right fist mirrored, its fingers curled like the
+	// right hand's.
+	const FBoneContainer& Bones = Output.Pose.GetBoneContainer();
+	const FCompactPoseBoneIndex RightHand = FindBone(Bones, RightHandBone);
+	const FCompactPoseBoneIndex RightPalm = FindBone(Bones, RightPalmBone);
+	const FCompactPoseBoneIndex Shoulder = FindBone(Bones, TEXT("LeftShoulder"));
+	const FCompactPoseBoneIndex Upper = FindBone(Bones, TEXT("LeftArm"));
+	const FCompactPoseBoneIndex Fore = FindBone(Bones, TEXT("LeftForeArm"));
+	const FCompactPoseBoneIndex Hand = FindBone(Bones, LeftHandBone);
+	const FCompactPoseBoneIndex LeftIndex = FindBone(Bones, TEXT("LeftHandIndex1"));
+	const FCompactPoseBoneIndex Chest = FindBone(Bones, TEXT("Spine2"));
+	if (!RightHand.IsValid() || !RightPalm.IsValid() || !Shoulder.IsValid() || !Upper.IsValid() || !Fore.IsValid() || !Hand.IsValid()
+		|| !LeftIndex.IsValid() || !Chest.IsValid())
+	{
+		return;
+	}
+	const FRRGunSupportHold& Hold = GunHands.Hold;
+	// World centimetres per mesh unit (the mesh's own scale times a giant's); the gun's lengths are in the world's
+	const float MeshScale = FMath::Max(static_cast<float>(Melee.MeshToWorld.GetScale3D().Z), KINDA_SMALL_NUMBER);
+	const float Unit = Hold.Length / 100.f * Hold.Size / MeshScale;
+	const float Fist = Hold.Size / MeshScale;
+
+	FCompactPose Reference;
+	Reference.SetBoneContainer(&Bones);
+	Reference.ResetToRefPose();
+
+	// The gun, from the right hand (URRRandomGunComponent::TickComponent, in the mesh's space)
+	const FTransform RightNow = GetMeshSpaceTransform(Output.Pose, RightHand);
+	const FVector Palm = (RightNow.GetLocation() + GetMeshSpaceTransform(Output.Pose, RightPalm).GetLocation()) * 0.5f;
+	const FQuat RightFist = RightNow.GetRotation() * Hold.FixTurn;
+	const FQuat GunRotation = RightFist * Hold.GripTurn;
+	const FVector GunOrigin = Palm + RightFist.RotateVector(Hold.FixOffset) * Fist - GunRotation.RotateVector(Hold.Grip) * Unit;
+	const FVector FistCenter = GunOrigin + GunRotation.RotateVector(Hold.Support) * Unit;
+
+	// The left fist: the right one's hold mirrored across the body (mesh X is the side axis), as the light sword's grip
+	// finds it from the reference pose; its frame is the gun's (muzzle ahead, top up), turned by SupportTurn
+	const auto Mirror = [](FVector V) { V.X = -V.X; return V; };
+	const FQuat RightRestFist = GetMeshSpaceTransform(Reference, RightHand).GetRotation() * Hold.FixTurn;
+	const FQuat LeftRestFist = FRotationMatrix::MakeFromXZ(Mirror(RightRestFist.GetAxisX()), Mirror(RightRestFist.GetAxisZ())).ToQuat();
+	const FQuat LeftRestHand = GetMeshSpaceTransform(Reference, Hand).GetRotation();
+	const FQuat LeftFix = LeftRestHand.Inverse() * LeftRestFist;
+	const FQuat LeftFist = (GunRotation * Hold.SupportTurn).GetNormalized();
+	const FQuat HandRotation = (LeftFist * LeftFix.Inverse()).GetNormalized();
+	// (the fist's own offset from the palm, mirrored: across the fist, Y flips)
+	const FVector LeftPalm = FistCenter - LeftFist.RotateVector(FVector(Hold.FixOffset.X, -Hold.FixOffset.Y, Hold.FixOffset.Z)) * Fist;
+	const FVector Wrist = LeftPalm - HandRotation.RotateVector(Reference[LeftIndex].GetTranslation() * 0.5f);
+
+	// Kept to blend back by the weight: the collarbone down to the fingertips
+	TArray<FCompactPoseBoneIndex, TInlineAllocator<24>> ArmBones;
+	TArray<FTransform, TInlineAllocator<24>> Before;
+	for (const FCompactPoseBoneIndex Index : Output.Pose.ForEachBoneIndex())
+	{
+		for (FCompactPoseBoneIndex Walk = Index; Walk.IsValid(); Walk = Output.Pose.GetParentBoneIndex(Walk))
+		{
+			if (Walk == Shoulder)
+			{
+				ArmBones.Add(Index);
+				Before.Add(Output.Pose[Index]);
+				break;
+			}
+		}
+	}
+
+	const FQuat ChestTurn = (GetMeshSpaceTransform(Output.Pose, Chest).GetRotation() * GetMeshSpaceTransform(Reference, Chest).GetRotation().Inverse()).GetNormalized();
+	const float UpperLength = Output.Pose[Fore].GetTranslation().Size();
+	const float ForeLength = Output.Pose[Hand].GetTranslation().Size();
+	const float Reach = (UpperLength + ForeLength) * 0.995f;
+	// Out of reach (short arms, a gun held out on the right): the collarbone swings the shoulder toward it first, up to
+	// ShoulderReach degrees
+	FVector Root = GetMeshSpaceTransform(Output.Pose, Upper).GetLocation();
+	const float Short = static_cast<float>((Wrist - Root).Size()) - Reach;
+	if (Short > 0.f)
+	{
+		const FVector Pivot = GetMeshSpaceTransform(Output.Pose, Shoulder).GetLocation();
+		const FVector Arm = Root - Pivot;
+		const FVector Axis = FVector::CrossProduct(Arm, Wrist - Pivot).GetSafeNormal();
+		if (!Axis.IsNearlyZero() && Arm.Size() > KINDA_SMALL_NUMBER)
+		{
+			const float Angle = FMath::Min(Short / static_cast<float>(Arm.Size()), FMath::DegreesToRadians(GunShoulderReach));
+			TurnBone(Output.Pose, Shoulder, FQuat(Axis, Angle));
+			Root = GetMeshSpaceTransform(Output.Pose, Upper).GetLocation();
+		}
+	}
+	const FVector ToWrist = Wrist - Root;
+	const FVector Direction = ToWrist.GetSafeNormal();
+	const float Distance = FMath::Clamp(static_cast<float>(ToWrist.Size()), 0.1f, Reach);
+	const float Along = (UpperLength * UpperLength - ForeLength * ForeLength + Distance * Distance) / (2.f * Distance);
+	// The elbow out to the left, down, a little back, turning with the chest
+	const FVector Pole = ChestTurn.RotateVector(FVector(1.f, -0.25f, -1.2f));
+	FVector Bend = Pole - Direction * FVector::DotProduct(Pole, Direction);
+	Bend = Bend.IsNearlyZero() ? ChestTurn.RotateVector(FVector(0.f, 0.f, -1.f)) : Bend.GetSafeNormal();
+	const FVector Elbow = Root + Direction * Along + Bend * FMath::Sqrt(FMath::Max(0.f, UpperLength * UpperLength - Along * Along));
+	const FVector OldUpper = GetMeshSpaceTransform(Output.Pose, Fore).GetLocation() - Root;
+	TurnBone(Output.Pose, Upper, FQuat::FindBetweenNormals(OldUpper.GetSafeNormal(), (Elbow - Root).GetSafeNormal()));
+	const FVector ElbowNow = GetMeshSpaceTransform(Output.Pose, Fore).GetLocation();
+	const FVector OldFore = GetMeshSpaceTransform(Output.Pose, Hand).GetLocation() - ElbowNow;
+	TurnBone(Output.Pose, Fore, FQuat::FindBetweenNormals(OldFore.GetSafeNormal(), (Wrist - ElbowNow).GetSafeNormal()));
+	const FQuat ForeNow = GetMeshSpaceTransform(Output.Pose, Fore).GetRotation();
+	Output.Pose[Hand].SetRotation((ForeNow.Inverse() * HandRotation).GetNormalized());
+
+	// The fingers curled round the gun like the right hand's: each right finger's turn in its fist, mirrored into the left
+	// fist (across the fist its Y flips: a rotation (x, y, z, w) becomes (-x, y, -z, w)), with the left bone's own axes
+	// taken from the reference pose. Parents come first in the pose, so each finger's parent is already set.
+	const FReferenceSkeleton& RefSkeleton = Bones.GetReferenceSkeleton();
+	const auto MirrorTurn = [](const FQuat& Q) { return FQuat(-Q.X, Q.Y, -Q.Z, Q.W); };
+	const FQuat RightRestHand = GetMeshSpaceTransform(Reference, RightHand).GetRotation();
+	const FQuat LeftFistNow = GetMeshSpaceTransform(Output.Pose, Hand).GetRotation() * LeftFix;
+	if (CVarGunFingers.GetValueOnAnyThread() != 0)
+	{
+		for (const FCompactPoseBoneIndex Index : ArmBones)
+		{
+			const FString Name = RefSkeleton.GetBoneName(Bones.MakeMeshPoseIndex(Index).GetInt()).ToString();
+			if (!Name.StartsWith(TEXT("LeftHand")) || Name.Len() <= 8)
+			{
+				continue;
+			}
+			const FCompactPoseBoneIndex Twin = FindBone(Bones, FName(TEXT("RightHand") + Name.Mid(8)));
+			if (!Twin.IsValid())
+			{
+				continue;
+			}
+			const FQuat RestTurn = (RightRestHand * Hold.FixTurn).Inverse() * GetMeshSpaceTransform(Reference, Twin).GetRotation();
+			const FQuat NowTurn = RightFist.Inverse() * GetMeshSpaceTransform(Output.Pose, Twin).GetRotation();
+			const FQuat Correction = MirrorTurn(RestTurn).Inverse() * LeftRestFist.Inverse() * GetMeshSpaceTransform(Reference, Index).GetRotation();
+			const FQuat Wanted = LeftFistNow * MirrorTurn(NowTurn) * Correction;
+			const FQuat Parent = GetMeshSpaceTransform(Output.Pose, Output.Pose.GetParentBoneIndex(Index)).GetRotation();
+			Output.Pose[Index].SetRotation((Parent.Inverse() * Wanted).GetNormalized());
+		}
+	}
+
+	if (CVarGunHandsLog.GetValueOnAnyThread() != 0 && (GFrameCounter % 30) == 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("GUNHANDS weight %.2f wrist off target %.2f reach %.1f short %.1f (mesh units) | right palm to left palm %.1f cm"), GunHands.Weight,
+			FVector::Dist(GetMeshSpaceTransform(Output.Pose, Hand).GetLocation(), Wrist), Reach, Short, FVector::Dist(Palm, LeftPalm) * MeshScale);
+	}
+	for (int32 I = 0; I < ArmBones.Num(); ++I)
+	{
+		Output.Pose[ArmBones[I]].Blend(Before[I], Output.Pose[ArmBones[I]], GunHands.Weight);
+	}
+}
+
 bool FRRRandomBodyAnimInstanceProxy::Evaluate(FPoseContext& Output)
 {
 	FAnimSingleNodeInstanceProxy::Evaluate(Output);
+	// Motion matching test: the driver's legs, hips, spine and head under everything else
+	if (MotionWeight > 0.f) { EvaluateMotion(Output); }
 	if (Aim.StrafeWeight > 0.f && Aim.Animations.IsComplete()) { EvaluateMovingLegs(Output); }
 
 	if (Aim.Weight > 0.f && Aim.Animations.IsComplete())
@@ -805,6 +1193,8 @@ bool FRRRandomBodyAnimInstanceProxy::Evaluate(FPoseContext& Output)
 	}
 	if (Aim.bSeparateBody) { EvaluateBodyFacing(Output); }
 	else { bHasUpperHistory = bWasCombatFacing = bEaseUpperEntry = false; }
+	// The left hand onto the gun, once the spine and the right arm are where they end up
+	if (GunHands.Weight > 0.f) { EvaluateGunHands(Output); }
 	if (Aim.GazeWeight > 0.f) { EvaluateGaze(Output); }
 	StoreSwordContacts(Output);
 	return true;

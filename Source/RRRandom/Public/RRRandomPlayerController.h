@@ -200,6 +200,13 @@ public:
 	void RRCard(int32 Number = 1);
 	UFUNCTION(Exec)
 	void RREmote(int32 Number = 1);
+	/** Scripted tests (the new fox's grip, 2026-11-19): aiming down the sights held on (1) or let go (0), as the right mouse button does. */
+	UFUNCTION(Exec)
+	void RRAim(int32 On = 1);
+	/** The swappable face part (2026-11-20): "RRFacePart Default" shows SK_<Name>Muzzle in place of the body's own muzzle,
+	 *  "RRFacePart Laugh" SK_<Name>Muzzle_Laugh, "RRFacePart Off" the body's own again. */
+	UFUNCTION(Exec)
+	void RRFacePart(const FString& Variant = TEXT("Default"));
 	UFUNCTION(Exec)
 	void RRDeal();
 	/** Presses / lets go of jump (scripted tests). */
@@ -207,6 +214,9 @@ public:
 	void RRJump();
 	UFUNCTION(Exec)
 	void RRJumpStop();
+	/** Test: my animal friend makes a climb this far up, where it stands (the climbing clips, on the studio map). */
+	UFUNCTION(Exec)
+	void RRClimbTest(float Rise = 90.f);
 	UFUNCTION(Server, Reliable)
 	void ServerDeal();
 
