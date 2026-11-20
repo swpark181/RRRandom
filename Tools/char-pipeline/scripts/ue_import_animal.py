@@ -65,6 +65,11 @@ def import_fbx(path, folder, asset_name=None, skeleton=None):
         ui.mesh_type_to_import = unreal.FBXImportType.FBXIT_SKELETAL_MESH
     ui.anim_sequence_import_data.set_editor_property(
         "animation_length", unreal.FBXAnimationLengthImportType.FBXALIT_EXPORTED_TIME)
+    if os.environ.get("RR_ANIM_FPS"):
+        # Mixamo's 30 fps takes otherwise come in resampled at about 1110 keys a second (a 45 MB victory dance);
+        # RR_ANIM_FPS=30 keeps them at their own rate (the new fox, 2026-11-19)
+        ui.anim_sequence_import_data.set_editor_property("use_default_sample_rate", False)
+        ui.anim_sequence_import_data.set_editor_property("custom_sample_rate", int(os.environ["RR_ANIM_FPS"]))
     task = unreal.AssetImportTask()
     task.filename = path
     task.destination_path = folder

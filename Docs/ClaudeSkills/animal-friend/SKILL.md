@@ -16,8 +16,14 @@ RRRandom 의 플레이 캐릭터는 **동물친구**(영문 UI ANIMAL FRIEND)라
 
 - **시안은 처음부터 Tripo 로.** 손으로 그린 SVG/HTML 시안은 "프로젝트 컨셉에 맞는 걸로", "트라이포 활용해서"라며 버려졌다.
   기존 동물친구 그림을 참고 이미지로 넣어 같은 스타일로 뽑는다.
-- **공통 룩:** 3D 카툰·치비 비율(큰 머리, 짧은 몸·다리), 편한 A 자세, 반팔 티셔츠 + 반바지 + 갈색 주머니 벨트.
+- **공통 룩:** 3D 카툰·치비 비율(큰 머리, 짧은 몸·다리), **T자 포즈**, 반팔 티셔츠 + 반바지 + 갈색 주머니 벨트.
   종마다 털·티셔츠·바지 색을 달리해서 다른 동물친구와 안 헷갈리게. 물체(소품)는 통통한 풍선 같은 카툰 스타일.
+- **게임용 캐릭터는 무조건 T자 포즈로 뽑는다**(2026-11-19 사용자 지시: "이제 게임용 캐릭터 뽑을 때 무조건 t자 포즈로 해줘").
+  3D 에 넣는 컨셉(정면·옆·뒤)과 Tripo 3D 모두 T자: 두 팔을 어깨 높이에서 수평으로 곧게 옆으로, 팔꿈치 펴고 손바닥 아래,
+  팔·손 아래가 훤히 비어 몸·허리·주머니와 안 닿게, 다리는 곧게 엉덩이 너비. 예전의 "편한 A 자세"는 쓰지 않는다
+  (A 자세는 팔이 몸에 붙어 Mixamo 가 팔을 몸통과 함께 움직였다 — 토끼 2026-10-27, 용 85차). 아래 프롬프트의 "relaxed A-pose"
+  는 모두 T자 포즈 문구로 바꿔 쓴다. 게임에 안 넣는 탐색용 시안(분위기만 보는 첫 시안)은 예외일 수 있지만, 모델링으로 갈 그림은
+  T자로 다시 뽑는다. T자 프롬프트 원문: `C:\work\RRRandom\Tools\char-pipeline\input\rabbit_smart_tpose\README.md`.
 - 탑뷰·쿼터뷰 게임이라 **위에서 봐도 읽히는 표식**(귀, 머리 위 장식, 꼬리)이 있으면 좋다.
 - 나중 변신(궁극기, 구미호 등)이 예정돼 있으면 기본형에 **작은 암시**만(이마 문양, 아이라인 등), 꼬리 수 같은 큰 변화는 변신형에.
 - 결과는 늘 **한눈에 비교하는 시트**로 보여준다(아래 7). 고르는 건 사용자.
@@ -67,8 +73,11 @@ RRRandom 의 플레이 캐릭터는 **동물친구**(영문 UI ANIMAL FRIEND)라
   꼬리가 그녀의 왼쪽으로 휘는 캐릭터라면: 앞-오른쪽 3/4 = 먼 쪽이라 거의 숨음, 뒤-왼쪽 3/4 = 카메라 쪽 가운데로 늘어짐.
 - 프롬프트 첫머리(그대로 재사용):
   `Character design concept for a cute 3D game. Use the reference image as the style guide: exactly the same 3D cartoon
-  render style, materials, soft studio lighting, chibi proportions (big head, short body, short legs) and relaxed A-pose.
+  render style, materials, soft studio lighting, chibi proportions (big head, short body, short legs), in a strict
+  symmetrical rigging T-pose (both arms straight out sideways at shoulder height, elbows straight, palms down, clear empty
+  space under the arms and hands, nothing touching the body; legs straight, hip-width apart).
   Full body, front view, centered, plain light grey background. No text, no logo, no weapon. Character: a NEW ...`
+  (2026-11-19 부터 T자 포즈. 참고 그림이 A 자세면 "do NOT copy the reference's arm pose" 를 덧붙인다.)
   뒤에 털 색·눈·머리 장식·꼬리, 그리고 `Outfit in the same game style: <색> short-sleeve T-shirt, <색> shorts, brown utility belt with small pouches.`
 - "no clothes / naked" 같은 말은 쓰지 않는다 → "image does not meet guidelines" 오류(참고 이미지 탓이 아님).
 - 여러 안은 **연달아 큐에 넣어도 된다**: 프롬프트 칸 클릭 → ctrl+a → 새 프롬프트 type → Generate. 참고 이미지는 남아 있다.
@@ -86,7 +95,9 @@ RRRandom 의 플레이 캐릭터는 **동물친구**(영문 UI ANIMAL FRIEND)라
   FRONT · FRONT-LEFT 3/4 · LEFT SIDE · BACK-LEFT 3/4 · BACK · BACK-RIGHT 3/4 · RIGHT SIDE · FRONT-RIGHT 3/4.
   (왼쪽/오른쪽은 **그림 기준**: LEFT SIDE = 얼굴이 그림 왼쪽 끝을 봄.) 프롬프트 틀:
   `Character turnaround reference, <방향 설명>: the exact same character as the reference image, same 3D cartoon render
-  style, materials, colors, chibi proportions and relaxed A-pose ...`
+  style, materials, colors, chibi proportions and the same strict T-pose (arms straight out sideways at shoulder height) ...`
+  (T자 포즈의 옆모습은 팔이 카메라 쪽·반대쪽으로 뻗어 손과 소매만 겹쳐 보인다 — "the near arm points straight at the camera"
+  라고 적는다.)
   방향 설명: 뒤 `BACK VIEW (seen straight from behind, her face is NOT visible)`,
   옆 `LEFT SIDE VIEW (exact side profile, she faces the LEFT edge of the image, only one eye visible)` / RIGHT 도 같은 식,
   3/4 `FRONT-LEFT THREE-QUARTER VIEW (body turned 45 degrees, she faces toward the LEFT edge of the image, both eyes visible,
@@ -266,6 +277,8 @@ Tripo Image 로 고침("Edit this exact image ... change only one thing: ...", �
 
 ## 8. 다음 단계 (요청 시) — 게임에 넣기
 
+**2026-11-19 부터 새 캐릭터를 게임에 넣을 때는 10절 순서를 쓴다**(빈 얼굴 T자 포즈 여우 교체 때 정리). 아래는 그 전까지의 기록과 세부 요령이다.
+
 `C:\work\RRRandom\HANDOFF.md` 23차(토끼·다람쥐·호랑이), 30·44차(드래곤), 51차(한복 호랑이) 그대로:
 `blender_tripo_to_obj.py <fbx> <obj> <베이스컬러 파일명>` → Mixamo(사용자 계정, Chrome; **Mixamo 는 캐릭터를 하나만 보관** —
 올리기 전에 지금 있는 것과 받아 둔 것 확인) → 2 Chain Fingers, 옆으로 큰 꼬리는 대칭 끄고 마커 → 17개 애니메이션
@@ -365,3 +378,108 @@ Mixamo 가 로그아웃돼 있으면 Adobe 로그인은 사용자가 직접(비�
 타이틀 자동 캡처(키 입력)는 포커스를 잃어 Enter 가 씹히기 쉽다 — 키마다 Alt 를 한 번 눌렀다 떼고 SetForegroundWindow.
 
 작업이 끝나면 HANDOFF.md 에 차수 기록을 남기고, 진행 상황은 메모리(`fox-girl-animal-friend` 같은 project 메모)에.
+
+## 9. 표정 텍스처용 얼굴 — "빈 얼굴" 모델 (2026-11-19, 여우)
+
+얼굴 표정을 텍스처로 바꾸는 캐릭터는 메시에 눈알·눈꺼풀·눈썹뼈·입 주름이 있으면 그림을 바꿔도 형태가 기본 표정 그대로 남는다
+(사용자: "눈 쪽이 평평해야", "기본 입이 없어야"). 그래서 **3D 입력 그림에서 얼굴을 지우고**(코만 남김) Tripo 로 뽑는다. 사례·근거·전후
+비교: https://claude.ai/artifact/6QufAZMWFDzDB4Y9cdRn2n (원본 `C:\work\char-pipeline\output\fox_texface\page\`), 파일 `input\fox_texface\`.
+
+- 순서: 정면에서 눈·눈꺼풀·눈썹·입 지우기("BLANK FACE BASE … Keep ONLY the small dark brown nose") → 옆·3/4·탑뷰는 "옛 그림 + 새 빈 얼굴 정면"
+  두 장 참고로 같은 편집 → T자 포즈로 전환(정면 먼저, 옆·뒤는 "그 뷰 + T자 정면" 두 장 참고) → Smart Mesh 멀티뷰.
+- **눈이 있던 자리에 매끈한 타원 패드가 남는다. Tripo 가 그걸 접시 모양으로 판다.** 3D 전에 뷰마다 "그 타원만 이마와 같은 털로 채워라,
+  크림색 주둥이는 그대로"(패드만 콕 집는 문구)로 지운다. "얼굴 전체를 같은 털로 덮어라"처럼 넓게 쓰면 주둥이 크림색이 사라지거나
+  주둥이 자체가 없어진다(여우: 6장 중 4장 실패).
+- **얼굴에 무늬가 있는 동물(호랑이, 2026-11-20)**: 눈가·볼 줄무늬와 옅은 음영도 Tripo 가 형태(감은 눈 홈, 미소 주름)로 만든다. 3D 입력 그림에서 얼굴 줄무늬·음영을 모두 걷어 내고(이마 줄만 남김) 뽑아야 매끈했다(첫 시도 100 크레딧 버림; 성긴 메시를 Blender 로 펴는 건 울퉁불퉁해짐). 옛 얼굴을 옮길 때 흰 반점이 주황 바탕에 물들면 `blender_feature_transfer.py --shift 0`, 셸 털이 그린 눈·코 위로 자라면 `blender_fur_shells_skel.py --face-bare rx,rz,zc`.
+- 주둥이를 "절반으로 줄여라"는 편집은 두 번 다 길이가 안 줄고 입 주름만 생겼다. 주둥이 길이는 이 방법으로 못 바꾼다.
+- 측정: `blender_face_audit.py <fbx> <basecolor|none> <prefix> [--zone/--eyes/--nose/--mouth]` — 머리 점토·텍스처 렌더(정면·3/4·옆·위),
+  얼굴 굴곡 지도, 눈·입 자리의 굴곡 수치(머리 폭 대비 %), 정면 카메라 JSON. 여우: 눈 자리 잔굴곡 0.63 → 0.13, 정면을 향한 면 51% → 89%.
+  텍스처 없는 메시(`none`)로도 돌아가니 **텍스처 30 크레딧을 쓰기 전에 메시만 받아 얼굴부터 본다.**
+- 표정 시험: audit 의 `<prefix>_tex_front.png`(1024) + 옛 얼굴 크롭을 참고 두 장으로 "ONLY paint the face features … EXPRESSION: …" →
+  `blender_expression.py bake <fbx> <basecolor> <tex_front.png> <edited.png> <prefix>_cam.json <out.png>`(리그 없는 Tripo FBX 도 됨) →
+  audit 로 다시 렌더. 정면 한 방향 투영이라 3/4 에서 먼 쪽 눈이 휜다(얼굴 전용 UV 는 다음 단계의 일).
+- Smart Mesh 메모: 텍스처 전 Export 는 zip 이 아니라 `.fbx` 한 개(파일 이름 = 작업 id 또는 Tripo 가 붙인 제목), 텍스처 후에는 zip.
+  **텍스처를 입힌 뒤에는 Free Retry 버튼이 없다**(텍스처 생성 중에만 보임 — 무엇을 다시 뽑는지는 확인 못 함). 내려받기를 기다릴 때는
+  "지금부터 새로 생긴 파일"만 집을 것(다운로드 폴더의 옛 `tripo_convert_*.zip` 을 잘못 풀어 옮긴 적 있음).
+- `file_upload` 는 browser_batch 한 번의 합계가 10.4 MB 를 넘으면 그 batch 전체가 실행되지 않는다. 참고 그림은 작은 JPG 사본으로.
+- **입 그림은 정면이 아니라 앞-아래에서 입힌다**(2026-11-19 말하기 시험, https://claude.ai/artifact/BXLrqY5dxifz25tdNaX3r3): 주둥이 있는
+  동물은 입 자리가 주둥이 아랫면이라 정면 투영하면 3/4·옆에서 턱선을 따라 길게 번진다. `blender_view_render.py <fbx> <basecolor> <png>
+  <json> --pitch 38 --span 0.40 --cz 0.57`(턱 밑에서 올려다본 렌더 + 카메라) 위에 입을 그리고 그 json 으로 `blender_expression.py bake`.
+  눈·눈썹은 정면 그대로. 입 프레임을 여러 장 만들 때는 `blender_image_region.py <기본> <편집본> <out> <cx,cy,rx,ry>` 로 입 타원만 기본
+  그림에 오려 붙인 뒤 굽는다(편집 모델이 눈을 조금씩 건드려 프레임을 넘기면 눈이 떨린다). GIF 는 `tools\ffmpeg\ffmpeg.exe` concat.
+
+## 10. 빈 얼굴 T자 포즈 모델을 게임 캐릭터로 넣기 (2026-11-19, 여우 교체 — 이 순서 그대로)
+
+파일: `C:\work\char-pipeline\input\fox_game\`(얼굴 `face\`, OBJ `mixamo_obj\`, Mixamo `mixamo\`, 리그 `rig_mx\`, 옛 에셋 백업 `ue_backup_fox_film\`).
+8절의 옛 순서 대신 이걸 쓴다. Blender = `"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b --factory-startup --python <스크립트> -- <인자>`.
+
+1. **게임용 얼굴 텍스처(빈 얼굴 모델은 이걸 안 하면 얼굴이 없다).**
+   **이미 게임에 있던 캐릭터를 다시 만드는 거라면 얼굴을 새로 그리지 말고 옛 텍스처에서 옮긴다**(사용자 2026-11-20: "얼굴 텍스쳐가 이전
+   느낌하고 너무 변했어. 기존 느낌을 살리는 쪽으로" — 그림 모델이 그린 얼굴은 굵은 테두리의 만화풍이 되어 인상이 달라졌다):
+   - 옛 리그 FBX + 옛 베이스컬러, 새 빈 얼굴 FBX + 베이스컬러를 각각 `blender_face_audit.py <fbx> <basecolor> <prefix> --px 2048` → 두 `_tex_front.png`.
+   - `blender_feature_transfer.py <새 정면> <옛 정면> <out> "<타원들>" --src x,y --dst x,y --scale s [--gain 1.8]` — 타원(옛 그림 픽셀,
+     `cx,cy,rx,ry[,각도]`, `;` 로 여러 개) 안을 옛 그림으로 바꾸고 가장자리 색 차이를 안으로 고르게 편다. `--src/--dst` = 같은 점(두 눈 사이)의
+     옛/새 위치, `--scale` = 옛 ortho ÷ 새 ortho(여우 0.982). 여우 눈·눈썹: `"666,1055,212,186;1383,1055,212,186;643,758,270,132;1397,758,270,132"
+     --src 1024,1083 --dst 1024,1124`. **타원은 그 부위를 통째로 덮어야 한다** — 눈썹 끝이 타원 밖으로 나가면 가장자리가 어두워져 안쪽이 하얗게 뜬다.
+     눈 아래가 크림색 털에 닿지 않게 위치를 잡는다(여우는 옛 비율보다 눈을 15px 쯤 위로).
+   - 입: 옛 입이 코 바로 아래의 짧은 선이면 정면에서 옮겨도 번지지 않는다(여우: `"1023,1479,212,53;784,1415,159,74,25;1262,1415,159,74,-25"
+     --src 1023,1420 --dst 1023,1489 --gain 1.8`, 코 아래 끝을 맞춤). 턱 밑 38° 렌더끼리 옮기면 옛 모델의 입술 굴곡 때문에 선이 조각난다.
+   - `blender_expression.py bake <새 fbx> <새 basecolor> <새 정면> <옮긴 그림> <prefix>_cam.json <out.png>` → audit 로 정면·3/4·옆 확인.
+   - **옛 눈동자가 털과 같은 색이면 셸 털이 눈동자 위로 자란다** → 털을 `--eye-r 0.05` 로 다시 만들고 `fur_cover` 얼굴을 꼭 본다.
+   - 이미 게임에 들어간 뒤 텍스처만 바꿀 때: `ue_py_import.sh <tag> "BASECOLOR DONE" "ue_import_basecolor.py Fox|<png>"`(UV 가 같을 때만) + 털 다시.
+   - **정면에서 입힌 입 선이 입꼬리 앞에서 끊기면**(주둥이 옆면이 비스듬해 선이 옅어짐): `blender_view_render.py … --pitch 38 --span 0.40 --cz 0.57 --px 2048`
+     그림 위에 `blender_stroke.py <in> <out> "x,y;x,y;…|…" --width 7.5 --taper 0.35 --soft 2.5 --color 0.16,0.09,0.07` 로 끊긴 구간만 잇고 그 json 으로 bake.
+   - **눈 사이가 밋밋하면 — 먼저 이것(여우가 실제로 쓴 방법)**: Tripo 는 얼굴만 다시 만들 수 없으니, 얼굴 형태가 마음에 드는 **다른 Tripo 결과**
+     (같은 컨셉의 다른 시도면 비율이 같다; 메시만 100 크레딧, 텍스처 불필요)의 얼굴 구역 깊이를 리깅된 메시로 옮긴다:
+     `blender_face_relief_transfer.py <평평한 리그> <형태를 줄 Tripo fbx> <out> --new <코끝 x,z> --old <코끝 x,z> --scale 1.0 --window <cx,cz,rx,rz>
+     --feather 0.03 --cuts 1 --amount 1.6 --blur 10 --smooth 2 --max 0.05`(여우: 원본 `fox_tpose_mesh.fbx`, `--new 0.1011,0.5725 --old 0.0024,0.5811
+     --window 0.1011,0.675,0.17,0.078`). **`--smooth 2` 를 빼면 울퉁불퉁하다**(Tripo 얼굴은 큰 평면 삼각형이라 면 자국이 옮겨짐). 창은 코 위까지만.
+     `--cuts` 는 1 이면 충분(3 은 털 면이 40% 늘었다). 결과는 `none` 텍스처로 점토 렌더를 봐야 한다(텍스처를 주면 점토 렌더가 거칠게 나옴).
+     사용자는 아래의 수치 콧등(`--bridge`)을 "어색해"라고 했다(좁은 능선 + 양옆 골) — 쓰지 말 것.
+   - (쓰지 않게 된 방법) 수치 콧등(사용자 2026-11-20: "눈과 눈 사이에 기존에 있던 굴곡을 조금 살려야" → 결과를 보고 "어색해"): 리깅이 끝난 리그 FBX 에
+     `blender_face_relief_transfer.py <rig> none <out> --new <두 눈 사이 x,z> --window <cx,cz,rx,rz> --feather 0.02 --cuts 2 --bridge A,s1,V,x0,s2,zlo,zhi,zfade`
+     (여우: `--new 0.1011,0.6346 --window 0.1011,0.668,0.075,0.072 --bridge 0.010,0.016,0.006,0.036,0.014,0.632,0.682,0.034` = 콧등 1%, 눈 안쪽 골 0.6%).
+     좌표는 그 리그를 `blender_face_audit.py` 로 돌린 `_cam.json` 의 center 에서 구한다. 코까지 내려가면 주둥이에 줄이 생기니 zlo 는 눈 아래 끝 위로.
+     옛 모델 깊이를 재서 옮기는 `--old` 방식은 잔주름이 생겨 쓰지 않았다. 법선은 스크립트가 원래 것을 기울여 쓴다(지우면 줄무늬).
+     그다음 `ue_py_import.sh <tag> "MESHONLY DONE" "ue_reimport_mesh.py Fox|<rig>"`(뼈대·애니메이션 그대로) + 털 다시. 눈 자리 자체는 평평하게 둔다.
+   새 캐릭터라 옛 얼굴이 없을 때만 아래처럼 그린다. 눈·눈썹은 정면에서, 입은 앞-아래에서:
+   - 정면: `blender_face_audit.py <fbx> <basecolor> <prefix> --px 1024` → `<prefix>_tex_front.png`, `_cam.json`. 그 위에 얼굴을 그린 그림에서
+     입 타원만 빈 얼굴로 되돌리고(`blender_image_region.py <얼굴 그림> <빈 정면> <out> 512,808,215,62 10`) `blender_expression.py bake` → 눈만 있는 텍스처.
+   - 입: `blender_view_render.py <fbx> <눈만 텍스처> <png> <json> --pitch 38 --span 0.40 --cz 0.57` → 그 그림에 닫은 입(또는 말하기 입)을 그리고
+     `blender_image_region.py <빈 그림> <편집본> <out> 512,715,300,110 12` → 같은 json 으로 bake. 여우 결과 `face\T_Fox_face.png`.
+2. **OBJ:** `blender_tripo_to_obj.py <fbx> <obj> <basecolor 파일명>`(Mixamo 용 텍스처는 2K JPG 사본으로 충분).
+   - **Smart Mesh 는 여러 덩어리다**(여우: 몸 + 오른팔 + 두 발). `obj_keep_largest.py <in> <out>` 를 그대로 쓰면 팔·발이 사라진다 →
+     `obj_keep_largest.py <in> <out> 20`(20 정점 이상 덩어리는 모두 남기고 범위를 찍어 줌).
+   - 꼬리 중심선은 격자 그림을 눈으로 읽지 말고 수치로: 몸 뒤(z < 몸 뒷면)·머리 아래 정점을 뿌리에서의 거리로 묶어 중심을 구한다. OBJ 의 몸 가운데는
+     x=0 이 아니다(꼬리까지 쳐서 가운데를 잡음; 여우 x≈10, z≈19). 여우 자르기: `blender_strip_polyline.py … "8,20,7;5,12,2;-2,9,-6;-6,10,-15;-13,12.5,-21;-21,17,-26;-21,29,-26;-22,34,-27" 14 7`.
+3. **Mixamo**(Chrome, 로그인돼 있을 때): Upload → zip → 마커(턱 = 얼굴 아래 끝, 손목, 팔꿈치 = 팔뚝 가운데, 무릎 = 바지단과 발 사이, 사타구니) →
+   Skeleton LOD 는 드롭다운 클릭 뒤 ArrowDown×2 + Enter = **2 Chain Fingers (41)** → Next → "Proceed with this new character" Next. T자 포즈 여우는 한 번에 됐다.
+   Mixamo 는 캐릭터 하나만 보관한다 — 바꾸기 전에 지금 것의 리그 FBX 가 로컬에 있는지 확인(2026-11-19 부터 `fox_body_mixamo` 보관).
+   - 동작 18개: `mixamo_export.js` 내용을 페이지 JS 로 넣고 `window.__runAll('foxg'); 'started'`(await 하면 45초 제한에 걸림) → `window.__prog` 로 진행 확인
+     → Downloads 의 `foxg_*.fbx` 를 `mixamo\fox_*.fbx` 로. 2026-11-19 에는 API 호출이 막히지 않고 3분쯤에 끝났다.
+4. **리그:** `blender_merge_parts.py mixamo/fox_SK.fbx mixamo_obj/fox_body.obj mixamo_obj/fox.obj rig_mx/fox_whole.fbx Hips,0.4,Spine`("on a body vertex" = 몸 정점 수 확인)
+   → 꼬리 뼈 좌표 = OBJ (x, y, z) → (x, −z, y)/100: `blender_animal_tail.py … "0.09,-0.07,0.20;0.03,0.00,0.11;-0.05,0.12,0.095;-0.15,0.22,0.135;-0.215,0.265,0.30" 0.15 1.6`
+   → `blender_head_weights.py` → `blender_pose_check.py`(꼬리·다리·팔·고개) → `blender_rig_measure.py`(여우 엉덩이 20.7).
+5. **언리얼.** 먼저 에디터·게임을 끄고 **백업**: `Content\Characters\<종>`, `Content\UI\T_<종>Portrait.uasset`, `Content\Cinematics\…`(git 에 없는 것이 많다).
+   그다음 `rm -rf Content/Characters/<종>` 하고(엔진이 뜨기 전에), 커맨드렛은 `scripts\ue_py_import.sh <tag> "<끝 표시 정규식>" "<스크립트 인자>" [초]`
+   (레거시 FBX 플래그 포함, 로그 `output\ue_logs\<tag>.log`, 끝 표시가 찍히면 프로세스를 끝냄 — 커맨드렛이 끝나도 안 죽는다).
+   **끝 표시에 항목마다 찍히는 말을 넣지 말 것**(첫 항목에서 끊고 프로세스를 죽인다; 여우 때 26개 중 18개에서 끊겼다).
+   - `RR_ANIM_FPS=30 ue_py_import.sh fox_animal "ANIMAL DONE" "ue_import_animal.py Fox|<mixamo 폴더>|<basecolor>|<rig fbx>"` — `RR_ANIM_FPS=30` 이 없으면
+     Mixamo 동작이 초당 1110키로 들어와 승리 춤이 45MB 가 된다(있으면 2.7MB).
+   - Run: `ue_import_shared_anim.py …/shared_anims/dragon_rifle_run.fbx|Run|20.4|Fox=<엉덩이>`, FlyBack: 자기 `fox_flyback.fbx|FlyBack|<엉덩이>|Fox=<엉덩이>`.
+   - 이모트·검·시네마틱 동작은 `ue_import_shared_batch.py <목록 파일>` 한 번으로(줄마다 `fbx|이름|원본 엉덩이|Fox=<엉덩이>` + Mixamo 것은 ` @30`, Tripo 24fps 는 없이).
+     여우 목록 `input\fox_game\shared_list.txt`; 전용 검 3컷은 `input\fox_game\import_sword_dedicated.py`, 조준 낮춤은 `RR_AIMLOW_DEG=-30 ue_cine_aim_low.py`.
+     옛 A자세 리그·토끼 리그에서 받은 동작도 그대로 옮겨진다(회전을 그대로 쓰고 뼈 길이만 새 뼈대 것).
+   - 셸 털: `blender_fur_shells_skel.py <rig> <basecolor> <out> --layers 12 --length 0.02 --cell 0.005 --orange-g 0.27 --orange-r 0.70` → 덮인 곳을
+     `blender_texture_compare.py <png> <털 fbx> <basecolor> --views front,left,back,face` 로 꼭 본다(새 여우는 주황이 더 붉어 기본값 0.38 로는 머리·꼬리가 듬성듬성)
+     → `ue_import_fur_shells.py "Fox|<fbx>|<strands png>"`. (2026-11-20: 털 재질에 "가까이서 얼굴 안쪽 정돈"이 들어 있다 — 얼굴 구역
+     타원체는 옛 재질에서 자동으로 이어받는다. 머리 모양·위치가 달라졌으면 5번째 값 `|<길이>|x,y,z,rx,ry,rz` 로 다시 잡고,
+     `furparam=TidyShow,1` 로 분홍 표시를 보며 맞춘다. 자세한 것은 HANDOFF "털 — 가까이서 얼굴 안쪽만 정돈".)
+6. **코드:** `RRRandomSpecies.cpp` `Tunings` 의 HipsHeight 와 GunHandTurn. GunHandTurn 재는 법: 게임을
+   `seq.sh <tag> "6:RRGod;7:rr.Gun.Debug 1;8:goto=0,8000,0;9:walk=1,0,8;18:RRAim 1;28:RRAim 0;29:quit" -RRMap=Studio -RRSpecies=Fox -RRIdleBots` 로 돌리고
+   `perl scripts/gun_hand_turn_log.pl <그 로그> 40 400` → "MEAN (walk, aim)" 줄(여우 29.0, -82.0, 89.7). `RRAim 1/0` 은 이때 넣은 치트(오른쪽 버튼 조준).
+   MeshScale 은 귀 끝까지 100 이면 그대로. 검 코드의 19.8 상수(여우 기준 크기)는 건드리지 않았다. 빌드 `Saved/Rounds99/build.sh`.
+7. **확인**(`Saved/Rounds99/seq.sh`, 스튜디오 맵은 `goto=0,8000,0` 으로 봇에서 떨어진 뒤): 정면·옆·뒤, 달리기, `RRAim 1`, `RREmote n`, `RRGun LIGHT SWORD` + `RRShoot`/`RRGuard 3`,
+   `RRGun 4`, 일반 맵 봇전 + `RRUltimate`, 로그에서 `Failed to load|has no skeleton|Ensure` 찾기. 캡처는 `output\screens\fox_game\`.
+8. **같이 깨지는 것:** 시네마틱(`Content\Cinematics\FoxVsTiger` 의 얼굴 마스크 메시·표정 재질·시퀀스)은 옛 메시·옛 UV·옛 뼈 길이에 맞춘 것이라 새 여우로
+   다시 지어야 한다(빈 얼굴 모델은 얼굴 마스크 없이 표정 텍스처를 바로 쓸 수 있다). 초상화·타이틀 그림은 옛 그림 그대로다.

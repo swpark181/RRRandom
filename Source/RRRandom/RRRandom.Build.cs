@@ -28,7 +28,27 @@ public class RRRandom : ModuleRules
 			"RenderCore",
 			// The HUD's runtime Nunito font: measured and rasterized by Slate's font services (RRRandomUIStyle)
 			"Slate",
-			"SlateCore"
+			"SlateCore",
+			// The cinematic's effects director reads its Level Sequence's time (RRRandomCineDirector, 2026-11-19)
+			"LevelSequence",
+			"MovieScene",
+			// Motion matching test (2026-11-20, RRRandomMotionMatching): the Pose Search plugin's trajectory and node types
+			"PoseSearch"
 		});
+
+		// The tool that builds a motion matching set's assets (URRRandomMotionMatchLibrary::BuildSet) only exists in the editor
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[]
+			{
+				"UnrealEd",
+				"AnimGraph",
+				"BlueprintGraph",
+				"BlendStack",
+				"BlendStackEditor",
+				"PoseSearchEditor",
+				"AssetRegistry"
+			});
+		}
 	}
 }

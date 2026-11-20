@@ -4,7 +4,15 @@
 #include "Animation/AnimSingleNodeInstance.h"
 #include "Animation/AnimSingleNodeInstanceProxy.h"
 #include "RRRandomAimAnimations.h"
+#include "RRRandomGunComponent.h"
 #include "RRRandomBodyAnimInstance.generated.h"
+
+/** The left hand on the held gun this frame (2026-11-20): where it goes, and how much of the way (eased in and out). */
+struct FRRGunHandsFrame
+{
+	FRRGunSupportHold Hold;
+	float Weight = 0.f;
+};
 
 /** What the aiming layer needs for one frame, worked out on the game thread. */
 struct FRRAimFrame
@@ -147,6 +155,9 @@ private:
 	FRRMeleeFrame Melee;
 	/** Turns the spine so the two hands (the gun between them) point along Aim.Facing, level. */
 	void PointGun(FPoseContext& Output) const;
+	/** Bends the left arm so its fist holds the gun at GunHands.Hold.Support (after every other layer has moved the arms). */
+	void EvaluateGunHands(FPoseContext& Output) const;
+	FRRGunHandsFrame GunHands;
 
 	/** Copied from the instance each frame: per tail bone, root first, the side swing and the lift in degrees. */
 	TArray<FName> TailBones;
@@ -166,6 +177,16 @@ private:
 	/** Turns each named bone in mesh space about its own root, in order (parents first). */
 	static void TurnBones(FPoseContext& Output, const TArray<FName>& Names, const TArray<FQuat>& Bends);
 	FRRAimFrame Aim;
+	/** Motion matching test (2026-11-20): the driver's pose per bone of this mesh, which bones take it, and how much. */
+	void EvaluateMotion(FPoseContext& Output) const;
+	TArray<FTransform> MotionPose;
+	TArray<uint8> MotionMask;
+	float MotionWeight = 0.f;
+	float MotionWholeWeight = 0.f;
+	TArray<FTransform> MotionWholePose;
+	/** Degrees the spine leans forward this frame; the neck and head lift this share of it back. */
+	float MotionLean = 0.f;
+	static constexpr float MotionHeadLift = 0.7f;
 };
 
 /**
@@ -371,6 +392,30 @@ public:
 	float ParryTo = 0.4f;
 	float GetAimWeight() const { return Aim.Weight; }
 	float GetAimMoveWeight() const { return Aim.MoveWeight; }
+	/**
+	 * Motion matching test (2026-11-20, RRRandomMotionMatching.h): while the animal friend walks about and has a driver
+	 * body (ARRRandomCharacter::GetMotionDriver), the driver's local bone transforms become this body's base pose for
+	 * the legs, hips, spine, neck and head. The arms keep the body's own animation (they hold the gun) and the tail its
+	 * own bends. MotionWeight eases in and out over MotionBlendTime.
+	 */
+	const TArray<FTransform>& GetMotionPose() const { return MotionPose; }
+	const TArray<uint8>& GetMotionMask() const { return MotionMask; }
+	float GetMotionWeight() const { return MotionWeight; }
+	float GetMotionLean() const { return MotionLean; }
+	const FRRGunHandsFrame& GetGunHandsFrame() const { return GunHands; }
+	/** 0 .. 1: the driver's whole pose is taken, arms too (a climbing clip, ARRRandomCharacter::WantsClimbMotion). */
+	float GetMotionWholeWeight() const { return MotionWholeWeight; }
+	const TArray<FTransform>& GetMotionWholePose() const { return MotionWholePose; }
+	UPROPERTY(EditAnywhere, Category = "Motion Matching")
+	float MotionBlendTime = 0.2f;
+	/**
+	 * Degrees the upper body leans forward at the walking speed while matched with its upper body (rr.MotionMatch.Upper 1):
+	 * the matched clips run upright and empty-handed, which looked stiff with a gun in the hands (the user, 2026-11-20).
+	 * rr.MotionMatch.Lean overrides it for trying amounts. 22 after the user compared 0, 14 and 22 ("기존 처럼 22 까지 숙이면
+	 * 좋겠네": about as far as the old walk animation bends).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Motion Matching")
+	float MotionRunLean = 22.f;
 
 protected:
 	virtual FAnimInstanceProxy* CreateAnimInstanceProxy() override;
@@ -397,6 +442,22 @@ private:
 	float TargetMoveWeights[4] = { 1.f, 0.f, 0.f, 0.f };
 
 	void UpdateAim(float DeltaSeconds);
+	/** Motion matching test: copies the driver's pose (MotionPose) and eases MotionWeight. */
+	void UpdateMotion(float DeltaSeconds);
+	TArray<FTransform> MotionPose;
+	TArray<uint8> MotionMask;
+	float MotionWeight = 0.f;
+	/** The driver mesh the mask and bone map were made for, and per bone of this mesh its bone in the driver's. */
+	TWeakObjectPtr<const USkeletalMesh> MotionMappedMesh;
+	TArray<int32> MotionBoneMap;
+	float MotionWholeWeight = 0.f;
+	TArray<FTransform> MotionWholePose;
+	/** rr.MotionMatch.Upper when the mask was made. */
+	int32 MotionUpperMode = -1;
+	float MotionLean = 0.f;
+	/** The left hand on the held gun (GunHands), eased in and out as the gun comes and goes. */
+	void UpdateGunHands(float DeltaSeconds);
+	FRRGunHandsFrame GunHands;
 	/** Round 97: the light sword's layer (Melee) from the brawler's last swing and its guard. */
 	void UpdateMelee(float DeltaSeconds);
 	FRRMeleeFrame Melee;

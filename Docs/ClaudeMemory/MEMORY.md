@@ -12,7 +12,7 @@
 - [Characters in 8 directions](character-eight-directions.md) — every character turnaround is 8 views (+top), not 4 (2026-10-21)
 - [Fox v3 remake](fox-v3-remake.md) — fox, rabbit, squirrel, tiger remade (r69-70) and Mixamo-rigged; rabbit A-3 in game r76; fox/squirrel/tiger/dragon film-style remakes all in game (round 77); dragon A-pose remake in game r85 (arms glued to body broke Mixamo; Mixamo holds dragon_apose_body_mixamo)
 - [Don't assume a tool is broken](feedback-dont-assume-broken.md) — test the cause before a workaround; say plainly which method was used
-- [Tiger fluffy concepts](tiger-fluffy-concepts.md) — fluffy tiger r72; film tiger B re-rigged in Mixamo by the user's own markers, in game r85 (hips 25.6); tiger rig is in input/tiger_film
+- [Tiger fluffy concepts](tiger-fluffy-concepts.md) — fluffy tiger r72; film tiger B re-rigged in Mixamo by the user's own markers, in game r85 (hips 25.6); tiger rig is in input/tiger_film; replaced in game 2026-11-20 by [[tiger-texface-model]]
 - [Fix textures in Tripo](feedback-fix-textures-in-tripo.md) — texture fixes via Tripo image edit + multiview retexture, not Blender paint (2026-10-21)
 - [UI portraits from concept art](ui-portraits-from-concept.md) — title/HUD character pictures are crops of the front concept, not 3D renders (2026-10-21)
 - [Star robot MJ concepts](star-robot-mj-concepts.md) — Star Team robot redesign: white + red/black ANGULAR robot (navy and general armor rejected 2026-10-23); old rounds discarded 2026-10-23; now a haetae (해태) combining robot; back to C-1 haetae-mouth helmet, glowing eyes only inside the mouth (G-1 recommended); superseded 2026-10-23 by the haetae combining robot in haetae-mj-concepts
@@ -33,3 +33,14 @@
 - [UE commandlet hangs at exit](ue-commandlet-hangs-at-exit.md) — pythonscript commandlet stays alive after DONE; poll its log, then kill
 - [DICE, never DIE](feedback-dice-not-die.md) — RRRandom on-screen text always says DICE (user asked 2026-11-18)
 - [Tripo Animate motions](tripo-animate-motions.md) — text-to-motion 20cr keeps arms tucked; multi-motion FBX; fix arms on the own rig in Blender
+- [3.5-heads concepts](prop35-concepts.md) — round 2 (2026-11-18): fox/squirrel/dragon redrawn for charm, rabbit 3 new designs (too Disney-like), waiting for picks; chart + charm-reference tricks for Nano Banana
+- [Cinematic sequence plan](cinematic-sequence-plan.md) — fox vs tiger ~10s Sequencer cinematic, texture expressions, plan in RRRandom/Docs/CinematicSequencePlan.md (2026-11-19); Fox, 7-cut 14 s storyboard v2; alley "다"; final v5 2026-11-21 (remade fox + tiger, parkour chase, hammer smash, overhead ultimate die + joy, redrawn fox expressions, 17 s), no music yet, not committed
+- [Trash exhibition folder](trash-exhibition-folder.md) — C:\work\휴지통전시회: failed stills/GIFs/robot concepts the user collects; how lost scenes were re-recorded (revert fix, or git worktree of an old commit)
+- [Game characters in T-pose](feedback-game-characters-t-pose.md) — from 2026-11-19 every game character concept-for-3D and Tripo model is T-pose, never A-pose; skill updated
+- [Fox texture-face model](fox-texface-model.md) — blank-face T-pose Smart Mesh fox; IN THE GAME as Fox since 2026-11-19 (hips 20.7, old assets backed up); face = old fox's features carried over 2026-11-20; cinematic still needs a rebuild; muzzle-swap and talking tests
+- [Fox motion matching test](fox-motion-matching-test.md) — Pose Search on the fox (2026-11-20): GASP at C:\work\GameAnimationSample, 158 clips retargeted to root-bone SK_FoxMM and copied into RRRandom; ON BY DEFAULT in the game since 2026-11-20 (`rr.MotionMatch 0` / `-RRNoMotionMatch` = off), upper body matched + 22° run lean, not committed
+- [Gun support hand IK](gun-support-hand-ik.md) — left hand on every gun via per-gun Support point + left-arm IK (2026-11-20, on by default, `rr.Gun.TwoHands 0` off), not committed
+- [Tiger texface model](tiger-texface-model.md) — game tiger replaced 2026-11-20 like the fox (blank-face T-pose Smart Mesh, old face carried over, TigerMM motion matching); 260 credits; not committed
+- [Fur tidy up close](fur-tidy-up-close.md) — all 7 furred animals tidy the inner face fur when the camera is near (2026-11-20, materials only, not committed); face ellipsoids, fur test commands, how to see the cat and rat
+- [Keep the old face look](feedback-keep-old-face-look.md) — remaking an existing character: carry the old eye/brow/mouth texture over, never redraw the face (2026-11-20)
+- [Swappable muzzle part](feedback-swappable-muzzle-part.md) — expressions/talking swap only the lower-face part (muzzle/mouth/chin); keep the jaw curves (2026-11-20)

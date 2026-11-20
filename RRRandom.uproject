@@ -19,6 +19,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "PoseSearch",
+			"Enabled": true
+		},
+		{
 			"Name": "Niagara",
 			"Enabled": true
 		},
@@ -44,6 +48,14 @@
 		},
 		{
 			"Name": "EOSShared",
+			"Enabled": true
+		},
+		{
+			"Name": "SequencerScripting",
+			"Enabled": true
+		},
+		{
+			"Name": "MovieRenderPipeline",
 			"Enabled": true
 		}
 	]
