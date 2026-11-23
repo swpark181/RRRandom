@@ -4,6 +4,117 @@
 
 Claude 기억 메모(작업 방식·아트 방향·주의점)는 `Docs/ClaudeMemory/` 에 복사해 둠 — 다른 PC 세션은 먼저 읽기.
 
+## 시네마틱 컷 재구성 초안 — 연습용 맵에서 배치, 동작, 긴장·주사위 장면 (2026-11-23, 실제 시퀀스는 안 건드림, 검토 대기)
+
+사용자가 콘티 페이지를 보고 컷별 수정 방향을 줌: 1 얼굴 클로즈업 → 뒤돌아봄 → 줌 아웃(흐린 호랑이), 2 길고 일정한 높이의 장애물을 짚고 올라 구르며 내려옴, 3 벽에 부딪히고 돌아서며 주저앉음, 4 어두운 거리에서 그림자를 지나 얼굴, 5 겁먹은 얼굴 → 금색 주사위 → 올려다보며 밝아짐, 6 일어서서 분신으로 넓게 포위 + 호랑이 움찔(기존 7 합침), 8 한 걸음씩 다가옴 + 무기 놓침, 9 그대로. "실제 시퀀스 수정하기 전에 게임내 캐릭터를 배치해서 구도와 동선을 잡아서 페이지 콘티". 그 뒤 "임시 자세를 애니메이션으로", "긴장감을 올리고 주사위 장면을 더 극적이고 유머러스하게(구도 스케치 먼저)", "이 구도대로 게임 캐릭터 배치" 순으로 진행.
+
+- **어디에:** 실제 `LS_FoxVsTiger` / `Map_FoxVsTiger` 는 그대로. 초안은 `/Game/Cinematics/FoxVsTiger/Board/` (`Map_FvT_Board` = DiceTown 복사, `LS_FvT_Board`, 오디션용 `LS_BoardAudition`, 위에서 본 `LS_FvT_BoardTop`), 렌더 설정 `MRQ_Board`.
+- **스크립트 (`Tools/cinematic/`):** `board_run.sh py <스크립트>` / `board_run.sh render <시퀀스> <테이크> [WxH]` (프레임은 `char-pipeline/output/storyboard/board2/<테이크>/`). `ue_board_build.py` 가 맵·시퀀스 전체를 다시 만들고 `board2/layout.json`(컷 시간, 경로, 카메라)을 씀. `RR_BOARD_TOP=1` 이면 막힌 골목을 바로 위에서 보는 확인용 카메라로 빌드(위치가 이상할 때). `ue_board_motions.py` 는 있는 동작에서 새 동작을 만듦(뼈마다 어느 동작의 어느 시각에서 가져올지, 다리/상체를 다른 동작에서, 뼈 회전을 시간 곡선으로, 다른 동작에서의 방향 유지). `ue_board_probe.py` 는 동작의 루트·골반·뼈 위치를 시간별로 출력. `ue_board_audition.py` 는 동작을 하나씩 틀어 보는 시퀀스(`RR_AUD_ANIMS/SLOTS/YAW/CAM/LENS`). `ue_board_poses.py` 는 처음의 정지 자세용(지금은 motions 가 대신함). `ue_cine_render_config.py` 는 `RR_CINE_PRESET` 한 줄만 추가.
+- **페이지 만드는 스크립트:** `Tools/cinematic/storyboard/` 에 사본(`build_board.py` 지금 영상 콘티, `build_board2.py` 초안 콘티, `build_board3.py` 구도 스케치). 원본과 출력은 저장소 밖 `C:\work\char-pipeline\output\storyboard\`.
+- **컷 (최종 테이크 `board2/n6`, 13컷 32초):** 1, 2, 3, 3-끝(layout 키 `3e`), 4, 4-2, 4-3(올려다보기/눈 번갈아 4번), 5-1, 5-2, 5-3, 6, 8, 9. 3-끝 = 위에서, 호랑이 그림자가 여우에게 닿음. 4-2 = 호랑이가 멈추지 않고 여우 앞 1.4m 까지. 4-3 = 망치를 듦 / 여우가 눈을 질끈 감음. 5-1 = 내려치는 순간 여우 머리 위에 나타난 금색 주사위가 대신 맞음. 5-2 = 둘이 주사위를 봄(1 쪽으로 기울다 5). 5-3 = 터지는 빛에 호랑이가 골목 가운데(= 6컷 포위 자리)로 밀려남.
+- **새 동작:** 여우 `A_Fox_Board_*` (RunLookBack, WallHit, TurnSit, Sit, SitLookUp, Cower, StandUp, StepA/B, AimStepA/B), 호랑이 `A_Tiger_Board_*` (Raise, Bonk, Watch, Shield). 모션 매칭 샘플에서 옮긴 것: `FoxMM/Traversal` 의 MantleRun, LandRoll, JumpOff, `FoxMM/Cine` 14개(벤치 앉기·일어서기, 쓰러졌다 일어서기, 머리 돌림, 웅크리기, 슬라이딩; 이 중 BenchInto / BenchOut 만 씀).
+- **알게 된 것:** 모션 매칭 동작을 게임 여우(루트 뼈 없음)에 틀면 루트 트랙이 빠지므로 액터를 원본 동작의 루트(위치 + 방향)로 키해야 함. 샘플 동작은 꼬리가 아래로 처져서 여우 스켈레톤으로 사본을 만듦. 게임의 `A_Tiger_HammerSwing1`, `A_Tiger_ShieldBlock` 은 상체용이라 그대로 틀면 호랑이가 눕는다 → 골반·다리는 `A_Tiger_Idle` 에서(정면을 봄; `Cine_SsIdleC` 는 옆으로 서 있어서 상체가 벽을 봄). 호랑이 게임 동작은 초당 24키, 여우는 30키. 여우 머리는 폭 75cm 쯤, 주사위 80cm: 폭 3.65m 골목에서 옆모습 둘을 담으려면 10~12mm. 옆 카메라는 호랑이 망치 쪽(방패 쪽에서는 방패가 가림). 앉은 여우 뒤쪽 카메라는 막힌 벽 안이라 그 컷만 벽을 숨김(4-2, 5-3, 6). 위에서 보는 컷의 긴 그림자는 길 쪽의 좁은 스폿을 컷 동안 낮춰서 만듦.
+- **Pose Search / 다른 방법 조사:** Pose Search 는 넣어 둔 동작에서 고를 뿐이라 멈추기·돌기·걸음은 되고 앉기·돌아보기는 안 됨. 샘플에 바닥에 주저앉는 동작은 없음(벤치 높이뿐). UE 5.8 의 MetaHuman Animator 가 웹캠 한 대로 전신 캡처를 한다고 함(포럼 공지, 안 써 봄): 주저앉기가 모자라면 Mixamo 다음 순서.
+- **페이지:** 초안 콘티 https://claude.ai/artifact/B9MXkSnKKFxAcNMjusBwmX (3판), 긴장·주사위 구도 스케치 https://claude.ai/artifact/6bC5aPXToCrmSUTHLhNHgT, 지금 영상 콘티 https://claude.ai/artifact/UqbffPLvmd1iaaBUh5vYmC.
+- **남은 것 / 사용자 확인 대기:** 2컷 장애물 모양(높이 1m 길이 4m 단으로 해석), 호랑이가 장애물을 부수는 것 유지, 6컷 타원(7.0m × 2.8m)과 벽 너머 카메라, 5-1·5-2 의 좌우(스케치와 반대), 망치가 머리 위로 높이 안 올라감(드는 동작을 따로 만들지), 한쪽 눈만 뜬 표정을 새로 그릴지, 길이 32초. 초안의 9컷은 시작 1초쯤 분신 권총이 렌즈를 가림(원인 못 찾음, 페이지는 지금 영상의 9컷을 씀). 확인 뒤 실제 시퀀스(`ue_cine_build.py`)에 옮길 것.
+
+## 시네마틱 콘티 페이지 — 컷 번호 1~9 (2026-11-23)
+
+사용자: "지금 시네마틱 콘티를 페이지로 만들어줘. 콘티에 번호를 붙여서." 페이지: https://claude.ai/artifact/UqbffPLvmd1iaaBUh5vYmC (원본 `C:/work/char-pipeline/output/storyboard/`: `build_board.py` 가 컷 목록에서 `page/index.html` 을 씀, 그림 `page/img/c<컷>_<순번>.jpg` = 최종 8판 프레임).
+
+- **번호**: 컷 1~9(시간 순), 그림은 `컷-순번`(예: 3-2). **이전 문서의 컷 이름과 다름**: 새 1 = 옛 1A, 2 = 1B, 3 = 2, 4 = 3, 5 = 4A, 6 = 4B, 7 = 5, 8 = 6, 9 = 7. 사용자가 번호로 말하면 이 새 번호(페이지 기준)로 읽을 것.
+- 컷 경계(프레임, 24fps): 0 · 58 · 120 · 156 · 204 · 240 · 252 · 300 · 360 · 408. 컷마다 구간, 길이(초+프레임), 렌즈, 화면·동작·표정·효과를 적음(출처 `ue_cine_build.py` 의 CUTS·CAMS·표정 키·cue).
+- 영상이 바뀌면: 프레임을 다시 뽑고(`img_grid.ps1 -Cols 1 -Cell 960`) `build_board.py` 의 표를 고쳐 같은 주소로 다시 게시.
+
+## 파츠에 맞춰 표정 입 텍스처 다시 그리기 — 여우 7 + 호랑이 3 (2026-11-23, 시네마틱에 적용, 커밋 안 함)
+
+사용자(아래 절의 결과를 보고): "변경된 파츠에 맞게 표정 텍스쳐 다시 그려줘. 여우하고 호랑이 둘 다." 페이지 4판: https://claude.ai/artifact/Md7fyo8H8EtUpZmYhvgado (맨 위 "파츠에 맞춰 입 텍스처 다시 그리기"). 작업 폴더 `C:/work/char-pipeline/input/expr_redraw/`.
+
+- **왜**: 표정 그림은 정면에서만 입혔고(`blender_expression.py bake`: 삼각형 단위 가중치 → 옆에서 각진 얼룩·옅은 쐐기), 그 뒤 파츠의 입 안이 들어가서 옆·아래에서 입꼬리가 번지고 각져 보였음. 기본 얼굴의 입꼬리 자국이 UV 섬 사이 빈 칸과 볼에 가는 선으로 남아 있기도 했음.
+- **방법**(새 `scripts/blender_mouth_views.py`):
+  1. `render <body fbx> <part fbx> <텍스처> <sheet png> <json> --mouth x,z,rx,rz --span S`: 그 표정의 파츠를 낀 머리(`rig_mx/<animal>_body.fbx` + `parts/<animal>_muzzle_<X>.fbx`)를 무광으로 네 방향(정면 | 아래 38도; 좌우 55도·아래 12도)에서 찍어 2×2 시트 한 장(3072², 칸마다 입이 한가운데; 여우 span 0.36, 호랑이 0.40). 전체: `input/expr_redraw/render_sheets.sh`.
+  2. Tripo Image · Nano Banana Pro · 4K · 2장: 시트를 올리고 "네 방향 시트다, 입만 깨끗하게 다시 그려라, 배치·구도는 픽셀 그대로"(프롬프트 전문과 고른 장 = `input/expr_redraw/prompts.md`; 태그 REDRAW_FOX_JOY/SCARED/DETERMINED, REDRAW2_FOX_WORRIED/GRIN, REDRAW_TIGER_SMUG/STARTLED, REDRAW2_TIGER_NERVOUS). 네 칸을 한 그림으로 주니 방향 간 일관성이 좋고 구도도 안 움직였음(밀림 0px). 11건 중 1건 실패(환불), 무료 568 → 588/1000.
+  3. 결과를 화면 높이 4배로 띄워 칸마다 가운데 띠 한 장씩 캡처(4장/표정, 페이지 도우미 `__band(tag, k, col, row)`; `save_to_disk` 에 `scale` 을 주면 저장본도 줄어드니 주지 말 것) → `caps.sh <animal>_<X> n0 n1 n2 n3` → `scripts/sheet_paste.ps1`(시트에 다시 붙임). 내려받기 안 함.
+  4. `bake …`(`bake_one.sh`, 전체 `bake_all.sh`): 텍셀마다 기준 자세 위치·법선 → 방향별로 가림 검사(BVH)·정면도 → **순서대로**(정면 → 아래 → 좌우) 앞 방향이 잘 보는 곳은 앞 방향만, 뒤 방향은 나머지만. 입 타원을 `--grow` 배 키운 범위 전체를 편집본으로(`--full`; 옅은 잔선은 차이 문턱으로는 못 잡음), UV 섬 사이 빈 칸 6텍셀 채움, 방향별 밀림 자동 보정, `--thick 4`(호랑이: 수염 근처 4px 는 그 방향에서 안 그림 — 수염 그림자가 턱에 찍혔었음), `--also`(눈 깜빡 얼굴에 같은 입).
+- **헤맨 것**: (1) 네 방향을 가중 평균하면 입 안이 겹쳐 보임(편집기가 입 안을 방향마다 깊이 있게 그려 이·혀 위치가 다름) → 순서 방식. (2) 선으로 된 입은 방향 간 선 위치가 조금만 달라도 끝이 두 갈래 → 선 입(Worried·Determined·Grin·Smug)은 정면이 거의 다 그리게 `--lo 0.03 --hi 0.16`, 벌린 입(Scared·Joy·Nervous·Startled)은 기본 `0.22/0.5`(정면 우선을 세게 하면 아랫입술 어두운 선이 턱 밑으로 길게 번짐). (3) 선 굵기: 첫 Worried·Grin 이 원래보다 3배쯤 굵게 나옴 → "hair-thin, do not thicken, no hooks" 로 다시 뽑아 그쪽 사용.
+- **파츠도 다시**: 다시 그린 입이 전보다 조금 크고 또렷해서(그려진 정점 수 Scared 107→209, Joy 252→386 등) 같은 방식으로 파츠를 새 텍스처에서 다시 만듦(`rebuild_parts.sh` = `input/expr_drafts/build_parts.sh` 와 같은 레시피; 바뀐 것: Scared·Startled 에 `--red … --fill 3`(새 그림은 혀가 밝음), Smug 송곳니 돌기 위치 `0.0633,0.6196`). 순서: 굽기(옛 파츠) → 파츠 다시 → 굽기(새 파츠, `PARTDIR`) → 파츠 다시. 깊이는 그대로.
+- **넣기**: `out/T_*_Expr_*.png` 10장 → `input/expressions_new/`(옛것 `old_1123b/`), 파츠 8개 → `input/<animal>_game/parts/`(옛것 `parts/old_1123b/`) → `input/expr_redraw/apply_redraw.sh`(`ue_import_part.py` 8번 + `ue_cine_expressions.py`: 텍스처·재질·털 마스크). 시네마틱은 다시 안 지음(같은 에셋 이름).
+- **확인**: 네 방향 전/후 `input/expr_redraw/out/<animal>_<X>_cmp.jpg`, 전체 `out/all_after.jpg`, 파츠 `out/parts/parts_new.jpg`. 엔진 `output/screens/expr_redraw/fox_redraw_expr.jpg`·`tiger_redraw_expr.jpg`(이전 = `screens/expr_parts/`): 웃음·환희 3/4 의 각진 얼룩 사라짐, 선 끝까지 이어짐. 최종 프레임 `screens/expr_redraw/v8_frames.jpg`. 렌더 로그 ensure/assert 0.
+- **최종 영상 8판**: `cine_blocking.ps1 -NoBuild -Take final1080h -Res 1920x1080`(RR_CINE_FINAL=1) → `render/FoxVsTiger_final_1080p_v8.mp4`(15.6MB), 웹용 `FoxVsTiger_web_v8.mp4`.
+- **남은 한계 / 안 한 것**: 아래에서 올려다보면 벌린 입이 위아래로 길게 보임(정면 그림을 턱 아래쪽 면까지 입히므로). 캡처 해상도는 4K 원본의 0.77배(입 둘레 약 23px/cm, 텍스처 밀도와 비슷). 게임 얼굴(T_Fox/Tiger_BaseColor)은 안 건드림. 음악·효과음, 커밋.
+
+## 모든 표정에 주둥이 파츠 + 호랑이 깜짝(Startled) 다듬기 (2026-11-23, 시네마틱에 적용, 커밋 안 함)
+
+사용자(아래 절의 결과를 보고): "나머지 표정도 파츠 만들고 호랑이 깜짝 표정도 다듬어줘." 페이지 3판: https://claude.ai/artifact/Md7fyo8H8EtUpZmYhvgado (맨 위 "추가 작업").
+
+- **호랑이 깜짝**: 점 눈동자 + 크게 벌린 입 → 홍채·동공 원래 크기에 눈만 조금 더 뜨고(홍채 둘레로 흰자), 코 너비만큼 작게 벌린 입. Tripo Image · Nano Banana Pro · 4K · 2장 × 프롬프트 2개(태그 STARTLED_TIGER_A/B, 무료 564 → 568/1000, 크레딧 0), 입력 = `input/expr_drafts/tiger/tiger_wide.jpg`(머리 전체). A 의 첫 장을 고름(이 없는 작은 입; B 는 걱정스러운 표정에 가까움). 화면 높이 4배로 띄워 두 장 캡처(`startled_cap1|2.jpg`, 2048 그림의 (538,570) 부터 987.74×512 씩) → `edit_Startled_hi.png` → 눈 타원 `753,785,225,215` · `1318,785,230,215`(눈이 커져서 Smug 때보다 넓힘) + 주둥이 `1046,1160,300,235` 만 오려 붙임 → `front_Startled_hi.png` → `blender_expression.py bake` → `input/expressions_new/T_Tiger_Expr_Startled.png`(옛것 `old_1123/`). 파일 내려받기 안 함. 전후 렌더 `output/expr_parts/tiger_Startled_cmp.jpg`.
+- **파츠**: `input/expr_drafts/build_parts.sh`(8개 전부 다시 만드는 명령 모음; Scared·Smug 는 앞 절과 같은 값) → `input/<fox|tiger>_game/parts/<animal>_muzzle_<표정>.fbx` → `input/expr_drafts/apply_parts.sh`(`ue_import_part.py` 6번 + `ue_cine_expressions.py`) → `SK_FoxMuzzle_Worried|Determined|Grin|Joy`, `SK_TigerMuzzle_Nervous|Startled`.
+  - 닫힌 입(여우 Worried·Determined `--mouth 0,0.522,0.085,0.018 --depth 0.003 --box 8 --gain 4 --soft 2`, 호랑이 Nervous `--mouth 0.005,0.620,0.105,0.026 --depth 0.004 --cuts 1 --red 0.25,0.6`): 입선 따라 얕은 주름. 여우 Grin `--mouth 0,0.520,0.085,0.020 --depth 0.004 --box 6 --gain 3 --soft 2`(이 줄 위아래 선이 들어가고 이는 남음).
+  - 벌린 입: 여우 Joy `--mouth 0,0.508,0.080,0.032 --depth 0.006 --red 0.25,1.0 --fill 4 --soft 6 --cuts 4 --back 1`, 호랑이 Startled `--mouth 0.005,0.610,0.055,0.022 --depth 0.006 --cuts 2 --red 0.25,0.6`.
+  - 눈 깜빡 얼굴(WorriedBlink·GrinBlink)은 입이 같아 눈 뜬 얼굴의 파츠를 씀: `ue_cine_build.py` 의 `PART_OF`(깜빡이는 동안 파츠 안 바뀜).
+- **`blender_mouth_part.py` 새 옵션**: `--probe [--plot <png>]`(파츠를 안 쓰고, 정점 위치에 텍스처 색을 찍은 0.01 눈금 그림 — 입 타원을 이걸 보고 잡음, `output/expr_parts/probe/`), `--box N --gain g`(가는 입선: 정점마다 읽는 칸을 넓히고 어두운 몫을 곱함 — 여우 파츠는 성겨서 기본값이면 선이 정점 사이로 빠져 0.07% 밖에 안 들어갔음), `--red 문턱[,몫]`(혀·잇몸처럼 밝은 빨강도 넣음: 빨강−초록), `--fill N`(벌린 입을 메시 위에서 닫기 연산 → 이·혀까지 한 덩어리로 오목하게; 안 하면 이가 가시처럼 남음), `--back 0..1`(법선 대신 머리 뒤쪽 +Y 로 곧게 넣음).
+  - **`--back` 을 만든 이유**: Joy 는 입이 턱을 감싸서, 법선 방향으로 넣으면 아래쪽이 위로 말려 올라와 정면에서 아랫니·텍스처 이음매가 드러나 파츠 없을 때보다 지저분했음(엔진 캡처로 발견, `screens/expr_parts/joy_cmp2.jpg` 는 고친 뒤). 뒤로 곧게 넣으면 정면 그림은 그대로, 옆에서만 깊이. Scared·Startled 는 입이 작아 법선 그대로 둠.
+- **확인**: 다시 지은 로그 "muzzle parts: fox [True ×7], tiger [True ×3]". 엔진 가까이 `output/screens/expr_parts/fox_parts_expr.jpg`·`tiger_parts_expr.jpg`(`fur_mask_shots.ps1 -NoGame -Expr -Expressions …`), 검토 렌더 `render/expr_parts2.mp4`, 최종 프레임에서 표정이 바뀌는 앞뒤 프레임(150–153, 178–182, 203–221, 240–248, 254–256, 381–386: `screens/expr_parts/swap_frames.jpg`, `swap_frames2.jpg`, `joy_frames.jpg`) — 주둥이가 비거나 튀는 프레임 없음, 깜빡임 동안 주둥이 그대로. 로그 ensure/assert 없음.
+- **최종 영상 7판**: `$env:RR_CINE_FINAL="1"; cine_blocking.ps1 -NoBuild -Take final1080g -Res 1920x1080` → `render/FoxVsTiger_final_1080p_v7.mp4`(15.5MB, 408프레임), 웹용 `FoxVsTiger_web_v7.mp4`(4.4MB). 깜짝 표정은 9.9~10.6초(화면에는 10.05~10.5초 컷에서만), 고개를 젖히는 모션 블러 속이라 거의 안 읽힘(예전 것도 마찬가지).
+- **남은 흠 / 안 한 것**: 여우 Grin·Joy 는 옆에서 보면 입꼬리 쪽 텍스처가 각져 보임(면마다 다른 투영이 섞인 11-21 굽기의 문제, 파츠 이전부터; 앞-아래 각도로 다시 굽는 게 해법). Joy 정면은 아랫니가 턱 털에 가려 보임(전부터). 게임 중 표정·파츠 바꾸기(없음), 음악·효과음, 커밋.
+
+## 표정 다듬기 적용 + 표정별 주둥이 파츠 (2026-11-23, 시네마틱에 적용, 커밋 안 함)
+
+사용자(아래 제안 페이지를 보고): "추천안 으로 진행하는데 표정별로 얼굴 3d 별도로 사용하기로 했는데 입 모양에 맞게 조금씩 변형을 주면 좋을것 같다." → 여우 B(숨 가쁜 작은 입)를 Scared 로, 호랑이 C(안쪽으로 기운 눈꺼풀 + 송곳니 끝)를 Smug 로 넣고, 두 표정에 입 모양대로 살짝 변형한 주둥이 파츠를 붙임.
+
+- **텍스처**: `input\expressions_new\T_Fox_Expr_Scared.png` = 초안 B 를 입힌 것(`input\expr_drafts\fox\T_Fox_Draft_B.png`), `T_Tiger_Expr_Smug.png` = 초안 C. 예전 것은 `input\expressions_new\old_1123\`. 호랑이는 Tripo 4K 결과를 화면 높이의 4배로 띄워 얼굴 부분만 두 장 캡처(2048 정면 그림 기준 1.48배 해상도) → `input\expr_drafts\tiger\edit_C_hi.png` → 두 눈·주둥이 타원만 오려 붙임(`front_C_hi.png`) → `blender_expression.py bake`(`tiger_rig_jaw.fbx`, `T_Tiger_face_v6.png`, `wide_tex_front.png`, `wide_cam.json`). 파일 내려받기는 안 함.
+- **여우 주둥이 파츠 분리**(호랑이와 같은 방식, 처음): `blender_split_part.py input\fox_game\rig_mx\fox_rig.fbx input\fox_game\rig_mx\fox --ellipse 0,-0.125,0.13,0.075` → `fox_parts.fbx`(게임 메시, 슬롯 Body/Muzzle; 840면, 이음매 74변), `fox_muzzle.fbx`(기본 파츠, `parts\` 에도 복사), `fox_body.fbx`. 언리얼: `ue_reimport_mesh.py Fox|…fox_parts.fbx`(슬롯 3개: 옛 'foxmat' 남음) + `ue_import_part.py Fox|…parts\fox_muzzle.fbx|SK_FoxMuzzle`. 털은 그대로(한 덩어리 메시에서 만든 `SK_FoxFur`).
+- **입 모양 파츠** 새 `scripts\blender_mouth_part.py <기본 파츠 fbx> <표정 텍스처> <out fbx> --mouth x,z,rx,rz [--depth 0.006] [--dark 0.30] [--soft 3] [--cuts 3] [--rim 0.012] [--bump "x,z,r,h;…"]`: 입 타원(정면에서 본 좌표: x 는 Head 뼈 기준, z 는 키 비율) 안의 면을 잘게 자르고, 각 정점의 UV 로 표정 텍스처를 읽어 어두운 곳(벌린 입 안, 입선)을 법선 방향으로 최대 `--depth` 만큼 넣음(메시 위에서 부드럽게), `--bump` = 정면에서 본 위치의 둥근 돌기(송곳니 끝). 가장자리(이음매)는 안 움직임. 파일의 매끈한 법선은 유지하고 변형만큼만 기울임.
+  - 여우: `… parts\fox_muzzle.fbx T_Fox_Expr_Scared.png parts\fox_muzzle_Scared.fbx --mouth 0,0.508,0.075,0.032 --depth 0.007`(정점 458 → 1,628, 195개 이동, 최대 0.7% = 약 1.3cm).
+  - 호랑이: `… parts\tiger_muzzle.fbx T_Tiger_Expr_Smug.png parts\tiger_muzzle_Smug.fbx --mouth 0.005,0.628,0.095,0.030 --depth 0.003 --cuts 1 --bump 0.0617,0.6206,0.008,0.004`(입선 주름 + 송곳니 돌기; 210개 이동).
+  - 언리얼: `ue_import_part.py Fox|…fox_muzzle_Scared.fbx|SK_FoxMuzzle_Scared`, `Tiger|…tiger_muzzle_Smug.fbx|SK_TigerMuzzle_Smug`. 이름 규칙 = `SK_<Name>Muzzle_<표정 이름>`.
+- **코드**: `ARRRandomCineAnimal::ExpressionParts`(표정 순서대로 파츠, 없으면 몸의 주둥이) + `FacePart` 컴포넌트 + `ShowFacePart`(게임의 `SetFacePart` 와 같은 방식: 리더 포즈, 몸의 "Muzzle" 구역 숨김, 표정 재질 입힘). `ue_cine_build.py` 의 `muzzle_parts()` 가 있는 파츠만 찾아 넣음(지금 여우 Scared, 호랑이 Smug). 주둥이 위 털은 기본 모양 그대로 — 파츠가 입 안쪽에서만 달라지고 거기는 표정의 털 마스크가 비워서 문제없음(입 밖까지 크게 바꾸는 파츠를 만들면 그 파츠용 털 필요).
+- 전체 순서 = `input\expr_drafts\apply_picks.sh`(메시·파츠·표정 가져오기) → `cine_blocking.ps1 -Take <이름>`(시네마틱 다시 짓기 + 검토 렌더).
+- **확인**: 빌드 통과. 시네마틱 다시 지은 로그 "muzzle parts: fox [True, False…], tiger [True, False, False]". 검토 렌더 `render\expr_picks.mp4`(408프레임, 9컷), 엔진 가까이 캡처 `C:\work\char-pipeline\output\screens\expr_picks\picks_sheet.jpg`(이전 = 털 마스크 때 찍은 옛 Scared·Smug; `fur_mask_shots.ps1 -NoGame -Expr -Expressions "Scared"`): 여우 큰 홍채·작게 벌린 입(옆에서 입 안 깊이 보임), 호랑이 눈썹 없음·송곳니. 게임 여우(메시 다시 가져온 뒤) `fox_game_game.jpg`: 겉모습 그대로, 이음매 안 보임. 로그 ensure/assert 없음.
+- **최종 영상 6판**: `$env:RR_CINE_FINAL="1"; cine_blocking.ps1 -NoBuild -Take final1080f -Res 1920x1080` → 프레임 `render\final1080f\` → ffmpeg `-crf 18` `render\FoxVsTiger_final_1080p_v6.mp4`(15.5MB), 웹용 720p `-crf 23` `FoxVsTiger_web_v6.mp4`(4.3MB). 털 마스크·호랑이 얼굴 털(같은 날 앞 작업)도 이 판부터 들어감. 페이지 2판에 적용 결과와 영상 추가.
+- **안 한 것**: 호랑이 Startled(점 눈동자) 다듬기(사용자에게 물어 둠), 나머지 표정의 파츠(여우 6·호랑이 2 — 입을 크게 벌리는 Joy 등은 변형이 커서 파츠용 털 처리 필요할 수 있음), 게임 중 표정(없음), 움직이는 영상에서 파츠 바뀌는 순간을 프레임 단위로 보진 않음(검토 렌더 시트와 영상 길이만 확인), 음악·효과음.
+
+## 표정 다듬기 제안 — 여우 도망(Scared)·호랑이 접근(Smug)을 덜 만화스럽게 (2026-11-23, 초안 3장씩 → 추천안으로 진행, 위 절)
+
+사용자: "여우 도망갈때 놀란 표정하고 호랑이가 걸어올 때 표정이 너무 만화 느낌이야. 적당히 3d 애니메이션에서 사례 10가지 정도 찾아보고 지금 다른 표정들에서 크게 벗어나지 않는 방향으로 수정해줘. 일단은 인게임에 바로 넣지 말고 사례 10가지와 초안 3가지 정도 제안 페이지로." 페이지: https://claude.ai/artifact/Md7fyo8H8EtUpZmYhvgado (원본 `C:\work\char-pipeline\output\expr_drafts\page\`).
+
+- **대상**: 시네마틱 여우 표정 0번 Scared(점 같은 홍채, 줄지은 이), 호랑이 표정 0번 Smug(그려 넣은 검은 눈썹, 반쯤 감은 눈, 이 드러낸 웃음). 호랑이 Startled 도 점 눈동자 — 같이 다듬을지 페이지에서 물어 둠.
+- **사례 10**(링크만, 장면 그림 없음): 주토피아, 장화신은 고양이 2(공황 장면 / 늑대), 드래곤 길들이기 2(투슬리스 동공), 와일드 로봇, 플로우, 라따뚜이, 정글북(2016), 라이온 킹(2019), 배드 가이즈(반대쪽 사례). 기준 4가지: 홍채는 줄이지 않는다 / 없던 것(눈썹)을 그려 넣지 않는다 / 이는 감춘다 / 얼굴은 덜고 몸이 말한다.
+- **초안**: 여우 A(닫힌 입)·B(작게 벌린 숨 가쁜 입, 추천)·C(가장 강함), 호랑이 A(느긋한 눈꺼풀)·B(한쪽 입꼬리)·C(안쪽으로 기운 눈꺼풀 + 송곳니 끝, 추천). 파일 `C:\work\char-pipeline\input\expr_drafts\<fox|tiger>\`(편집한 정면 `front_<X>.png`, 입힌 텍스처 `T_<Animal>_Draft_<X>.png`, 전체 순서 `build_drafts.sh`), 렌더 `output\expr_drafts\`.
+- **만든 법**: Tripo Image · Nano Banana Pro · 4K · 2장씩, 정면 그림을 참고로 올리고 "Edit this exact image … Change ONLY the facial expression: …"(무료 18장, 546 → 564/1000, 크레딧 0). 여우 입력 = `input\expressions_new\redraw\base_crop.png`(1536). **호랑이는 머리가 가장자리에서 잘린 크롭을 주면 모델이 구도를 바꿔(확대·이동) 다시 입힐 수 없었음** → 머리 전체가 보이는 `blender_face_audit.py … --span 0.72 --cz 0.68` 그림으로 다시(6장 버림). 호랑이는 편집본에서 두 눈·주둥이 타원만 기본 그림에 오려 붙임(`blender_image_region.py`, 줄무늬 선명도 유지) → `blender_expression.py bake`(리그 `tiger_rig_jaw.fbx`, 미리보기 렌더는 `tiger_rig_whiskers.fbx`).
+- **결과 가져오기**: 파일을 내려받지 않고 화면 캡처로(4K 결과를 화면 높이의 2배로 띄워 위·아래 두 장 `save_to_disk` → 새 `scripts\stitch_paste.ps1` 로 이어 붙이고 기본 정면 그림에 얹음). 약 1500px 라 원본보다 흐림. 4K 원본은 Tripo 기록에 남아 있음(프롬프트 끝 태그 DRAFT_FOX_A/B/C, DRAFT2_TIGER_A/B/C).
+- **고르면 할 일**: 4K 원본으로 다시(내려받기는 사용자에게 먼저 확인), 여우 입은 앞-아래 각도로 입히기, 호랑이는 턱·목·수염 색 칸 처리 → `input\expressions_new\T_Fox_Expr_Scared.png`·`T_Tiger_Expr_Smug.png` 교체 → `ue_cine_expressions.py`(털 마스크 자동) → 시네마틱 다시 렌더.
+
+## 털 마스크 — 얼굴 텍스처마다 짝이 되는 마스크로 눈·입 위 털 없애기 (2026-11-23, 여우 + 호랑이, 게임·시네마틱에 적용, 커밋 안 함)
+
+사용자: "캐릭터 입이나 눈 위에 털이 생기지 않도록 별도의 uv맵 같은거 만들어서 얼굴 텍스쳐 갈아낄때 마다 같이 적용해줘." 비교 페이지: https://claude.ai/artifact/CCGC6tdG2uJ8TjB5gFdDpG (원본 `C:\work\char-pipeline\output\fur_mask\page\`).
+
+- **전 상태**: 셸 털은 면 단위로 심음 → 눈 둘레는 들쭉날쭉한 큰 구멍(`--eye-r 0.05`), 입에는 털이 그대로 자라 입선·이를 덮음. 구멍은 한 가지라 표정(커진 눈, 벌린 입, 감은 눈)을 못 따라감.
+- **마스크**: 얼굴이 그려진 텍스처마다 짝 `<텍스처 이름>_FurMask`(몸 UV0 그대로, 1024², 선형, 1 = 털 · 0 = 맨살 · 사이 = 그만큼 짧은 털). 게임 얼굴 `Characters\Fox\Textures\T_Fox_BaseColor_FurMask`, 표정 `Cinematics\FoxVsTiger\Expressions\T_Fox_Expr_<X>_FurMask`. 원본 png 는 얼굴 그림 옆 `<그림>_FurMask.png`.
+- **만드는 법** `char-pipeline\scripts\blender_fur_mask.py <rig fbx> <얼굴 텍스처> <out png> [--face zlo,zhi,rx] [--dark 0.30] [--white 0.80,0.14] [--ref <빈 얼굴 텍스처>] [--close 0.012] [--margin 0.003] [--feather 0.020] [--speck 0.015] [--keep …] [--show <png>]`(전부 키 대비 비율, 약 6초):
+  - 얼굴 = 머리 앞쪽 절반, 높이 0.50~0.80, 가운데선에서 0.20 안. 그 안에서 그려진 부분 = 어두운 텍셀(선·동공·눈썹·코·벌린 입) + 순백(흰자·이). 텍스처 원본 해상도에서 판정해 마스크 칸마다 "하나라도 있으면" 으로 줄임(가는 입선 유지).
+  - **UV 에서 번지게 하면 안 됨**: Tripo 아틀라스는 얼굴이 여러 섬(눈 하나가 섬 둘에 걸침). 텍셀마다 기준 자세 표면의 3D 위치를 구해 거리·메우기를 전부 3D(KD 트리)로. 작은 얼룩(지름 1.5% 미만 덩어리) 버림 → 닫기(1.2% 키우고 줄이기: 털과 같은 색인 홍채·혀 메움) → 마스크 = 그려진 곳에서 0.3% 까지 0, 거기서 2% 에 걸쳐 1 로. 섬 사이 틈은 이웃 값으로 6칸 채움(바이리니어 번짐 방지).
+  - `--show` = 맨살을 분홍으로 칠한 텍스처(→ `blender_lit_views.py` 로 확인: `output\fur_mask\check\fox_masks_sheet.jpg`).
+- **털 셸**: `blender_fur_shells_skel.py … --face-fur 0.50,0.80,0.20`(새 옵션: 얼굴 앞면은 색과 무관하게 전부 털, 마스크가 눈·입을 비움) → 털 면 9,040 → 10,661(138,593면). 이전 털 `output\fox_game\fur_1120c\`.
+- **재질** `ue_import_fur_shells.py`: 텍스처 파라미터 `FurMaskTex`(UV0, 마스크 있는 동물만; 없으면 상수 1) → `FurMask` 노드에서 m < 0.04 면 바닥층까지 0, 가닥 길이 × m; `FurColor` 에서 바닥층 음영을 맨살 쪽으로 풀어 줌. `FurMaskShow` 1 = 마스크 자리를 하늘색으로(털은 다 자람).
+- **갈아 낄 때 같이**(`scripts\ue_fur_mask_lib.py`, 언리얼 파이썬엔 numpy 가 없어 Blender 를 띄움; 마스크 png 가 그림·리그·옵션·스크립트보다 새것이면 다시 안 만듦):
+  - `ue_import_basecolor.py Fox|<png>` → `T_Fox_BaseColor_FurMask` 도 같이(같은 에셋이라 털 재질이 바로 따라감; 털 재질이 옛것이면 재질만 다시 만듦).
+  - `ue_import_animal.py`, `ue_import_fur_shells.py`(기준색 텍스처의 원본 그림에서 매번 다시 확인).
+  - `Tools\cinematic\ue_cine_expressions.py` → 표정마다 `T_<종>_Expr_<X>_FurMask` + `M_<종>Fur_Expr_<X>` 가 표정 텍스처와 그 마스크를 함께(`ReplaceMaterialTexture` 두 번). C++ 변경 없음(`ExpressionFurs` 그대로).
+  - 대상 동물·옵션 = `scripts\fur_chars.json`(`rig`, `mask`, `face_fur`; 지금 여우만). 새 빈 얼굴 동물은 여기 추가.
+- **같이 찾은 문제**: 99차 "눈·옷 위 털 빼기"(`ue_fur_bare.py`, 재질 안의 FurBare 노드)가 11-20 정돈 때 재질을 새로 만들면서 **다람쥐·레드 폭스·토끼에서 빠져 있었음**(호랑이는 새 모델이라 옛 수치 해당 없음). 수치를 `fur_chars.json` 의 `bare` 로 옮기고 `ue_import_fur_shells.py` 가 끝에 항상 다시 적용. 세 마리 재질 다시 만듦(`"Squirrel|||;RedFox|||;Rabbit|||"`).
+- **확인**(캡처 `C:\work\char-pipeline\output\screens\fur_mask\`, 새 `scripts\fur_mask_shots.ps1 -Species Fox -Tag <이름> [-Show] [-Expr]`, `img_grid.ps1`): 전 = git HEAD 의 `M_FoxFur`·`SK_FoxFur`·`M_FoxFur_Expr_*` 로 바꿔 같은 카메라로.
+  - 게임(Studio, `goto=0,0,180` 이 해를 마주 봄, `RRSlomo 0.01`): 입선 위 가닥 사라짐, 눈 테두리 앞까지 짧은 털, 윤곽 그대로(`fox_before|after_game.jpg`).
+  - 표정 8 × 2뷰(`fox_before|after_expr.jpg`): 하네스 새 명령 `cineface=<종 번호>,<표정|->`(시네마틱 맵 `Map_FoxVsTiger` 의 배우에게 표정을 넣고 `facecam`/`furparam` 대상으로; `-game` 에서 파이썬은 액터를 못 만들고 `EditorAssetLibrary` 는 크래시) + `tplace=0,0,1500,0`(하늘로, yaw 0 이 해). `facecam` 은 시네 카메라뿐이면 16mm·초점 끔으로.
+  - 시네마틱 검토 렌더 `render\mask_review.mp4`(408프레임, 9컷 정상). **최종 영상 v5 는 다시 안 뽑음.**
+  - 다람쥐·레드 폭스·토끼 전/후 `bare_cmp.jpg`: 다람쥐·레드 폭스 눈 위 가닥 사라짐, 토끼는 얼굴 차이 거의 없음(옷만).
+- **호랑이도 같은 날 적용**(사용자: "호랑이도 여우랑 똑같이 적용해줘"): 비워 두었던 얼굴 앞면(`--face-bare`)에 털을 다시 심고 마스크로 눈·코·입을 비움. 게임 얼굴 + 표정 3개(Nervous·Smug·Startled).
+  - **판정**(`fur_chars.json` 의 Tiger): 줄무늬가 눈 선만큼 어둡고 흰 털이 이만큼 희어서 여우 규칙은 못 씀 → 새 옵션 `--only "x,z,rx,rz[,규칙글자];…"`(정면에서 본 타원 안에서만 찾음; 글자 d 어두움 · w 흰색 · c 크림 · p 분홍 · r 기준 텍스처와 차이): 두 눈 `∓0.098,0.757,0.068,0.065,dc`, 주둥이 `0.005,0.642,0.105,0.088,dp`. `--cream 0.72,0.11,0.30,0.10`(새: 밝기·채도 범위·빨강−파랑; 호랑이 흰자는 따뜻한 흰색 (0.93,0.86,0.77), 흰 털은 채도 0.1 미만 — **눈 외곽선은 중간 회색(밝기 0.53)이라 어두움 규칙에 안 걸림**, 조명 렌더에서 검게 보일 뿐; 정면 무광 렌더에서 색을 직접 재서 알았음), `--pink`(새: 코·혀), `--white 0,0`, `--speck 0.02`, `--size 2048`, `--fill-inside 0.0025`(새: 타원 안에서 그려진 선으로 막힌 안쪽을 채움 — 선 양옆 한 걸음을 벽으로; 깜짝 표정의 큰 흰자·이), `--face 0.53,0.86,0.22,0.75`(4번째 값 새: 얼굴 = 맨 앞에서 뒤까지의 몇 할까지인지, 기본 0.5 — 호랑이는 주둥이가 튀어나와 0.5 면 눈 바깥 절반이 잘림). 타원 중심 x 를 안 쓰던 버그도 고침(`--keep` 포함).
+  - **털 셸**: 리그 = `rig_mx\tiger_parts.fbx`(몸 + 주둥이 파츠 두 메시). `blender_fur_shells_skel.py` 가 메시가 여럿이면 합치고 이음매 159점을 붙인 뒤 털을 만듦, 털 면의 재질 슬롯(Body/Muzzle) 유지 → **주둥이 위 털은 `SK_TigerFur` 의 "Muzzle" 구역**. 명령: `… tiger_parts.fbx T_Tiger_face_v6.png out --mask all --band 0.13,0.54,0.21 --cloth white --eye-r 0.05 --face-fur 0.56,0.86,0.20,0.75 --no-loose 100`(`--no-loose` 새: 면 100개 미만 떨어진 조각 = 수염 8가닥은 털 없음). 털 면 15,489 → 21,964(285,532면). 이전 털 `output\tiger_game\fur_1120\`.
+  - **주둥이 파츠와의 관계**: 지금은 기본 파츠(`RRFacePart Default`, 몸의 주둥이와 같은 모양)뿐이라 문제없음. **입 모양이 다른 파츠를 만들면** 그 파츠용 털을 따로 만들거나 `SetFacePart` 에서 털의 "Muzzle" 구역을 숨겨야 함(코드 아직 없음).
+  - 확인: `tiger_before|after_game.jpg`, `tiger_before|after_expr.jpg`(`fur_mask_shots.ps1 -Species Tiger -Tag … -Show -Expr -Expressions "-","Nervous","Smug","Startled"`), 마스크 그림 `output\fur_mask\check\tiger_masks_sheet.jpg`, 시네마틱 검토 렌더 `render\mask_review2.mp4`. 여우 마스크는 스크립트 변경 뒤에도 수치 동일.
+- **안 한 것**: 고양이·쥐, 움직이는 화면·30명 fps(텍스처 읽기 1번 추가)·온라인·거인·탈것, 게임 중 표정 바꾸기(게임엔 아직 없음 — 생기면 표정 텍스처와 `_FurMask` 를 한 쌍으로 넘길 것). 눈썹도 맨살(그려진 부분 전부). `Tools\char-pipeline\scripts` 사본에 새 스크립트 복사함(리그 경로는 `C:\work\char-pipeline` 기준이라 사본에서는 실행 안 됨).
+
 ## 털 — 가까이서 얼굴 안쪽만 정돈 (여우 먼저, 이어서 털 있는 동물 전부; 2026-11-20, 게임에 적용, 커밋 안 함)
 
 사용자: "여우 얼굴을 가까이서 볼 때 털이 너무 듬성듬성한것 처럼 보이는데 가까워질수록 외곽털은 그대로 비교적 얼굴 안쪽 털들은 정돈되게 보이게 해줘." 비교 페이지: https://claude.ai/artifact/T7MBGysfir79NWG675Ds5L (원본 `C:\work\char-pipeline\output\fox_game\fur_tidy\page\`).

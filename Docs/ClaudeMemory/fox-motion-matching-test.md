@@ -95,3 +95,5 @@ lengthening the climb would look better but changes game speed.
 ABP_/PSD_/PSS_FoxMM.uasset on disk first; the script now stops if they exist.
 
 Write-up for people (user asked 2026-11-20: "모션관련 작업을 md 파일로 정리해서 저장해줘"): `C:\work\RRRandom\Docs\FoxMotionMatching.md` (Korean; switches, structure, pipeline order, clip-name checks, problems, open items). Keep it in step with the HANDOFF entry. Before/after page (model, face, motion): https://claude.ai/artifact/Thv5P49BdQv9NVVTsU3dby, source `C:\work\char-pipeline\outputox_compare\page\`.
+
+Shipped 2026-11-21: RRRandom PR #20 (merge 2a60731) carries all of this; earlier "not committed" notes above are out of date.

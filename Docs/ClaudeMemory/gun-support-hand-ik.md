@@ -15,3 +15,5 @@ Done (game, all species, `rr.Gun.TwoHands` default 1): `FRRGunLook::Support` + `
 I told the user plainly that Pose Search cannot place hands (the GASP clips are unarmed); matching picks the body, IK puts the hand on the gun afterwards.
 
 Measuring: `char-pipeline/scripts/blender_gun_support.py` (side view, underside profile, red/green fist rings). Checking: off/on pairs on Studio with `showhud` (hides the HUD) and `RRStudioCam 70 170 -15`; `guncam=body` and `guncam=left` views end up inside the big head or chest, don't use them. Page https://claude.ai/artifact/FKkYK2dgZaN52zZp2MZvyb (source `char-pipeline/output/gun_hands/page/`). HANDOFF top section + Docs/FoxMotionMatching.md 7-1. Not committed. Related: [[fox-motion-matching-test]], [[animation-studio-map]].
+
+Shipped 2026-11-21: RRRandom PR #20 (merge 2a60731) carries all of this; earlier "not committed" notes above are out of date.

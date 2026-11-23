@@ -133,11 +133,31 @@ log(f"faces: fox {[bool(m) for m in FOX_FACES]}, tiger {[bool(m) for m in TIGER_
 FOX_FURS = [unreal.load_asset(EXPR + f"M_FoxFur_Expr_{n}") for n in FOX_EXPR]
 TIGER_FURS = [unreal.load_asset(EXPR + f"M_TigerFur_Expr_{n}") for n in ("Smug", "Startled", "Nervous")]
 log(f"fur faces: fox {[bool(m) for m in FOX_FURS]}, tiger {[bool(m) for m in TIGER_FURS]}")
+# (2026-11-23, the user: "표정별로 얼굴 3d 별도로 사용하기로 했는데 입 모양에 맞게 조금씩 변형을 주면 좋을것 같다") the muzzle part
+# of each expression that has one: /Game/Characters/<Name>/SK_<Name>Muzzle_<Expression> (char-pipeline
+# blender_mouth_part.py + ue_import_part.py), shown in place of the body's "Muzzle" section; none = the body's own muzzle.
+# A blink face has the mouth of its open-eyed face, so it shows that face's part (no part swap during a blink).
+PART_OF = {"WorriedBlink": "Worried", "GrinBlink": "Grin"}
+
+
+def muzzle_parts(species, names):
+    parts = []
+    for n in names:
+        path = f"/Game/Characters/{species}/SK_{species}Muzzle_{PART_OF.get(n, n)}"
+        parts.append(unreal.load_asset(path) if unreal.EditorAssetLibrary.does_asset_exist(path) else None)
+    return parts
+
+
+FOX_PARTS = muzzle_parts("Fox", FOX_EXPR)
+TIGER_PARTS = muzzle_parts("Tiger", ("Smug", "Startled", "Nervous"))
+log(f"muzzle parts: fox {[bool(m) for m in FOX_PARTS]}, tiger {[bool(m) for m in TIGER_PARTS]}")
 for a in [fox] + clones:
     a.set_editor_property("expressions", FOX_FACES)
     a.set_editor_property("expression_furs", FOX_FURS)
+    a.set_editor_property("expression_parts", FOX_PARTS)
 tiger.set_editor_property("expressions", TIGER_FACES)
 tiger.set_editor_property("expression_furs", TIGER_FURS)
+tiger.set_editor_property("expression_parts", TIGER_PARTS)
 # The fox's parkour: the Game Animation Sample's running hurdles, retargeted onto SK_FoxMM (the fox's rig + a root
 # bone, char-pipeline/scripts/mm_gasp_retarget_extra.py). The game fox's skeleton takes them as a compatible skeleton
 # (same bone names; the root bone's track has no bone here, so the clip plays in place and the actor is keyed along

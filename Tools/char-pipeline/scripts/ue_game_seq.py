@@ -341,7 +341,16 @@ def tick(dt):
                             front_yaw = unreal.MathLibrary.make_rot_from_x(f).yaw
                     break
             if cams and head is not None:
-                cam = cams[0]
+                # (a plain camera: on the cinematic's map the first ones are its cine cameras, long lenses with depth of field)
+                cam = ([c for c in cams if not isinstance(c, unreal.CineCameraActor)] or cams)[0]
+                if isinstance(cam, unreal.CineCameraActor):
+                    # (only cine cameras there: a wide lens, everything sharp)
+                    lens = cam.get_cine_camera_component()
+                    lens.set_editor_property("current_focal_length", 16.0)
+                    lens.set_editor_property("current_aperture", 22.0)
+                    focus = lens.get_editor_property("focus_settings")
+                    focus.set_editor_property("focus_method", unreal.CameraFocusMethod.DISABLE)
+                    lens.set_editor_property("focus_settings", focus)
                 face = head + unreal.Vector(0.0, 0.0, up)
                 way = unreal.MathLibrary.get_forward_vector(unreal.Rotator(0.0, 0.0, front_yaw + yaw_off))
                 spot = face + way * dist + unreal.Vector(0.0, 0.0, rise)
@@ -351,6 +360,28 @@ def tick(dt):
                 unreal.log(f"GAMESEQ facecam at {spot} looking at {face}")
             else:
                 unreal.log("GAMESEQ facecam: no head bone or camera")
+        elif cmd.startswith("cineface="):
+            # 2026-11-23: cineface=<species index>,<expression name or -> puts that expression on the cinematic animal
+            # friend of that species standing in the level (ARRRandomCineAnimal; run on the cinematic's own map,
+            # /Game/Cinematics/FoxVsTiger/Map_FoxVsTiger: Python cannot spawn an actor in a -game run), the way the
+            # cinematic swaps it: body M_<Sp>_Expr_<X> and fur M_<Sp>Fur_Expr_<X> ("-" = the game's own face), and makes
+            # it the target of facecam / furparam. To see each expression's fur mask at work.
+            vals = cmd.split("=")[1].split(",")
+            idx, want = int(vals[0]), vals[1] if len(vals) > 1 else "-"
+            actor = state.get("cine_actor")
+            if actor is None or not unreal.SystemLibrary.is_valid(actor):
+                there = [x for x in unreal.GameplayStatics.get_all_actors_of_class(w, unreal.RRRandomCineAnimal)
+                         if x.get_editor_property("species") == idx]
+                there.sort(key=lambda x: ("Clone" in x.get_name(), x.get_name()))
+                actor = there[0] if there else None
+                state["cine_actor"] = actor
+            if actor is None:
+                unreal.log("GAMESEQ cineface: no cinematic animal friend of that species in this level")
+            else:
+                names = [m.get_name().split("_Expr_")[-1] if m else "" for m in actor.get_editor_property("expressions")]
+                actor.set_editor_property("expression", names.index(want) if want in names else -1)
+                state["target"] = actor
+                unreal.log(f"GAMESEQ cineface {actor.get_name()} {want} of {names} at {actor.get_actor_location()}")
         elif cmd.startswith("furparam="):
             # furparam=<name>,<value>[,<name>,<value>...]: sets scalar parameters on my animal friend's shell fur material
             # (through a dynamic instance, this run only), to compare values in one run: furparam=TidyNear,-1,TidyFar,-1

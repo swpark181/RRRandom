@@ -62,6 +62,17 @@ public:
 	TArray<TObjectPtr<UMaterialInterface>> ExpressionFurs;
 
 	/**
+	 * 2026-11-23: the muzzle part for each expression (same order as Expressions; SK_<Name>Muzzle_<Expression>,
+	 * char-pipeline/scripts/blender_mouth_part.py: the default muzzle with its surface shaped a little to the mouth painted
+	 * in that expression: the inside of an open mouth sunk in, a fang tip raised). Shown on FacePart in place of the body's
+	 * "Muzzle" material section, wearing the expression's material. Null or no such index: the body's own muzzle.
+	 * The fur over the muzzle stays the default part's: the parts differ from it only inside the mouth, where the
+	 * expression's fur mask leaves no fur.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Cine")
+	TArray<TObjectPtr<USkeletalMesh>> ExpressionParts;
+
+	/**
 	 * The cinematic's own body (null: the game's), on the species' skeleton: the game mesh with a smooth face mask
 	 * joined to it as the material slot "Face" (char-pipeline/scripts/blender_face_flatten.py; what stood out of the face
 	 * is pushed behind it). With a "Face" slot the body keeps the game's material and only the mask takes
@@ -83,6 +94,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cine")
 	TObjectPtr<URRRandomFurComponent> Fur;
 
+	/** The expression's muzzle part (ExpressionParts), following Body's pose; hidden while the body shows its own muzzle. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cine")
+	TObjectPtr<USkeletalMeshComponent> FacePart;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cine")
 	TObjectPtr<UStaticMeshComponent> Pistol;
 
@@ -100,6 +115,8 @@ private:
 	void PlaceShield() const;
 
 	void ApplyExpression();
+	/** Shows Part with Material in place of the body's "Muzzle" section, or (null) the body's own muzzle again. */
+	void ShowFacePart(USkeletalMesh* Part, UMaterialInterface* Material);
 
 	int32 AppliedSpecies = -1;
 	int32 AppliedExpression = -2;

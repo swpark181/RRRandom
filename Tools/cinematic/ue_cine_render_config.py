@@ -6,7 +6,7 @@ import os
 import unreal
 
 FOLDER = "/Game/Cinematics/FoxVsTiger"
-NAME = "MRQ_Blocking720"
+NAME = os.environ.get("RR_CINE_PRESET", "MRQ_Blocking720")   # (2026-11-23: the storyboard draft renders with its own preset)
 eal = unreal.EditorAssetLibrary
 if eal.does_asset_exist(f"{FOLDER}/{NAME}"):
     eal.delete_asset(f"{FOLDER}/{NAME}")

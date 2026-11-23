@@ -20,6 +20,9 @@ Usage: blender -b --factory-startup --python blender_fur_shells_skel.py -- <rig 
        [--layers 12] [--length 0.02] [--cell 0.005] [--mask orange|cream|all]
        with --mask orange: [--orange-g 0.38] [--orange-r 0] (the G / R floor and an R floor for the fur colour)
        [--eye-r 0.035] (how far round the eye whites stays bare, x the height)
+       [--face-fur <z lo>,<z hi>,<half width>[,<front 0.5>]] (the whole front of the face furred, for a face with a fur mask)
+       [--no-loose <faces>] (loose pieces with fewer faces stay bare: whiskers)
+  A rig with several meshes (the tiger's body + muzzle part) is joined and welded first; the fur keeps their material slots.
        with --mask all: [--band <z lo>,<z hi>,<torso radius>] (fractions of the height: the clothes' heights and the
        torso's radius round its middle there) [--cloth white,beige,green,dark,red] (clothing colours anywhere in that band,
        for sleeves) [--dark-head] (a black eye mask) [--iris yellow|green] (eyes with no white round them)
@@ -51,7 +54,23 @@ CELLS = 64
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.fbx(filepath=rig_fbx)
 arm = next(o for o in bpy.data.objects if o.type == "ARMATURE")
-body = next(o for o in bpy.data.objects if o.type == "MESH")
+meshes = [o for o in bpy.data.objects if o.type == "MESH"]
+body = meshes[0]
+joined = len(meshes) > 1
+if joined:
+    # Several meshes (2026-11-23, the tiger: its body and its muzzle part, tiger_parts.fbx): made one, so the fur runs
+    # across the muzzle too. Their seam is welded further down, so the fur's normals don't part along it. The fur keeps
+    # each face's material slot ("Body" / "Muzzle"): the muzzle's fur is its own section of SK_<Name>Fur, to hide when
+    # another muzzle part is shown.
+    body = max(meshes, key=lambda o: len(o.data.polygons))
+    for o in meshes:
+        o.data.uv_layers[0].name = "UVMap"
+    bpy.ops.object.select_all(action="DESELECT")
+    for o in meshes:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = body
+    bpy.ops.object.join()
+    print(f"SHELLS joined {len(meshes)} meshes: {len(body.data.polygons)} faces, slots {[m.name for m in body.data.materials]}")
 mw = body.matrix_world.copy()
 mw3 = mw.to_3x3()
 
@@ -68,6 +87,11 @@ def sample(uv):
 
 bm = bmesh.new()
 bm.from_mesh(body.data)
+if joined:
+    before = len(bm.verts)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=2e-5 / max(mw.to_scale()[0], 1e-9))
+    bm.normal_update()
+    print(f"SHELLS welded {before - len(bm.verts)} seam vertices")
 bm.faces.ensure_lookup_table()
 bm.verts.ensure_lookup_table()
 uv_layer = bm.loops.layers.uv.active
@@ -175,6 +199,52 @@ if face_bare:
     bare |= ell & (centres[:, 1] < hy_mid) & (fn[:, 1] < -0.15)
     print(f"SHELLS face bare: {int((ell & (centres[:, 1] < hy_mid)).sum())} faces round x {hx:.3f}")
 fur &= ~bare
+# --no-loose <faces>: loose pieces of the mesh with fewer faces than this never carry fur (the tiger's whiskers: eight
+# thin prisms of 27 faces each on its muzzle part)
+no_loose = opt("--no-loose", 0, int)
+tiny = np.zeros(len(centres), bool)
+if no_loose:
+    seen_i = np.zeros(len(centres), bool)
+    for start in bm.faces:
+        if seen_i[start.index]:
+            continue
+        comp, stack = [], [start]
+        seen_i[start.index] = True
+        while stack:
+            f = stack.pop()
+            comp.append(f.index)
+            for e in f.edges:
+                for g2 in e.link_faces:
+                    if not seen_i[g2.index]:
+                        seen_i[g2.index] = True
+                        stack.append(g2)
+        if len(comp) < no_loose:
+            tiny[comp] = True
+    fur &= ~tiny
+    bare |= tiny
+    print(f"SHELLS loose pieces under {no_loose} faces: {int(tiny.sum())} faces kept bare")
+# --face-fur <z lo>,<z hi>,<half width> (2026-11-23, for a face that is texture only and has a fur mask,
+# blender_fur_mask.py with the same --face numbers): every face on the front of the head between those heights and within
+# that half width of its middle line carries fur, whatever its colour. The fur mask of the face texture in use then
+# says, texel by texel, where the eyes, brows, nose and mouth stay bare (the holes cut here face by face were jagged
+# and the same for every expression)
+face_fur = opt("--face-fur", "", str)
+if face_fur:
+    f_nums = [float(c) for c in face_fur.split(",")]
+    f_zlo, f_zhi, f_rx = f_nums[:3]
+    f_front = f_nums[3] if len(f_nums) > 3 else 0.5  # (how far back from the front-most point the face goes, as the mask's --face)
+    headv = wco[wco[:, 2] > zlo + 0.55 * height]
+    hx = (np.percentile(headv[:, 0], 2) + np.percentile(headv[:, 0], 98)) / 2
+    for bone in arm.data.bones:
+        if bone.name.split(":")[-1] == "Head":
+            hx = (arm.matrix_world @ bone.head_local).x
+    bandv = wco[(wco[:, 2] > zlo + f_zlo * height) & (wco[:, 2] < zlo + f_zhi * height) & (np.abs(wco[:, 0] - hx) < f_rx * height)]
+    hy_mid = bandv[:, 1].min() + (bandv[:, 1].max() - bandv[:, 1].min()) * f_front
+    forced = (zrel > f_zlo) & (zrel < f_zhi) & (np.abs(centres[:, 0] - hx) < f_rx * height) & (centres[:, 1] < hy_mid)
+    print(f"SHELLS face fur: {int((forced & ~fur).sum())} more faces round x {hx:.3f}, in front of y {hy_mid:.3f}")
+    forced &= ~tiny
+    fur |= forced
+    bare &= ~forced
 nbrs =[[g2.index for e in f.edges for g2 in e.link_faces if g2.index != f.index] for f in bm.faces]
 for _ in range(2):
     vote = np.array([fur[n].mean() if n else 0.0 for n in nbrs])
@@ -255,6 +325,10 @@ for li, h in enumerate(hs_layers):
 
 me = bpy.data.meshes.new("FurShells")
 me.from_pydata(verts, [], faces)
+if joined and len(body.data.materials) > 1:
+    for m in body.data.materials:
+        me.materials.append(m)
+    me.polygons.foreach_set("material_index", [f.material_index for _ in hs_layers for f in fur_faces])
 me.shade_smooth()  # smooth like the body, or the shells light up in facets
 me.uv_layers.new(name="UVMap").data.foreach_set("uv", [c for uv in uv0 for c in uv])
 me.uv_layers.new(name="FurUV").data.foreach_set("uv", [c for uv in uv1 for c in uv])
