@@ -1,13 +1,14 @@
 {
   "_about": "What each animal friend's shell fur needs besides its mesh, read by ue_fur_mask_lib.py (2026-11-23). 'rig' + 'mask': the animal friend has a fur mask for each face texture (blender_fur_mask.py <rig> <face texture> <mask png> + these options; paths from the char-pipeline folder); 'face_fur': the --face-fur numbers its shells were made with (the same as the mask's --face). 'bare': the ue_fur_bare.py spec (eyes and clothes left out by position and colour, round 99), put back every time M_<Name>Fur is rebuilt.",
   "Fox": {
-    "rig": "input/fox_game/rig_mx/fox_rig.fbx",
+    "_note": "rig = the fox generated again with a straight tail (2026-11-24); before that input/fox_game/rig_mx/fox_rig.fbx",
+    "rig": "input/fox_straight/rig/fox_straight_rig.fbx",
     "mask": ["--face", "0.50,0.80,0.20"],
     "face_fur": "0.50,0.80,0.20"
   },
   "Tiger": {
-    "_note": "rig = body + muzzle part (the fur runs over the muzzle, as its own 'Muzzle' section). Its stripes are as dark as its eye lines and its fur as white as its teeth, so features are looked for only in three ellipses: each eye (dark + the warm white of the eye) and the muzzle (dark + pink).",
-    "rig": "input/tiger_game/rig_mx/tiger_parts.fbx",
+    "_note": "rig = the tiger generated again with a straight tail (2026-11-25; before that input/tiger_game/rig_mx/tiger_parts.fbx), rig = body + muzzle part (the fur runs over the muzzle, as its own 'Muzzle' section). Its stripes are as dark as its eye lines and its fur as white as its teeth, so features are looked for only in three ellipses: each eye (dark + the warm white of the eye) and the muzzle (dark + pink).",
+    "rig": "input/tiger_straight/rig/tiger_straight_fit_parts.fbx",
     "mask": ["--size", "2048", "--face", "0.53,0.86,0.22,0.75", "--white", "0,0", "--pink", "--cream", "0.72,0.11,0.30,0.10",
              "--speck", "0.02",
              "--only", "-0.098,0.757,0.068,0.065,dc;0.098,0.757,0.068,0.065,dc;0.005,0.642,0.105,0.088,dp",

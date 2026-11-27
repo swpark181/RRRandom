@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 01b70a0c-fd4e-460b-89a1-f962ea75fc2a
-  modified: 2026-11-23T06:52:34.650Z
+  modified: 2026-11-24T02:28:37.341Z
 ---
 
 2026-11-23, the user: "지금 시네마틱 콘티를 페이지로 만들어줘. 콘티에 번호를 붙여서." Page:
@@ -22,7 +22,57 @@ The user's word for this document is 콘티 (asked first what a "시퀀스 연�
 
 Related: [[cinematic-sequence-plan]], [[feedback-comparison-page]].
 
-**Re-cut draft (2026-11-23, waiting for the user's review).** The user gave a new cut list against this page (1 face close-up
+**The re-cut is the real film now (2026-11-24, final v9, 13 cuts, 32 s; not committed).** The user: "콘티 손본거 따라서 작업
+진행해줘" - taken as the go-ahead to move the draft below into the real Map_FoxVsTiger / LS_FoxVsTiger (my reading; the
+draft's open questions were never answered and stayed as drafted). This page (same address, version 2) now shows the
+new film with cut labels 1, 2, 3, 3-끝, 4, 4-2, 4-3, 5-1, 5-2, 5-3, 6, 8, 9 and panels like "4-3·2"; the builder is
+`storyboard\build_board.py` (the v8 page's is `build_board_v8.py`), frames from `cinematic_blocking\render\final1080i`,
+times from `storyboard\final\layout.json`. Build + render: `RRRandom/Tools/cinematic/cine_run.sh build | render <take>
+[WxH] | mp4 <take> <name> [crf] [height]` (720p render 40 s; RR_CINE_FINAL=1 1080p 2 min 15 s); `ue_cine_build.py` is the
+re-cut, `ue_cine_build_v8_1123.py` the film before. Videos `render\FoxVsTiger_final_1080p_v9.mp4`, `FoxVsTiger_web_v9.mp4`.
+Fixed on the way: cut 2's whip was a camera yaw key going -165 → 180 the long way round (unwrap yaws between camera
+keys), not the pink die (its face is at X -4499); cut 9's blocked lens was the clones starting the aim clip at the cut
+(now PistolAimLow from 1.5 s in); hammer raised straight overhead (right upper arm turned 75° in A_Tiger_Board_Raise,
+eased back in Bonk); the fox's face shots from straight in front with the tiger hidden (and the shadow light off, or
+the face burns out), whole face not eyes only (the head sways out of a tight frame); clones appear 3 frames after
+their smoke. Ray traces in a commandlet's editor world hit nothing of the town (it is not built there).
+
+**Polish pass (2026-11-24, final v10, 32.75 s, not committed).** After my list of what a shipping sequence lacks, the user
+chose picture quality only ("털, 표정, 동작이음매, 페이드") and asked for a quick way to check; the order they approved was
+fade → fur → faces → motion, each with before/after clips. Review page https://claude.ai/artifact/KFxKf14i5VFf1i2Qnmh8aK
+(`storyboard\polish\`, clips by `make_clips.sh side|zoom`, before = take final1080i, after = final1080j); this conti
+page republished from v10 (version 3). Quick-check tools in `cine_run.sh`: `render <take> <res> <from,to>` (one cut
+≈ 45 s, final quality too), `clip`, `compare` (side by side, slowed, frame numbers). What was done: Fade track (in 0.5 s,
+out 0.75 s added after the grin's 2 s); a 36-layer fur for the fox and the tiger in the cinematic only
+(`/Game/Cinematics/FoxVsTiger/Fur/SK_<Name>FurCine`, `ue_cine_import_fur.py`, CineAnimal.FurMesh; the game's fur has 12
+layers, which show as dashes in face close-ups); fox blinks 2 → 6 and expression changes hidden in a two-frame blink or
+at a cut; hammer blow straighter, tiger's skid leans back then forward, sit-down lands with weight.
+Lessons: in Movie Render Queue a Fade track darkens scene light before tone mapping (key every frame, amount bent by
+^2.2, black on frame END-1); judge fur only at final quality; a ranged render lacks effects cued before it; the done
+word given to ue_py_import.sh must not match an earlier log line; with MSYS_NO_PATHCONV exported, ffmpeg gets
+unconverted /c/ paths. Not possible without new art: tiger blinks (no closed-eyes picture). Tails CAN act (I first said no, having looked only
+at the clips' 41 tracks): SK_Fox and SK_Tiger have Tail1-4 under Hips, bent by code in the game; a clip takes them with
+`anim.controller.add_bone_curve("Tail1")` + set_bone_track_keys (tested in `ue_cine_tail_test.py`, list a rig's bones
+with `ue_cine_bones.py`). Ears have no bones and no morph targets: my proposal is cinematic-only body + fur meshes with
+ear bones (CineAnimal.BodyMesh / FurMesh overrides), not yet built. 2026-11-24 the user also said an expression change
+inside a cut looks awkward and asked for a plan with changes only at cuts (proposal given, waiting for the answer).
+Ear/tail reference page (2026-11-24, asked for 30 works + 30 technique sources and picks):
+https://claude.ai/artifact/FcLqEZhMNWKJNQiS6UrV1x (`storyboard\eartailuild.py`). My picks: 1 keyed poses baked into the
+clips with root-to-tip delay, 2 ear bones on cinematic-only meshes, 3 spring overlap computed in the clip generator and
+baked (real-time physics nodes are not repeatable under MRQ temporal samples and CineAnimal has no anim blueprint);
+quick wins: tail poses at five beats, four ear poses, offset curves. Ears are 100% weighted to Head in both rigs.
+Not started: waiting for the user's go-ahead.
+One-page summary of all the sequence work (asked 2026-11-24): https://claude.ai/artifact/XRejGxJPrbm5RkaCT94wk5
+(`storyboard\summary\index.html`, hand-written; update it when the film changes). Same day the user asked whether
+AnimDynamics fits the GAME: my answer was usable but not the best fit - the body animation is all native C++
+(URRRandomBodyAnimInstance, no anim graph; no animal has a post-process anim blueprint), the tail is already bent by
+code (wag, lift, turn spring, first 4 tail bones only though the cat has 9 and the rat 11, no reaction to jumps), so I
+recommended extending that code to a per-bone spring chain (then KawaiiPhysics, then AnimDynamics). Built the same
+day: see [[tail-chain-spring]]. The user has not said yet whether the film will play in real time in the
+game or as a rendered video - my shipping list (no way to play it in the game, no skip, no sound, never run in real
+time) is in HANDOFF.
+
+**Re-cut draft (2026-11-23; applied to the real sequence 2026-11-24, see above).** The user gave a new cut list against this page (1 face close-up
 → look back → zoom out with the blurred tiger; 2 long even obstacle: hands on, up, roll down; 3 hits the wall, turns,
 slumps; 4 dark street, tiger through shadow; 5 scared face → die → looks up, brightens; 6 stands, clones surround WIDE,
 tiger flinches (old 7 merged in, deleted); 8 foxes step closer, tiger drops the weapon; 9 as before) and asked for a rough

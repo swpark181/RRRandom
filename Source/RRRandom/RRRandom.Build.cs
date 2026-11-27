@@ -13,6 +13,7 @@ public class RRRandom : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"AnimationCore",
 			"InputCore",
 			"EnhancedInput",
 			"AIModule",

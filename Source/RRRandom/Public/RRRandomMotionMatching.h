@@ -9,6 +9,7 @@
 
 class UAnimSequence;
 class USkeletalMesh;
+class UPoseSearchDatabase;
 
 /**
  * Motion matching test (2026-11-20). An animal friend with a motion matching set (/Game/Characters/<Name>MM: a copy of
@@ -74,4 +75,7 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "RRRandom|Motion Matching")
 	static FString BuildSet(USkeletalMesh* Mesh, const TArray<UAnimSequence*>& Clips, const FString& Folder, const FString& Name);
+	/** Extend a saved set without replacing its schema, blueprint, or existing entries. */
+	UFUNCTION(BlueprintCallable, Category = "RRRandom|Motion Matching")
+	static int32 AddClips(UPoseSearchDatabase* Database, const TArray<UAnimSequence*>& Clips);
 };

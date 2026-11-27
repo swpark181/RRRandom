@@ -37,33 +37,48 @@ who.set_actor_label("Aud_Animal")
 who.set_editor_property("species", species)
 who.set_editor_property("hold_hammer", species == 3)
 who.set_editor_property("hold_shield", species == 3)
-cam_pos = spot + unreal.Vector(*[float(w) for w in os.environ.get("RR_AUD_CAM", "330,-330,120").split(",")])
-cam = eas.spawn_actor_from_class(unreal.CineCameraActor, cam_pos, unreal.MathLibrary.find_look_at_rotation(cam_pos, spot + unreal.Vector(0, 0, 80)))
-cam.set_actor_label("Aud_Cam")
-cam.get_cine_camera_component().set_editor_property("current_focal_length", float(os.environ.get("RR_AUD_LENS", "28")))
+
+
+def camera(label, spec):
+    """spec "x,y,z[,target x,y,z[,focal length]]", offsets from the animal's feet."""
+    v = [float(w) for w in spec.split(",")]
+    pos = spot + unreal.Vector(*v[:3])
+    target = spot + (unreal.Vector(*v[3:6]) if len(v) >= 6 else unreal.Vector(0, 0, 80))
+    c = eas.spawn_actor_from_class(unreal.CineCameraActor, pos, unreal.MathLibrary.find_look_at_rotation(pos, target))
+    c.set_actor_label(label)
+    c.get_cine_camera_component().set_editor_property("current_focal_length", v[6] if len(v) > 6 else float(os.environ.get("RR_AUD_LENS", "28")))
+    return c
+
+
+# (RR_AUD_CAM2: a second camera; the clips then play twice, the second time seen from it)
+cam_list = [camera("Aud_Cam", os.environ.get("RR_AUD_CAM", "330,-330,120"))]
+if os.environ.get("RR_AUD_CAM2"):
+    cam_list.append(camera("Aud_Cam2", os.environ["RR_AUD_CAM2"]))
 seq = unreal.AssetToolsHelpers.get_asset_tools().create_asset("LS_BoardAudition", FOLDER, unreal.LevelSequence, unreal.LevelSequenceFactoryNew())
 seq.set_display_rate(unreal.FrameRate(FPS, 1))
-end = int(round(starts[-1] * FPS))
+once = int(round(starts[-1] * FPS))
+end = once * len(cam_list)
 seq.set_playback_start(0)
 seq.set_playback_end(end)
 body = seq.add_possessable(who.get_editor_property("body"))
 track = body.add_track(unreal.MovieSceneSkeletalAnimationTrack)
-for i, path in enumerate(anims):
-    a = unreal.load_asset(path)
-    if not a:
-        unreal.log(f"BOARD missing {path}")
-        continue
-    s = track.add_section()
-    s.set_range(int(round(starts[i] * FPS)), int(round(starts[i + 1] * FPS)))
-    p = s.get_editor_property("params")
-    p.set_editor_property("animation", a)
-    s.set_editor_property("params", p)
-    unreal.log(f"BOARD audition {i} {starts[i]:.1f}s (frame {int(round(starts[i] * FPS))}) {path.split('/')[-1]} {a.get_play_length():.2f}s")
-cb = seq.add_possessable(cam)
 cut = seq.add_track(unreal.MovieSceneCameraCutTrack)
-cs = cut.add_section()
-cs.set_range(0, end)
-cs.set_camera_binding_id(seq.get_binding_id(cb))
+for k, cam in enumerate(cam_list):
+    for i, path in enumerate(anims):
+        a = unreal.load_asset(path)
+        if not a:
+            unreal.log(f"BOARD missing {path}")
+            continue
+        s = track.add_section()
+        s.set_range(k * once + int(round(starts[i] * FPS)), k * once + int(round(starts[i + 1] * FPS)))
+        p = s.get_editor_property("params")
+        p.set_editor_property("animation", a)
+        s.set_editor_property("params", p)
+        if k == 0:
+            unreal.log(f"BOARD audition {i} {starts[i]:.1f}s (frame {int(round(starts[i] * FPS))}) {path.split('/')[-1]} {a.get_play_length():.2f}s")
+    cs = cut.add_section()
+    cs.set_range(k * once, (k + 1) * once)
+    cs.set_camera_binding_id(seq.get_binding_id(seq.add_possessable(cam)))
 eal.save_loaded_asset(seq)
 les.save_current_level()
 unreal.log("BOARD DONE")

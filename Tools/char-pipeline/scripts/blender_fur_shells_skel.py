@@ -22,6 +22,7 @@ Usage: blender -b --factory-startup --python blender_fur_shells_skel.py -- <rig 
        [--eye-r 0.035] (how far round the eye whites stays bare, x the height)
        [--face-fur <z lo>,<z hi>,<half width>[,<front 0.5>]] (the whole front of the face furred, for a face with a fur mask)
        [--no-loose <faces>] (loose pieces with fewer faces stay bare: whiskers)
+       [--fur-bones Tail] (every face skinned mostly to bones with this in their name is furred, whatever its colour)
   A rig with several meshes (the tiger's body + muzzle part) is joined and welded first; the fur keeps their material slots.
        with --mask all: [--band <z lo>,<z hi>,<torso radius>] (fractions of the height: the clothes' heights and the
        torso's radius round its middle there) [--cloth white,beige,green,dark,red] (clothing colours anywhere in that band,
@@ -223,6 +224,28 @@ if no_loose:
     fur &= ~tiny
     bare |= tiny
     print(f"SHELLS loose pieces under {no_loose} faces: {int(tiny.sum())} faces kept bare")
+# --fur-bones <part of a bone's name> (2026-11-24, the fox's tail as its own part, blender_tail_part.py): every face
+# skinned mostly (every corner more than half) to such bones carries fur, whatever its colour. A tail's texture darkens toward the body, under the
+# colour rule's floor, so the fur stopped short of the body in a ragged line; that was hidden while the tail ran into
+# the body's skin and showed as a bare band once the tail was a part that stands out of it. (More than half, not all:
+# blender_tail_straight.py's tail shares the skin round its root with the hips.)
+fur_bones = opt("--fur-bones", "", str)
+if fur_bones:
+    group_names = {g.index: g.name for g in body.vertex_groups}
+
+    def of_bones(v):
+        ws = v[deform]
+        total = sum(ws.values())
+        return sum(w for g, w in ws.items() if fur_bones in group_names.get(g, "")) / total if total > 0.0 else 0.0
+
+    least = np.array([min(of_bones(v) for v in f.verts) for f in bm.faces])
+    # ...and a face only partly theirs (the skin a tail shares with the hips round its root) if it is the fur's colour
+    # but for its darkness: the body's own colour rule without the brightness floor, so the trousers there stay bare
+    warm = (r - b > 0.2) & (g / np.maximum(r, 1e-3) > opt("--orange-g", 0.38))
+    whole = ((least > 0.5) | ((least > 0.1) & warm)) & ~tiny
+    print(f"SHELLS fur bones '{fur_bones}': {int(whole.sum())} faces, {int((whole & ~fur).sum())} of them had no fur")
+    fur |= whole
+    bare &= ~whole
 # --face-fur <z lo>,<z hi>,<half width> (2026-11-23, for a face that is texture only and has a fur mask,
 # blender_fur_mask.py with the same --face numbers): every face on the front of the head between those heights and within
 # that half width of its middle line carries fur, whatever its colour. The fur mask of the face texture in use then
@@ -305,6 +328,19 @@ print(f"SHELLS FurUV: 1 uv = {CELLS} cells of {cell * height * 100:.2f} cm (body
 bpy.data.objects.remove(tmp)
 
 # ---- the shells: a base, then the layers ----
+# --long "cx,cy,cz,r,times" (2026-11-25, the rabbit's round tail, the user: "더 동글동글 하고 풍성하게"): fur this many times
+# as long within r of that point (world, body units), easing back to 1 over the outer 40% of r. Repeatable.
+LONGS = [[float(c) for c in sys.argv[i + 1].split(",")] for i, a in enumerate(sys.argv) if a == "--long"]
+lmul = {}
+for i in vidx:
+    m = 1.0
+    for cx, cy, cz, r, times in LONGS:
+        d = float(np.linalg.norm(wco[i] - np.array([cx, cy, cz])))
+        t = min(1.0, max(0.0, (r - d) / (0.4 * r)))
+        m = max(m, 1.0 + (times - 1.0) * t * t * (3.0 - 2.0 * t))
+    lmul[i] = m
+if LONGS:
+    print(f"SHELLS --long: {sum(1 for v in lmul.values() if v > 1.01)} fur vertices longer, up to x{max(lmul.values()):.2f}")
 hs_layers = [0.04] + [k / layers for k in range(1, layers + 1)]
 verts, faces, uv0, uv1, cols, groups = [], [], [], [], [], []
 for li, h in enumerate(hs_layers):
@@ -312,7 +348,7 @@ for li, h in enumerate(hs_layers):
     off = li * R
     for i in vidx:
         w = vw[i]
-        p = wco[i] + (wno[i] * L * h + down * L * 0.35 * h * h) * w
+        p = wco[i] + (wno[i] * L * h + down * L * 0.35 * h * h) * w * lmul[i]
         verts.append(tuple(mw.inverted() @ Vector(tuple(p))))
         cols.append((h, w, 1.0 if base else 0.0, 1.0))
     loop = 0

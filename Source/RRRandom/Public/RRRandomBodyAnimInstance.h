@@ -35,6 +35,8 @@ struct FRRAimFrame
 	/** Final head/neck direction, after all weapon and locomotion layers. */
 	FVector GazeFacing = FVector(0.f, 1.f, 0.f);
 	float GazeWeight = 0.f;
+	FVector ListeningDirection = FVector::ZeroVector;
+	float ListeningWeight = 0.f;
 	/** Persistent world headings keep a logical aim turn from snapping the rendered body. */
 	bool bSeparateBody = false;
 	bool bCombatFacing = false;
@@ -163,6 +165,18 @@ private:
 	TArray<FName> TailBones;
 	TArray<float> TailSwing;
 	TArray<float> TailLift;
+	/** Copied from the instance each frame: how big the tail is drawn (on its first bone), and the floor under it (mesh space)
+	 * with how far above it each joint stays. */
+	float TailSize = 1.f;
+	bool bTailFloor = false;
+	FVector TailFloorPoint = FVector::ZeroVector;
+	FVector TailFloorNormal = FVector::UpVector;
+	float TailFloorMargin = 0.f;
+	/** Copied from the instance each frame: the ears' bones and turns (reference pose, mesh space), the head and its reference turn. */
+	TArray<FName> EarBones;
+	TArray<FQuat> EarBends;
+	FName EarHead;
+	FQuat EarHeadRest = FQuat::Identity;
 	/** Copied from the instance each frame: the flying pose's and the wings' bones and each one's turn in mesh space. */
 	TArray<FName> FlightBones;
 	TArray<FQuat> FlightBends;
@@ -179,6 +193,20 @@ private:
 	FRRAimFrame Aim;
 	/** Motion matching test (2026-11-20): the driver's pose per bone of this mesh, which bones take it, and how much. */
 	void EvaluateMotion(FPoseContext& Output) const;
+	void EvaluateClimbGrip(FPoseContext& Output) const;
+	static void Reach(FCompactPose& Pose, FCompactPoseBoneIndex End, const FVector& Target, const FVector& Pole);
+	FVector GripGoals[2] = {};
+	float GripWeights[2] = {};
+	void PlantStrafeFeet(FPoseContext& Output);
+	struct FStrafeFoot
+	{
+		FVector Anchor = FVector::ZeroVector;
+		FVector Offset = FVector::ZeroVector;
+		bool bPlanted = false;
+	};
+	FStrafeFoot StrafeFeet[2];
+	bool bRightStrafe = false;
+	float PivotLoad = 0.f;
 	TArray<FTransform> MotionPose;
 	TArray<uint8> MotionMask;
 	float MotionWeight = 0.f;
@@ -255,6 +283,113 @@ public:
 	/** Degrees the tail lifts while riding (UpdateRidePose), up off the seat and out of the vehicle's body. */
 	UPROPERTY(EditAnywhere, Category = "Tail")
 	float RideTailLift = 60.f;
+
+	/**
+	 * The chain (2026-11-24, rr.Tail.Chain 0 = as before): every tail bone the mesh has is its own damped spring, softer
+	 * toward the tip, and a bone is left behind by what the bones above it do (ChainInertia), so a move runs down the
+	 * tail as a wave instead of all the joints turning together. The wag, the lift and the turn swing above are what the
+	 * springs are pulled toward. Bones named Tail5, Tail6 ... after TailBoneNames are found on the mesh and join in
+	 * (the cat has nine, the rat eleven; only the first four used to bend).
+	 * Oscillations per second at the root and at the tip, and the damping ratio (1 = no overshoot).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Tail|Chain", meta = (ClampMin = "0.1"))
+	float ChainRootFrequency = 1.3f;
+	UPROPERTY(EditAnywhere, Category = "Tail|Chain", meta = (ClampMin = "0.1"))
+	float ChainTipFrequency = 0.8f;
+	UPROPERTY(EditAnywhere, Category = "Tail|Chain", meta = (ClampMin = "0.05", ClampMax = "1.5"))
+	float ChainDamping = 0.3f;
+	/** 0 .. 1: how much of the turning of the bones above a bone does not follow at once. */
+	UPROPERTY(EditAnywhere, Category = "Tail|Chain", meta = (ClampMin = "0", ClampMax = "1"))
+	float ChainInertia = 0.8f;
+	/** How many times over the body's motion (turning, speeding up, braking, jumping, each step) moves the tail. */
+	UPROPERTY(EditAnywhere, Category = "Tail|Chain", meta = (ClampMin = "0"))
+	float ChainGain = 3.f;
+	/** Where along the tail it bends: 0 toward the tip (the root hardly moves) .. 1 toward the root (the whole tail swings
+	 * from its base). This and ChainRootFrequency are for bodies that are no animal friend's: an animal friend's come
+	 * from its FRRSpeciesLook (TailRootBias, TailRootFrequency). */
+	UPROPERTY(EditAnywhere, Category = "Tail|Chain", meta = (ClampMin = "0", ClampMax = "1"))
+	float ChainRootBias = 1.f;
+	/** Most the turn and sideways swing reaches in the chain, in degrees, all bones together. */
+	UPROPERTY(EditAnywhere, Category = "Tail|Chain")
+	float MaxChainSwing = 70.f;
+	/** Degrees the tail floats up per cm/s of falling (and is dragged down by, rising): a jump shows in the tail. */
+	UPROPERTY(EditAnywhere, Category = "Tail|Chain")
+	float FallLift = 0.08f;
+	/** Degrees the tail is thrown up per cm/s2 of braking (and trails down by, speeding up). */
+	UPROPERTY(EditAnywhere, Category = "Tail|Chain")
+	float BrakeLift = 0.008f;
+	/** Most the two above lift or lower the tail together, in degrees. */
+	UPROPERTY(EditAnywhere, Category = "Tail|Chain")
+	float MaxChainLift = 60.f;
+	/** Each shot flicks the tail up: degrees a second, a bone (half at the root, half again more at the tip). */
+	UPROPERTY(EditAnywhere, Category = "Tail|Chain")
+	float ShotTailKick = 90.f;
+	/** Degrees a second of the body's turn at which the tail starts to go from its walking springs and chain lag to its
+	 * turning ones (FRRSpeciesLook::TailTurnDamping, TailTurnFollow), and at which it is all the way there. */
+	UPROPERTY(EditAnywhere, Category = "Tail|Chain", meta = (ClampMin = "0"))
+	float TailTurnFrom = 60.f;
+	UPROPERTY(EditAnywhere, Category = "Tail|Chain", meta = (ClampMin = "1"))
+	float TailTurnFull = 240.f;
+
+	/**
+	 * Ears (2026-11-25, the user: the fox, red fox, rabbit, tiger and dragon). Bones EarL1.., EarR1.. under the head, each
+	 * ear ending in an unweighted EarLEnd / EarREnd (char-pipeline/scripts/blender_ear_bones.py); a mesh without them skips
+	 * this. Each ear bone is a damped spring in two ways, both taken from the ear's own direction in the reference pose:
+	 * "back" (the tip toward the back of the head; negative forward) and "out" (the tip away from the head's middle and
+	 * down: the drooping 'airplane ear'; for a fin pointing sideways, down). The springs are thrown by how the ear's tip
+	 * would move if it were rigid on the head (the head bobbing, turning, landing) and pulled toward the pose of the moment:
+	 * swept back on the run, forward and alert while aiming, flattened when hit, drooping when knocked out, a twitch now and
+	 * then standing. All in degrees for the whole ear (shared over its bones, more toward the tip), times the animal
+	 * friend's FRRSpeciesLook::EarPose; rr.Ear.* try other amounts without a rebuild, rr.Ear 0 turns them off.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	float EarRunBack = 30.f;
+	/**
+	 * The rush (2026-11-25, the user: "뛰어갈 때 여우, 레드폭스, 토끼는 좀 더 드라마틱 하게 귀가 뒤로 밀렸으면 좋겠어. 나중에 탈것을
+	 * 타서 속도가 발생할때도 비슷하게"): past EarRushFrom cm/s (a walk is 300) the ears are swept back by the animal friend's
+	 * FRRSpeciesLook::EarRush more, 1 - e^(-over / EarRushSpeed) of it (a sprint about 60%, a vehicle at 1000 nearly all), and
+	 * flutter in the wind by EarFlutter degrees at full rush. Riding, the vehicle's speed counts. rr.Ear.Rush scales it.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	float EarRushFrom = 300.f;
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	float EarRushSpeed = 230.f;
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	float EarFlutter = 5.f;
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	float EarAimForward = 12.f;
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	float EarHitBack = 55.f;
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	float EarHitOut = 20.f;
+	/** Seconds a hit keeps the ears down (they ease back up over it). */
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	float EarHitTime = 0.9f;
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	float EarDownBack = 20.f;
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	float EarDownOut = 45.f;
+	/** Each shot: the ears flinch back, degrees a second at the root. */
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	float EarShotKick = 160.f;
+	/** Standing, one ear twitches every so often (seconds between, at random within), this hard (degrees a second). */
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	FVector2D EarTwitchEvery = FVector2D(2.5f, 6.f);
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	float EarTwitch = 420.f;
+	/** How hard the head's motion throws the ears: times the tip's acceleration across the ear over the ear's length (as
+	 * an angular push), at the fox's EarGain 1. At 0.45 the fox showed 2-3 degrees walking and up to 14 stopping a
+	 * sprint; the user found that too faint (2026-11-25: "출렁임이 약하다 Throw 2로 올려서"). */
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	float EarThrow = 2.f;
+	/** The tip's spring as a share of the root's frequency; the damping ratio. */
+	UPROPERTY(EditAnywhere, Category = "Ears", meta = (ClampMin = "0.1", ClampMax = "1"))
+	float EarTipFrequencyShare = 0.65f;
+	UPROPERTY(EditAnywhere, Category = "Ears", meta = (ClampMin = "0.05", ClampMax = "1.5"))
+	float EarDamping = 0.3f;
+	/** Most an ear goes from its modelled place either way, in degrees for the whole ear. */
+	UPROPERTY(EditAnywhere, Category = "Ears")
+	float EarMost = 75.f;
 
 	/**
 	 * Wing bones (the dragon's own wings): left root, left tip, right root, right tip. A mesh without them skips this.
@@ -345,7 +480,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Aim")
 	float KickTime = 0.16f;
 
-	const TArray<FName>& GetTailBones() const { return TailBoneNames; }
+	const TArray<FName>& GetTailBones() const { return ActiveTailBones.Num() > 0 ? ActiveTailBones : TailBoneNames; }
 	const TArray<FName>& GetFlightBones() const { return FlightBoneNames; }
 	const TArray<FQuat>& GetFlightBends() const { return FlightBends; }
 	const TArray<FName>& GetJumpBones() const { return JumpBoneNames; }
@@ -360,8 +495,15 @@ public:
 	const TArray<FQuat>& GetSprintBends() const { return SprintBends; }
 	const TArray<FName>& GetWingBones() const { return WingBoneNames; }
 	const TArray<FQuat>& GetWingBends() const { return WingBends; }
+	/** The ears' bones (every ear, root to tip, one ear after the other), each one's turn in the reference pose's mesh space, and the head they hang from. */
+	const TArray<FName>& GetEarBones() const { return EarBoneNames; }
+	const TArray<FQuat>& GetEarBends() const { return EarBends; }
+	FName GetEarHead() const { return EarHead; }
+	const FQuat& GetEarHeadRest() const { return EarHeadRest; }
 	const TArray<float>& GetTailSwing() const { return BoneSwing; }
 	const TArray<float>& GetTailLift() const { return BoneLift; }
+	float GetTailSize() const { return TailSize; }
+	bool GetTailFloor(FVector& Point, FVector& Normal, float& Margin) const { Point = TailFloorPoint; Normal = TailFloorNormal; Margin = TailFloorMargin; return bTailFloor; }
 	const FRRAimFrame& GetAimFrame() const { return Aim; }
 	const FRRMeleeFrame& GetMeleeFrame() const { return Melee; }
 	/**
@@ -402,6 +544,7 @@ public:
 	const TArray<uint8>& GetMotionMask() const { return MotionMask; }
 	float GetMotionWeight() const { return MotionWeight; }
 	float GetMotionLean() const { return MotionLean; }
+	float GetPivotLoad() const { return PivotLoad; }
 	const FRRGunHandsFrame& GetGunHandsFrame() const { return GunHands; }
 	/** 0 .. 1: the driver's whole pose is taken, arms too (a climbing clip, ARRRandomCharacter::WantsClimbMotion). */
 	float GetMotionWholeWeight() const { return MotionWholeWeight; }
@@ -435,6 +578,70 @@ private:
 	FVector LastVelocity = FVector::ZeroVector;
 	TArray<float> BoneSwing;
 	TArray<float> BoneLift;
+	/** The chain: how fast each bone's swing and lift move, the tail bones found on this mesh, the lift from falling and braking, the last shot. */
+	TArray<float> BoneSwingSpeed;
+	TArray<float> BoneLiftSpeed;
+	TArray<FName> ActiveTailBones;
+	TWeakObjectPtr<const USkeletalMesh> TailBonesMesh;
+	float LiftTrail = 0.f;
+	float LastSinceShot = 0.f;
+	/** This body's own (its species'): see ChainRootBias. */
+	float TailRootBias = 1.f;
+	float TailRootHz = 1.3f;
+	bool bTailBigWag = true;
+	float TailIdleCurl = 0.f, TailIdleLift = 0.f, TailIdleTipLift = 0.f;
+	/** How much the whole tail motion is, 1 = full (FRRSpeciesLook::TailAmount). */
+	float TailAmount = 1.f;
+	/** FRRSpeciesLook's cat-tail numbers (TailWave ...). */
+	float TailWave = 1.f, TailWagSize = 1.f, TailWagSpeed = 1.f, TailTipHz = -1.f, TailMoveLift = 0.f, TailMoveTipLift = 0.f, TailDampingRatio = -1.f;
+	/** FRRSpeciesLook::TailSquiggle ..., and where the squiggle wave is (radians). */
+	float TailSquiggle = 0.f, TailSquiggleSide = 0.f, TailSquiggleWaves = 1.f, TailSquiggleSpeed = 0.4f, SquigglePhase = 0.f;
+	/** FRRSpeciesLook::TailFollow; the hips' frame-to-frame turn, tip (degrees) and the tail root's rise (cm) it lags behind;
+	 * the tail's base direction in its parent bone and that bone, its length (mesh units), the last frame's readings. */
+	float TailFollow = 0.f;
+	/** FRRSpeciesLook::TailTurnDamping, TailTurnFollow (-1: as walking), and how hard the body is turning now, 0 .. 1. */
+	float TailTurnDamping = -1.f, TailTurnFollow = -1.f, TailTurning = 0.f;
+	float TailFollowYaw = 0.f, TailFollowPitch = 0.f, TailFollowRise = 0.f;
+	TWeakObjectPtr<const USkeletalMesh> TailDirMesh;
+	FVector TailDirLocal = FVector::ZeroVector;
+	FName TailParent;
+	float TailLengthMesh = 0.f;
+	float LastTailYaw = 0.f, LastTailPitch = 0.f, LastTailRootZ = 0.f;
+	bool bTailFollowLast = false;
+	/** FRRSpeciesLook::TailSize; and the floor under the tail this frame (mesh space, see the proxy). */
+	float TailSize = 1.f;
+	bool bTailFloor = false;
+	FVector TailFloorPoint = FVector::ZeroVector;
+	FVector TailFloorNormal = FVector::UpVector;
+	float TailFloorMargin = 0.f;
+	/** 0 moving .. 1 standing still, eased. */
+	float TailIdle = 0.f;
+	float TailBrakeHold = 0.f;
+	float PivotTime = 0.f;
+	float PivotLoad = 0.f;
+
+	/** One ear: its bones, its two turning axes and where its tip moves on each (reference pose, mesh space), its length, its springs. */
+	struct FEar
+	{
+		TArray<FName> Bones;
+		FVector BackAxis = FVector::ZeroVector, OutAxis = FVector::ZeroVector;
+		FVector BackMove = FVector::ZeroVector, OutMove = FVector::ZeroVector;
+		/** The tip's place on the head (head bone space, unscaled) and the ear's length (cm, unscaled). */
+		FVector TipOnHead = FVector::ZeroVector;
+		float Length = 1.f;
+		TArray<float> Back, Out, BackSpeed, OutSpeed;
+		FVector LastTip = FVector::ZeroVector, LastTipVelocity = FVector::ZeroVector, TipAcceleration = FVector::ZeroVector;
+		bool bHasLast = false;
+	};
+	TArray<FEar> Ears;
+	TWeakObjectPtr<const USkeletalMesh> EarMesh;
+	FName EarHead;
+	FQuat EarHeadRest = FQuat::Identity;
+	TArray<FName> EarBoneNames;
+	TArray<FQuat> EarBends;
+	float EarFrequency = 3.f, EarGain = 1.f, EarPose = 1.f, EarRushDegrees = 15.f, EarTime = 0.f, EarRigidity = 0.f, EarDampingRatio = 0.3f;
+	float EarHit = 0.f, LastHitFlash = 0.f, EarSinceShot = 0.f, EarTwitchIn = 3.f;
+	void UpdateEars(float DeltaSeconds);
 	FRRAimFrame Aim;
 	bool bHasBodyHeading = false;
 	FVector LastBodyLocation = FVector::ZeroVector;
@@ -449,7 +656,12 @@ private:
 	float MotionWeight = 0.f;
 	/** The driver mesh the mask and bone map were made for, and per bone of this mesh its bone in the driver's. */
 	TWeakObjectPtr<const USkeletalMesh> MotionMappedMesh;
+	TWeakObjectPtr<const USkeletalMesh> MotionMappedBody;
 	TArray<int32> MotionBoneMap;
+	TArray<FTransform> SourceComponentPose, TargetComponentPose;
+	TArray<FQuat> MotionBindRotations;
+	FVector SourceBindHips = FVector::ZeroVector, TargetBindHips = FVector::ZeroVector;
+	int32 MotionHips = INDEX_NONE;
 	float MotionWholeWeight = 0.f;
 	TArray<FTransform> MotionWholePose;
 	/** rr.MotionMatch.Upper when the mask was made. */

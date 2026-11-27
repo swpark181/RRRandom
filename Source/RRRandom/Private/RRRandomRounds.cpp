@@ -7,6 +7,8 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/TextRenderComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/DamageEvents.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -279,6 +281,180 @@ void ARRRandomArenaFence::Build()
 	}
 	Panels->AddInstances(PanelTransforms, false, true);
 	Posts->AddInstances(PostTransforms, false, true);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Round 102: the dice spots
+
+namespace
+{
+	// The pad: the meteor's floor mark (a glowing band round a faintly filled disc) a little over the ground, the number
+	// lying on it
+	constexpr float PadLift = 4.f;
+	constexpr float PadGlow = 3.f;
+	constexpr float PadBand = 0.1f;
+	constexpr float PadFill = 0.f;
+	constexpr float NumberSize = 300.f;
+	const FColor PadColor(189, 166, 240);
+	const FColor NumberColor(58, 28, 140);
+}
+
+ARRRandomSpawnZones::ARRRandomSpawnZones()
+{
+	bReplicates = true;
+	bAlwaysRelevant = true;
+	PrimaryActorTick.bCanEverTick = true;
+	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+	for (uint8& Die : TeamDice)
+	{
+		Die = 0;
+	}
+}
+
+void ARRRandomSpawnZones::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(ARRRandomSpawnZones, Zones);
+	DOREPLIFETIME(ARRRandomSpawnZones, TeamDice);
+}
+
+void ARRRandomSpawnZones::SetZones(const TArray<FVector>& InZones)
+{
+	Zones.Reset();
+	for (const FVector& Zone : InZones)
+	{
+		Zones.Add(Zone);
+	}
+}
+
+void ARRRandomSpawnZones::SetTeamDice(int32 Team, int32 DieA, int32 DieB)
+{
+	if (Team == 0 || Team == 1)
+	{
+		TeamDice[Team * 2] = uint8(FMath::Clamp(DieA, 0, 6));
+		TeamDice[Team * 2 + 1] = uint8(FMath::Clamp(DieB, 0, 6));
+		ForceNetUpdate();
+	}
+}
+
+bool ARRRandomSpawnZones::GetZone(int32 Number, FVector& OutFeet) const
+{
+	const int32 Index = Number - FirstNumber;
+	if (!Zones.IsValidIndex(Index))
+	{
+		return false;
+	}
+	OutFeet = Zones[Index];
+	return true;
+}
+
+int32 ARRRandomSpawnZones::GetTeamDie(int32 Team, int32 Which) const
+{
+	return (Team == 0 || Team == 1) && (Which == 0 || Which == 1) ? TeamDice[Team * 2 + Which] : 0;
+}
+
+ARRRandomSpawnZones* ARRRandomSpawnZones::Get(const UObject* WorldContext)
+{
+	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	if (!World)
+	{
+		return nullptr;
+	}
+	TActorIterator<ARRRandomSpawnZones> It(const_cast<UWorld*>(World));
+	return It ? *It : nullptr;
+}
+
+void ARRRandomSpawnZones::BeginPlay()
+{
+	Super::BeginPlay();
+	Build();
+}
+
+void ARRRandomSpawnZones::OnRep_Zones()
+{
+	Build();
+}
+
+void ARRRandomSpawnZones::Build()
+{
+	if (bBuilt || Zones.Num() == 0 || !HasActorBegunPlay() || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+	bBuilt = true;
+	// (the meteor's floor mark: a band at the edge of a flat plane, the inside faintly filled)
+	UStaticMesh* Plane = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
+	UMaterialInterface* Marker = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/MeteorRush/M_MRRing.M_MRRing"));
+	if (!Plane)
+	{
+		return;
+	}
+	if (Marker)
+	{
+		PadMaterial = UMaterialInstanceDynamic::Create(Marker, this);
+		PadMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor::FromSRGBColor(PadColor));
+		PadMaterial->SetScalarParameterValue(TEXT("Glow"), PadGlow);
+		PadMaterial->SetScalarParameterValue(TEXT("Thickness"), PadBand);
+		PadMaterial->SetScalarParameterValue(TEXT("Fill"), PadFill);
+	}
+	for (int32 Index = 0; Index < Zones.Num(); ++Index)
+	{
+		const FVector Feet = Zones[Index];
+		// A mesh each (the ring's material isn't made for instances); the engine's plane is 100 across, flat, facing up
+		UStaticMeshComponent* Pad = NewObject<UStaticMeshComponent>(this);
+		Pad->SetStaticMesh(Plane);
+		Pad->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Pad->SetCastShadow(false);
+		Pad->SetCanEverAffectNavigation(false);
+		Pad->SetupAttachment(RootComponent);
+		Pad->SetUsingAbsoluteLocation(true);
+		Pad->SetUsingAbsoluteRotation(true);
+		Pad->SetUsingAbsoluteScale(true);
+		if (PadMaterial)
+		{
+			Pad->SetMaterial(0, PadMaterial);
+		}
+		Pad->RegisterComponent();
+		Pad->SetWorldTransform(FTransform(FQuat::Identity, Feet + FVector(0.f, 0.f, PadLift), FVector(PadRadius / 50.f, PadRadius / 50.f, 1.f)));
+		Pads.Add(Pad);
+		UTextRenderComponent* Number = NewObject<UTextRenderComponent>(this);
+		Number->SetupAttachment(RootComponent);
+		Number->SetUsingAbsoluteLocation(true);
+		Number->SetUsingAbsoluteRotation(true);
+		Number->SetCastShadow(false);
+		Number->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Number->SetHorizontalAlignment(EHTA_Center);
+		Number->SetVerticalAlignment(EVRTA_TextCenter);
+		Number->SetWorldSize(NumberSize);
+		Number->SetTextRenderColor(NumberColor);
+		Number->SetText(FText::AsNumber(Index + FirstNumber));
+		Number->RegisterComponent();
+		Number->SetWorldLocationAndRotation(Feet + FVector(0.f, 0.f, PadLift + 3.f), FRotator(90.f, 180.f, 0.f));
+		Numbers.Add(Number);
+	}
+}
+
+void ARRRandomSpawnZones::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	// The numbers lie on the ground turned to read from this machine's camera (the top away from it)
+	if (Numbers.Num() == 0)
+	{
+		return;
+	}
+	const APlayerCameraManager* Camera = UGameplayStatics::GetPlayerCameraManager(this, 0);
+	if (!Camera)
+	{
+		return;
+	}
+	const FRotator Facing(90.f, Camera->GetCameraRotation().Yaw + 180.f, 0.f);
+	for (UTextRenderComponent* Number : Numbers)
+	{
+		if (Number)
+		{
+			Number->SetWorldRotation(Facing);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

@@ -207,6 +207,8 @@ public:
 	static FLinearColor GetTeamColor(int32 InTeam);
 
 	bool IsAlive() const { return bAlive; }
+	/** 1 just hit, fading to 0 over a fifth of a second (every machine; the ears flatten at it). */
+	float GetHitFlash() const { return HitFlash; }
 	/** Dancing after the match (the winners in the dance line and the MVP); the gun is put away meanwhile. */
 	bool IsCelebrating() const;
 	/** Hanging its head after the match (the losers, but not the MVP); the gun is put away meanwhile. */
@@ -409,6 +411,13 @@ public:
 	ARRRandomCharacter* GetLastKiller() const { return LastKiller; }
 	float GetRespawnTotal() const { return RespawnTotal; }
 	float GetRespawnQuick() const { return RespawnQuick; }
+	/**
+	 * Round 102: the two dice rolled at this knockout (Which 0 or 1, 1..6; 0 for none, owner only) and the dice spot they
+	 * picked (server: ARRRandomSpawnZones' number, 0 for home). The game mode rolls them and puts home there on getting up.
+	 */
+	int32 GetRespawnDie(int32 Which) const { return Which == 0 || Which == 1 ? RespawnDice[Which] : 0; }
+	int32 GetRespawnZone() const { return RespawnZone; }
+	void SetRespawnRoll(int32 DieA, int32 DieB);
 	/** The team its body shows: the other one while a red fox is disguised. */
 	int32 GetShownTeam() const;
 	/** The team it seems to be on to a viewer of ViewerTeam (a disguised red fox seems one of theirs to its opponents). */
@@ -529,6 +538,8 @@ public:
 	 * (walking about on the ground: not in the air, riding, emoting, knocked out ...).
 	 */
 	USkeletalMeshComponent* GetMotionDriver() const { return MotionDriver; }
+	bool UsesSharedMotionRig() const { return bSharedMotionRig; }
+	float GetMotionStrideRatio() const { return MotionStrideRatio; }
 	bool WantsMotionMatch() const;
 	/**
 	 * The driver is playing a climbing clip (onto a low ledge or up a high one, the user 2026-11-20: "장애물 넘어갈때나
@@ -537,6 +548,9 @@ public:
 	bool WantsClimbMotion() const { return ClimbDriver && ClimbMotionHold > 0.f; }
 	/** The second hidden body, which plays the climbing clip by itself while WantsClimbMotion. */
 	USkeletalMeshComponent* GetClimbDriver() const { return ClimbDriver; }
+	float GetLedgeGrip(int32 Side, FVector& Goal) const;
+	float GetHeardStepAge() const;
+	const FVector& GetHeardStepLocation() const { return HeardStepLocation; }
 	/** Which blow of the combo the last swing was (0 .. 2): within ComboWindow of the one before it counts on, else it starts over. */
 	int32 GetComboStep() const { return ComboStep; }
 	static constexpr float ComboWindow = 0.9f;
@@ -1177,10 +1191,18 @@ private:
 	FRandomStream WeaponStream;
 	bool bClimbing = false;
 	float ClimbElapsed = 0.f;
+	FVector LedgeGrips[2] = {};
+	bool bLedgeGrip[2] = {};
+	float HeardStepTime = -100.f;
+	FVector HeardStepLocation = FVector::ZeroVector;
+	float StepDistance = 0.f;
+	void UpdateAudibleSteps(float DeltaSeconds);
 	FVector ClimbStart = FVector::ZeroVector;
 	FVector ClimbTarget = FVector::ZeroVector;
 	/** Server: seconds left trusting the owning client's position after its climb. */
 	float ClientTrustRemaining = 0.f;
+	/** Round 103: when the last climb was over (the server's timing of it), for a lagging client's next climb request. */
+	float LastClimbEndTime = -UE_BIG_NUMBER;
 	/** When jump was last pressed; a jump that reaches a wall shortly after still climbs it. */
 	float JumpPressedTime = -UE_BIG_NUMBER;
 	/** Round 96: where my feet were then: a climb reaches MaxClimbHeight over them, not over where a jump has lifted them to (a
@@ -1245,6 +1267,10 @@ private:
 	float RespawnTotal = 0.f;
 	UPROPERTY(Replicated)
 	float RespawnQuick = 0.f;
+	/** Round 102: this knockout's dice (owner only) and the spot they picked (server). */
+	UPROPERTY(Replicated)
+	uint8 RespawnDice[2] = { 0, 0 };
+	int32 RespawnZone = 0;
 	int32 RoundKnockouts = 0;
 	float LastKnockoutTime = -1000.f;
 	/** A blast this very moment (SetBlastImpact) and the way it pushes; the knockout from it spins (bFlingSpin, every machine). */
@@ -1380,6 +1406,8 @@ private:
 	TObjectPtr<USkeletalMeshComponent> MotionDriver;
 	/** The species a set was last looked for (found or not), so a missing one is not searched every frame. */
 	int32 MotionDriverSpecies = -1;
+	bool bSharedMotionRig = false;
+	float MotionStrideRatio = 1.f;
 	/**
 	 * The set's climbing clips (/Game/Characters/<Name>MM/Traversal/A_<Name>MM_ClimbLow and _ClimbHigh: the sample's 1 m
 	 * mantle and 2.5 m climb), played on a second hidden body (ClimbDriver, made at the first climb) while the capsule makes the climb (UpdateClimb): the

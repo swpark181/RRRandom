@@ -1,0 +1,115 @@
+{
+  "videos": [
+    {
+      "id": "2CSjL_f3xPI",
+      "title": "Tiger walk",
+      "channel": "What's In John's Freezer?",
+      "kind": "real tiger",
+      "start": 0,
+      "what": "동물 운동을 연구하는 John R. Hutchinson 교수 채널의 영상입니다. BBC 다큐 촬영 때 찍은 호랑이 걷기를 초당 250프레임(약 10배 느리게)으로 보여 줍니다. 꼬리를 따로 다룬 영상은 아니고, 몸 전체의 걸음을 담았습니다.",
+      "use": "걸을 때 엉덩이가 오르내리고 좌우로 흔들리는 박자에 꼬리 뿌리가 어떻게 늦게 따라가는지 볼 때 기준으로 씁니다.",
+      "confidence": "중간"
+    },
+    {
+      "id": "6fhAzkK_s_Y",
+      "title": "The royal walk of a tiger is even better in slow motion",
+      "channel": "Call of The Wild",
+      "kind": "real tiger",
+      "start": 0,
+      "what": "호랑이가 걷는 모습을 슬로모션으로 보여 주는 영상입니다(제목 기준). 꼬리가 화면에 얼마나 나오는지는 확인하지 못했습니다.",
+      "use": "걸을 때 꼬리가 어느 높이로 들려 있고 끝이 어떻게 휘는지, 걸음마다 웨이브가 꼬리를 따라 내려가는지 봅니다.",
+      "confidence": "중간"
+    },
+    {
+      "id": "Ldz2eB2zSvY",
+      "title": "Breathtaking rare footage of tigers running at full speed",
+      "channel": "WildMotion Journey",
+      "kind": "real tiger",
+      "start": 0,
+      "what": "호랑이들이 전속력으로 달리는 영상입니다. 검색 결과 설명으로는 물을 가로질러 달리는 모습을 슬로모션으로 담았습니다.",
+      "use": "달릴 때 꼬리가 걸을 때보다 낮게, 뒤로 길게 뻗어 균형을 잡는 모습을 '달리기 자세'의 기준으로 씁니다.",
+      "confidence": "중간"
+    },
+    {
+      "id": "u4g2-zxYWkk",
+      "title": "Tiger twitches its tail and its ears as it is bothered by insects",
+      "channel": "WildFilmsIndia",
+      "kind": "real tiger",
+      "start": 0,
+      "what": "인도 카지랑가 국립공원의 야생 호랑이가 벌레를 쫓느라 꼬리와 귀, 피부를 씰룩이는 영상입니다(제목과 설명 기준).",
+      "use": "가만히 서 있을 때 꼬리 끝만 짧게 튕기는 아이들 동작의 크기와 빈도를 참고합니다.",
+      "confidence": "높음"
+    },
+    {
+      "id": "HZB8OlmaNcc",
+      "title": "Cats Walking and Running (Slow Motion Animation Reference)",
+      "channel": "SloMo Ref",
+      "kind": "real cat",
+      "start": 0,
+      "what": "고양이가 걷고 달리는 모습을 애니메이션 참고용으로 슬로모션으로 모은 영상입니다(제목 기준).",
+      "use": "같은 고양이의 걷기와 달리기를 나란히 보며 꼬리 높이가 어떻게 바뀌는지(걷기는 높게, 달리기는 낮게) 비교합니다.",
+      "confidence": "높음"
+    },
+    {
+      "id": "zjc1I9S2jwo",
+      "title": "Cat \"Question Mark\" Tail",
+      "channel": "Your Pet Lab",
+      "kind": "real cat",
+      "start": 0,
+      "what": "꼬리를 곧게 세우고 끝을 갈고리처럼 구부린 '물음표 꼬리'를 다룬 영상입니다. 반갑게 다가갈 때의 꼬리라는 설명입니다.",
+      "use": "걸을 때 꼬리를 들고 끝을 구부리는 모양, 즉 우리 호랑이의 기본 걷기 꼬리 모양을 잡을 때 씁니다.",
+      "confidence": "높음"
+    },
+    {
+      "id": "JLi3Z_Mlshk",
+      "title": "Quivering, Wagging, Puffed Up:  What is Your Cat's Tail Trying to Tell You?",
+      "channel": "Jackson Galaxy",
+      "kind": "real cat",
+      "start": 0,
+      "what": "고양이 행동 전문가 Jackson Galaxy가 꼬리 떨기, 흔들기, 부풀리기가 무슨 뜻인지 설명하는 영상입니다. 진행자가 말하는 장면이 많을 수 있습니다.",
+      "use": "꼬리 떨기와 휘두르기, 부풀리기를 감정별 동작(기쁨, 짜증, 놀람)으로 나눌 때 참고합니다.",
+      "confidence": "중간"
+    },
+    {
+      "id": "dBCFHNOL91A",
+      "title": "Cat Tail Language Explained: 12 Tail Positions & What They Mean | Cat Body Language Guide",
+      "channel": "Modern Cat Care",
+      "kind": "real cat",
+      "start": 0,
+      "what": "고양이 꼬리 자세 12가지와 그 뜻을 설명하는 영상입니다. 실제 고양이 영상인지 그림이나 생성 이미지 위주인지는 확인하지 못했습니다.",
+      "use": "꼬리 자세 목록(세움, 물음표, 내림, 감기 등)을 우리 호랑이의 상태별 꼬리 포즈 목록으로 옮길 때 체크리스트로 씁니다.",
+      "confidence": "낮음"
+    },
+    {
+      "id": "DJUU-3JnB-M",
+      "title": "2D Cat's Tail Using Wave Principle",
+      "channel": "Alyssa Myers",
+      "kind": "animation",
+      "start": 0,
+      "what": "고양이 꼬리를 웨이브 원리(움직임이 뿌리에서 끝으로 전달되는 방식)로 2D 애니메이션한 영상입니다(제목 기준).",
+      "use": "뼈 8개에 웨이브가 뿌리에서 끝으로 얼마나 늦게 전달돼야 고양이 꼬리처럼 보이는지 기준으로 삼습니다.",
+      "confidence": "높음"
+    },
+    {
+      "id": "6RxLpsuiQP0",
+      "title": "Animation Tutorial: Free Squirrels Rig - Adding Overlap To Tail",
+      "channel": "Animation Mentor",
+      "kind": "animation",
+      "start": 0,
+      "what": "Animation Mentor가 무료 다람쥐 리그로 꼬리에 오버랩(뼈마다 시간 차)을 넣는 과정을 보여 주는 튜토리얼입니다.",
+      "use": "뼈 체인에서 뼈마다 몇 프레임씩 늦추고 끝을 더 느슨하게 두는 방식을 스프링 강도와 감쇠 값을 정할 때 참고합니다.",
+      "confidence": "높음"
+    },
+    {
+      "id": "XwqKw0DvUew",
+      "title": "How to animate dangling stuff: Follow-through, drag, overlap animation principles - 2D class [010]",
+      "channel": "AnimatorIslandTV",
+      "kind": "animation",
+      "start": 0,
+      "what": "몸에 매달린 것(꼬리, 천 등)에 팔로스루, 드래그, 오버랩을 주는 원리를 설명하는 2D 애니메이션 강의입니다. 고양이 꼬리 전용 영상은 아닙니다.",
+      "use": "몸이 멈출 때 꼬리가 한 번 더 넘어갔다가 자리 잡는 팔로스루 크기를 정할 때 참고합니다.",
+      "confidence": "중간"
+    }
+  ],
+  "notes": "모든 영상은 YouTube oEmbed에서 제목이 정상으로 돌아와 임베드할 수 있음을 확인했습니다(2026-11-25). 영상 자체는 보지 못했고 제목과 검색 결과의 설명만으로 판단했습니다. 그래서 start는 모두 0이고, 꼬리가 실제로 잘 보이는 구간은 직접 확인해야 합니다. 꼬리가 화면에 잘 나오는지 가장 확실하지 않은 영상은 dBCFHNOL91A(그림이나 생성 이미지 위주일 수 있음), JLi3Z_Mlshk(진행자가 말하는 장면이 많을 수 있음), 6fhAzkK_s_Y와 Ldz2eB2zSvY(꼬리를 따로 다룬 영상이 아님)입니다. 실제 호랑이 영상 가운데 서 있을 때 꼬리 끝을 말아 올리는 장면을 확실히 담은 영상은 찾지 못했습니다. 이 동작은 고양이 영상(물음표 꼬리)에서 가져오는 것이 좋겠습니다. Stray의 꼬리 애니메이션을 다룬 메이킹 영상이나 GDC 강연은 찾지 못했습니다. 인터뷰 기사에 따르면 Stray의 고양이는 모션 캡처 없이 손으로 키프레임을 잡았습니다. 목록에는 넣지 않았지만 임베드를 확인한 예비 영상도 있습니다. ztikTbgW0rc(Big Cats in Slow Mo, Big Cat Rescue), 7bHXDvYLfUY(Animalia's Tigers in Super-slowmotion., Animalia), UdyU68GKumg(Why does a tiger wag it's tail?, Kunal Jain), 9JFZyUpav5A(Slow Motion Cat Walk 1), 1CZtUPfPnRc(CAT WALK Animation Tutorial, Pixi-Gags), 9Su5es3mL7c(On All Fours: Creating Realistic Quadruped Motion, GDC 강연이지만 꼬리를 다루는지는 모름), bOtoNbuZa1c(How Stray Was Made and Inspired by an Overpopulated City, 개발 이야기이고 꼬리 내용은 없음)입니다."
+}

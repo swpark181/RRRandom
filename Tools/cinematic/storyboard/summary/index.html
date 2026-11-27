@@ -1,0 +1,307 @@
+<title>여우 vs 호랑이 시퀀스 작업 정리</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* layout: a project summary sheet. The current film's facts first, then how it got here (a version timeline), what is
+   in it by area, what was learned, what was researched, and what is still open. Same look as the storyboard pages. */
+:root {
+  --bg: #f2f1f6; --sheet: #ffffff; --ink: #1c1a29; --soft: #5d5a70; --line: #d6d3e2; --accent: #5b3fd0; --accent-soft: #e9e4fb;
+  --done: #1f7a4d; --open: #a05a00; --open-soft: #fbf0dc;
+  --font: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --num: "Barlow Condensed", "Arial Narrow", "Noto Sans KR", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #15141d; --sheet: #1e1c2a; --ink: #ecebf4; --soft: #a3a0b8; --line: #353247; --accent: #a892ff; --accent-soft: #2c2650; --done: #6fd3a0; --open: #e6b04a; --open-soft: #352a14; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --bg: #15141d; --sheet: #1e1c2a; --ink: #ecebf4; --soft: #a3a0b8; --line: #353247; --accent: #a892ff; --accent-soft: #2c2650; --done: #6fd3a0; --open: #e6b04a; --open-soft: #352a14; color-scheme: dark; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 15px; line-height: 1.65;
+  padding-block: 28px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 30px; }
+header { display: flex; flex-direction: column; gap: 10px; }
+.eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--accent); }
+h1 { font-size: clamp(24px, 4vw, 34px); font-weight: 700; line-height: 1.25; margin: 0; text-wrap: balance; }
+h2 { font-size: 19px; font-weight: 700; margin: 0; }
+h3 { font-size: 15px; font-weight: 700; margin: 0; }
+p { margin: 0; max-width: 70ch; }
+.lead { color: var(--soft); }
+.small { font-size: 13px; }
+section { display: flex; flex-direction: column; gap: 12px; scroll-margin-top: 12px; }
+.nav { display: flex; flex-wrap: wrap; gap: 6px; }
+.nav a { font-size: 13px; font-weight: 700; text-decoration: none; color: var(--ink); background: var(--accent-soft); border: 1px solid var(--line); border-radius: 4px; padding: 3px 12px; }
+.nav a:hover, .nav a:focus-visible { background: var(--accent); color: var(--sheet); outline: none; }
+.facts { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0; padding: 0; list-style: none; font-size: 14px; }
+.facts b { font-family: var(--num); font-size: 22px; font-weight: 700; margin-right: 4px; font-variant-numeric: tabular-nums; }
+.box { background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.box ul { margin: 0; padding-left: 18px; font-size: 14px; }
+.box li + li { margin-top: 5px; }
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.tablebox { overflow-x: auto; background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; min-width: 600px; font-size: 14px; }
+th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 12px; color: var(--soft); font-weight: 700; white-space: nowrap; }
+td.num { font-family: var(--num); font-size: 17px; font-weight: 700; color: var(--accent); white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.t { white-space: nowrap; font-variant-numeric: tabular-nums; }
+code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px; background: var(--accent-soft); border-radius: 3px; padding: 0 4px; overflow-wrap: anywhere; }
+.open { border-color: var(--open); background: var(--open-soft); }
+.tag { font-size: 11px; font-weight: 700; border-radius: 3px; padding: 0 6px; white-space: nowrap; }
+.tag.done { color: var(--done); border: 1px solid var(--done); }
+.tag.open { color: var(--open); border: 1px solid var(--open); background: none; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 820px) { .two, .three { grid-template-columns: minmax(0, 1fr); } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">RRRANDOM · 시네마틱 · 2026-11-24 기준</div>
+    <h1>여우 vs 호랑이 시퀀스 작업 정리</h1>
+    <p class="lead">시퀀스 작업에서 지금까지 적용한 것, 알아낸 것, 조사한 것, 아직 정해지지 않은 것을 한 장에 모았습니다. 자세한 내용은 맨 아래에 모아 둔 각 페이지에 있습니다.</p>
+    <nav class="nav" aria-label="목차">
+      <a href="#now">지금 영상</a><a href="#history">지나온 판</a><a href="#how">만드는 방법</a><a href="#applied">적용한 것</a><a href="#learned">알아낸 것</a><a href="#research">조사한 것</a><a href="#open">남은 것</a><a href="#pages">페이지 모음</a>
+    </nav>
+  </header>
+
+  <section id="now">
+    <h2>지금 영상: 최종 10판</h2>
+    <ul class="facts">
+      <li><b>13</b>컷</li><li><b>32.75</b>초</li><li><b>786</b>프레임 (초당 24)</li><li><b>1080p</b></li><li>소리 <b>없음</b></li>
+    </ul>
+    <p class="small lead">파일: <code>C:\work\char-pipeline\output\cinematic_blocking\render\FoxVsTiger_final_1080p_v10.mp4</code> (웹용은 같은 폴더의 <code>FoxVsTiger_web_v10.mp4</code>). 언리얼 안에서는 맵 <code>Map_FoxVsTiger</code>, 시퀀스 <code>LS_FoxVsTiger</code>.</p>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>컷</th><th>내용</th><th>구간(초)</th><th>핵심</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td>추격</td><td class="t">0~3.5</td><td>여우 얼굴 클로즈업에서 뒤돌아본 뒤 줌 아웃, 뒤에 호랑이가 흐리게</td></tr>
+          <tr><td class="num">2</td><td>장애물</td><td class="t">3.5~7.5</td><td>긴 단을 짚고 올라 달리고 구르며 내려옴, 호랑이가 부숨</td></tr>
+          <tr><td class="num">3</td><td>막다른 골목</td><td class="t">7.5~11</td><td>벽에 부딪히고 돌아서 주저앉음</td></tr>
+          <tr><td class="num">3-끝</td><td>갇혔다</td><td class="t">11~12.25</td><td>위에서 내려다봄, 호랑이 그림자가 여우에게 닿음</td></tr>
+          <tr><td class="num">4</td><td>호랑이 등장</td><td class="t">12.25~14.25</td><td>어둠에서 빛으로, 멈추지 않고 다가옴</td></tr>
+          <tr><td class="num">4-2</td><td>코앞까지</td><td class="t">14.25~16.5</td><td>여우 머리 너머로 호랑이가 1.4m 앞까지</td></tr>
+          <tr><td class="num">4-3</td><td>망치 / 눈</td><td class="t">16.5~19</td><td>머리 위로 드는 망치와 여우 얼굴을 번갈아 네 숏</td></tr>
+          <tr><td class="num">5-1</td><td>뿅</td><td class="t">19~20</td><td>내려친 망치를 여우 머리 위의 금색 주사위가 대신 맞음</td></tr>
+          <tr><td class="num">5-2</td><td>1…? 5!</td><td class="t">20~23</td><td>둘이 주사위를 올려다봄, 1로 기울다 5</td></tr>
+          <tr><td class="num">5-3</td><td>터진다</td><td class="t">23~24.5</td><td>빛에 호랑이가 골목 가운데로 밀려남</td></tr>
+          <tr><td class="num">6</td><td>분신</td><td class="t">24.5~27</td><td>연기와 함께 분신 다섯, 여섯이 넓게 둘러쌈</td></tr>
+          <tr><td class="num">8</td><td>포위</td><td class="t">27~30</td><td>한 걸음씩 좁힘, 호랑이가 망치를 놓치고 웅크림</td></tr>
+          <tr><td class="num">9</td><td>씩 웃는 여우</td><td class="t">30~32.75</td><td>권총을 겨눈 채 웃고, 페이드 아웃</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small lead">7번이 없는 것은 초안에서 6번에 합쳤기 때문입니다.</p>
+  </section>
+
+  <section id="history">
+    <h2>지나온 판</h2>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>날짜</th><th>판</th><th>무엇이 달라졌나</th><th>저장</th></tr></thead>
+        <tbody>
+          <tr><td class="t">11-19</td><td>블로킹 1~4차, 최종 1·2판</td><td>골목 선정, 캐릭터 배치, 텍스처 표정, 긴 그림자, 14초 7컷</td><td><span class="tag done">main에 병합</span></td></tr>
+          <tr><td class="t">11-20</td><td>최종 3·4판</td><td>새 여우·호랑이 모델, 장애물을 뛰어넘는 추격, 호랑이의 뿅망치 내려치기, 17초</td><td><span class="tag done">main에 병합</span></td></tr>
+          <tr><td class="t">11-21</td><td>최종 5판</td><td>머리 위에서 도는 궁극기 주사위, 환희 표정, 여우 표정 전부 다시 그림</td><td><span class="tag done">main에 병합</span></td></tr>
+          <tr><td class="t">11-23</td><td>최종 6·7·8판</td><td>얼굴 털 마스크, 차분해진 표정, 표정마다 주둥이 파츠, 파츠에 맞춰 입 다시 그림</td><td><span class="tag open">PR 21 (병합 전)</span></td></tr>
+          <tr><td class="t">11-23</td><td>재구성 초안 1~3판</td><td>연습용 맵에서 새 컷 구성 → 정지 자세를 실제 동작으로 → 긴장과 주사위 장면 추가 (13컷 32초)</td><td><span class="tag open">PR 21 (병합 전)</span></td></tr>
+          <tr><td class="t">11-24</td><td>최종 9판</td><td>초안을 실제 시퀀스로 옮기고 거친 곳 수정</td><td><span class="tag open">커밋 안 함</span></td></tr>
+          <tr><td class="t">11-24</td><td>최종 10판</td><td>페이드, 36겹 털, 여우 눈 깜빡임, 동작 이음매</td><td><span class="tag open">커밋 안 함</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="how">
+    <h2>만드는 방법</h2>
+    <div class="two">
+      <div class="box">
+        <h3>구조</h3>
+        <ul>
+          <li>맵과 시퀀스 전체를 스크립트 하나(<code>Tools/cinematic/ue_cine_build.py</code>)가 매번 처음부터 다시 만듭니다. 에디터에서 손으로 고친 것은 다음 빌드에 지워집니다.</li>
+          <li>새 동작 클립은 <code>ue_board_motions.py</code>가 이미 있는 클립을 뼈 단위로 조합해 만듭니다(다리는 이 클립, 상체는 저 클립, 뼈 회전은 시간 곡선).</li>
+          <li>연기·주사위·부서짐 같은 효과는 게임의 효과 코드를 시퀀스 시간에 맞춰 부르는 방식입니다.</li>
+          <li>영상은 오프라인 렌더(프레임당 8번 샘플링)로 뽑습니다.</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>명령과 걸리는 시간 (<code>cine_run.sh</code>)</h3>
+        <ul>
+          <li><code>build</code>: 맵과 시퀀스 다시 만들기, 약 15초</li>
+          <li><code>render 테이크 1280x720</code>: 전체 초안 화질, 약 45초</li>
+          <li><code>render 테이크 1920x1080</code> (최종 화질): 약 2분 30초</li>
+          <li><code>render 테이크 해상도 시작,끝</code>: 컷 하나만, 약 45초</li>
+          <li><code>compare A B 시작 끝 이름 배속</code>: 두 판을 나란히 느리게 보는 영상</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="applied">
+    <h2>적용한 것</h2>
+    <div class="three">
+      <div class="box">
+        <h3>동작</h3>
+        <ul>
+          <li>여우 새 클립 11개: 달리며 뒤돌아보기, 벽 충돌, 돌아서 앉기, 앉아 있기, 올려다보기, 움츠리기, 일어서기, 한 걸음(일반·조준)</li>
+          <li>호랑이 새 클립 4개: 망치 들기, 내려치기, 지켜보기, 방패 들고 밀려나기</li>
+          <li>모션 매칭 샘플에서 옮긴 클립 17개 (실제 사용은 짚고 오르기, 구르기, 벤치 앉기·일어서기)</li>
+          <li>망치는 팔을 75도 더 올려 머리 위로 곧게 듦</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>표정과 얼굴</h3>
+        <ul>
+          <li>표정은 얼굴 텍스처를 통째로 바꾸는 방식. 여우 7종, 호랑이 3종</li>
+          <li>표정마다 입 모양에 맞춘 주둥이 파츠</li>
+          <li>눈·입 위에는 털이 자라지 않게 하는 털 마스크</li>
+          <li>여우 눈 깜빡임 6번, 표정 바뀜은 깜빡임 두 프레임이나 컷 경계에 숨김</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>털</h3>
+        <ul>
+          <li>여우와 호랑이는 이 영상에서만 36겹 털 (게임은 12겹)</li>
+          <li>분신 다섯은 게임 털 그대로</li>
+          <li>가까이서는 얼굴 안쪽 털이 정돈되어 보이는 재질</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>카메라</h3>
+        <ul>
+          <li>카메라 14대, 숏 16개</li>
+          <li>좁은 골목(폭 3.65m)의 옆모습 숏은 10~12mm 렌즈</li>
+          <li>컷 4-2, 5-3, 6은 막힌 벽을 숨기고 그 자리에서 찍음</li>
+          <li>컷 4-3은 여우 눈높이 숏에서는 여우를, 얼굴 숏에서는 호랑이를 숨김</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>조명과 효과</h3>
+        <ul>
+          <li>해 질 녘 한 가지 햇빛, 장면별 보조 조명 10여 개</li>
+          <li>컷 3-끝의 긴 그림자: 길 쪽 좁은 조명을 컷 동안 낮춤</li>
+          <li>효과: 장애물 부서짐, 주사위 반짝임과 터짐, 분신 연기, 밀려나는 발밑 먼지</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>편집</h3>
+        <ul>
+          <li>시작 0.5초 페이드 인, 끝 0.75초 페이드 아웃</li>
+          <li>컷 2: 여우 위를 따라가는 낮은 트래킹</li>
+          <li>컷 9: 분신 권총이 렌즈를 가리던 것 해결</li>
+          <li>주저앉는 끝, 내려치기, 밀려나기 동작 다듬음</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="learned">
+    <h2>알아낸 것</h2>
+    <div class="two">
+      <div class="box">
+        <h3>동작과 리그</h3>
+        <ul>
+          <li>게임의 망치·방패 클립은 상체용이라 통째로 틀면 호랑이가 눕습니다. 골반과 다리는 서 있는 클립에서 가져와야 합니다.</li>
+          <li>모션 매칭 클립은 게임 여우에 틀면 이동 정보가 빠집니다. 캐릭터 위치와 방향을 원본 클립의 루트로 따로 넣어야 합니다.</li>
+          <li>구간이 클립 길이를 넘으면 처음부터 반복됩니다. 멈춰 있는 구간은 클립 길이 안에 맞춰야 합니다.</li>
+          <li>호랑이의 게임 클립은 초당 24키, 여우는 30키입니다.</li>
+          <li>여우와 호랑이 리그에는 꼬리 뼈가 4개씩 있고 클립이 안 움직일 뿐입니다. 클립에 꼬리 트랙을 추가해 움직이는 것까지 확인했습니다.</li>
+          <li>귀에는 뼈도 형태 변형도 없고, 귀 정점은 전부 머리 뼈 하나에 묶여 있습니다.</li>
+          <li>Pose Search는 넣어 둔 클립에서 고를 뿐이라 멈추기·돌기·걸음은 되고 주저앉기·돌아보기는 안 됩니다.</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>카메라와 렌더</h3>
+        <ul>
+          <li>카메라 회전 키가 -165도에서 180도로 가면 반대쪽으로 한 바퀴 돕니다. 회전 값을 이어지게 풀어야 합니다(컷 2가 휙 돌던 원인).</li>
+          <li>클립의 어느 시점부터 트는지에 따라 팔 높이가 달라집니다(컷 9 권총이 렌즈를 가리던 원인).</li>
+          <li>캐릭터를 숨기면 그 캐릭터가 가리던 조명이 그대로 들어와 얼굴이 하얗게 탑니다.</li>
+          <li>렌더에서 페이드는 화면 보정 전의 빛에 곱해집니다. 직선으로 넣으면 끝까지 밝다가 뚝 떨어지므로 양을 휘어 줘야 합니다.</li>
+          <li>털은 초안 화질과 최종 화질에서 가장자리가 다르게 나옵니다. 최종 화질로만 판단해야 합니다.</li>
+          <li>컷 하나만 뽑으면 그 앞에서 일어난 효과(부서진 장애물 등)가 없습니다.</li>
+          <li>옆모습 숏은 호랑이의 망치 쪽에서 찍어야 합니다. 방패 쪽에서는 방패가 얼굴을 가립니다.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="research">
+    <h2>조사한 것</h2>
+    <div class="two">
+      <div class="box">
+        <h3>동작을 얻는 방법</h3>
+        <ul>
+          <li>지금 방식(있는 클립 조합)으로 필요한 동작은 모두 만들었습니다.</li>
+          <li>모자랄 때의 다음 순서: Mixamo, 그다음 웹캠 한 대로 하는 전신 캡처(UE 5.8, 써 보지 않음).</li>
+          <li>영상에서 동작을 뽑는 도구와 Cascadeur는 여섯 동작을 위해 배우기에는 과하다고 판단했습니다.</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>귀와 꼬리 연기</h3>
+        <ul>
+          <li>작품 30개, 기술 자료 30개, 영상 84개를 모았습니다.</li>
+          <li>고른 기술: ① 뼈에 키를 넣어 굽는 연기 ② 시네마틱 전용 메시에 귀 뼈 추가 ③ 스프링을 계산해 굽는 자동 출렁임.</li>
+          <li>시간 대비 효과: 꼬리 포즈 다섯 군데, 귀 포즈 네 가지, 커브를 밀어 꼬리가 따라오게 하기.</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>시퀀서의 층 쌓기 (자료 31~33번)</h3>
+        <ul>
+          <li>영상에는 FK 컨트롤 릭을 애디티브로 얹는 방식이 가장 맞습니다. 스크립트로 트랙과 키를 넣는 함수가 엔진에 있는 것을 확인했습니다.</li>
+          <li>레이어드 컨트롤 릭은 릭 에셋부터 만들어야 하고, 애니메이션 믹서는 실험 단계입니다.</li>
+          <li>손작업을 받으려면 빌드가 그 층을 지우지 않게 구조를 바꿔야 합니다.</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>영상에 실시간 물리를 쓰는 것</h3>
+        <ul>
+          <li>권하지 않습니다. 컷마다 캐릭터가 순간이동하고, 연기 포즈는 어차피 키로 넣어야 하고, 뽑을 때마다 달라질 수 있습니다.</li>
+          <li>영상은 키 연기와 구운 스프링, 게임은 실시간 방식으로 나누는 것을 권했습니다.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="open">
+    <h2>남은 것</h2>
+    <div class="two">
+      <div class="box open">
+        <h3>결정을 기다리는 것</h3>
+        <ul>
+          <li><b>표정</b>: 컷 안에서 표정이 바뀌지 않게 하는 수정안. 컷 5-2를 다섯 숏으로 나눌지, 눈 깜빡임을 남길지.</li>
+          <li><b>꼬리와 귀</b>: 꼬리 연기를 바로 넣을지, 귀 뼈를 추가할지.</li>
+          <li><b>호랑이 깜빡임</b>: 눈 감은 그림을 새로 그릴지.</li>
+          <li><b>쓰임새</b>: 게임 안에서 실시간으로 재생할지, 미리 뽑은 영상 파일을 틀지.</li>
+          <li><b>초안 때의 선택</b>: 장애물 모양, 컷 5-1·5-2의 좌우, 벽을 숨기는 컷, 32초 길이.</li>
+        </ul>
+      </div>
+      <div class="box open">
+        <h3>출시용으로 부족한 것</h3>
+        <ul>
+          <li>게임 안에서 재생하는 경로, 건너뛰기, 입력 잠금이 없습니다.</li>
+          <li>소리가 없습니다(게임 코드 전체에 소리 재생이 없음).</li>
+          <li>실시간 성능을 재 본 적이 없습니다.</li>
+          <li>컷 3에서 3-끝으로 넘어갈 때 대낮에서 밤처럼 바뀝니다.</li>
+          <li>효과가 1초 넘는 끊김에서 빠질 수 있고, 다시 재생하려면 맵을 다시 열어야 합니다.</li>
+          <li>용량: 표정 텍스처 129MB, 전용 털 208MB, 쓰는 곳을 못 찾은 옛 얼굴 폴더 98MB.</li>
+          <li>9판과 10판은 아직 커밋하지 않았습니다.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="pages">
+    <h2>페이지 모음</h2>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>페이지</th><th>내용</th></tr></thead>
+        <tbody>
+          <tr><td><a href="https://claude.ai/artifact/UqbffPLvmd1iaaBUh5vYmC">콘티 (최종 10판)</a></td><td>컷별 그림 51장과 화면·동작·표정·효과, 전체 영상</td></tr>
+          <tr><td><a href="https://claude.ai/artifact/KFxKf14i5VFf1i2Qnmh8aK">화면 손보기 전후 비교</a></td><td>페이드, 털, 표정, 동작을 9판과 10판으로 나란히 본 영상</td></tr>
+          <tr><td><a href="https://claude.ai/artifact/FcLqEZhMNWKJNQiS6UrV1x">귀와 꼬리 연기 자료</a></td><td>작품 30, 기술 30, 영상 링크, 고른 기술</td></tr>
+          <tr><td><a href="https://claude.ai/artifact/B9MXkSnKKFxAcNMjusBwmX">재구성 초안 콘티</a></td><td>연습용 맵에서 잡은 13컷 초안과 동선 그림</td></tr>
+          <tr><td><a href="https://claude.ai/artifact/6bC5aPXToCrmSUTHLhNHgT">긴장·주사위 장면 구도 스케치</a></td><td>초안에 넣기 전에 그린 일곱 장의 구도</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small lead">작업 기록의 원문은 저장소의 <code>HANDOFF.md</code>와 <code>Docs/CinematicSequencePlan.md</code>에 있습니다.</p>
+  </section>
+</div>

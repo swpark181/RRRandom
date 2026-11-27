@@ -2697,6 +2697,34 @@ void ARRRandomPlayerController::ServerCheatRingEdge_Implementation(float Inside)
 #endif
 }
 
+void ARRRandomPlayerController::RRGoSky(int32 Hop)
+{
+	ServerCheatGoSky(Hop);
+}
+
+void ARRRandomPlayerController::ServerCheatGoSky_Implementation(int32 Hop)
+{
+#if !UE_BUILD_SHIPPING
+	ARRRandomCharacter* Mine = Cast<ARRRandomCharacter>(GetPawn());
+	const ARRRandomDiceTown* Town = Mine ? ARRRandomDiceTown::FindAt(this, Mine->GetActorLocation()) : nullptr;
+	if (!Town || !Town->GetSkyHops().IsValidIndex(Hop))
+	{
+		ClientMessage(TEXT("No such sky hop here."));
+		return;
+	}
+	const ARRRandomDiceTown::FSkyHop& Sky = Town->GetSkyHops()[Hop];
+	const FRotator Facing(0.f, (Sky.To - Sky.From).GetSafeNormal2D().Rotation().Yaw, 0.f);
+	Mine->TeleportTo(Sky.From + FVector(0.f, 0.f, Mine->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 10.f), Facing, false, true);
+	ClientSetRotation(Facing);
+	FString Rest;
+	for (int32 Index = Hop; Index < Town->GetSkyHops().Num() && Index < Hop + 16; ++Index)
+	{
+		Rest += FString::Printf(TEXT(" %d=(%.0f, %.0f, %.0f)"), Index, Town->GetSkyHops()[Index].To.X, Town->GetSkyHops()[Index].To.Y, Town->GetSkyHops()[Index].To.Z);
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: cheat, %s to sky hop %d at %s; the hops' far ends on:%s."), *Mine->GetName(), Hop, *Sky.From.ToCompactString(), *Rest);
+#endif
+}
+
 void ARRRandomPlayerController::RRGoBuilding(int32 Index, int32 Floor, float Yaw)
 {
 	ServerCheatGoBuilding(Index, Floor, Yaw);

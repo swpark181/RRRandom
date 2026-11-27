@@ -39,3 +39,5 @@ Shipped 2026-11-21: RRRandom PR #20 (merge 2a60731) carries all of this; earlier
 Ninth pass 2026-11-23 (final v7, render/FoxVsTiger_final_1080p_v7.mp4 + FoxVsTiger_web_v7.mp4; v6 the same morning), not committed: fur masks on every face, fur back on the tiger's face, calmer fox Scared / tiger Smug / tiger Startled, and a muzzle part per expression swapped by the actor (ARRRandomCineAnimal.ExpressionParts). See [[fur-mask-face-textures]], [[expression-drafts-restraint]], [[feedback-swappable-muzzle-part]]. Still no music or sound.
 
 Tenth pass 2026-11-23 (final v8, render/FoxVsTiger_final_1080p_v8.mp4 + web_v8), not committed: every expression's mouth repainted on its own muzzle part from four views, parts rebuilt from the new paint. See [[mouth-redraw-four-views]].
+
+Eleventh pass 2026-11-24 (final v9, render/FoxVsTiger_final_1080p_v9.mp4 + web_v9, 13 cuts, 32 s), not committed: the re-cut storyboard draft moved into the real map and sequence and cleaned up. v6-v8 were committed in PR #21 (open, not merged as of 2026-11-24). Details in [[cinematic-storyboard-page]].

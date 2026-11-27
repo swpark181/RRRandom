@@ -51,6 +51,8 @@ namespace
 	// The emote wheel's size, and how far the mouse goes to pick a slice
 	constexpr float WheelRadius = 120.f;
 	constexpr float WheelPick = 30.f;
+	// Round 102: the respawn dice tumble this long after the knockout before landing
+	constexpr float RespawnDiceRollTime = 1.1f;
 }
 
 int32 ARRRandomHUD::GetEmotePick() const
@@ -223,6 +225,29 @@ void ARRRandomHUD::DrawRoundIntro(const ARRRandomGameState& State, const ARRRand
 		const float RuleTop = DieCenter.Y + DieSize * 0.5f + 12.f * S;
 		Centered(Canvas, RRRounds::GetRuleName(State.GetRoundRule()), CenterX, RuleTop, RuleSize, EWeight::Black, Faded(RRRounds::GetRuleColor(State.GetRoundRule()), RuleIn), RuleSize * 0.1f, true);
 		Centered(Canvas, RRRounds::GetRuleLine(State.GetRoundRule()), CenterX, RuleTop + RuleSize * 1.25f, 13.f * S, EWeight::ExtraBold, Faded(RRUI::InkSoft, RuleIn), 0.f, true);
+
+		// Round 102: each team's start dice and the spot they gave, blue on the left, red on the right
+		const ARRRandomSpawnZones* Zones = ARRRandomSpawnZones::Get(this);
+		if (Zones && Zones->GetTeamZone(0) > 0 && Zones->GetTeamZone(1) > 0)
+		{
+			const float StartIn = Ease((Since - RollEnd - 0.25f) / 0.3f);
+			const float Line = RuleTop + RuleSize * 1.25f + 30.f * S;
+			const float Die = 28.f * S;
+			for (int32 Team = 0; Team < 2; ++Team)
+			{
+				const float Mid = CenterX + (Team == 0 ? -120.f : 120.f) * S;
+				const bool bMine = Viewer && Viewer->GetTeam() == Team;
+				Centered(Canvas, FString::Printf(TEXT("%s START%s"), Team == 0 ? TEXT("BLUE") : TEXT("RED"), bMine ? TEXT(" · YOU") : TEXT("")), Mid, Line, 11.f * S, EWeight::Black,
+					Faded(RRUI::TeamColorDeep(Team), StartIn), 11.f * S * 0.2f, true);
+				const float DieY = Line + 20.f * S + Die * 0.5f;
+				DrawDieFace(FVector2D(Mid - 46.f * S, DieY), Die, Zones->GetTeamDie(Team, 0), StartIn);
+				DrawDieFace(FVector2D(Mid - 12.f * S, DieY), Die, Zones->GetTeamDie(Team, 1), StartIn);
+				const FString Sum = FString::Printf(TEXT("= %d"), Zones->GetTeamZone(Team));
+				const float SumSize = 24.f * S;
+				const FVector2D SumBox = RRUI::MeasureText(Sum, SumSize, EWeight::Black);
+				RRUI::DrawGlowText(Canvas, Sum, FVector2D(Mid + 10.f * S, DieY - SumBox.Y * 0.5f), SumSize, EWeight::Black, Faded(RRUI::TeamColorDeep(Team), StartIn));
+			}
+		}
 	}
 }
 
@@ -369,6 +394,43 @@ void ARRRandomHUD::DrawKnockedOutBy(const ARRRandomCharacter& Viewer)
 	const float Total = FMath::Max(0.1f, Viewer.GetRespawnTotal());
 	const FBox2D Bar(FVector2D(CenterX - 90.f * S, Y + 4.f * S), FVector2D(CenterX + 90.f * S, Y + 9.f * S));
 	RRUI::DrawBar(Canvas, Bar, 1.f - Viewer.GetRespawnRemaining() / Total, Faded(RRUI::White, 0.8f), RRUI::Lavender);
+
+	// Round 102: two dice for where it gets back up, tumbling a moment, then landing on the spot's number
+	const int32 DieA = Viewer.GetRespawnDie(0);
+	const int32 DieB = Viewer.GetRespawnDie(1);
+	if (DieA <= 0 || DieB <= 0)
+	{
+		return;
+	}
+	const float Since = Viewer.GetRespawnTotal() - Viewer.GetRespawnRemaining();
+	const float DieSize = 42.f * S;
+	const float Label = Y + 22.f * S;
+	Centered(Canvas, TEXT("RESPAWN DICE"), CenterX, Label, 11.f * S, EWeight::ExtraBold, RRUI::InkSoft, 11.f * S * 0.24f, true);
+	const float Row = Label + 20.f * S + DieSize * 0.5f;
+	for (int32 Which = 0; Which < 2; ++Which)
+	{
+		const FVector2D At(CenterX + (Which == 0 ? -1.f : 1.f) * DieSize * 0.7f, Row);
+		if (Since < RespawnDiceRollTime)
+		{
+			// Faces flicking, slower and slower, each die its own way
+			const float Phase = FMath::Pow(FMath::Max(0.f, Since) / RespawnDiceRollTime, 0.6f) * 12.f;
+			const int32 Face = 1 + (FMath::FloorToInt(Phase) * (Which == 0 ? 5 : 3) + Which * 2) % 6;
+			const float Wobble = FMath::Sin(Since * 30.f + Which * 2.f) * 5.f * S * (1.f - Since / RespawnDiceRollTime);
+			RRUI::DrawDisc(Canvas, At + FVector2D(0.f, 4.f * S), DieSize * 0.62f, Faded(RRUI::Shadow, 0.5f));
+			DrawDieFace(At + FVector2D(Wobble, -FMath::Abs(Wobble)), DieSize, Face, 1.f);
+		}
+		else
+		{
+			const float Pop = 1.f + 0.3f * FMath::Max(0.f, 1.f - (Since - RespawnDiceRollTime) / 0.25f);
+			DrawDieFace(At, DieSize * Pop, Which == 0 ? DieA : DieB, 1.f);
+		}
+	}
+	if (Since >= RespawnDiceRollTime)
+	{
+		const float In = Ease((Since - RespawnDiceRollTime) / 0.3f);
+		const float Size = 20.f * S * (1.f + 0.25f * (1.f - In));
+		Centered(Canvas, FString::Printf(TEXT("%d + %d = SPOT %d"), DieA, DieB, DieA + DieB), CenterX, Row + DieSize * 0.5f + 10.f * S, Size, EWeight::Black, Faded(RRUI::LavenderDeep, In), Size * 0.12f, true);
+	}
 }
 
 void ARRRandomHUD::DrawEmoteWheel(const ARRRandomCharacter& Viewer)

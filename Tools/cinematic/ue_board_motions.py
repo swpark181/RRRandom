@@ -7,6 +7,7 @@
 # What the Level Sequence cannot do by cross-fading sections is done here; cutting and joining whole clips stays there.
 # Run with UnrealEditor-Cmd -run=pythonscript (board_run.sh py ue_board_motions.py).
 import math
+import os
 
 import unreal
 
@@ -266,13 +267,31 @@ def bonk_when(t):
 # legs of the game's idle, which faces straight ahead as those clips expect - the alley idle stands side on, and the
 # swing's chest over its hips faced the side wall - and the clip from the spine up)
 tiger_stand = Clip(TIGER + "/A_Tiger_Idle")
-make("Raise", swing, 3.0, legs_upper(tiger_stand, lambda t: t, swing, raise_when), out=TIGER, prefix="A_Tiger_Board_")
+# (2026-11-24, the real sequence: at the swing's top the hammer lies back over his shoulder - from the fox's eyes it
+# was out of sight, and from the side it never went up. The upper arm is turned up over his head as he winds up
+# (LIFT degrees at the top), and back to the swing's own as the blow comes down, so it lands where it did.)
+LIFT = -75.0                             # (tried 45, 60, 75: at 75 the arm is straight up, the hammer's head over his own)
+for old in ("TestRaise45", "TestRaise60", "TestRaise75"):
+    if eal.does_asset_exist(f"{TIGER}/A_Tiger_Board_{old}"):
+        eal.delete_asset(f"{TIGER}/A_Tiger_Board_{old}")
+make("Raise", swing, 3.0, legs_upper(tiger_stand, lambda t: t, swing, raise_when),
+     [turn("rightarm", "X", lambda t: LIFT * smooth((t - 0.3) / 1.5))], out=TIGER, prefix="A_Tiger_Board_")
 make("Bonk", swing, 1.9, legs_upper(tiger_stand, lambda t: 3.0 + t, swing, bonk_when), [
+    # (2026-11-24: the arm stays up for the first half of the blow and comes straight down on the die; let go at once,
+    # it swung back over the shoulder first and the hammer came in from the side)
+    turn("rightarm", "X", curve([(0.0, LIFT), (0.05, LIFT * 0.8), (0.12, 0.0)])),
     turn("spine", "X", curve([(0.12, 0), (0.30, 13), (0.75, 6), (1.4, 0)])),
     turn("head", "X", curve([(0.12, 0), (0.28, 15), (0.8, 5), (1.5, 0)])),
 ], out=TIGER, prefix="A_Tiger_Board_")
 shield_block = Clip(TIGER + "/A_Tiger_ShieldBlock")
-make("Shield", shield_block, 1.25, legs_upper(tiger_stand, lambda t: 5.0 + t, shield_block, lambda t: t), [turn("spine", "X", 9)], out=TIGER, prefix="A_Tiger_Board_")
+# (2026-11-24: pushed back by the die's burst he slid in one held pose. Now he is thrown back over his heels and
+    # brings himself forward again behind the shield as he slows. (A braced leg was tried too: at the cut's distance it does not show.))
+SKID_LEAN = curve([(0.0, 24), (0.25, 20), (0.6, 8), (0.95, 2)])
+SKID = [turn("spine", "X", SKID_LEAN), turn("head", "X", curve([(0.0, 10), (0.3, -6), (0.9, -2)]))]
+for old in ("TestSkid0", "TestSkidA", "TestSkidB"):
+    if eal.does_asset_exist(f"{TIGER}/A_Tiger_Board_{old}"):
+        eal.delete_asset(f"{TIGER}/A_Tiger_Board_{old}")
+make("Shield", shield_block, 1.25, legs_upper(tiger_stand, lambda t: 5.0 + t, shield_block, lambda t: t), SKID, out=TIGER, prefix="A_Tiger_Board_")
 # (the game's idle, not the alley idle: that one holds the hammer out in front, into the fox's face from here)
 make("Watch", tiger_stand, 4.0, of(tiger_stand, lambda t: t), [turn("spine", "X", -6), turn("neck", "X", 8), turn("head", "X", 12)], out=TIGER, prefix="A_Tiger_Board_")
 unreal.log("BOARD DONE")

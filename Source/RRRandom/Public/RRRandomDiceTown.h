@@ -110,6 +110,27 @@ public:
 	FVector GetRandomWalkSpot(FRandomStream& Stream, float Radius) const;
 
 	/**
+	 * Round 103, the sky paths (the user: "주사위마을에 파쿠르로 이동할 수 있는 공간", then "같이 손볼 내용 포함해서 그대로
+	 * 진행해줘"): over each cross road gate, from a staircase of giant dice at one end to the nearest flat roof past the
+	 * other (AddSkyPaths). A hop is a step there that walking doesn't make, a climb of up to 2 m or a jump over a gap, good
+	 * either way (feet to feet, in the world); the bots' navmesh gets a link for each (MakeSkyLinks), their walking graph too.
+	 */
+	struct FSkyHop
+	{
+		FVector From;
+		FVector To;
+	};
+	const TArray<FSkyHop>& GetSkyHops() const { return SkyHops; }
+	/** Spots up on the sky paths (feet, in the world): the gate's beam, the stepping dice, the roof. */
+	const TArray<FVector>& GetSkyPerches() const { return SkyPerches; }
+	/** A feet spot on a sky path (up its stairs, on the gate, a stepping die or the roof). */
+	bool IsOnSkyPath(const FVector& Feet) const;
+	/** A sky path perch at random (feet), for the bots' roaming; false without sky paths. */
+	bool GetRandomSkyPerch(FRandomStream& Stream, FVector& OutFeet) const;
+	/** Whether a feet spot is looked down on from close by: a perch within Reach across and at least Drop higher. */
+	bool IsOverlookedBySkyPath(const FVector& Feet, float Reach, float Drop) const;
+
+	/**
 	 * Smashes and mends this machine's town to match the wrecks in force (round 60, ARRRandomWreckage): the blocks over the
 	 * floor inside them go (giant dice stay), and with them what stands there drawn as a model (roofs, Tripo trees, hedges,
 	 * lamps, awnings, whole flights of stairs); the hidden boxes that stop things are cut round the holes, and blocks inside
@@ -425,6 +446,17 @@ private:
 	void MakeBlocks();
 	void MakeCollision();
 	void MakeWalkGraph();
+	/** Round 103: the sky paths, at the end of LayOut (-RRNoSkyPath leaves them out). */
+	void AddSkyPaths();
+	/** Server: a navmesh link for each sky hop (the bots' routes). */
+	void MakeSkyLinks();
+	TArray<FSkyHop> SkyHops;
+	TArray<FVector> SkyPerches;
+	/** The boxes the sky paths take up (in the world), for IsOnSkyPath. */
+	TArray<FBox> SkyAreas;
+	/** The walking graph's links for the sky hops: node to node, both ways. */
+	TMultiMap<int32, int32> SkyGraphLinks;
+	UPROPERTY(Transient) TArray<TObjectPtr<AActor>> SkyLinks;
 	void MakeUnderside();
 	void MakeSky();
 	void AddColored(UInstancedStaticMeshComponent* Instances, const FTransform& Transform, const FColor& Body, const FColor& Accent);

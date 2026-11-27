@@ -1,60 +1,130 @@
-"""The fox-vs-tiger cinematic's storyboard page (2026-11-23): writes page/index.html from the cut list below.
-Panels are frames of the final render (page/img/c<cut>_<n>.jpg, made from render/final1080h). Run with any Python 3:
-    python build_board.py
-Cut times are frames at 24 fps, from RRRandom/Tools/cinematic/ue_cine_build.py (CUTS, the expression keys, the cues).
+"""The fox-vs-tiger cinematic's storyboard page: writes page/index.html and page/img from the cut list below.
+2026-11-24: the re-cut film (final v10: 13 cuts, 32.75 s; v9 before the polish pass). Panels are frames of the final render
+(cinematic_blocking/render/final1080j); cut times come from final/layout.json, written by
+RRRandom/Tools/cinematic/ue_cine_build.py. The page of the film before it (v8, 9 cuts) is build_board_v8.py.
+Run with any Python 3:    python build_board.py [take]
+Cut labels are the user's: 1, 2, 3, 3-끝, 4, 4-2, 4-3, 5-1, 5-2, 5-3, 6, 8, 9 (the old cut 7 went into 6).
 """
 import html
 import io
+import json
 import os
+import subprocess
+import sys
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+TAKE = sys.argv[1] if len(sys.argv) > 1 else "final1080j"
+FRAMES = os.path.join("C:/work/char-pipeline/output/cinematic_blocking/render", TAKE)
+FF = "C:/work/char-pipeline/tools/ffmpeg/ffmpeg.exe"
+FILM = "FoxVsTiger_web_v10.mp4"
 FPS = 24
+L = json.load(io.open(os.path.join(HERE, "final", "layout.json"), encoding="utf-8"))
+T = L["times"]
+C = {k: v[0] for k, v in L["cuts"].items()}
+WIDE = L["wide"]
+
 cuts = [
-    dict(n=1, name="추격", f0=0, f1=58, old="1A", cam="Cam1a_Chase", lens="24mm",
-         panels=[(4, "여우가 달려오고 호랑이가 뒤쫓는다"), (18, "첫 장애물을 뛰어넘는다"), (46, "호랑이가 망치로 장애물을 날린다")],
-         view="길 옆 조금 위에서, 여우 앞쪽을 같은 속도로 물러나며 따라간다.",
-         act="여우가 고리 도로를 달려 첫 장애물(주사위 더미)을 뛰어넘는다(0.6초). 뒤따르던 호랑이가 망치를 머리 위로 들었다 내리쳐 장애물을 날린다(1.8초).",
-         face=[("여우", "놀람"), ("호랑이", "접근")], fx="주사위 블록이 부서져 여우 쪽으로 튄다."),
-    dict(n=2, name="둘째 장애물", f0=58, f1=120, old="1B", cam="Cam1b_Barricade", lens="24mm",
-         panels=[(60, "여우가 둘째 장애물로 달려든다"), (84, "여우는 넘어 지나가고 호랑이가 망치를 든다"), (93, "장애물이 부서진다")],
-         view="둘째 장애물 옆 낮은 자리. 거의 고정.",
-         act="여우가 둘째 장애물을 넘어 화면 앞으로 빠져나간다(2.7초). 호랑이가 다시 망치를 내리쳐 부수고 달려 나온다(3.9초).",
-         face=[("여우", "놀람"), ("호랑이", "접근")], fx="주사위 블록이 화면 쪽으로 튄다."),
-    dict(n=3, name="막다른 골목", f0=120, f1=156, old="2", cam="Cam2_DeadEnd", lens="18mm",
-         panels=[(132, "골목으로 뛰어든다"), (148, "벽 앞에서 미끄러지며 멈춘다"), (155, "뒤를 돌아본다")],
-         view="골목 안쪽, 낮은 자리. 고정.",
-         act="여우가 골목으로 뛰어들어 벽 앞에서 미끄러지며 멈추고(5.5초), 뒤를 돌아본다(6.2~6.5초).",
-         face=[("여우", "놀람 → 걱정 (6.3초)")], fx="화면 밖에서 골목 입구 모퉁이가 부서진다(5.6초). 다음 컷의 잔해가 된다."),
-    dict(n=4, name="호랑이 등장", f0=156, f1=204, old="3", cam="Cam3_TigerArrives", lens="30mm",
-         panels=[(158, "골목 입구에 호랑이가 선다"), (182, "여우를 보며 걸어온다"), (203, "가까이 와서 멈춘다")],
-         view="여우 등 뒤 낮은 자리에서 골목 입구 쪽. 역광과 긴 그림자. 여우는 화면 앞에 흐리게 걸친다. 고정.",
-         act="호랑이가 잔해가 깔린 골목 입구에서 여우를 똑바로 보며 천천히 걸어 들어온다.",
-         face=[("호랑이", "접근"), ("여우", "걱정 (등을 보임)")], fx="이 컷에만 골목 입구의 낮고 따뜻한 조명으로 호랑이 그림자를 골목 끝까지 드리우고, 호랑이 얼굴에 좁은 보조광을 준다."),
-    dict(n=5, name="금색 주사위", f0=204, f1=240, old="4A", cam="Cam4_GoldDie", lens="18mm",
-         panels=[(205, "머리 위로 금색 주사위가 튀어나온다"), (221, "주사위가 도는 동안 환호한다"), (236, "5 눈으로 멈춘다")],
-         view="호랑이 쪽에서 여우 상반신과 머리 위 주사위. 아주 조금 물러난다.",
-         act="여우 머리 위로 금색 궁극기 주사위가 튀어나와 1.4초 동안 돌다가 5 눈으로 멈추고 터진다(9.9초). 여우는 두 손을 들고 환호한다.",
-         face=[("여우", "환희 → 결심 (9.9초)")], fx="주사위 반짝임과 빛기둥, 멈출 때 터지는 빛."),
-    dict(n=6, name="호랑이 움찔", f0=240, f1=252, old="4B", cam="Cam4b_TigerStarts", lens="28mm",
-         panels=[(242, "호랑이가 움찔한다"), (250, "고개를 젖히며 놀란다")],
-         view="호랑이의 망치 쪽 앞에서 얼굴. 고정.",
-         act="주사위가 터지자 호랑이가 움찔하며 고개를 젖힌다.",
-         face=[("호랑이", "깜짝")], fx="없음."),
-    dict(n=7, name="분신", f0=252, f1=300, old="5", cam="Cam5_Clones", lens="24mm",
-         panels=[(253, "호랑이와 여우가 마주 선다"), (256, "연기가 터진다"), (290, "분신들이 호랑이를 에워싼다")],
-         view="골목 입구 쪽 높은 자리에서 내려다본다. 고정.",
-         act="연기가 터지며(10.6초) 여우 분신 다섯이 나타나, 진짜 여우까지 여섯이 호랑이를 둥글게 에워싼다. 호랑이는 좌우를 두리번거린다.",
-         face=[("여우", "결심 → 웃음 (10.6초)"), ("호랑이", "깜짝 → 긴장 (10.6초)")], fx="분신 연기: 가운데 큰 것 하나, 자리마다 하나씩."),
-    dict(n=8, name="포위", f0=300, f1=360, old="6", cam="Cam6_Surrounded", lens="18mm",
-         panels=[(302, "여우들이 권총을 겨눈다"), (310, "호랑이가 망치를 떨어뜨린다"), (352, "방패 뒤로 웅크린다")],
+    dict(n=1, name="추격: 얼굴에서 줌 아웃", lens="55→30mm", cam="Cam1_Chase",
+         panels=[(14, "달리는 여우 얼굴 클로즈업"), (30, "불안하게 뒤를 한 번 돌아본다"), (80, "줌 아웃: 뒤에 쫓아오는 호랑이가 흐리게 보인다")],
+         view="여우 앞에서 같은 속도로 물러난다. 긴 렌즈로 얼굴을 크게 잡고 시작해, 돌아본 뒤에 줌 아웃하면서 조금 더 물러난다. 초점은 계속 여우.",
+         act="여우가 고리 도로를 달린다. 0.5~2.0초에 오른쪽 어깨 너머로 뒤를 한 번 돌아보고 다시 앞을 본다. 호랑이는 6m쯤 뒤에서 쫓아온다.",
+         face=[("여우", "놀람 → 걱정 (돌아보는 동안) → 놀람"), ("호랑이", "접근")], fx="배경과 호랑이는 초점 밖(조리개 1.4).",
+         was="길 옆에서 따라가며 첫 장애물을 넘고 호랑이가 부수는 컷."),
+    dict(n=2, name="장애물: 짚고 올라 구르며 내려온다", lens="16→11.5mm", cam="Cam2_Obstacle",
+         panels=[(90, "긴 장애물로 달려든다"), (98, "두 손으로 짚고 올라간다"), (118, "위를 달린다"), (140, "끝에서 뛰어내린다"),
+                 (150, "구르며 착지한다. 뒤에 호랑이"), (174, "호랑이가 장애물을 부순다")],
+         view="길 옆 낮은 자리에서 옆모습으로. 여우가 올라서면 같은 속도로 나란히 따라가고, 끝에서는 넓게 벌려 장애물 전체와 호랑이까지 담는다.",
+         act=f"높이 1m, 길이 4m의 평평한 단을 짚고 올라가({T['mantle'][0]:.1f}~{T['mantle'][1]:.1f}초) 위를 달려 끝에서 뛰어내리고({T['off']:.1f}초), 바닥에서 한 바퀴 구른 뒤({T['down']:.1f}초~) 일어나 달린다. 뒤따라온 호랑이가 망치로 장애물을 부순다({T['smash']:.1f}초).",
+         face=[("여우", "놀람"), ("호랑이", "접근")], fx="장애물 블록이 부서져 화면 쪽으로 날아온다.",
+         was="낮은 주사위 더미 둘을 뛰어넘는 컷."),
+    dict(n=3, name="막다른 골목: 부딪히고 주저앉는다", lens="18mm", cam="Cam3_DeadEnd",
+         panels=[(200, "골목 끝으로 달려온다"), (206, "두 손으로 벽을 짚으며 부딪힌다"), (217, "튕겨 나와 돌아선다"),
+                 (229, "등을 벽 쪽으로"), (238, "벽을 타고 미끄러져 내려간다"), (256, "바닥에 주저앉는다")],
+         view="골목 안 낮은 자리, 벽 쪽을 비스듬히. 고정.",
+         act=f"여우가 골목 끝까지 달려와 두 손으로 벽을 짚으며 부딪힌다({T['hit']:.1f}초). 튕겨 나온 뒤 카메라 쪽으로 돌아서고({T['turn']:.1f}초~), 등을 벽에 대고 바닥까지 미끄러져 앉는다({T['sit']:.1f}초).",
+         face=[("여우", "놀람")], fx=f"화면 밖에서 골목 입구 모퉁이가 부서진다({C['3'] + 0.6:.1f}초).",
+         was="벽 앞에서 미끄러지며 멈추고 선 채로 돌아보는 컷."),
+    dict(n="3e", label="3-끝", name="갇혔다: 그림자가 먼저 닿는다", lens="18mm", cam="Cam3E_Top",
+         panels=[(268, "세 면이 막힌 구석의 여우"), (280, "입구에 선 호랑이의 그림자가 바닥을 타고 자란다"), (292, "그림자가 여우에게 닿는다")],
+         view="바로 위에서 내려다본다. 왼쪽이 막힌 벽, 오른쪽이 골목 입구. 고정.",
+         act="호랑이가 골목 입구로 걸어 들어온다. 입구 쪽 낮은 빛 때문에 그의 긴 그림자가 바닥을 타고 여우 쪽으로 자란다.",
+         face=[("여우", "놀람")], fx="골목 조명을 끄고, 길 쪽에서 골목 안으로 좁고 낮은 빛 하나. 이 컷 동안 빛을 낮춰서 그림자가 길어진다.",
+         was="없던 컷."),
+    dict(n=4, name="호랑이 등장: 그림자를 지나 얼굴이 보인다", lens="26mm", cam="Cam4_Tiger",
+         panels=[(296, "골목 입구, 역광 속의 호랑이"), (318, "빛 웅덩이를 지나 걸어온다"), (338, "멈추지 않고 다가온다")],
+         view="앉은 여우 옆 낮은 자리에서 골목 입구 쪽을 올려다본다(호랑이의 망치 쪽). 고정.",
+         act="호랑이가 골목 입구에서 천천히 걸어 들어온다(초속 1.3m). 빛 웅덩이를 지나며 얼굴이 드러나지만 멈추지 않는다.",
+         face=[("호랑이", "접근")], fx="골목 조명을 끄고 어둡게. 입구 뒤쪽의 낮은 조명으로 윤곽과 긴 그림자, 가운데에 빛 웅덩이 하나, 호랑이 가슴과 얼굴에 좁은 보조광.",
+         was="여우 어깨 너머로 역광과 긴 그림자를 보는 컷. 호랑이가 골목 가운데에서 멈췄다."),
+    dict(n="4-2", name="멈추지 않는다: 코앞까지", lens="20mm", cam="Cam42_Loom",
+         panels=[(350, "여우 머리 너머로 다가오는 호랑이"), (372, "가운데를 지나 계속 온다"), (392, "코앞에 선다")],
+         view="여우 뒤통수 너머, 조금 옆에서. 천천히 다가간다. 카메라가 막힌 벽 자리에 있어서 이 컷은 벽을 치우고 찍는다.",
+         act=f"호랑이가 골목 가운데에서 서지 않고 여우 앞 1.4m까지 걸어온다({T['near']:.1f}초).",
+         face=[("호랑이", "접근")], fx="막힌 벽 위쪽에 약한 푸른 조명 하나.",
+         was="없던 컷."),
+    dict(n="4-3", name="망치를 든다 / 눈을 질끈 감는다", lens="12 / 42mm", cam="Cam43_Up · Cam43_Eyes",
+         panels=[(402, "여우 눈높이에서 올려다본 호랑이. 망치가 올라간다"), (410, "천천히 든다"), (424, "여우의 얼굴"),
+                 (440, "머리 위로 다 들었다. 반 박자 멈춘다"), (445, "움츠러든다"), (452, "눈을 질끈 감는다")],
+         view="두 구도를 번갈아 보여 준다(1.0초, 0.6초, 0.4초, 0.5초로 짧아진다). 올려다보는 쪽은 여우 눈 자리에서 찍어서 그때는 여우를 숨기고, 얼굴 쪽은 호랑이가 선 자리 뒤 낮은 곳에서 정면으로 찍어서 그때는 호랑이를 숨긴다.",
+         act=f"호랑이가 1.5초에 걸쳐 망치를 머리 위로 곧게 들고({T['raise'][0]:.1f}~{T['raise'][1]:.1f}초) 꼭대기에서 멈춘다. 여우는 움츠러들다가({T['cower']:.1f}초~) 눈을 질끈 감는다({C['4-3'] + 2.12:.1f}초).",
+         face=[("여우", f"놀람 → 눈 감음 ({C['4-3'] + 2.12:.1f}초)"), ("호랑이", "접근")], fx="없음. 소리를 넣게 되면 여기서 음악을 끊는다.",
+         was="없던 컷."),
+    dict(n="5-1", name="뿅! 주사위가 대신 맞는다", lens="10.5mm", cam="Cam51_Bonk",
+         panels=[(458, "머리 위에서 멈춘 망치. 여우는 움츠리고 있다"), (465, "내려치는 순간 여우 머리 위에 주사위가 나타난다"), (475, "뿅! 망치가 튕겨 나가고 주사위가 돌기 시작한다")],
+         view="골목 옆벽에 붙어서 옆모습으로. 골목 폭이 3.65m뿐이라 아주 넓은 렌즈를 썼다. 호랑이의 망치 쪽에서 찍어서 스케치와 좌우가 반대다(여우가 오른쪽).",
+         act=f"호랑이가 망치를 내려치고({T['die']:.2f}초) 그 아래 여우 머리 위에 금색 주사위가 튀어나와 대신 맞는다({T['bonk']:.2f}초). 망치는 튕겨 올라가고 호랑이가 뒤로 젖혀진다.",
+         face=[("여우", "눈 감음"), ("호랑이", f"접근 → 깜짝 ({T['bonk'] + 0.05:.1f}초)")], fx="맞는 자리에 작은 흰 연기. 주사위 반짝임이 시작된다.",
+         was="여우가 서서 환호하는 동안 주사위가 저절로 돌던 컷(5)."),
+    dict(n="5-2", name="1…? 5! 둘이 주사위를 본다", lens="12mm", cam="Cam52_Watch",
+         panels=[(486, "세차게 도는 주사위"), (506, "여우가 눈을 뜨고 올려다본다"), (524, "모서리로 서서 흔들린다"),
+                 (533, "1 쪽으로 기운다. 호랑이 씩"), (543, "넘어간다"), (549, "5! 표정이 뒤바뀐다")],
+         view="같은 쪽 옆벽, 더 낮은 자리에서 올려다본다. 두 얼굴 사이 위에 주사위. 고정.",
+         act=(f"맞은 주사위가 여우 머리 위에서 세차게 돌다가 느려진다. 여우가 1초에 걸쳐 고개를 들어 올려다본다({T['look']:.1f}초~). 주사위가 모서리로 서서 흔들리고({T['rock']:.1f}초) "
+              f"1 쪽으로 기울었다가({T['one']:.1f}초) 5로 넘어간다({T['five']:.2f}초). 호랑이는 망치를 내리고 몸을 숙여 지켜본다."),
+         face=[("여우", f"눈 감음 → 걱정 ({T['look'] + 0.3:.1f}초) → 환희 ({T['five'] + 0.06:.1f}초)"),
+               ("호랑이", f"깜짝 → 긴장 ({T['bonk'] + 0.9:.1f}초) → 접근 ({T['one'] + 0.1:.1f}초) → 깜짝 ({T['five'] + 0.06:.1f}초)")],
+         fx="주사위 반짝임과 빛기둥. 여우 얼굴에 금색 빛.",
+         was="없던 컷."),
+    dict(n="5-3", name="터진다: 호랑이가 밀려난다", lens="18mm", cam="Cam53_Burst",
+         panels=[(556, "5에서 멈춘 주사위가 터진다"), (564, "빛에 밀려 호랑이가 뒤로 미끄러진다"), (584, "골목 가운데에서 멈춘다. 여우가 일어선다")],
+         view="막힌 벽 쪽 구석에서 골목 입구 쪽으로. 앞에 여우와 주사위, 멀리 밀려나는 호랑이. 이 컷도 벽을 치우고 찍는다.",
+         act=f"주사위가 터지고({T['land']:.2f}초) 호랑이가 방패를 든 채 골목 가운데까지 2.9m 밀려난다(~{T['tiger_back']:.1f}초). 여우는 일어선다({T['up']:.1f}초~).",
+         face=[("여우", f"환희 → 결심 ({C['5-3'] + 0.3:.1f}초)"), ("호랑이", "깜짝")], fx="주사위가 터지는 빛과 고리. 밀려나는 호랑이 발밑에 먼지.",
+         was="호랑이 얼굴만 0.5초 잡던 컷(6)."),
+    dict(n=6, name="분신: 넓게 둘러싼다", lens="17mm", cam="Cam6_Clones",
+         panels=[(592, "일어선 여우와 밀려난 호랑이"), (600, "연기와 함께 분신"), (640, "여우가 한 걸음 나서고, 여섯이 넓게 둘러싼다")],
+         view="여우 등 뒤 높은 곳에서 골목 길이 방향으로 내려다본다. 카메라가 막힌 벽 자리 너머에 있어서 벽을 치우고 찍는다. 고정.",
+         act=f"연기가 터지며 분신 다섯이 나타나고({T['poof']:.2f}초) 여우가 한 걸음 나선다. 여섯이 골목 길이 방향의 긴 타원(길이 {WIDE[0] / 100:.1f}m, 폭 {WIDE[1] / 100:.1f}m)으로 호랑이를 둘러싼다. 호랑이는 좌우를 두리번거린다.",
+         face=[("여우", f"결심 → 웃음 ({T['poof']:.1f}초)"), ("호랑이", f"깜짝 → 긴장 ({T['poof'] + 0.6:.1f}초)")],
+         fx="분신 연기: 여우 자리에 큰 것 하나, 분신 자리마다 하나씩.",
+         was="입구 쪽에서 내려다보는 분신 컷(7). 처음부터 좁은 원이었다."),
+    dict(n=8, name="포위: 한 걸음씩 좁힌다", lens="18mm", cam="Cam8_CloseIn",
+         panels=[(652, "넓게 선 여우들이 권총을 겨눈다"), (692, "다가오는 사이 호랑이가 망치를 놓친다"), (716, "좁은 원. 호랑이는 방패 뒤로 웅크린다")],
          view="높은 곳에서 거의 수직으로 내려다본다. 고정.",
-         act="여우 여섯이 일제히 권총을 겨눈다. 호랑이는 망치를 떨어뜨리고(12.5~12.8초) 방패 뒤로 웅크린다.",
-         face=[("여우", "웃음"), ("호랑이", "긴장")], fx="없음."),
-    dict(n=9, name="씩 웃는 여우", f0=360, f1=408, old="7", cam="Cam7_Grin", lens="40mm",
-         panels=[(362, "웅크린 호랑이 너머로 여우 얼굴"), (383, "눈을 한 번 깜빡인다"), (400, "권총을 겨눈 채 씩 웃는다")],
+         act=(f"여우 여섯이 권총을 겨눈 채 한 걸음 딛고 멈추기를 되풀이해({' / '.join(f'{a:.1f}' for a, _ in T['steps'])}초) 반지름 1.7m의 원까지 좁힌다. "
+              f"호랑이는 둘째 걸음에 망치를 놓치고({T['drop']:.1f}초) 방패 뒤로 웅크린다({T['crouch']:.1f}초)."),
+         face=[("여우", "웃음"), ("호랑이", "긴장")], fx="없음.",
+         was="처음부터 좁은 원으로 서서 겨누는 컷."),
+    dict(n=9, name="씩 웃는 여우", lens="40mm", cam="Cam9_Grin",
+         panels=[(722, "웅크린 호랑이 너머로 여우 얼굴"), (743, "눈을 한 번 깜빡인다"), (764, "권총을 겨눈 채 씩 웃는다")],
          view="여우 턱 높이에서 살짝 올려다본다. 천천히 다가간다. 화면 앞에 호랑이 귀와 방패가 흐리게 걸친다.",
-         act="여우가 권총을 겨눈 채 씩 웃는다. 눈을 한 번 깜빡인다(15.9초).",
-         face=[("여우", "웃음 (눈 깜빡 15.9~16.05초)")], fx="이 컷에만 여우 얼굴용 조명을 쓴다."),
+         act=f"여우가 권총을 겨눈 채 씩 웃는다. 눈을 한 번 깜빡인다({C['9'] + 0.9:.1f}초).",
+         face=[("여우", "웃음 (눈 깜빡)")], fx="이 컷에만 여우 얼굴용 조명.",
+         was="같은 컷."),
 ]
+for c in cuts:
+    c.setdefault("label", str(c["n"]))
+    c["f0"], c["f1"] = (int(round(v * FPS)) for v in L["cuts"][str(c["n"])])
+
+img_dir = os.path.join(HERE, "page", "img")
+os.makedirs(img_dir, exist_ok=True)
+for name in os.listdir(img_dir):
+    os.remove(os.path.join(img_dir, name))
+ext = os.path.splitext(os.listdir(FRAMES)[0])[1]
+for c in cuts:
+    for i, (fr, _) in enumerate(c["panels"], 1):
+        subprocess.run([FF, "-y", "-loglevel", "error", "-i", os.path.join(FRAMES, f"fvt.{fr:04d}{ext}"), "-vf", "scale=960:540", "-q:v", "3",
+                        os.path.join(img_dir, f"c{c['n']}_{i}.jpg")], check=True)
 
 
 def sf(fr):
@@ -62,35 +132,35 @@ def sf(fr):
 
 
 def sec(fr):
-    return f"{fr / FPS:.1f}"
+    s = f"{fr / FPS:.2f}".rstrip("0").rstrip(".")
+    return s if "." in s else s + ".0"
 
 
 e = html.escape
 segs = "\n".join(
-    f'      <a class="seg" href="#cut-{c["n"]}" style="flex-grow:{c["f1"] - c["f0"]}" aria-label="컷 {c["n"]} {c["name"]}"><b>{c["n"]}</b></a>'
+    f'      <a class="seg" href="#cut-{c["n"]}" style="flex-grow:{c["f1"] - c["f0"]}" aria-label="컷 {c["label"]} {e(c["name"])}"><b>{c["label"]}</b></a>'
     for c in cuts)
-ticks = "\n".join(f'      <span style="flex-grow:{c["f1"] - c["f0"]}">{sec(c["f0"])}</span>' for c in cuts)
 rows = "\n".join(
-    f'        <tr><td class="num"><a href="#cut-{c["n"]}">{c["n"]}</a></td><td>{e(c["name"])}</td>'
+    f'        <tr><td class="num"><a href="#cut-{c["n"]}">{c["label"]}</a></td><td>{e(c["name"])}</td>'
     f'<td class="num">{sec(c["f0"])}~{sec(c["f1"])}</td><td class="num">{sf(c["f1"] - c["f0"])}</td><td class="num">{c["lens"]}</td>'
     f'<td>{" · ".join(e(w + " " + x) for w, x in c["face"])}</td></tr>' for c in cuts)
 blocks = []
 for c in cuts:
     pan = "\n".join(
-        f'          <figure><img src="img/c{c["n"]}_{i}.jpg" alt="컷 {c["n"]}-{i}: {e(cap)}" loading="lazy" width="960" height="540">'
-        f'<figcaption><span class="tag">{c["n"]}-{i}</span><span class="cap">{e(cap)}</span><span class="tc">{fr / FPS:.2f}초</span></figcaption></figure>'
+        f'          <figure><img src="img/c{c["n"]}_{i}.jpg" alt="컷 {c["label"]}의 {i}번 그림: {e(cap)}" loading="lazy" width="960" height="540">'
+        f'<figcaption><span class="tag">{c["label"]}·{i}</span><span class="cap">{e(cap)}</span><span class="tc">{fr / FPS:.2f}초</span></figcaption></figure>'
         for i, (fr, cap) in enumerate(c["panels"], 1))
     faces = "".join(f'<span class="who {"fox" if w == "여우" else "tiger"}">{w}</span> {e(x)}<br>' for w, x in c["face"])
     blocks.append(f'''    <article class="cut" id="cut-{c["n"]}">
       <div class="slate">
-        <div class="no"><span>컷</span>{c["n"]}</div>
+        <div class="no{" long" if len(c["label"]) > 1 else ""}"><span>컷</span>{c["label"]}</div>
         <div class="title">{e(c["name"])}</div>
         <dl class="time">
           <div><dt>구간</dt><dd>{sec(c["f0"])}~{sec(c["f1"])}초</dd></div>
           <div><dt>길이</dt><dd>{sf(c["f1"] - c["f0"])}</dd></div>
           <div><dt>렌즈</dt><dd>{c["lens"]}</dd></div>
         </dl>
-        <div class="old">이전 문서의 컷 {c["old"]} · {c["cam"]}</div>
+        <div class="old">{c["cam"]}</div>
       </div>
       <div class="body">
         <div class="panels">
@@ -101,12 +171,12 @@ for c in cuts:
           <div><dt>동작</dt><dd>{e(c["act"])}</dd></div>
           <div><dt>표정</dt><dd>{faces}</dd></div>
           <div><dt>효과</dt><dd>{e(c["fx"])}</dd></div>
+          <div class="was"><dt>8판</dt><dd>{e(c["was"])}</dd></div>
         </dl>
       </div>
     </article>''')
 
-CSS = '''
-/* layout: a storyboard sheet. A running-time strip on top, then one row per cut: a slate column (number, time,
+CSS = '''/* layout: a storyboard sheet. A running-time strip on top, then one row per cut: a slate column (number, time,
    lens) beside its numbered panels and the four note lines a paper sheet has (picture / action / face / effects). */
 :root {
   --bg: #f2f1f6;
@@ -201,6 +271,12 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .panels { grid-template-columns: minmax(0, 1fr); }
   .notes { grid-template-columns: minmax(0, 1fr); }
 }
+.no.long { font-size: 44px; }
+.seg b { font-size: clamp(13px, 1.7vw, 22px); white-space: nowrap; }
+.notes .was { color: var(--soft); }
+.changes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.changes .list h3 { margin: 0 0 6px; font-size: 14px; }
+@media (max-width: 720px) { .changes { grid-template-columns: minmax(0, 1fr); } .no.long { font-size: 36px; } }
 '''
 
 n_panels = sum(len(c["panels"]) for c in cuts)
@@ -212,9 +288,9 @@ page = f'''<title>여우 vs 호랑이 콘티</title>
 
 <div class="wrap">
   <header>
-    <div class="eyebrow">RRRANDOM · 시네마틱 콘티 · 2026-11-23</div>
+    <div class="eyebrow">RRRANDOM · 시네마틱 콘티 · 2026-11-24</div>
     <h1>여우 vs 호랑이 콘티</h1>
-    <p class="lead">지금 시네마틱(최종 영상 8판)을 컷 순서대로 정리했습니다. 컷은 1번부터 {len(cuts)}번까지이고, 그림에는 컷 번호와 순번을 붙였습니다(예: 3-2는 컷 3의 둘째 그림). 고칠 곳은 이 번호로 가리키시면 됩니다.</p>
+    <p class="lead">손본 콘티대로 실제 시퀀스를 다시 만든 영상(최종 10판)을 컷 순서대로 정리했습니다. 컷 번호는 초안 때 그대로이고(7번은 6번에 합쳐서 없습니다), 그림에는 컷 번호와 순번을 붙였습니다(예: 4-3·2는 컷 4-3의 둘째 그림). 고칠 곳은 이 번호로 가리키시면 됩니다.</p>
     <ul class="facts">
       <li><b>{len(cuts)}</b>컷</li>
       <li><b>{n_panels}</b>그림</li>
@@ -224,15 +300,41 @@ page = f'''<title>여우 vs 호랑이 콘티</title>
   </header>
 
   <section>
-    <h2>시간 흐름</h2>
+    <h2>영상과 시간 흐름</h2>
+    <video class="film" controls muted playsinline preload="metadata" src="{FILM}"></video>
     <div class="strip">
 {segs}
     </div>
-    <div class="ticks" aria-hidden="true">
-{ticks}
+    <p class="lead small">칸의 너비가 컷의 길이입니다. 번호를 누르면 그 컷으로 갑니다. 소리는 아직 없습니다.</p>
+  </section>
+
+  <section>
+    <h2>초안에서 달라진 것</h2>
+    <div class="changes">
+      <div class="list">
+        <h3>고친 것</h3>
+        <ul>
+          <li><b>컷 2</b>: 여우가 장애물 위를 달릴 때 화면이 휙 돌며 흐려지던 것을 없앴습니다. 카메라가 낮게 나란히 따라갑니다.</li>
+          <li><b>컷 4</b>: 빛을 지난 뒤 방패가 검은 덩어리로 보이던 것을 좁은 보조광으로 살렸습니다.</li>
+          <li><b>컷 4-3</b>: 망치를 어깨 뒤가 아니라 머리 위로 곧게 듭니다. 여우 쪽은 한쪽 눈만 기울어 보이던 구도를 정면 얼굴로 바꿨습니다.</li>
+          <li><b>컷 5-1</b>: 머리 위로 든 망치가 내려와 주사위에 맞습니다.</li>
+          <li><b>컷 5-3</b>: 밀려나는 호랑이 발밑에 먼지를 넣었습니다.</li>
+          <li><b>컷 6</b>: 분신이 연기보다 먼저 보이던 것을 연기 속에서 나타나게 했습니다.</li>
+          <li><b>컷 9</b>: 시작할 때 분신의 권총이 렌즈를 가리던 것을 고쳤습니다. 이제 이 컷도 새로 찍은 화면입니다.</li>
+        </ul>
+      </div>
+      <div class="list">
+        <h3>그대로 둔 것 (확인 부탁드립니다)</h3>
+        <ul>
+          <li>장애물은 길이 4m, 높이 1m의 단 하나이고, 호랑이가 부숩니다.</li>
+          <li>컷 5-1과 5-2는 스케치와 좌우가 반대입니다(호랑이의 망치 쪽에서 찍어야 방패에 가리지 않습니다).</li>
+          <li>컷 4-2, 5-3, 6은 카메라 자리 때문에 막힌 벽을 치우고 찍습니다.</li>
+          <li>주사위는 망치에 맞아서 돌고, 1로 기울었다가 5로 넘어갑니다.</li>
+          <li>한쪽 눈만 뜨는 새 표정은 만들지 않았습니다. 지금 있는 눈 감은 표정을 씁니다.</li>
+          <li>길이는 32초입니다(8판은 17초).</li>
+        </ul>
+      </div>
     </div>
-    <p class="lead small">칸의 너비가 컷의 길이입니다. 아래 숫자는 컷이 시작하는 시각(초)이고, 번호를 누르면 그 컷으로 갑니다.</p>
-    <video class="film" controls muted playsinline preload="metadata" src="FoxVsTiger_web_v8.mp4"></video>
   </section>
 
   <section>
@@ -245,7 +347,7 @@ page = f'''<title>여우 vs 호랑이 콘티</title>
         </tbody>
       </table>
     </div>
-    <p class="lead small">길이는 콘티 용지 표기대로 초+프레임입니다(2+10 = 2초 10프레임).</p>
+    <p class="lead small">길이는 콘티 용지 표기대로 초+프레임입니다(2+06 = 2초 6프레임).</p>
   </section>
 
   <section>
@@ -259,15 +361,17 @@ page = f'''<title>여우 vs 호랑이 콘티</title>
     <h2>알아 둘 것</h2>
     <div class="list">
       <ul>
-        <li>그림은 최종 영상 8판의 프레임입니다. 그림 아래 오른쪽 숫자가 그 프레임의 시각입니다.</li>
+        <li>그림은 최종 영상 10판(1080p)의 프레임입니다. 9판에서 페이드, 털, 표정, 동작 이음매를 손본 판이고, 끝에 페이드 0.75초가 붙었습니다. 그림 아래 오른쪽 숫자가 그 프레임의 시각입니다.</li>
+        <li>각 컷의 "8판" 줄은 이전 영상(17초, 9컷)에서 그 자리에 있던 컷입니다.</li>
         <li>음악과 효과음은 아직 없어서 소리 칸은 두지 않았습니다.</li>
-        <li>이전 문서와 작업 기록은 추격을 1A·1B, 주사위를 4A·4B로 나눠 컷 1~7로 불렀습니다. 각 컷의 번호 칸 아래에 그 이름과 카메라 이름을 적어 두었습니다.</li>
-        <li>표정 이름은 여우 놀람·걱정·결심·웃음·환희, 호랑이 접근·깜짝·긴장입니다.</li>
+        <li>표정 이름은 여우 놀람·걱정·결심·웃음·환희·눈 감음, 호랑이 접근·깜짝·긴장입니다.</li>
+        <li>움직임은 프레임을 띄엄띄엄 뽑아 확인했습니다. 영상을 재생해서 보시면 제가 놓친 어색한 곳이 있을 수 있습니다.</li>
       </ul>
     </div>
   </section>
 </div>
 '''
-out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "page", "index.html")
+out = os.path.join(HERE, "page", "index.html")
 io.open(out, "w", encoding="utf-8", newline="\n").write(page)
+io.open(os.path.join(HERE, "page", "preview.html"), "w", encoding="utf-8", newline="\n").write('<!doctype html><meta charset="utf-8">' + page)
 print("BOARD", out, len(page), "chars,", len(cuts), "cuts,", n_panels, "panels")

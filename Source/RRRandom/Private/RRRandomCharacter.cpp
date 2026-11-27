@@ -49,6 +49,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/DamageEvents.h"
+#include "Engine/OverlapResult.h"
 #include "GameFramework/DamageType.h"
 #include "TimerManager.h"
 #include "Engine/SkeletalMesh.h"
@@ -71,6 +72,17 @@ namespace
 	constexpr float WalkAnimationThreshold = 10.f;
 	/** A CANNON's shell smashes the structures this close round where it hits (round 89). */
 	constexpr float CannonWreckRadius = 110.f;
+	/**
+	 * Round 103: the tiger's hammer breaks a wall it swings at within this share of its reach (looked for with a ball this
+	 * big from its middle): a hole this wide round a line from this far over its feet to this far (scaled with the body: a
+	 * giant breaks a giant's hole), wider with the third blow; not the floor it stands on.
+	 */
+	constexpr float HammerWallReachShare = 0.9f;
+	constexpr float HammerWallProbe = 30.f;
+	constexpr float HammerWallRadius = 110.f;
+	constexpr float HammerWallFinisherRadius = 140.f;
+	constexpr float HammerWallLow = 80.f;
+	constexpr float HammerWallHigh = 170.f;
 
 	bool IsInSwordGuardArc(const ARRRandomCharacter& Guard, const FVector& Position, const FVector& Velocity)
 	{
@@ -269,6 +281,8 @@ namespace
 	constexpr float ClimbJumpWindow = 0.5f;
 	// Extra room the server allows a client's climb request, for movement during the request's trip
 	constexpr float ClimbRequestTolerance = 150.f;
+	/** Round 103: a climb request this soon after the last climb ended may be measured from its top. */
+	constexpr float ClimbChainWindow = 1.5f;
 
 	// A defense villain (round 90): how strongly its wave's color tints it (a stand-in's borrowed look more), a bite's reach
 	// past its capsule and pace, the hit landing this long after the bite starts (with the animation), the cat's claws a
@@ -750,6 +764,7 @@ void ARRRandomCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME_CONDITION(ARRRandomCharacter, LastKiller, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(ARRRandomCharacter, RespawnTotal, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(ARRRandomCharacter, RespawnQuick, COND_OwnerOnly);
+	DOREPLIFETIME_CONDITION(ARRRandomCharacter, RespawnDice, COND_OwnerOnly);
 	DOREPLIFETIME(ARRRandomCharacter, bFlingSpin);
 	DOREPLIFETIME(ARRRandomCharacter, EmoteIndex);
 	DOREPLIFETIME(ARRRandomCharacter, EmoteSerial);
@@ -1272,6 +1287,40 @@ void ARRRandomCharacter::DelayFire(float Seconds)
 	NextFireTime = FMath::Max(NextFireTime, GetWorld()->GetTimeSeconds() + Seconds);
 }
 
+float ARRRandomCharacter::GetHeardStepAge() const
+{
+	return GetWorld()->GetTimeSeconds() - HeardStepTime;
+}
+
+void ARRRandomCharacter::UpdateAudibleSteps(float DeltaSeconds)
+{
+	const float Speed = GetVelocity().Size2D();
+	if (!bAlive || GetVehicle() || GetRobot() || !GetCharacterMovement()->IsMovingOnGround() || Speed < 65.f)
+	{
+		StepDistance = 0.f;
+		return;
+	}
+	StepDistance += Speed * DeltaSeconds;
+	if (StepDistance < 78.f) { return; }
+	StepDistance = FMath::Fmod(StepDistance, 78.f);
+	// A cosmetic footfall on each viewing machine, including replicated walking characters.
+	// Pawns nearby hear it through their capsule, at most once per listening gesture.
+	TArray<FOverlapResult> Nearby;
+	const FVector Here = GetActorLocation();
+	GetWorld()->OverlapMultiByObjectType(Nearby, Here, FQuat::Identity, FCollisionObjectQueryParams(ECC_Pawn),
+		FCollisionShape::MakeSphere(525.f), FCollisionQueryParams(SCENE_QUERY_STAT(AnimalFootfall), false, this));
+	for (const FOverlapResult& Hit : Nearby)
+	{
+		ARRRandomCharacter* Listener = Cast<ARRRandomCharacter>(Hit.GetActor());
+		if (Listener && !Listener->IsVillain() && Listener->bAlive && Listener->GetHeardStepAge() > 0.95f
+			&& Listener->GetVelocity().SizeSquared2D() < FMath::Square(30.f) && !Listener->WantsAimFacing())
+		{
+			Listener->HeardStepLocation = Here;
+			Listener->HeardStepTime = GetWorld()->GetTimeSeconds();
+		}
+	}
+}
+
 void ARRRandomCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -1311,6 +1360,7 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 	if (GetNetMode() != NM_DedicatedServer)
 	{
 		UpdateShield(DeltaSeconds);
+		UpdateAudibleSteps(DeltaSeconds);
 	}
 	UpdateJumpLanding(DeltaSeconds);
 	// Out of sight while its ultimate stands in for it (the tiger's giant, the rabbit's hops)
@@ -1455,11 +1505,9 @@ void ARRRandomCharacter::Tick(float DeltaSeconds)
 
 namespace
 {
-	// Motion matching (2026-11-20): animal friends that have a set (/Game/Characters/<Name>MM, the fox so far) move by
-	// Unreal's Motion Matching. On in the game since the user asked ("이렇게 해서 게임속 여우에도 적용해줘"); 0 here or
-	// -RRNoMotionMatch on the command line gives the old single-animation walk back.
+	// Playable species use a native or retargeted motion set. Defense enemies keep their own locomotion.
 	TAutoConsoleVariable<int32> CVarMotionMatch(TEXT("rr.MotionMatch"), 1,
-		TEXT("1: animal friends with a motion matching set (the fox) take their legs, hips, spine and head from Unreal's Motion Matching; 0: the old walk."));
+		TEXT("1: motion matching for the six playable animal friends; 0: the original walk."));
 
 	// Climbing with a clip (2026-11-20): a rise over this, from where the climb starts, is the high ledge's pull-up; under
 	// it the low ledge's step up. The clip blends in and out over these seconds and runs out this fast once on top.
@@ -1511,7 +1559,7 @@ void ARRRandomCharacter::UpdateMotionDriver()
 {
 	static const bool bCommandLineOff = FParse::Param(FCommandLine::Get(), TEXT("RRNoMotionMatch"));
 	// (a fox's clones too: they must not be told from the fox by how they walk)
-	const bool bOn = !bCommandLineOff && CVarMotionMatch.GetValueOnGameThread() != 0 && GetNetMode() != NM_DedicatedServer;
+	const bool bOn = ShownSpecies < RRSpecies::Count && !bCommandLineOff && CVarMotionMatch.GetValueOnGameThread() != 0 && GetNetMode() != NM_DedicatedServer;
 	USkeletalMeshComponent* BodyMesh = GetMesh();
 	if (MotionDriver && (!bOn || MotionDriverSpecies != ShownSpecies))
 	{
@@ -1534,12 +1582,25 @@ void ARRRandomCharacter::UpdateMotionDriver()
 	if (!MotionDriver && MotionDriverSpecies != ShownSpecies)
 	{
 		MotionDriverSpecies = ShownSpecies;
-		const FString Name = FString(RRSpecies::GetAssetName(ShownSpecies)) + TEXT("MM");
+		bSharedMotionRig = ShownSpecies != RRSpecies::Fox && ShownSpecies != RRSpecies::Tiger;
+		const FString Name = FString(RRSpecies::GetAssetName(bSharedMotionRig ? RRSpecies::Fox : ShownSpecies)) + TEXT("MM");
+		MotionStrideRatio = 1.f;
 		const FString Folder = FString::Printf(TEXT("/Game/Characters/%s/"), *Name);
 		USkeletalMesh* DriverMesh = LoadObject<USkeletalMesh>(nullptr, *(Folder + TEXT("SK_") + Name + TEXT(".SK_") + Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
 		UClass* AnimClass = LoadClass<UAnimInstance>(nullptr, *(Folder + TEXT("ABP_") + Name + TEXT(".ABP_") + Name + TEXT("_C")), nullptr, LOAD_NoWarn | LOAD_Quiet);
 		if (DriverMesh && AnimClass)
 		{
+			if (bSharedMotionRig && BodyMesh->GetSkeletalMeshAsset())
+			{
+				const FReferenceSkeleton& Source = DriverMesh->GetRefSkeleton();
+				const FReferenceSkeleton& Target = BodyMesh->GetSkeletalMeshAsset()->GetRefSkeleton();
+				const int32 From = Source.FindBoneIndex(TEXT("Hips")), To = Target.FindBoneIndex(TEXT("Hips"));
+				if (From != INDEX_NONE && To != INDEX_NONE)
+				{
+					MotionStrideRatio = FMath::Max(1.f, static_cast<float>(Target.GetBoneAbsoluteTransform(To).GetLocation().Z))
+						/ FMath::Max(1.f, static_cast<float>(Source.GetBoneAbsoluteTransform(From).GetLocation().Z));
+				}
+			}
 			MotionDriver = NewObject<USkeletalMeshComponent>(this, TEXT("MotionDriver"));
 			MotionDriver->SetupAttachment(BodyMesh->GetAttachParent());
 			MotionDriver->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -1592,7 +1653,7 @@ void ARRRandomCharacter::UpdateMotionDriver()
 		}
 		if (URRRandomMotionMatchInstance* Instance = Cast<URRRandomMotionMatchInstance>(MotionDriver->GetAnimInstance()))
 		{
-			Instance->DistanceScale = 1.f / FMath::Max(BodyMesh->GetComponentScale().Z * RRMotionMatch::PlayRate, KINDA_SMALL_NUMBER);
+			Instance->DistanceScale = 1.f / FMath::Max(BodyMesh->GetComponentScale().Z * RRMotionMatch::PlayRate * MotionStrideRatio, KINDA_SMALL_NUMBER);
 		}
 		// Worked out only where its pose is used: on the host always (shots leave from the gun in the hands, so it poses
 		// every animal friend), elsewhere only for bodies on screen
@@ -1636,14 +1697,20 @@ void ARRRandomCharacter::StartClimbMotion()
 		ClimbDriver->SetSkeletalMeshAsset(MotionDriver->GetSkeletalMeshAsset());
 		ClimbDriver->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 		ClimbDriver->RegisterComponent();
+		// UpdateClimb moves the capsule in the actor tick. Sample the hands against the
+		// finished transform, including the large vertical displacement on a high ledge.
+		ClimbDriver->AddTickPrerequisiteActor(this);
 		BodyMesh->AddTickPrerequisiteComponent(ClimbDriver);
 	}
 	ClimbDriver->SetComponentTickEnabled(true);
 	// From where the clip starts to rise, at the rate that has it up when the capsule is (ClimbUpShare of the climb)
 	const float* Marks = ClimbMarks[ClimbClip];
 	ClimbDriver->PlayAnimation(ClimbClips[ClimbClip], false);
-	ClimbDriver->SetPosition(Marks[0], false);
-	ClimbDriver->SetPlayRate(FMath::Max(Marks[1] - Marks[0], 0.05f) / FMath::Max(ClimbDuration * ClimbUpShare, 0.05f));
+	// Enter the high pull-up closer to its grasp; reserve its opening beats for the hands.
+	const bool bHighPull = ClimbClip == 1 && (bLedgeGrip[0] || bLedgeGrip[1]);
+	const float Entry = bHighPull ? FMath::Lerp(Marks[0], Marks[1], 0.20f) : Marks[0];
+	ClimbDriver->SetPosition(Entry, false);
+	ClimbDriver->SetPlayRate(FMath::Max(Marks[1] - Entry, 0.05f) / FMath::Max(ClimbDuration * ClimbUpShare, 0.05f));
 	bClimbMotionOver = false;
 	ClimbMotionHold = ClimbDuration + ClimbMotionBlendOut;
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s climbs %.0f up with %s."), *GetName(), Rise, *ClimbClips[ClimbClip]->GetName());
@@ -1976,6 +2043,29 @@ void ARRRandomCharacter::StartClimb(const FVector& Destination, const FVector& W
 	ClimbStart = GetActorLocation();
 	ClimbTarget = Destination;
 	SetActorRotation(WallFacing.Rotation());
+	const float Radius = GetCapsuleComponent()->GetScaledCapsuleRadius();
+	const float ReferenceHeight = SpeciesLooks.IsValidIndex(RRSpecies::Fox) ? SpeciesLooks[RRSpecies::Fox].HipsHeight : RideHipsHeight;
+	const float GripWidth = FMath::Min(Radius, 19.f * RideHipsHeight * static_cast<float>(GetActorScale3D().Y) / FMath::Max(1.f, ReferenceHeight));
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		bLedgeGrip[Side] = false;
+		if (IsVillain()) { continue; }
+		const FVector Top = Destination - FVector::UpVector * (GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 2.f);
+		const FVector Probe = Top + GetActorRightVector() * (Side == 0 ? -GripWidth : GripWidth) - FVector::UpVector * 6.f;
+		const FCollisionQueryParams Query(SCENE_QUERY_STAT(AnimalLedgeGrip), false, this);
+		const FCollisionObjectQueryParams Static(ECC_WorldStatic);
+		FHitResult Face, Lip;
+		if (GetWorld()->LineTraceSingleByObjectType(Face, Probe - WallFacing * (Radius + ClimbLedgeInset + 35.f), Probe, Static, Query))
+		{
+			const FVector Inward = Face.ImpactPoint + WallFacing * 3.f;
+			if (GetWorld()->LineTraceSingleByObjectType(Lip, Inward + FVector::UpVector * 22.f, Inward, Static, Query)
+				&& Lip.ImpactNormal.Z >= GetCharacterMovement()->GetWalkableFloorZ())
+			{
+				bLedgeGrip[Side] = true;
+				LedgeGrips[Side] = Lip.ImpactPoint + Lip.ImpactNormal * 2.f;
+			}
+		}
+	}
 	// (an animal friend with a motion matching set plays its climbing clip meanwhile)
 	StartClimbMotion();
 	// Movement off while the climb moves the capsule; input does nothing meanwhile.
@@ -1985,6 +2075,16 @@ void ARRRandomCharacter::StartClimb(const FVector& Destination, const FVector& W
 		GetCharacterMovement()->StopMovementImmediately();
 		GetCharacterMovement()->DisableMovement();
 	}
+}
+
+float ARRRandomCharacter::GetLedgeGrip(int32 Side, FVector& Goal) const
+{
+	if (!bClimbing || !bLedgeGrip[Side] || !ClimbDriver || !ClimbDriver->GetSingleNodeInstance()) { return 0.f; }
+	const float* Marks = ClimbMarks[ClimbClip];
+	const float Phase = (ClimbDriver->GetPosition() - Marks[0]) / FMath::Max(Marks[2] - Marks[0], 0.01f);
+	const float Offset = Side == 0 ? 0.f : 0.035f;
+	Goal = LedgeGrips[Side];
+	return FMath::SmoothStep(0.f, 0.12f, Phase - Offset) * (1.f - FMath::SmoothStep(0.60f, 0.88f, Phase - Offset));
 }
 
 void ARRRandomCharacter::CheatClimb(float Rise)
@@ -2002,9 +2102,22 @@ void ARRRandomCharacter::ServerStartClimb_Implementation(FVector_NetQuantize Des
 	const UCapsuleComponent* Capsule = GetCapsuleComponent();
 	const float MaxReach = Capsule->GetScaledCapsuleRadius() * 2.f + ClimbReach + ClimbLedgeInset + ClimbRequestTolerance;
 	const FVector Location = GetActorLocation();
-	if (!bAlive || bClimbing || FVector::Dist2D(Location, Destination) > MaxReach || Destination.Z - Location.Z > MaxClimbHeight + ClimbRequestTolerance)
+	// Round 103 (the sky path's climbs one after another, under lag: the client already a ledge up when the server still had
+	// it on the one below, or still timing the climb before; the request was turned down and the client pulled back down):
+	// from where the last climb ends too, while it goes on or just after, and that one cut short for this
+	const bool bFromLast = bClimbing || GetWorld()->GetTimeSeconds() - LastClimbEndTime < ClimbChainWindow;
+	auto IsReachable = [&](const FVector& From)
 	{
+		return FVector::Dist2D(From, Destination) <= MaxReach && Destination.Z - From.Z <= MaxClimbHeight + ClimbRequestTolerance;
+	};
+	if (!bAlive || !(IsReachable(Location) || (bFromLast && IsReachable(ClimbTarget))))
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s's climb onto %s turned down (at %s%s)."), *GetName(), *Destination.ToCompactString(), *Location.ToCompactString(), bClimbing ? TEXT(", still climbing") : TEXT(""));
 		return;
+	}
+	if (bClimbing)
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s climbs on before the last climb is timed out (lag)."), *GetName());
 	}
 	StartClimb(Destination, WallFacing);
 	SetTrustClientMovement(true);
@@ -2180,13 +2293,16 @@ void ARRRandomCharacter::UpdateClimb(float DeltaSeconds)
 		const float UpAlpha = FMath::Clamp(Alpha / ClimbUpShare, 0.f, 1.f);
 		const float OverAlpha = FMath::Clamp((Alpha - ClimbUpShare) / (1.f - ClimbUpShare), 0.f, 1.f);
 		const FVector Flat = FMath::Lerp(FVector(ClimbStart.X, ClimbStart.Y, 0.f), FVector(ClimbTarget.X, ClimbTarget.Y, 0.f), FMath::InterpEaseInOut(0.f, 1.f, OverAlpha, 2.f));
-		const float Z = FMath::InterpEaseOut(ClimbStart.Z, ClimbTarget.Z, UpAlpha, 2.f);
+		const bool bHighPull = ClimbTarget.Z - ClimbStart.Z > ClimbHighRise && (bLedgeGrip[0] || bLedgeGrip[1]);
+		const float Rise = bHighPull ? FMath::SmoothStep(0.08f, 1.f, UpAlpha) : FMath::InterpEaseOut(0.f, 1.f, UpAlpha, 2.f);
+		const float Z = FMath::Lerp(ClimbStart.Z, ClimbTarget.Z, Rise);
 		SetActorLocation(FVector(Flat.X, Flat.Y, Z));
 	}
 
 	if (Alpha >= 1.f)
 	{
 		bClimbing = false;
+		LastClimbEndTime = GetWorld()->GetTimeSeconds();
 		if (IsLocallyControlled())
 		{
 			GetCharacterMovement()->SetMovementMode(MOVE_Walking);
@@ -3576,6 +3692,24 @@ void ARRRandomCharacter::SwingSword(const FVector& TargetLocation)
 	{
 		MulticastHammerSlam(Here - FVector(0.f, 0.f, GetCapsuleComponent()->GetScaledCapsuleHalfHeight()) + Facing * 60.f, Reach);
 	}
+	// Round 103 (the user: "호랑이는 길이 막히면 망치로 파괴하면서 전진할 수 있게"): the tiger's hammer breaks the town's wall (or
+	// cover block) it swings at, a hole its size to go on through; it mends like any other wreck
+	if (Weapon.IsHammer() && Species == RRSpecies::Tiger)
+	{
+		FHitResult Wall;
+		const FCollisionQueryParams Params(SCENE_QUERY_STAT(RRRandomHammerWall), false, this);
+		const float Scale = GetActorScale3D().Z;
+		if (GetWorld()->SweepSingleByObjectType(Wall, Here, Here + Facing * (GetCapsuleComponent()->GetScaledCapsuleRadius() + Reach * HammerWallReachShare), FQuat::Identity,
+				FCollisionObjectQueryParams(ECC_WorldStatic), FCollisionShape::MakeSphere(HammerWallProbe * Scale), Params)
+			&& Wall.GetActor() && (Wall.GetActor()->IsA<ARRRandomDiceTown>() || Wall.GetActor()->IsA<ARRRandomCover>()))
+		{
+			const float Feet = Here.Z - GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+			const FVector Into = Wall.ImpactPoint + Facing * 50.f;
+			ARRRandomWreckage::Wreck(this, FVector(Into.X, Into.Y, Feet + HammerWallLow * Scale), FVector(Into.X, Into.Y, Feet + HammerWallHigh * Scale),
+				(bFinisher ? HammerWallFinisherRadius : HammerWallRadius) * Scale, false);
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s's hammer breaks the wall at %s."), *GetName(), *Wall.ImpactPoint.ToCompactString());
+		}
+	}
 	// (striking ends a disguise or invisibility, as a shot does)
 	Kit->OnShot();
 	UE_LOG(LogTemp, Verbose, TEXT("RRRandom: %s swings the %s (%d hit)."), *GetName(), *Weapon.Name, Hits);
@@ -4103,6 +4237,11 @@ void ARRRandomCharacter::KnockOut(const FVector& ShotDirection, ARRRandomCharact
 		++RoundKnockouts;
 		LastKnockoutTime = Now;
 		UE_LOG(LogTemp, Log, TEXT("RRRandom: %s waits %.1f s to get back up (knockout %d this round, +%.1f s for a quick one)."), *GetName(), RespawnRemaining, RoundKnockouts, Quick);
+		// Round 102: two dice say where it gets back up
+		if (ARRRandomGameMode* Mode = GetWorld()->GetAuthGameMode<ARRRandomGameMode>())
+		{
+			Mode->RollRespawnZone(this);
+		}
 	}
 	RespawnTotal = RespawnRemaining;
 	DiceBuffs->ClearBuffs();
@@ -4289,8 +4428,24 @@ void ARRRandomCharacter::ReviveNow()
 	}
 }
 
+void ARRRandomCharacter::SetRespawnRoll(int32 DieA, int32 DieB)
+{
+	RespawnDice[0] = uint8(FMath::Clamp(DieA, 0, 6));
+	RespawnDice[1] = uint8(FMath::Clamp(DieB, 0, 6));
+	RespawnZone = DieA > 0 && DieB > 0 ? DieA + DieB : 0;
+}
+
 void ARRRandomCharacter::Respawn()
 {
+	// Round 102: home is a free spot where the knockout's dice said (the main mode)
+	if (RespawnZone > 0 && HasAuthority())
+	{
+		if (ARRRandomGameMode* Mode = GetWorld()->GetAuthGameMode<ARRRandomGameMode>())
+		{
+			Mode->PlaceForRespawn(this);
+		}
+	}
+	SetRespawnRoll(0, 0);
 	// Clients follow through replicated movement and OnRep_Alive
 	SetActorLocationAndRotation(HomeLocation, HomeRotation, false, nullptr, ETeleportType::TeleportPhysics);
 	FlingVelocity = FVector::ZeroVector;
@@ -5136,6 +5291,8 @@ void ARRRandomCharacter::ResetForRound()
 	}
 	else
 	{
+		// (up at the team's start spot, not where its knockout's dice said)
+		SetRespawnRoll(0, 0);
 		RespawnRemaining = 0.f;
 		Respawn();
 	}

@@ -24,6 +24,18 @@ RRRandom 의 플레이 캐릭터는 **동물친구**(영문 UI ANIMAL FRIEND)라
   (A 자세는 팔이 몸에 붙어 Mixamo 가 팔을 몸통과 함께 움직였다 — 토끼 2026-10-27, 용 85차). 아래 프롬프트의 "relaxed A-pose"
   는 모두 T자 포즈 문구로 바꿔 쓴다. 게임에 안 넣는 탐색용 시안(분위기만 보는 첫 시안)은 예외일 수 있지만, 모델링으로 갈 그림은
   T자로 다시 뽑는다. T자 프롬프트 원문: `C:\work\RRRandom\Tools\char-pipeline\input\rabbit_smart_tpose\README.md`.
+- **꼬리는 쭉 펴서 그린다**(2026-11-24 사용자 지시: "이제 캐릭터 그릴때 꼬리는 캐릭터 고유 디자인이 아니면 쭉 펴서 그리고
+  애니메이션과 스프링으로 유지시킨다"). 3D 에 넣는 컨셉(정면·옆·뒤, 8방향)과 Tripo 3D 모두: 꼬리가 엉덩이 한가운데에서 **몸 뒤로
+  똑바로**, 좌우로 휘지 않고, 말지 않고, 바닥·다리·등에 닿지 않게(살짝 위로 든 수평). 꼬리의 휨·말림·흔들림은 그림이 아니라 게임의
+  꼬리 뼈(8개쯤, 넓게 나눠 가진 가중치) + 스프링 체인(`URRRandomBodyAnimInstance`, `rr.Tail.*`) + 애니메이션이 만든다.
+  예외는 **꼬리 모양 자체가 그 캐릭터의 고유 디자인**일 때뿐(다람쥐의 등 뒤로 말아 올린 큰 꼬리, 구미호의 아홉 꼬리 같은 것) —
+  그때도 뿌리는 몸 한가운데에서 좌우로 틀지 않고 나오게 그린다.
+  이유(여우, 2026-11-24): 컨셉에서 꼬리를 한쪽으로 빼 그려서 모델이 뿌리부터 40도 틀어져 나왔고, 스프링이 그 틀어진 자세를
+  기준으로 흔들려 한쪽으로만 치우쳐 보였다. 코드로 뼈를 돌려 펴면 마디가 꺾였고, 잘라서 꽂으면 꽂힌 자리가 보였고, 표면을 다시
+  펴거나 꼬리만 새로 뽑아 이어도 "억지로 편" 티가 남아 결국 모델을 다시 뽑게 됐다. 프롬프트 문구(Nano Banana Pro, 뷰마다):
+  `Her tail is held perfectly straight, pointing directly backward from the middle of her lower back, level with the ground and
+  lifted slightly: no curl, no bend to either side, not touching the floor, her legs or her back.` + 정면 뷰는
+  `the tail is hidden behind her body`, 뒷모습은 `seen end-on: a round fluffy disc in the middle of her lower back`.
 - 탑뷰·쿼터뷰 게임이라 **위에서 봐도 읽히는 표식**(귀, 머리 위 장식, 꼬리)이 있으면 좋다.
 - 나중 변신(궁극기, 구미호 등)이 예정돼 있으면 기본형에 **작은 암시**만(이마 문양, 아이라인 등), 꼬리 수 같은 큰 변화는 변신형에.
 - 결과는 늘 **한눈에 비교하는 시트**로 보여준다(아래 7). 고르는 건 사용자.
@@ -408,6 +420,20 @@ Mixamo 가 로그아웃돼 있으면 Adobe 로그인은 사용자가 직접(비�
   눈·눈썹은 정면 그대로. 입 프레임을 여러 장 만들 때는 `blender_image_region.py <기본> <편집본> <out> <cx,cy,rx,ry>` 로 입 타원만 기본
   그림에 오려 붙인 뒤 굽는다(편집 모델이 눈을 조금씩 건드려 프레임을 넘기면 눈이 떨린다). GIF 는 `tools\ffmpeg\ffmpeg.exe` concat.
 
+### 같은 캐릭터를 다시 뽑았을 때 — 옛 뼈대를 그대로 쓴다 (2026-11-24, 여우 꼬리 일자)
+
+같은 컨셉 그림에서 일부만 고쳐(꼬리, 옷 등) 모델을 다시 뽑았으면 Mixamo 로 돌아가지 않는다. 뼈대가 같으면 애니메이션·모션 매칭·
+종별 수치(HipsHeight, GunHandTurn)를 하나도 다시 안 해도 된다.
+1. `blender_model_views.py <새 fbx> <basecolor> <prefix>` 로 크기·덩어리·네 방향 확인.
+2. `blender_reskin.py <옛 리그 fbx> <새 fbx> <out rig>` — 옛 몸에 맞춤(RESKIN fit 의 mean distance 가 1~2cm 안인지), 옛 가중치 옮김,
+   꼬리 뼈 Tail1~8 을 새 꼬리 가운데에. `blender_pose_check.py` 와 `blender_tail_view.py --swing/--lift` 로 팔다리·꼬리 확인.
+3. 얼굴은 9~10절처럼 **정면 그림에서** 옮긴다(`blender_face_audit.py --px 2048` 옛·새 → `blender_feature_transfer.py` 눈·눈썹은
+   같은 자리, 입은 새 코에 맞춰 `--src <옛 코> --dst <새 코>` → `blender_expression.py bake`). 표면 → 표면 굽기
+   (`blender_face_bake.py`)는 머리 모양이 조금만 달라도 눈이 찌그러진다.
+4. `blender_split_part.py`(주둥이 파츠 쓰는 종) → 털(`--fur-bones Tail`) → `fur_chars.json` 의 rig 경로 → 언리얼:
+   `ue_reimport_mesh.py`(뼈가 늘면 뼈대도 저장됨) → `ue_import_part.py` → `ue_import_basecolor.py` → `ue_import_fur_shells.py`.
+5. 시네마틱에 나오는 종이면 표정 텍스처·표정 파츠·시네마틱 털도 새 UV·새 메시로 다시(안 하면 영상의 얼굴이 깨진다).
+
 ## 10. 빈 얼굴 T자 포즈 모델을 게임 캐릭터로 넣기 (2026-11-19, 여우 교체 — 이 순서 그대로)
 
 파일: `C:\work\char-pipeline\input\fox_game\`(얼굴 `face\`, OBJ `mixamo_obj\`, Mixamo `mixamo\`, 리그 `rig_mx\`, 옛 에셋 백업 `ue_backup_fox_film\`).
@@ -426,7 +452,17 @@ Mixamo 가 로그아웃돼 있으면 Adobe 로그인은 사용자가 직접(비�
      --src 1023,1420 --dst 1023,1489 --gain 1.8`, 코 아래 끝을 맞춤). 턱 밑 38° 렌더끼리 옮기면 옛 모델의 입술 굴곡 때문에 선이 조각난다.
    - `blender_expression.py bake <새 fbx> <새 basecolor> <새 정면> <옮긴 그림> <prefix>_cam.json <out.png>` → audit 로 정면·3/4·옆 확인.
    - **옛 눈동자가 털과 같은 색이면 셸 털이 눈동자 위로 자란다** → 털을 `--eye-r 0.05` 로 다시 만들고 `fur_cover` 얼굴을 꼭 본다.
-   - 이미 게임에 들어간 뒤 텍스처만 바꿀 때: `ue_py_import.sh <tag> "BASECOLOR DONE" "ue_import_basecolor.py Fox|<png>"`(UV 가 같을 때만) + 털 다시.
+   - 이미 게임에 들어간 뒤 텍스처만 바꿀 때: `ue_py_import.sh <tag> "BASECOLOR DONE" "ue_import_basecolor.py Fox|<png>"`(UV 가 같을 때만).
+     **(2026-11-23) 얼굴 텍스처의 털 마스크가 같이 들어간다** — 사용자 규칙: 얼굴 텍스처를 갈아 낄 때마다 눈·입 위에 털이 안 나게 하는 마스크를
+     함께 적용. 텍스처마다 짝 `<텍스처>_FurMask`(같은 UV, 1 = 털, 0 = 맨살, 사이 = 그만큼 짧은 털)를 `blender_fur_mask.py` 가 그 그림에서
+     뽑고(얼굴 앞면의 어두운 선·흰자 = 그려진 부분, 거리는 UV 가 아니라 표면 3D 로 — Tripo 아틀라스는 눈 하나가 섬 두 개에 걸침),
+     `ue_fur_mask_lib.py` 를 거쳐 `ue_import_basecolor.py`·`ue_import_animal.py`·`ue_import_fur_shells.py`·`Tools\cinematic\ue_cine_expressions.py`
+     가 알아서 만들고 가져온다. 털 셸을 다시 뽑을 필요 없다. 마스크가 있는 동물과 옵션은 `scripts\fur_chars.json`(지금 여우·호랑이; 새 빈 얼굴
+     동물은 여기에 `rig`·`mask`·`face_fur` 를 추가). **얼굴에 무늬가 있거나 흰 털인 동물(호랑이)**은 색만으로 못 가리므로 `--only` 로 두 눈·
+     주둥이 타원 안에서만 찾는다(눈 `dc` = 어두움 + 크림색 흰자, 주둥이 `dp` = 어두움 + 분홍; 타원 좌표는 `--show` 그림을
+     `blender_lit_views.py` 로 보며 맞춤). 판정이 안 맞으면 눈으로 짐작하지 말고 무광 정면 렌더(`blender_expression.py render`)에서
+     색을 직접 재 볼 것 — 호랑이 눈 외곽선은 검정이 아니라 중간 회색이었다. 호랑이 털 셸은 `tiger_parts.fbx`(몸 + 주둥이 파츠)에서
+     `--face-fur … --no-loose 100`(수염 제외)로 뽑는다(`fur_chars.json` 의 `shells`). 확인은 `fur_mask_shots.ps1 -Species Fox -Tag <이름> -Show -Expr`. HANDOFF "털 마스크".
    - **정면에서 입힌 입 선이 입꼬리 앞에서 끊기면**(주둥이 옆면이 비스듬해 선이 옅어짐): `blender_view_render.py … --pitch 38 --span 0.40 --cz 0.57 --px 2048`
      그림 위에 `blender_stroke.py <in> <out> "x,y;x,y;…|…" --width 7.5 --taper 0.35 --soft 2.5 --color 0.16,0.09,0.07` 로 끊긴 구간만 잇고 그 json 으로 bake.
    - **눈 사이가 밋밋하면 — 먼저 이것(여우가 실제로 쓴 방법)**: Tripo 는 얼굴만 다시 만들 수 없으니, 얼굴 형태가 마음에 드는 **다른 Tripo 결과**
@@ -470,7 +506,9 @@ Mixamo 가 로그아웃돼 있으면 Adobe 로그인은 사용자가 직접(비�
    - 이모트·검·시네마틱 동작은 `ue_import_shared_batch.py <목록 파일>` 한 번으로(줄마다 `fbx|이름|원본 엉덩이|Fox=<엉덩이>` + Mixamo 것은 ` @30`, Tripo 24fps 는 없이).
      여우 목록 `input\fox_game\shared_list.txt`; 전용 검 3컷은 `input\fox_game\import_sword_dedicated.py`, 조준 낮춤은 `RR_AIMLOW_DEG=-30 ue_cine_aim_low.py`.
      옛 A자세 리그·토끼 리그에서 받은 동작도 그대로 옮겨진다(회전을 그대로 쓰고 뼈 길이만 새 뼈대 것).
-   - 셸 털: `blender_fur_shells_skel.py <rig> <basecolor> <out> --layers 12 --length 0.02 --cell 0.005 --orange-g 0.27 --orange-r 0.70` → 덮인 곳을
+   - 셸 털: `blender_fur_shells_skel.py <rig> <basecolor> <out> --layers 12 --length 0.02 --cell 0.005 --orange-g 0.27 --orange-r 0.70 --eye-r 0.05
+     --face-fur 0.50,0.80,0.20`(2026-11-23: 얼굴 앞면 전체에 털을 심고, 눈·입은 얼굴 텍스처의 털 마스크가 비운다 — `fur_chars.json` 의
+     `face_fur`/`mask --face` 와 같은 값) → 덮인 곳을
      `blender_texture_compare.py <png> <털 fbx> <basecolor> --views front,left,back,face` 로 꼭 본다(새 여우는 주황이 더 붉어 기본값 0.38 로는 머리·꼬리가 듬성듬성)
      → `ue_import_fur_shells.py "Fox|<fbx>|<strands png>"`. (2026-11-20: 털 재질에 "가까이서 얼굴 안쪽 정돈"이 들어 있다 — 얼굴 구역
      타원체는 옛 재질에서 자동으로 이어받는다. 머리 모양·위치가 달라졌으면 5번째 값 `|<길이>|x,y,z,rx,ry,rz` 로 다시 잡고,

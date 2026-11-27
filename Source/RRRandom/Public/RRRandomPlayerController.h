@@ -297,6 +297,11 @@ public:
 	void RRGoBuilding(int32 Index = 0, int32 Floor = 0, float Yaw = -1.f);
 	UFUNCTION(Server, Reliable)
 	void ServerCheatGoBuilding(int32 Index, int32 Floor, float Yaw);
+	/** Round 103 cheat: my animal friend at the near end of sky hop Hop (0: the foot of the blue half's sky path stairs), facing along it. */
+	UFUNCTION(Exec)
+	void RRGoSky(int32 Hop = 0);
+	UFUNCTION(Server, Reliable)
+	void ServerCheatGoSky(int32 Hop);
 	/** Round 94 cheat: my animal friend 3.5 m in front of the first cover model of kind Model (ECoverModel number), looking at it. */
 	UFUNCTION(Exec)
 	void RRGoCover(int32 Model = 1);

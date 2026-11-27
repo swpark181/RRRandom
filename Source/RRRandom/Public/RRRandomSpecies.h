@@ -160,6 +160,84 @@ struct FRRSpeciesLook
 	UPROPERTY()
 	FRotator GunHandTurn = FRotator::ZeroRotator;
 
+	/**
+	 * The tail chain (URRRandomBodyAnimInstance, 2026-11-24): where along the tail it bends, 0 = toward the tip .. 1 =
+	 * toward the root (the whole tail swings from its base), and how stiff the root's spring is (oscillations a second;
+	 * the tip's is the animation instance's ChainTipFrequency).
+	 */
+	float TailRootBias = 1.f;
+	float TailRootFrequency = 1.3f;
+	/** Whether the wag itself grows with the chain's gain (the dragon's does not: its tail was right as it was). */
+	bool bTailBigWag = true;
+	/**
+	 * The tail's idle pose (2026-11-24, the user: standing still, the tail a little lifted and curled to one side, as
+	 * it used to be). Tails are modelled straight out behind the body; this is what they do standing: degrees in all
+	 * the tail curls to the animal friend's right (negative: left), more toward the tip, degrees in all it lifts at
+	 * its root, and degrees in all its far end turns up (the user, the same day: the tip a little higher, the way the
+	 * old tail curled). Moving straightens it again. 0, 0: it stays straight (and the tails still modelled swept to a side
+	 * stay as they are).
+	 */
+	float TailIdleCurl = 0.f;
+	float TailIdleLift = 0.f;
+	float TailIdleTipLift = 0.f;
+
+	/** How much of the tail chain's motion this animal friend's tail makes, 1 = all (2026-11-25: the rabbit's round tail only sways a
+	 * little, the user: "동그란 느낌을 유지하면서 살짝 흔들리기만"). */
+	float TailAmount = 1.f;
+	/**
+	 * A cat's tail (2026-11-25, the user: the tiger's tail should move "여우 꼬리 보다는 조금 더 고양이 꼬리처럼"): the sway runs down
+	 * the tail as a wave (TailWave times the usual delay from root to tip), wider (TailWagSize) and slower (TailWagSpeed),
+	 * a looser tip (TailTipFrequency, oscillations a second; -1 the usual), and carried up with its end hooked while moving
+	 * (TailMoveLift at the root, TailMoveTipLift toward the end, degrees in all, the way the idle pose is given).
+	 */
+	float TailWave = 1.f;
+	float TailWagSize = 1.f;
+	float TailWagSpeed = 1.f;
+	float TailTipFrequency = -1.f;
+	float TailMoveLift = 0.f;
+	float TailMoveTipLift = 0.f;
+	/** The tail springs' damping ratio for this animal friend (-1: the animation instance's ChainDamping); higher, the sway
+	 * settles smoothly without bouncing (2026-11-25, the Stray cat's heavy, smooth tail). */
+	float TailDamping = -1.f;
+	/**
+	 * A squiggle (2026-11-25, the user on the Stray-like tiger tail: "조금 더 꼬불거리는 모습도 보였으면 좋겠어. 지금은 너무 스틱
+	 * 같아"): an S-curve that runs slowly down the tail, bone against bone, so it never looks like one straight stick.
+	 * TailSquiggle: degrees each bone bends up and down at the most (for an 8-bone tail; more toward the tip),
+	 * TailSquiggleSide: the same to the sides, TailSquiggleWaves: how many waves fit along the tail at once (about 1: an S),
+	 * TailSquiggleSpeed: waves a second running down it. 0, 0: none (every other animal friend).
+	 */
+	float TailSquiggle = 0.f;
+	float TailSquiggleSide = 0.f;
+	float TailSquiggleWaves = 1.f;
+	float TailSquiggleSpeed = 0.4f;
+	/** How big the tail is drawn, length and thickness together, 1 = as modelled (2026-11-25, the user: the tiger's tail
+	 * 30% thinner and shorter - the first tail bone is scaled, the fur on it too). */
+	float TailSize = 1.f;
+	/** How much of its way in the world the tail's end keeps as the hips turn, tip and bob, 0 .. 1 (2026-11-25, the user on
+	 * the tiger: "꼬리가 너무 막대기 같은데 뛰거나 방향전환을 할 때 체인같은 느낌을"): the root goes with the body at once, the end
+	 * a beat later. 0: none; over 1 the end keeps more than its own way and whips back past (the tiger's 1.7, "조금 더 격하게"). */
+	float TailFollow = 0.f;
+	/** Turning (2026-11-25, the user: "걸을 땐 묵직하게, 방향 틀 때만 격하게 나눠줘"): the tail's springs' damping ratio and its chain
+	 * lag while the body turns hard (URRRandomBodyAnimInstance::TailTurnFrom .. TailTurnFull degrees a second), easing back
+	 * to TailDamping and TailFollow over about a second after. -1: no change when turning. */
+	float TailTurnDamping = -1.f;
+	float TailTurnFollow = -1.f;
+
+	/**
+	 * The ears (URRRandomBodyAnimInstance, 2026-11-25; bones EarL1.., EarR1.. from char-pipeline/scripts/blender_ear_bones.py):
+	 * how stiff the root's spring is (oscillations a second; softer toward the tip), how hard the head's motion throws
+	 * them, and how far they go into the poses (running, aiming, hit, knocked out, the idle twitch), 1 = the fox's.
+	 */
+	float EarFrequency = 3.f;
+	float EarGain = 1.f;
+	float EarPose = 1.f;
+	/** Degrees more the ears are swept back by the wind of speed beyond walking (running, a vehicle), at full rush. */
+	float EarRush = 15.f;
+	/** 0 .. 1: how much of the bend the root bone takes alone (1: the ear stays straight and turns at its base, like stiff
+	 * cartilage; 0: shared along it, the tip most), and the springs' damping ratio (higher settles sooner, less wobble). */
+	float EarRigid = 0.f;
+	float EarDamping = 0.3f;
+
 	UPROPERTY()
 	TObjectPtr<UTexture2D> Portrait;
 

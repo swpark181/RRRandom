@@ -5,11 +5,13 @@
 #include "RRRandomMovementComponent.h"
 #include "RRRandomVehicle.h"
 #include "AnimationRuntime.h"
+#include "TwoBoneIK.h"
 #include "Animation/AnimClassInterface.h"
 #include "Animation/AnimNodeBase.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AttributesRuntime.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "PoseSearch/AnimNode_MotionMatching.h"
 
@@ -38,6 +40,53 @@ namespace
 		TEXT("1: log, twice a second, how far my left hand is from its place on the gun and how far its arm can reach."));
 	TAutoConsoleVariable<int32> CVarLogMotion(TEXT("rr.MotionMatch.Log"), 0,
 		TEXT("1: log, twice a second, the motion matching driver's root and hips and what my animal friend's body takes from them (test)."));
+
+	// The tail as a chain of springs (2026-11-24, the user asked for the recommended way on the tails): 1 on, 0 the four bones bent
+	// together as before. The others, when 0 or more, stand in for the animation instance's own numbers (tuning from the
+	// console, no rebuild).
+	TAutoConsoleVariable<int32> CVarTailChain(TEXT("rr.Tail.Chain"), 1,
+		TEXT("1: every tail bone is its own spring, softer toward the tip, and reacts to jumps, braking and shots. 0: as before (four bones bent together)."));
+	TAutoConsoleVariable<float> CVarTailRootHz(TEXT("rr.Tail.RootHz"), -1.f, TEXT("Tail chain: oscillations a second at the root (-1: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarTailTipHz(TEXT("rr.Tail.TipHz"), -1.f, TEXT("Tail chain: oscillations a second at the tip (-1: ChainTipFrequency)."));
+	TAutoConsoleVariable<float> CVarTailDamping(TEXT("rr.Tail.Damping"), -1.f, TEXT("Tail chain: damping ratio, 1 = no overshoot (-1: ChainDamping)."));
+	TAutoConsoleVariable<float> CVarTailInertia(TEXT("rr.Tail.Inertia"), -1.f, TEXT("Tail chain: 0 .. 1, how much a bone is left behind by the bones above it (-1: ChainInertia)."));
+	TAutoConsoleVariable<float> CVarTailFallLift(TEXT("rr.Tail.FallLift"), -1.f, TEXT("Tail chain: degrees up per cm/s of falling (-1: FallLift)."));
+	TAutoConsoleVariable<float> CVarTailBrakeLift(TEXT("rr.Tail.BrakeLift"), -1.f, TEXT("Tail chain: degrees up per cm/s2 of braking (-1: BrakeLift)."));
+	TAutoConsoleVariable<float> CVarTailRootBias(TEXT("rr.Tail.RootBias"), -1.f, TEXT("Tail chain: 0 bends toward the tip .. 1 toward the root (-1: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarTailIdleCurl(TEXT("rr.Tail.IdleCurl"), -999.f, TEXT("Tail chain: degrees the tail curls to the right standing still, negative to the left (-999: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarTailIdleLift(TEXT("rr.Tail.IdleLift"), -999.f, TEXT("Tail chain: degrees the tail lifts at its root standing still (-999: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarTailIdleTipLift(TEXT("rr.Tail.IdleTipLift"), -999.f, TEXT("Tail chain: degrees the tail's far end turns up standing still (-999: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarTailGain(TEXT("rr.Tail.Gain"), -1.f, TEXT("Tail chain: how many times over the body's motion moves the tail (-1: ChainGain)."));
+	TAutoConsoleVariable<float> CVarTailShotKick(TEXT("rr.Tail.ShotKick"), -1.f, TEXT("Tail chain: degrees a second a shot flicks the tip up (-1: ShotTailKick)."));
+	TAutoConsoleVariable<int32> CVarTailFloor(TEXT("rr.Tail.Floor"), 1, TEXT("1: no tail joint goes nearer the floor than rr.Tail.FloorMargin (the bones above lift it). 0: off."));
+	TAutoConsoleVariable<float> CVarTailFloorMargin(TEXT("rr.Tail.FloorMargin"), 7.f, TEXT("Tail chain: how far above the floor every tail joint stays, mesh units at full tail size (its thickness and fur)."));
+	TAutoConsoleVariable<float> CVarTailFollow(TEXT("rr.Tail.Follow"), -1.f, TEXT("Tail chain: 0 .. 1, how much of its way in the world the tail's end keeps as the hips turn, tip and bob (-1: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarTailFollowCurve(TEXT("rr.Tail.FollowCurve"), -1.f, TEXT("Tail chain: how much more toward the tip that lag is kept, 1 = evenly (-1: 1.2)."));
+	TAutoConsoleVariable<float> CVarTailMoveLift(TEXT("rr.Tail.MoveLift"), -999.f, TEXT("Tail chain: degrees the tail lifts at its root walking, negative hangs it down (-999: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarTailMoveTipLift(TEXT("rr.Tail.MoveTipLift"), -999.f, TEXT("Tail chain: degrees the tail's far end turns up walking (-999: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarTailSquiggle(TEXT("rr.Tail.Squiggle"), -1.f, TEXT("Tail chain: degrees each bone of an 8-bone tail bends up and down in the running S-curve (-1: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarTailSquiggleSide(TEXT("rr.Tail.SquiggleSide"), -1.f, TEXT("Tail chain: the same to the sides (-1: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarTailSquiggleWaves(TEXT("rr.Tail.SquiggleWaves"), -1.f, TEXT("Tail chain: how many waves of the S-curve fit along the tail (-1: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarTailSquiggleHz(TEXT("rr.Tail.SquiggleHz"), -1.f, TEXT("Tail chain: S-curve waves a second running down the tail (-1: the animal friend's own)."));
+	TAutoConsoleVariable<int32> CVarTailLog(TEXT("rr.Tail.Log"), 0, TEXT("1: log my animal friend's tail chain ten times a second (test)."));
+	// The ears (2026-11-25): rr.Ear 0 leaves them as modelled; the others, when 0 or more, stand in for the numbers
+	// (rr.Ear.Back / rr.Ear.Out: a pose held for looking at, degrees for the whole ear, -999 = the game's own)
+	TAutoConsoleVariable<int32> CVarEar(TEXT("rr.Ear"), 1, TEXT("1: the ears' bones spring and take poses (running, aiming, hit, knocked out, twitching). 0: as modelled."));
+	TAutoConsoleVariable<float> CVarEarThrow(TEXT("rr.Ear.Throw"), -1.f, TEXT("Ears: how many times over the head's motion throws them (-1: EarThrow x the animal friend's EarGain)."));
+	TAutoConsoleVariable<float> CVarEarPose(TEXT("rr.Ear.Pose"), -1.f, TEXT("Ears: how far into the poses, 1 = the fox's (-1: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarEarRush(TEXT("rr.Ear.Rush"), -1.f, TEXT("Ears: how many times the sweep back from speed past a walk (-1: 1, the animal friend's own EarRush)."));
+	TAutoConsoleVariable<float> CVarEarRigid(TEXT("rr.Ear.Rigid"), -1.f, TEXT("Ears: 0 .. 1, how much the root bone bends alone - 1 the ear stays straight (-1: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarEarDamping(TEXT("rr.Ear.Damping"), -1.f, TEXT("Ears: the springs' damping ratio, 1 = no overshoot (-1: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarEarHz(TEXT("rr.Ear.Hz"), -1.f, TEXT("Ears: oscillations a second at the root (-1: the animal friend's own)."));
+	TAutoConsoleVariable<float> CVarEarBack(TEXT("rr.Ear.Back"), -999.f, TEXT("Ears: hold both ears this many degrees back (negative: forward), for looking (-999: off)."));
+	TAutoConsoleVariable<float> CVarEarOut(TEXT("rr.Ear.Out"), -999.f, TEXT("Ears: hold both ears this many degrees out and down, for looking (-999: off)."));
+	TAutoConsoleVariable<int32> CVarEarLog(TEXT("rr.Ear.Log"), 0, TEXT("1: log my animal friend's ears ten times a second (test)."));
+	// The most tail bones looked for on a mesh (Tail1 .. Tail16)
+	constexpr int32 MaxTailBones = 16;
+	// A bone may bend this many times its even share of the whole tail's most (MaxChainSwing, MaxChainLift)
+	constexpr float BoneRoom = 2.f;
+	// ...and the most the whole tail goes below where the wag and the lift hold it, all bones together
+	constexpr float MaxChainDown = 14.f;
 
 	// Long frames are simulated in steps this short, so the spring stays steady
 	constexpr float MaxStep = 1.f / 60.f;
@@ -384,6 +433,259 @@ void URRRandomBodyAnimInstance::UpdateWings(float DeltaSeconds)
 	}
 }
 
+void URRRandomBodyAnimInstance::UpdateEars(float DeltaSeconds)
+{
+	Aim.ListeningWeight = 0.f;
+	const USkeletalMeshComponent* Mesh = GetSkelMeshComponent();
+	const USkeletalMesh* Asset = Mesh ? Mesh->GetSkeletalMeshAsset() : nullptr;
+	// The ears this mesh has (looked for again when the mesh changes: another animal friend's body)
+	if (EarMesh.Get() != Asset)
+	{
+		EarMesh = Asset;
+		Ears.Reset();
+		EarHead = NAME_None;
+		EarFrequency = 3.f;
+		EarGain = EarPose = 1.f;
+		EarRushDegrees = 15.f;
+		EarRigidity = 0.f;
+		EarDampingRatio = EarDamping;
+		const FReferenceSkeleton* Ref = Asset ? &Asset->GetRefSkeleton() : nullptr;
+		const int32 Head = Ref ? Ref->FindBoneIndex(TEXT("Head")) : INDEX_NONE;
+		if (Head != INDEX_NONE)
+		{
+			for (const FRRSpeciesLook& Look : FRRSpeciesLook::GetAll())
+			{
+				if (Look.Mesh == Asset)
+				{
+					EarFrequency = Look.EarFrequency;
+					EarGain = Look.EarGain;
+					EarPose = Look.EarPose;
+					EarRushDegrees = Look.EarRush;
+					EarRigidity = Look.EarRigid;
+					EarDampingRatio = Look.EarDamping;
+					break;
+				}
+			}
+			TArray<FTransform> Space;
+			FAnimationRuntime::FillUpComponentSpaceTransforms(*Ref, Ref->GetRefBonePose(), Space);
+			const FVector HeadAt = Space[Head].GetLocation();
+			for (const TCHAR* Side : { TEXT("L"), TEXT("R") })
+			{
+				FEar Ear;
+				for (int32 Number = 1; Number <= 8; ++Number)
+				{
+					const FName Name(*FString::Printf(TEXT("Ear%s%d"), Side, Number));
+					if (Ref->FindBoneIndex(Name) == INDEX_NONE)
+					{
+						break;
+					}
+					Ear.Bones.Add(Name);
+				}
+				const int32 End = Ref->FindBoneIndex(FName(*FString::Printf(TEXT("Ear%sEnd"), Side)));
+				if (Ear.Bones.Num() == 0 || End == INDEX_NONE)
+				{
+					continue;
+				}
+				const FVector Root = Space[Ref->FindBoneIndex(Ear.Bones[0])].GetLocation();
+				const FVector Tip = Space[End].GetLocation();
+				const FVector Along = (Tip - Root).GetSafeNormal();
+				Ear.Length = FMath::Max(FVector::Dist(Root, Tip), 1.f);
+				// Back: toward the back of the head (the mesh faces +Y); an ear already pointing back folds down instead
+				FVector BackWay = -FVector::YAxisVector;
+				if (FVector::CrossProduct(Along, BackWay).Size() < 0.35f)
+				{
+					BackWay = -FVector::ZAxisVector;
+				}
+				Ear.BackAxis = FVector::CrossProduct(Along, BackWay).GetSafeNormal();
+				// Out: away from the head's middle and down, square to the ear
+				FVector OutWay = FVector(Tip.X >= HeadAt.X ? 1.f : -1.f, 0.f, -1.f).GetSafeNormal();
+				OutWay = (OutWay - Along * FVector::DotProduct(OutWay, Along)).GetSafeNormal();
+				Ear.OutAxis = FVector::CrossProduct(Along, OutWay).GetSafeNormal();
+				// (a small turn about an axis moves the tip along axis x ear)
+				Ear.BackMove = FVector::CrossProduct(Ear.BackAxis, Along);
+				Ear.OutMove = FVector::CrossProduct(Ear.OutAxis, Along);
+				Ear.TipOnHead = Space[Head].InverseTransformPosition(Tip);
+				const int32 Count = Ear.Bones.Num();
+				Ear.Back.SetNumZeroed(Count);
+				Ear.Out.SetNumZeroed(Count);
+				Ear.BackSpeed.SetNumZeroed(Count);
+				Ear.OutSpeed.SetNumZeroed(Count);
+				Ears.Add(MoveTemp(Ear));
+			}
+			if (Ears.Num() > 0)
+			{
+				EarHead = Ref->GetBoneName(Head);
+				EarHeadRest = Space[Head].GetRotation();
+				UE_LOG(LogTemp, Log, TEXT("RRRandom: %s has %d ear(s) of %d bone(s)."), *GetNameSafe(GetOwningActor()), Ears.Num(), Ears[0].Bones.Num());
+			}
+		}
+	}
+	EarBoneNames.Reset();
+	EarBends.Reset();
+	const AActor* Owner = GetOwningActor();
+	if (!Owner || CVarEar.GetValueOnGameThread() == 0)
+	{
+		return;
+	}
+
+	const auto Tuned = [](const TAutoConsoleVariable<float>& Var, float Default)
+	{
+		const float Value = Var.GetValueOnGameThread();
+		return Value >= 0.f ? Value : Default;
+	};
+	const float Pose = Tuned(CVarEarPose, EarPose);
+	const float Throw = Tuned(CVarEarThrow, EarThrow * EarGain);
+	const float RootHz = Tuned(CVarEarHz, EarFrequency);
+	const float Rigidity = FMath::Clamp(Tuned(CVarEarRigid, EarRigidity), 0.f, 1.f);
+	const float DampingRatio = Tuned(CVarEarDamping, EarDampingRatio);
+	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(Owner);
+	const bool bAlive = !Brawler || Brawler->IsAlive();
+	const FVector Velocity = Owner->GetVelocity();
+	const bool bListening = Brawler && bAlive
+		&& Brawler->WantsMotionMatch() && Velocity.SizeSquared2D() < FMath::Square(30.f)
+		&& !Brawler->WantsAimFacing() && !Brawler->IsEmoting();
+	const float Age = bListening ? Brawler->GetHeardStepAge() : 10.f;
+	const float Attention = FMath::SmoothStep(0.f, 0.08f, Age) * (1.f - FMath::SmoothStep(0.48f, 0.85f, Age));
+	const FVector Heard = Attention > 0.f ? (Brawler->GetHeardStepLocation() - Owner->GetActorLocation()).GetSafeNormal2D() : FVector::ZeroVector;
+	const float SoundSide = FVector::DotProduct(Heard, Owner->GetActorRightVector());
+	Aim.ListeningDirection = Heard;
+	Aim.ListeningWeight = FMath::SmoothStep(0.10f, 0.30f, Age) * Attention * 0.78f;
+	if (Attention > 0.f && CVarLogMotion.GetValueOnGameThread() && Brawler->IsLocallyControlled() && Brawler->IsPlayerControlled() && GFrameCounter % 6 == 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("ANIM LISTEN age %.2f side %.2f ears %d head %.2f"), Age, SoundSide, Ears.Num(), Aim.ListeningWeight);
+	}
+	if (Ears.IsEmpty()) { return; }
+
+	// The pose of the moment, degrees for the whole ear: swept back with speed, forward and alert while aiming (less on
+	// the run), flat back and a little out when hit, out and down when knocked out
+	// (riding, the driver's speed - a vehicle is carried along by its driver, and a passenger sits still on it: the wind
+	// the ears feel; all ways, a plane climbs and dives)
+	const ARRRandomVehicle* Ridden = Brawler ? Brawler->GetVehicle() : nullptr;
+	const ARRRandomCharacter* Driver = Ridden ? Ridden->GetRider() : nullptr;
+	const float Speed = Driver ? Driver->GetVelocity().Size() : Velocity.Size2D();
+	const float Pace = FMath::Clamp(Speed / FMath::Max(WagRunSpeed, 1.f), 0.f, 1.f);
+	const float Rush = (1.f - FMath::Exp(-FMath::Max(0.f, Speed - EarRushFrom) / FMath::Max(EarRushSpeed, 1.f))) * Life;
+	EarTime += DeltaSeconds;
+	const float Flutter = 0.6f * FMath::Sin(EarTime * 2.f * PI * 7.f) + 0.4f * FMath::Sin(EarTime * 2.f * PI * 11.3f + 1.f);
+	const float HitFlash = Brawler ? Brawler->GetHitFlash() : 0.f;
+	if (HitFlash > LastHitFlash + 0.3f)
+	{
+		EarHit = 1.f;
+	}
+	LastHitFlash = HitFlash;
+	EarHit = FMath::Max(0.f, EarHit - DeltaSeconds / FMath::Max(EarHitTime, 0.05f));
+	const float Hit = FMath::Sin(EarHit * HALF_PI);
+	const float Down = 1.f - Life;
+	float BackPose = Pose * (EarRunBack * Pace - EarAimForward * Aim.Weight * (1.f - 0.6f * Pace) + EarHitBack * Hit + EarDownBack * Down)
+		+ (EarRushDegrees * Tuned(CVarEarRush, 1.f) + EarFlutter * Flutter) * Rush;
+	float OutPose = Pose * (EarHitOut * Hit + EarDownOut * Down);
+	if (CVarEarBack.GetValueOnGameThread() > -900.f) { BackPose = CVarEarBack.GetValueOnGameThread(); }
+	if (CVarEarOut.GetValueOnGameThread() > -900.f) { OutPose = CVarEarOut.GetValueOnGameThread(); }
+
+	// A shot: both ears flinch back. Standing about: now and then one ear twitches.
+	const float SinceShot = Brawler ? Brawler->GetTimeSinceShot() : EarSinceShot;
+	const bool bShot = SinceShot < EarSinceShot - KINDA_SMALL_NUMBER;
+	EarSinceShot = SinceShot;
+	int32 Twitching = INDEX_NONE;
+	if (bAlive && Attention == 0.f && Velocity.SizeSquared2D() < FMath::Square(30.f) && Aim.Weight < 0.1f)
+	{
+		EarTwitchIn -= DeltaSeconds;
+		if (EarTwitchIn <= 0.f)
+		{
+			Twitching = FMath::RandRange(0, Ears.Num() - 1);
+			EarTwitchIn = FMath::FRandRange(EarTwitchEvery.X, EarTwitchEvery.Y);
+		}
+	}
+
+	const FTransform HeadWorld = Mesh->GetSocketTransform(EarHead, RTS_World);
+	const float Scale = FMath::Max(HeadWorld.GetScale3D().X, 0.01f);
+	for (int32 EarIndex = 0; EarIndex < Ears.Num(); ++EarIndex)
+	{
+		FEar& Ear = Ears[EarIndex];
+		const bool bSoundEar = (SoundSide >= 0.f) == (Ear.Bones[0] == TEXT("EarR1"));
+		const float ListenBack = Attention * Pose * (bSoundEar ? -23.f : 9.f);
+		const float ListenOut = Attention * Pose * (bSoundEar ? 16.f * FMath::Abs(SoundSide) : 0.f);
+		const int32 Count = Ear.Bones.Num();
+		// How the tip would move if the ear were rigid on the head: its acceleration (eased: a frame's jitter is not a
+		// throw), turned into the head's reference frame, where the ear's axes are
+		const FVector Tip = HeadWorld.TransformPosition(Ear.TipOnHead);
+		if (!Ear.bHasLast || DeltaSeconds < 1e-3f)
+		{
+			Ear.bHasLast = true;
+			Ear.LastTip = Tip;
+			Ear.LastTipVelocity = FVector::ZeroVector;
+		}
+		else
+		{
+			const FVector TipVelocity = (Tip - Ear.LastTip) / DeltaSeconds;
+			const FVector Raw = ((TipVelocity - Ear.LastTipVelocity) / DeltaSeconds).GetClampedToMaxSize(6000.f);
+			Ear.TipAcceleration = FMath::VInterpTo(Ear.TipAcceleration, Raw, DeltaSeconds, 20.f);
+			Ear.LastTip = Tip;
+			// (a teleport or a respawn: no throw from it)
+			Ear.LastTipVelocity = TipVelocity.SizeSquared() < FMath::Square(5000.f) ? TipVelocity : FVector::ZeroVector;
+		}
+		const FVector Felt = EarHeadRest.RotateVector(HeadWorld.GetRotation().UnrotateVector(Ear.TipAcceleration));
+		// (degrees a second squared: the tip lags behind the way it is pushed; a landing or a jump's push up also flops
+		// the ears out and down, as if they were softer that way)
+		const float Reach = Ear.Length * Scale;
+		const float ThrowBack = -FVector::DotProduct(Felt, Ear.BackMove) / Reach * Throw * (180.f / PI);
+		const float ThrowOut = (-FVector::DotProduct(Felt, Ear.OutMove) + 0.5f * FMath::Max(Felt.Z, 0.f)) / Reach * Throw * (180.f / PI);
+		const float Total = Count * (Count + 1) * 0.5f;
+		const float Most = Count > 1 ? 1.5f * EarMost / Count : EarMost;
+		for (int32 Bone = 0; Bone < Count; ++Bone)
+		{
+			// (a stiff ear - EarRigidity - turns at its root bone; a soft one bends along, the throw more toward the tip)
+			const float RootOnly = Bone == 0 ? 1.f : 0.f;
+			const float TipWard = FMath::Lerp((Bone + 1) / Total, RootOnly, Rigidity);
+			const float Even = FMath::Lerp(1.f / Count, RootOnly, Rigidity);
+			const float BoneMost = FMath::Lerp(Most, Bone == 0 ? 1.2f * EarMost : Most, Rigidity);
+			const float Along = Count > 1 ? float(Bone) / (Count - 1) : 0.f;
+			if (bShot && Life > 0.5f)
+			{
+				Ear.BackSpeed[Bone] += EarShotKick * Pose * TipWard;
+			}
+			if (EarIndex == Twitching)
+			{
+				Ear.BackSpeed[Bone] += EarTwitch * Pose * TipWard;
+				Ear.OutSpeed[Bone] += 0.4f * EarTwitch * Pose * TipWard;
+			}
+			const float Omega = 2.f * PI * RootHz * FMath::Lerp(1.f, EarTipFrequencyShare, Along);
+			const float Damping = 2.f * DampingRatio * Omega;
+			for (float Left = DeltaSeconds; Left > 0.f; Left -= MaxStep)
+			{
+				const float Step = FMath::Min(Left, MaxStep);
+				Ear.BackSpeed[Bone] += (Omega * Omega * ((BackPose + ListenBack) * Even - Ear.Back[Bone]) - Damping * Ear.BackSpeed[Bone] + ThrowBack * TipWard) * Step;
+				Ear.OutSpeed[Bone] += (Omega * Omega * ((OutPose + ListenOut) * Even - Ear.Out[Bone]) - Damping * Ear.OutSpeed[Bone] + ThrowOut * TipWard) * Step;
+				Ear.Back[Bone] += Ear.BackSpeed[Bone] * Step;
+				Ear.Out[Bone] += Ear.OutSpeed[Bone] * Step;
+			}
+			if (FMath::Abs(Ear.Back[Bone]) > BoneMost)
+			{
+				Ear.Back[Bone] = FMath::Sign(Ear.Back[Bone]) * BoneMost;
+				Ear.BackSpeed[Bone] = 0.f;
+			}
+			if (FMath::Abs(Ear.Out[Bone]) > BoneMost)
+			{
+				Ear.Out[Bone] = FMath::Sign(Ear.Out[Bone]) * BoneMost;
+				Ear.OutSpeed[Bone] = 0.f;
+			}
+			EarBoneNames.Add(Ear.Bones[Bone]);
+			EarBends.Add(FQuat(Ear.OutAxis, FMath::DegreesToRadians(Ear.Out[Bone])) * FQuat(Ear.BackAxis, FMath::DegreesToRadians(Ear.Back[Bone])));
+		}
+	}
+	if (CVarEarLog.GetValueOnGameThread() != 0 && Brawler && Brawler->IsLocallyControlled() && Brawler->IsPlayerControlled() && (GFrameCounter % 6) == 0)
+	{
+		float Back = 0.f, Out = 0.f;
+		for (int32 Bone = 0; Bone < Ears[0].Bones.Num(); ++Bone)
+		{
+			Back += Ears[0].Back[Bone];
+			Out += Ears[0].Out[Bone];
+		}
+		UE_LOG(LogTemp, Log, TEXT("RREar: pose back %.1f out %.1f | first ear back %.1f out %.1f | felt %.0f | hit %.2f down %.2f"), BackPose, OutPose, Back, Out,
+			Ears[0].TipAcceleration.Size(), Hit, Down);
+	}
+}
+
 FAnimInstanceProxy* URRRandomBodyAnimInstance::CreateAnimInstanceProxy()
 {
 	return new FRRRandomBodyAnimInstanceProxy(this);
@@ -403,14 +705,176 @@ void URRRandomBodyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		UpdateSprintPose(DeltaSeconds);
 		UpdateRidePose(DeltaSeconds);
 		UpdateWings(DeltaSeconds);
+		UpdateEars(DeltaSeconds);
 	}
 
 	const USkeletalMeshComponent* Mesh = GetSkelMeshComponent();
 	const AActor* Owner = GetOwningActor();
-	const int32 Count = TailBoneNames.Num();
-	if (!Mesh || !Owner || Count == 0 || DeltaSeconds <= 0.f)
+	if (!Mesh || !Owner || TailBoneNames.Num() == 0 || DeltaSeconds <= 0.f)
 	{
 		return;
+	}
+	// The chain bends every tail bone the mesh has: Tail5, Tail6 ... after the named ones (looked for again when the
+	// mesh changes: another animal friend's body)
+	const bool bChain = CVarTailChain.GetValueOnGameThread() != 0;
+	if (TailBonesMesh.Get() != Mesh->GetSkeletalMeshAsset())
+	{
+		TailBonesMesh = Mesh->GetSkeletalMeshAsset();
+		ActiveTailBones = TailBoneNames;
+		// (where this animal friend's tail bends and how stiff its root is)
+		TailRootBias = ChainRootBias;
+		TailRootHz = ChainRootFrequency;
+		bTailBigWag = true;
+		TailIdleCurl = TailIdleLift = TailIdleTipLift = 0.f;
+		TailAmount = 1.f;
+		TailWave = TailWagSize = TailWagSpeed = 1.f;
+		TailTipHz = -1.f;
+		TailMoveLift = TailMoveTipLift = 0.f;
+		TailDampingRatio = -1.f;
+		TailSquiggle = TailSquiggleSide = 0.f;
+		TailSquiggleWaves = 1.f;
+		TailSquiggleSpeed = 0.4f;
+		TailSize = 1.f;
+		TailFollow = 0.f;
+		TailTurnDamping = TailTurnFollow = -1.f;
+		for (const FRRSpeciesLook& Look : FRRSpeciesLook::GetAll())
+		{
+			if (TailBonesMesh.IsValid() && Look.Mesh == TailBonesMesh.Get())
+			{
+				TailRootBias = Look.TailRootBias;
+				TailRootHz = Look.TailRootFrequency;
+				bTailBigWag = Look.bTailBigWag;
+				TailIdleCurl = Look.TailIdleCurl;
+				TailIdleLift = Look.TailIdleLift;
+				TailIdleTipLift = Look.TailIdleTipLift;
+				TailAmount = Look.TailAmount;
+				TailWave = Look.TailWave;
+				TailWagSize = Look.TailWagSize;
+				TailWagSpeed = Look.TailWagSpeed;
+				TailTipHz = Look.TailTipFrequency;
+				TailMoveLift = Look.TailMoveLift;
+				TailMoveTipLift = Look.TailMoveTipLift;
+				TailDampingRatio = Look.TailDamping;
+				TailSquiggle = Look.TailSquiggle;
+				TailSquiggleSide = Look.TailSquiggleSide;
+				TailSquiggleWaves = Look.TailSquiggleWaves;
+				TailSquiggleSpeed = Look.TailSquiggleSpeed;
+				TailSize = Look.TailSize;
+				TailFollow = Look.TailFollow;
+				TailTurnDamping = Look.TailTurnDamping;
+				TailTurnFollow = Look.TailTurnFollow;
+				break;
+			}
+		}
+		for (int32 Number = TailBoneNames.Num() + 1; TailBonesMesh.IsValid() && Number <= MaxTailBones; ++Number)
+		{
+			const FName Name(*FString::Printf(TEXT("Tail%d"), Number));
+			if (Mesh->GetBoneIndex(Name) == INDEX_NONE)
+			{
+				break;
+			}
+			ActiveTailBones.Add(Name);
+		}
+		// (only the ones this mesh has, from Tail1 on: the rabbit's round tail is one bone, 2026-11-25 - counting four
+		// shared its bend among three bones that are not there)
+		for (int32 Index = 0; Index < ActiveTailBones.Num(); ++Index)
+		{
+			if (TailBonesMesh.IsValid() && Mesh->GetBoneIndex(ActiveTailBones[Index]) == INDEX_NONE)
+			{
+				ActiveTailBones.SetNum(Index);
+				break;
+			}
+		}
+		if (ActiveTailBones.Num() != TailBoneNames.Num())
+		{
+			UE_LOG(LogTemp, Log, TEXT("RRRandom: %s has a tail of %d bones."), *Owner->GetName(), ActiveTailBones.Num());
+		}
+	}
+	const int32 Count = bChain ? ActiveTailBones.Num() : TailBoneNames.Num();
+	// (no tail bones on this mesh)
+	bTailFloor = false;
+	if (Count == 0)
+	{
+		BoneSwing.Reset();
+		BoneLift.Reset();
+		return;
+	}
+
+	// The floor under the tail (2026-11-25, the user: "바닥을 뚫고 안 보이는 부분은 없게"): straight down from the tail's root,
+	// static ground only (not other characters or cars), in the mesh's space for the proxy, which lifts each bone just
+	// enough that the joint after it stays clear. Not riding (the tail is up off the seat).
+	if (CVarTailFloor.GetValueOnGameThread() != 0 && RideWeight < 0.5f && GetWorld())
+	{
+		const FVector Root = Mesh->GetBoneLocation(GetTailBones()[0]);
+		FHitResult Hit;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(RRTailFloor), false, Owner);
+		if (GetWorld()->LineTraceSingleByObjectType(Hit, Root + FVector(0.f, 0.f, 10.f), Root - FVector(0.f, 0.f, 400.f), FCollisionObjectQueryParams(ECC_WorldStatic), Params))
+		{
+			const FTransform& ToWorld = Mesh->GetComponentTransform();
+			TailFloorPoint = ToWorld.InverseTransformPosition(Hit.ImpactPoint);
+			TailFloorNormal = ToWorld.InverseTransformVectorNoScale(Hit.ImpactNormal).GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
+			TailFloorMargin = CVarTailFloorMargin.GetValueOnGameThread() * TailSize;
+			bTailFloor = true;
+		}
+	}
+
+	// Where the tail's base points and how high its root is, from the posed hips (2026-11-25, the user: "꼬리가 너무 막대기
+	// 같은데 뛰거나 방향전환을 할 때 체인같은 느낌을 조금 더"): how much they turned and rose since the last frame - every
+	// sway and bob of the hips in a run, every turn - is what the chain's far end lags behind (FRRSpeciesLook::TailFollow)
+	TailFollowYaw = TailFollowPitch = TailFollowRise = 0.f;
+	{
+		const TArray<FName>& Bones = GetTailBones();
+		const FReferenceSkeleton& Ref = Mesh->GetSkeletalMeshAsset()->GetRefSkeleton();
+		if (TailDirMesh.Get() != Mesh->GetSkeletalMeshAsset())
+		{
+			TailDirMesh = Mesh->GetSkeletalMeshAsset();
+			TailParent = NAME_None;
+			bTailFollowLast = false;
+			const int32 First = Ref.FindBoneIndex(Bones[0]);
+			const int32 Second = Bones.Num() > 1 ? Ref.FindBoneIndex(Bones[1]) : INDEX_NONE;
+			const int32 Parent = First != INDEX_NONE ? Ref.GetParentIndex(First) : INDEX_NONE;
+			if (Second != INDEX_NONE && Parent != INDEX_NONE)
+			{
+				const FTransform ParentRest = FAnimationRuntime::GetComponentSpaceTransformRefPose(Ref, Parent);
+				const FVector FirstAt = FAnimationRuntime::GetComponentSpaceTransformRefPose(Ref, First).GetLocation();
+				TailDirLocal = ParentRest.InverseTransformVectorNoScale(FAnimationRuntime::GetComponentSpaceTransformRefPose(Ref, Second).GetLocation() - FirstAt).GetSafeNormal();
+				TailParent = Ref.GetBoneName(Parent);
+				// (its length: the bones' own, and the last one's once more)
+				TailLengthMesh = 0.f;
+				FVector At = FirstAt, Step = FVector::ZeroVector;
+				for (int32 Bone = 1; Bone < Bones.Num(); ++Bone)
+				{
+					const int32 Index = Ref.FindBoneIndex(Bones[Bone]);
+					if (Index == INDEX_NONE)
+					{
+						break;
+					}
+					const FVector Next = FAnimationRuntime::GetComponentSpaceTransformRefPose(Ref, Index).GetLocation();
+					Step = Next - At;
+					TailLengthMesh += static_cast<float>(Step.Size());
+					At = Next;
+				}
+				TailLengthMesh += static_cast<float>(Step.Size());
+			}
+		}
+		if (TailParent != NAME_None && !TailDirLocal.IsNearlyZero())
+		{
+			const FVector Dir = Mesh->GetBoneQuaternion(TailParent).RotateVector(TailDirLocal);
+			const float DirYaw = FMath::RadiansToDegrees(FMath::Atan2(Dir.Y, Dir.X));
+			const float DirPitch = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(static_cast<float>(Dir.Z), -1.f, 1.f)));
+			const float RootZ = static_cast<float>(Mesh->GetBoneLocation(Bones[0]).Z);
+			const float RiseMost = 10.f;
+			if (bTailFollowLast && FMath::Abs(RootZ - LastTailRootZ) < 4.f * RiseMost)
+			{
+				TailFollowYaw = FMath::Clamp(FMath::FindDeltaAngleDegrees(LastTailYaw, DirYaw), -MaxTurnPerFrame, MaxTurnPerFrame);
+				TailFollowPitch = FMath::Clamp(DirPitch - LastTailPitch, -10.f, 10.f);
+				TailFollowRise = FMath::Clamp(RootZ - LastTailRootZ, -RiseMost, RiseMost);
+			}
+			LastTailYaw = DirYaw;
+			LastTailPitch = DirPitch;
+			LastTailRootZ = RootZ;
+			bTailFollowLast = true;
+		}
 	}
 
 	// Follow the rendered pelvis, not the gameplay actor's immediate aim turn.
@@ -430,8 +894,21 @@ void URRRandomBodyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	// Turning: the tail keeps pointing where it did for a moment, so relative to the body it swings toward the turn's
 	// outside (turning right leaves it bent to the right of the body)
 	Swing += FMath::Clamp(FMath::FindDeltaAngleDegrees(LastYaw, Yaw), -MaxTurnPerFrame, MaxTurnPerFrame) * TurnDrag;
+	// How hard the body is turning, 0 .. 1 (2026-11-25, the user: "걸을 땐 묵직하게, 방향 틀 때만 격하게 나눠줘"): up at once
+	// with the turn, back down over about a second after it, so the whip has time to play out. The tail's springs and
+	// its chain lag go from the walking numbers to the turning ones with it (FRRSpeciesLook::TailTurnDamping, TailTurnFollow).
+	{
+		const float TurnRate = FMath::Abs(FMath::FindDeltaAngleDegrees(LastYaw, Yaw)) / DeltaSeconds;
+		const float Hard = FMath::Clamp((TurnRate - TailTurnFrom) / FMath::Max(TailTurnFull - TailTurnFrom, 1.f), 0.f, 1.f);
+		TailTurning = Hard > TailTurning ? Hard : FMath::FInterpTo(TailTurning, Hard, DeltaSeconds, 1.5f);
+	}
 	// Speeding up sideways: it trails the other way while the push lasts
 	const FVector Acceleration = ((Velocity - LastVelocity) / DeltaSeconds).GetClampedToMaxSize(MaxAcceleration);
+	const float AlongBrake = -FVector::DotProduct(Acceleration, LastVelocity.GetSafeNormal2D());
+	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(Owner);
+	const bool bGroundMotion = Brawler && Brawler->WantsMotionMatch();
+	if (bGroundMotion && LastVelocity.Size2D() > 210.f && AlongBrake > 380.f) { TailBrakeHold = 0.60f; }
+	else { TailBrakeHold = bGroundMotion ? FMath::Max(0.f, TailBrakeHold - DeltaSeconds) : 0.f; }
 	TailTrail = FMath::FInterpTo(TailTrail, -FVector::DotProduct(Acceleration, Right) * SideAccelSwing, DeltaSeconds, 6.f);
 	LastYaw = Yaw;
 	LastVelocity = Velocity;
@@ -453,26 +930,203 @@ void URRRandomBodyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	}
 
 	// Wagging and lifting with speed; a knocked-out brawler's tail goes still
-	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(Owner);
 	Life = FMath::FInterpConstantTo(Life, !Brawler || Brawler->IsAlive() ? 1.f : 0.f, DeltaSeconds, LifeFadeSpeed);
 	TailPace = FMath::FInterpTo(TailPace, FMath::Clamp(Velocity.Size2D() / FMath::Max(WagRunSpeed, 1.f), 0.f, 1.f), DeltaSeconds, 3.f);
 	const float Run = TailPace;
 	TailTime += DeltaSeconds;
-	WagPhase = FMath::Fmod(WagPhase + 2.f * PI * FMath::Lerp(WagFrequency.X, WagFrequency.Y, Run)
+	WagPhase = FMath::Fmod(WagPhase + 2.f * PI * FMath::Lerp(WagFrequency.X, WagFrequency.Y, Run) * TailWagSpeed
 		* (1.f + 0.08f * FMath::Sin(TailTime * 0.73f)) * DeltaSeconds, 2.f * PI);
 	// Riding, the tail lifts up off the seat and out of the vehicle's body
 	Lift = FMath::FInterpTo(Lift, RunLift * Run + RideTailLift * RideWeight, DeltaSeconds, LiftSpeed);
-	const float Wag = FMath::Lerp(WagAmplitude.X, WagAmplitude.Y, Run);
+	const float Wag = FMath::Lerp(WagAmplitude.X, WagAmplitude.Y, Run) * TailWagSize
+		* (1.f - 0.90f * FMath::SmoothStep(0.f, 0.35f, TailBrakeHold));
 	const float TotalLift = (Lift + RunBob * Run * FMath::Sin(2.f * WagPhase) + 0.8f * FMath::Sin(TailTime * 1.3f)) * Life;
 
 	// Spread over the bones, more toward the tip so the tail curls rather than pivoting stiffly at the root
 	BoneSwing.SetNumZeroed(Count);
 	BoneLift.SetNumZeroed(Count);
 	const float Total = Count * (Count + 1) * 0.5f;
+	if (bChain)
+	{
+		// Each bone a spring of its own toward its share of the wag, the lift and the turn swing; softer toward the tip,
+		// and left behind by the bones above it
+		const auto Tuned = [](const TAutoConsoleVariable<float>& Var, float Default)
+		{
+			const float Value = Var.GetValueOnGameThread();
+			return Value >= 0.f ? Value : Default;
+		};
+		const float RootHz = Tuned(CVarTailRootHz, TailRootHz);
+		const float Bias = FMath::Clamp(Tuned(CVarTailRootBias, TailRootBias), 0.f, 1.f);
+		const float TipHz = Tuned(CVarTailTipHz, TailTipHz > 0.f ? TailTipHz : ChainTipFrequency);
+		const float CalmRatio = TailDampingRatio > 0.f ? TailDampingRatio : ChainDamping;
+		const float Ratio = Tuned(CVarTailDamping, TailTurnDamping > 0.f ? FMath::Lerp(CalmRatio, TailTurnDamping, TailTurning) : CalmRatio);
+		const float Inertia = FMath::Clamp(Tuned(CVarTailInertia, ChainInertia), 0.f, 1.f);
+		// (the user, 2026-11-24: too faint, only the tip showed anything, three times as much would do, and the springs
+		// were too stiff out to the tip. So what the body's motion does to the tail is multiplied by Gain, the bends are
+		// shared more evenly along the tail (Even: the root takes part), and the tip's spring is much softer.)
+		const float Gain = Tuned(CVarTailGain, ChainGain);
+		// What the body's own way does to it: rising drags the tail down and falling floats it up (a jump), braking
+		// throws it up and forward and speeding up leaves it trailing low
+		const FVector Forward = FRotator(0.f, Yaw, 0.f).Vector();
+		const float Fall = -Velocity.Z * Tuned(CVarTailFallLift, FallLift) * Gain;
+		const float Brake = (TailBrakeHold > 0.f ? AlongBrake : -FVector::DotProduct(Acceleration, Forward)) * Tuned(CVarTailBrakeLift, BrakeLift) * Gain;
+		const float SwingBig = FMath::Clamp(Swing * Gain, -MaxChainSwing, MaxChainSwing);
+		// (the wag itself too: walking and running straight it is all that moves the tail, and at its old size the chain
+		// looked no different from before. Half as much again standing, Gain times on the run.)
+		const float WagBig = bTailBigWag ? Wag * FMath::Lerp(FMath::Min(1.5f, Gain), Gain, Run) : Wag;
+		// (down by much less than up: the tail hangs close to the legs and the floor already)
+		LiftTrail = FMath::FInterpTo(LiftTrail, FMath::Clamp(Fall + Brake, -MaxChainLift * 0.3f, MaxChainLift) * (1.f - RideWeight), DeltaSeconds, 12.f);
+		// A shot flicks it up, the tip most
+		const float SinceShot = Brawler ? Brawler->GetTimeSinceShot() : LastSinceShot;
+		const float Flick = SinceShot < LastSinceShot - KINDA_SMALL_NUMBER ? Tuned(CVarTailShotKick, ShotTailKick) * Life : 0.f;
+		LastSinceShot = SinceShot;
+
+		// The idle pose: standing still the tail curls to one side, more toward the tip, and lifts a little at its root;
+		// moving, it straightens out behind the body again (about a second either way, then the springs)
+		const bool bStanding = Velocity.SizeSquared2D() < FMath::Square(30.f) && RideWeight < 0.5f && Life > 0.5f;
+		TailIdle = FMath::FInterpTo(TailIdle, bStanding ? 1.f : 0.f, DeltaSeconds, bStanding ? 2.5f : 5.f);
+		const float IdleCurl = (CVarTailIdleCurl.GetValueOnGameThread() > -900.f ? CVarTailIdleCurl.GetValueOnGameThread() : TailIdleCurl) * TailIdle;
+		const float IdleLift = (CVarTailIdleLift.GetValueOnGameThread() > -900.f ? CVarTailIdleLift.GetValueOnGameThread() : TailIdleLift) * TailIdle;
+		const float IdleTipLift = (CVarTailIdleTipLift.GetValueOnGameThread() > -900.f ? CVarTailIdleTipLift.GetValueOnGameThread() : TailIdleTipLift) * TailIdle;
+		// (the lift at the root raises the whole tail; the tip's is shared toward the far end, which after the curl
+		// points sideways - the bones' lift is about their own side axis, see the proxy - so the end turns up)
+		// (moving: a cat carries its tail up, the end hooked - TailMoveLift, TailMoveTipLift - fading in with pace; at a sprint
+		// a quarter as high, nearer level, the way a running cat holds it)
+		const float Moving = (1.f - TailIdle) * FMath::Min(1.f, Run * 2.f) * (1.f - 0.75f * FMath::SmoothStep(0.6f, 0.9f, Run)) * (1.f - RideWeight) * Life;
+		// The squiggle (FRRSpeciesLook::TailSquiggle): bone against bone, an S-curve running slowly down the tail, up and down
+		// and a quarter wave later to the sides, so it never holds as one straight stick. Fullest walking, a little less
+		// standing, less at a sprint, none riding or knocked out.
+		const auto Own = [](const TAutoConsoleVariable<float>& Var, float Default)
+		{
+			const float Value = Var.GetValueOnGameThread();
+			return Value >= 0.f ? Value : Default;
+		};
+		const float SquiggleUp = Own(CVarTailSquiggle, TailSquiggle), SquiggleSide = Own(CVarTailSquiggleSide, TailSquiggleSide);
+		const float SquiggleWaves = Own(CVarTailSquiggleWaves, TailSquiggleWaves);
+		const float MoveLift = CVarTailMoveLift.GetValueOnGameThread() > -900.f ? CVarTailMoveLift.GetValueOnGameThread() : TailMoveLift;
+		const float MoveTipLift = CVarTailMoveTipLift.GetValueOnGameThread() > -900.f ? CVarTailMoveTipLift.GetValueOnGameThread() : TailMoveTipLift;
+		SquigglePhase = FMath::Fmod(SquigglePhase + 2.f * PI * Own(CVarTailSquiggleHz, TailSquiggleSpeed) * (1.f + 0.5f * Run) * DeltaSeconds, 2.f * PI);
+		const float Squiggling = FMath::Lerp(0.6f, 1.f, 1.f - TailIdle) * (1.f - 0.6f * FMath::SmoothStep(0.6f, 0.9f, Run)) * (1.f - RideWeight) * Life
+			* 8.f / FMath::Max(Count, 1);
+		TArray<float, TInlineAllocator<16>> Rest, LiftRest, SquiggleLift;
+		Rest.SetNumZeroed(Count);
+		LiftRest.SetNumZeroed(Count);
+		SquiggleLift.SetNumZeroed(Count);
+		for (int32 Bone = 0; Bone < Count; ++Bone)
+		{
+			const float Along = Count > 1 ? float(Bone) / (Count - 1) : 1.f;
+			const float At = SquigglePhase - 2.f * PI * SquiggleWaves * Along;
+			const float Loose = Squiggling * FMath::Lerp(0.6f, 1.4f, Along);
+			SquiggleLift[Bone] = SquiggleUp * Loose * FMath::Sin(At);
+			Rest[Bone] = IdleCurl * (Bone + 1) / Total + SquiggleSide * Loose * FMath::Sin(At - 0.5f * PI);
+			LiftRest[Bone] = IdleLift * (Count - Bone) / Total + IdleTipLift * (Bone + 1) / Total
+				+ Moving * (MoveLift * (Count - Bone) / Total + MoveTipLift * (Bone + 1) / Total) + SquiggleLift[Bone];
+		}
+		BoneSwingSpeed.SetNumZeroed(Count);
+		BoneLiftSpeed.SetNumZeroed(Count);
+		TArray<float, TInlineAllocator<16>> SwingTo, LiftTo;
+		SwingTo.SetNumUninitialized(Count);
+		LiftTo.SetNumUninitialized(Count);
+		for (int32 Bone = 0; Bone < Count; ++Bone)
+		{
+			const float Share = (Bone + 1) / Total;
+			const float Delay = Count > 1 ? WagDelay * TailWave * Bone / (Count - 1) : 0.f;
+			const float Wave = 0.85f * FMath::Sin(WagPhase - Delay) + 0.15f * FMath::Sin(TailTime * 1.07f - Delay * 1.4f);
+			// (the bend's share: toward the tip, as the wag was always shared, or toward the root - the whole tail swings)
+			const float Even = FMath::Lerp(Share, (Count - Bone) / Total, Bias);
+			SwingTo[Bone] = (Rest[Bone] + (SwingBig + WagBig * Wave) * Even * Life) * TailAmount;
+			// (the lift from falling and braking: half as the running lift is shared, at the root, so the whole tail goes
+			// up, and half toward the tip, so it curls)
+			const float RootShare = Count == 1 ? 1.f : (Bone == 0 ? RootLiftShare : (1.f - RootLiftShare) / (Count - 1));
+			LiftTo[Bone] = (TotalLift + (Gain - 1.f) * RunBob * Run * FMath::Sin(2.f * WagPhase) * Life) * RootShare + LiftTrail * 0.5f * (RootShare + Even) * Life
+				+ LiftRest[Bone];
+			LiftTo[Bone] *= TailAmount;
+			// (the flick: about the same turn all told however many bones the tail has)
+			const float TipWard = Count > 1 ? float(Bone) / (Count - 1) : 1.f;
+			BoneLiftSpeed[Bone] += Flick * TailAmount * FMath::Lerp(0.5f + TipWard, 1.5f - TipWard, Bias) * 4.f / FMath::Max(Count, 4);
+		}
+		// The chain's lag (FRRSpeciesLook::TailFollow): as the hips turn, tip and bob, each bone keeps a share of where it
+		// pointed in the world - little at the root, most at the tip - so the bend runs down the tail and the springs bring
+		// it after, a beat later toward the end, instead of the whole tail swinging round with the body like a stick
+		const float Follow = Tuned(CVarTailFollow, TailTurnFollow > 0.f ? FMath::Lerp(TailFollow, TailTurnFollow, TailTurning) : TailFollow)
+			* (1.f - RideWeight) * Life;
+		if (Follow > 0.f)
+		{
+			const float World = TailLengthMesh * static_cast<float>(Mesh->GetComponentTransform().GetScale3D().Z) * TailSize;
+			// (a root that rises leaves the far end behind, below: about as if the tail turned down about a point two
+			// thirds of the way along)
+			const float Dip = -TailFollowPitch - FMath::RadiansToDegrees(TailFollowRise / FMath::Max(0.65f * World, 1.f));
+			// (1.5 at first; 1.2 with the tiger's stronger lag, 2026-11-25: more of it toward the middle)
+			const float Curve = FMath::Max(0.1f, Tuned(CVarTailFollowCurve, 1.2f));
+			float Kept = 0.f;
+			for (int32 Bone = 0; Bone < Count; ++Bone)
+			{
+				const float Upto = FMath::Pow((Bone + 1.f) / Count, Curve);
+				const float Share = (Upto - Kept) * Follow;
+				Kept = Upto;
+				BoneSwing[Bone] += TailFollowYaw * Share;
+				BoneLift[Bone] += Dip * Share;
+			}
+		}
+		for (float Left = DeltaSeconds; Left > 0.f; Left -= MaxStep)
+		{
+			const float Step = FMath::Min(Left, MaxStep);
+			// (what the bones above have done this step, all together: a bone's own turning is taken off it by Inertia)
+			float SwingAbove = 0.f, LiftAbove = 0.f;
+			for (int32 Bone = 0; Bone < Count; ++Bone)
+			{
+				const float Along = Count > 1 ? float(Bone) / (Count - 1) : 0.f;
+				const float BoneOmega = 2.f * PI * FMath::Lerp(RootHz, TipHz, Along);
+				const float BoneDamping = 2.f * Ratio * FMath::Lerp(1.f, 0.6f, Along) * BoneOmega;
+				const float SwingPull = BoneOmega * BoneOmega * (SwingTo[Bone] - BoneSwing[Bone]) - BoneDamping * BoneSwingSpeed[Bone] - Inertia * SwingAbove;
+				const float LiftPull = BoneOmega * BoneOmega * (LiftTo[Bone] - BoneLift[Bone]) - BoneDamping * BoneLiftSpeed[Bone] - Inertia * LiftAbove;
+				BoneSwingSpeed[Bone] += SwingPull * Step;
+				BoneLiftSpeed[Bone] += LiftPull * Step;
+				// (a bone's own most, by how many bones share the bend: past it the tail rolled up into a ball on landing)
+				const float SwingMost = BoneRoom * MaxChainSwing / Count, LiftMost = BoneRoom * MaxChainLift / Count;
+				BoneSwing[Bone] += BoneSwingSpeed[Bone] * Step;
+				if (FMath::Abs(BoneSwing[Bone] - Rest[Bone]) > SwingMost)
+				{
+					BoneSwing[Bone] = Rest[Bone] + FMath::Sign(BoneSwing[Bone] - Rest[Bone]) * SwingMost;
+					BoneSwingSpeed[Bone] = 0.f;
+				}
+				BoneLift[Bone] += BoneLiftSpeed[Bone] * Step;
+				if (BoneLift[Bone] > LiftRest[Bone] + LiftMost)
+				{
+					BoneLift[Bone] = LiftRest[Bone] + LiftMost;
+					BoneLiftSpeed[Bone] = FMath::Min(BoneLiftSpeed[Bone], 0.f);
+				}
+				// (the floor: the tail hangs close to the legs and the ground, so it only goes a little way down, and
+				// stops there with a small bounce - swinging through, it rolled up into a ball under the body)
+				// (a squiggle's own downward bend is let through: bone against bone, it never rolls the tail under; and so is a
+				// pose that hangs the tail down on purpose - the tiger's, 2026-11-25 - the floor is then that far under its pose)
+				const float Floor = -MaxChainDown / Count + FMath::Min(0.f, LiftRest[Bone]);
+				if (BoneLift[Bone] < Floor)
+				{
+					BoneLift[Bone] = Floor;
+					BoneLiftSpeed[Bone] = FMath::Max(BoneLiftSpeed[Bone], 0.f) - FMath::Min(BoneLiftSpeed[Bone], 0.f) * 0.2f;
+				}
+				SwingAbove += SwingPull;
+				LiftAbove += LiftPull;
+			}
+		}
+		if (CVarTailLog.GetValueOnGameThread() != 0 && Brawler && Brawler->IsLocallyControlled() && Brawler->IsPlayerControlled() && (GFrameCounter % 6) == 0)
+		{
+			float SwingAll = 0.f, LiftAll = 0.f;
+			for (int32 Bone = 0; Bone < Count; ++Bone)
+			{
+				SwingAll += BoneSwing[Bone];
+				LiftAll += BoneLift[Bone];
+			}
+			UE_LOG(LogTemp, Log, TEXT("RRTail: %d bones, speed %.0f up %.0f, trail %.1f, lift %.1f (tip %.1f), swing %.1f (tip %.1f), turning %.2f damping %.2f follow %.2f"), Count, Velocity.Size2D(), Velocity.Z,
+				LiftTrail, LiftAll, BoneLift.Last(), SwingAll, BoneSwing.Last(), TailTurning, Ratio, Follow);
+		}
+		return;
+	}
 	for (int32 Bone = 0; Bone < Count; ++Bone)
 	{
 		const float Share = (Bone + 1) / Total;
-		const float Delay = Count > 1 ? WagDelay * Bone / (Count - 1) : 0.f;
+		const float Delay = Count > 1 ? WagDelay * TailWave * Bone / (Count - 1) : 0.f;
 		const float Wave = 0.85f * FMath::Sin(WagPhase - Delay) + 0.15f * FMath::Sin(TailTime * 1.07f - Delay * 1.4f);
 		// The soft tip follows the root later instead of all four joints reversing together.
 		const float Follow = FMath::Lerp(18.f, 8.f, Count > 1 ? float(Bone) / (Count - 1) : 0.f);
@@ -491,6 +1145,8 @@ void URRRandomBodyAnimInstance::UpdateMotion(float DeltaSeconds)
 	if (!DriverMesh || !BodyMesh)
 	{
 		MotionWeight = 0.f;
+		MotionWholeWeight = 0.f;
+		PivotTime = PivotLoad = 0.f;
 		MotionLean = 0.f;
 		MotionMappedMesh.Reset();
 		return;
@@ -498,12 +1154,17 @@ void URRRandomBodyAnimInstance::UpdateMotion(float DeltaSeconds)
 	const FReferenceSkeleton& Body = BodyMesh->GetRefSkeleton();
 	const FReferenceSkeleton& Source = DriverMesh->GetRefSkeleton();
 	const int32 UpperMode = CVarMotionUpper.GetValueOnGameThread();
-	if (MotionMappedMesh.Get() != DriverMesh || MotionBoneMap.Num() != Body.GetNum() || MotionUpperMode != UpperMode)
+	const bool bRetarget = Brawler->UsesSharedMotionRig();
+	// (round 103: mapped again too when it comes to retargeting after being mapped without (a joiner's animal friend, its
+	// species arriving after its meshes): the retarget poses were empty and the next read crashed)
+	if (MotionMappedMesh.Get() != DriverMesh || MotionMappedBody.Get() != BodyMesh || MotionUpperMode != UpperMode
+		|| (bRetarget && (SourceComponentPose.Num() != Source.GetNum() || TargetComponentPose.Num() != Body.GetNum() || MotionBindRotations.Num() != Body.GetNum())))
 	{
 		// Bone for bone by name. 1: taken whenever matched (hips, legs, and with rr.MotionMatch.Upper 1 the spine and head);
 		// 2: taken only while the driver's whole pose is (a climbing clip): the arms, which otherwise keep the gun-holding
 		// animation, and the spine with Upper 0; 0: never (the tail, bent by code)
 		MotionMappedMesh = DriverMesh;
+		MotionMappedBody = BodyMesh;
 		MotionUpperMode = UpperMode;
 		MotionBoneMap.Init(INDEX_NONE, Body.GetNum());
 		MotionMask.Init(0, Body.GetNum());
@@ -521,13 +1182,64 @@ void URRRandomBodyAnimInstance::UpdateMotion(float DeltaSeconds)
 			MotionBoneMap[Bone] = Source.FindBoneIndex(Body.GetBoneName(Bone));
 			MotionMask[Bone] = bNever || MotionBoneMap[Bone] == INDEX_NONE ? 0 : bWhole ? 2 : 1;
 		}
+		if (bRetarget)
+		{
+			Source.GetBoneAbsoluteTransforms(SourceComponentPose);
+			Body.GetBoneAbsoluteTransforms(TargetComponentPose);
+			MotionBindRotations.SetNum(Body.GetNum());
+			for (int32 Bone = 0; Bone < Body.GetNum(); ++Bone)
+			{
+				if (MotionMask[Bone])
+				{
+					MotionBindRotations[Bone] = SourceComponentPose[MotionBoneMap[Bone]].GetRotation().Inverse()
+						* TargetComponentPose[Bone].GetRotation();
+				}
+			}
+			MotionHips = Body.FindBoneIndex(TEXT("Hips"));
+			if (MotionHips != INDEX_NONE && MotionBoneMap[MotionHips] != INDEX_NONE)
+			{
+				SourceBindHips = SourceComponentPose[MotionBoneMap[MotionHips]].GetLocation();
+				TargetBindHips = TargetComponentPose[MotionHips].GetLocation();
+			}
+		}
 	}
 	// (waits for the driver's pose if it is still being worked out)
 	const TArrayView<const FTransform> Local = Driver->GetBoneSpaceTransformsView();
 	const bool bPosed = Local.Num() == Source.GetNum();
-	if (bPosed)
+	const auto ReadDriverPose = [&](TArrayView<const FTransform> BonePose, bool bInPlace, TArray<FTransform>& OutPose)
 	{
-		MotionPose.SetNum(Body.GetNum());
+		OutPose.SetNum(Body.GetNum());
+		if (bRetarget)
+		{
+			// Transfer motion relative to each skeleton's bind pose in mesh space. Only
+			// the pelvis travels; all other local offsets keep the target limb lengths.
+			for (int32 Bone = 0; Bone < Source.GetNum(); ++Bone)
+			{
+				const int32 Parent = Source.GetParentIndex(Bone);
+				SourceComponentPose[Bone] = Parent == INDEX_NONE
+					? (bInPlace ? Source.GetRefBonePose()[Bone] : BonePose[Bone])
+					: BonePose[Bone] * SourceComponentPose[Parent];
+			}
+			for (int32 Bone = 0; Bone < Body.GetNum(); ++Bone)
+			{
+				const int32 Parent = Body.GetParentIndex(Bone);
+				const FTransform& ParentPose = Parent != INDEX_NONE ? TargetComponentPose[Parent] : FTransform::Identity;
+				FTransform Pose = Body.GetRefBonePose()[Bone];
+				if (MotionMask[Bone])
+				{
+					const FTransform& From = SourceComponentPose[MotionBoneMap[Bone]];
+					Pose.SetRotation((ParentPose.GetRotation().Inverse() * From.GetRotation() * MotionBindRotations[Bone]).GetNormalized());
+					if (Bone == MotionHips)
+					{
+						const FVector Position = TargetBindHips + (From.GetLocation() - SourceBindHips) * Brawler->GetMotionStrideRatio();
+						Pose.SetLocation(ParentPose.InverseTransformPosition(Position));
+					}
+				}
+				TargetComponentPose[Bone] = Pose * ParentPose;
+				OutPose[Bone] = Pose;
+			}
+			return;
+		}
 		for (int32 Bone = 0; Bone < Body.GetNum(); ++Bone)
 		{
 			if (!MotionMask[Bone])
@@ -535,17 +1247,18 @@ void URRRandomBodyAnimInstance::UpdateMotion(float DeltaSeconds)
 				continue;
 			}
 			// A bone that is a root here but has parents in the driver (the hips, under the driver's root bone) takes them along
-			FTransform Pose = Local[MotionBoneMap[Bone]];
+			FTransform Pose = BonePose[MotionBoneMap[Bone]];
 			if (Body.GetParentIndex(Bone) == INDEX_NONE)
 			{
 				for (int32 Parent = Source.GetParentIndex(MotionBoneMap[Bone]); Parent != INDEX_NONE; Parent = Source.GetParentIndex(Parent))
 				{
-					Pose = Pose * Local[Parent];
+					Pose = Pose * (bInPlace ? Source.GetRefBonePose()[Parent] : BonePose[Parent]);
 				}
 			}
-			MotionPose[Bone] = Pose;
+			OutPose[Bone] = Pose;
 		}
-	}
+	};
+	if (bPosed) { ReadDriverPose(Local, false, MotionPose); }
 	if (bPosed && CVarLogMotion.GetValueOnGameThread() != 0 && Brawler->IsPlayerControlled() && Brawler->IsLocallyControlled() && (GFrameCounter % 15) == 0)
 	{
 		// Which clip the Motion Matching node is playing now
@@ -605,23 +1318,7 @@ void URRRandomBodyAnimInstance::UpdateMotion(float DeltaSeconds)
 	const bool bClimb = Climber && ClimbLocal.Num() == Source.GetNum();
 	if (bClimb)
 	{
-		MotionWholePose.SetNum(Body.GetNum());
-		for (int32 Bone = 0; Bone < Body.GetNum(); ++Bone)
-		{
-			if (!MotionMask[Bone])
-			{
-				continue;
-			}
-			FTransform Pose = ClimbLocal[MotionBoneMap[Bone]];
-			if (Body.GetParentIndex(Bone) == INDEX_NONE)
-			{
-				for (int32 Parent = Source.GetParentIndex(MotionBoneMap[Bone]); Parent != INDEX_NONE; Parent = Source.GetParentIndex(Parent))
-				{
-					Pose = Pose * Source.GetRefBonePose()[Parent];
-				}
-			}
-			MotionWholePose[Bone] = Pose;
-		}
+		ReadDriverPose(ClimbLocal, true, MotionWholePose);
 	}
 	const bool bWalk = bPosed && !bClimb && Brawler->WantsMotionMatch();
 	const bool bWanted = bWalk || bClimb;
@@ -635,7 +1332,22 @@ void URRRandomBodyAnimInstance::UpdateMotion(float DeltaSeconds)
 	const float WalkMax = FMath::Max(Brawler->GetCharacterMovement()->MaxWalkSpeed, 1.f);
 	const float Pace = bWalk && UpperMode != 0 ? FMath::Clamp(Brawler->GetAnimationMoveSpeed() / WalkMax, 0.f, 1.f) : 0.f;
 	const float LeanAtRun = CVarMotionLean.GetValueOnGameThread() >= 0.f ? CVarMotionLean.GetValueOnGameThread() : MotionRunLean;
-	MotionLean = FMath::FInterpTo(MotionLean, LeanAtRun * FMath::SmoothStep(0.15f, 0.9f, Pace), DeltaSeconds, 6.f);
+	PivotTime = FMath::Max(0.f, PivotTime - DeltaSeconds);
+	if (bWalk)
+	{
+		const FVector Intent = Brawler->GetCharacterMovement()->GetCurrentAcceleration().GetSafeNormal2D();
+		if (PivotTime == 0.f && LastVelocity.Size2D() > 175.f && FVector::DotProduct(LastVelocity.GetSafeNormal2D(), Intent) < -0.55f)
+		{
+			PivotTime = 0.32f;
+			if (CVarLogMotion.GetValueOnGameThread() && Brawler->IsPlayerControlled())
+			{
+				UE_LOG(LogTemp, Log, TEXT("ANIM PIVOT entry speed %.0f"), LastVelocity.Size2D());
+			}
+		}
+	}
+	else { PivotTime = 0.f; }
+	PivotLoad = FMath::Sin(PI * PivotTime / 0.32f);
+	MotionLean = FMath::FInterpTo(MotionLean, LeanAtRun * FMath::SmoothStep(0.15f, 0.9f, Pace) * (1.f - PivotLoad), DeltaSeconds, 6.f);
 }
 
 void URRRandomBodyAnimInstance::UpdateAim(float DeltaSeconds)
@@ -775,6 +1487,12 @@ void FRRRandomBodyAnimInstanceProxy::PreUpdate(UAnimInstance* InAnimInstance, fl
 	TailBones = Instance->GetTailBones();
 	TailSwing = Instance->GetTailSwing();
 	TailLift = Instance->GetTailLift();
+	TailSize = Instance->GetTailSize();
+	bTailFloor = Instance->GetTailFloor(TailFloorPoint, TailFloorNormal, TailFloorMargin);
+	EarBones = Instance->GetEarBones();
+	EarBends = Instance->GetEarBends();
+	EarHead = Instance->GetEarHead();
+	EarHeadRest = Instance->GetEarHeadRest();
 	FlightBones = Instance->GetFlightBones();
 	FlightBends = Instance->GetFlightBends();
 	JumpBones = Instance->GetJumpBones();
@@ -790,6 +1508,7 @@ void FRRRandomBodyAnimInstanceProxy::PreUpdate(UAnimInstance* InAnimInstance, fl
 	GunHands = Instance->GetGunHandsFrame();
 	MotionWeight = Instance->GetMotionWeight();
 	MotionLean = Instance->GetMotionLean();
+	PivotLoad = Instance->GetPivotLoad();
 	MotionWholeWeight = Instance->GetMotionWholeWeight();
 	if (MotionWholeWeight > 0.f)
 	{
@@ -816,6 +1535,23 @@ void FRRRandomBodyAnimInstanceProxy::EvaluateMotion(FPoseContext& Output) const
 		}
 	}
 	Output.Pose.NormalizeRotations();
+	if (PivotLoad > KINDA_SMALL_NUMBER)
+	{
+		const FCompactPoseBoneIndex Hips = FindBone(Bones, TEXT("Hips"));
+		const FCompactPoseBoneIndex Feet[] = {FindBone(Bones, TEXT("LeftFoot")), FindBone(Bones, TEXT("RightFoot"))};
+		if (Hips.IsValid() && Feet[0].IsValid() && Feet[1].IsValid())
+		{
+			const FVector Targets[] = {GetMeshSpaceTransform(Output.Pose, Feet[0]).GetLocation(), GetMeshSpaceTransform(Output.Pose, Feet[1]).GetLocation()};
+			const auto Parent = Output.Pose.GetParentBoneIndex(Hips);
+			const FVector Dip(0, 0, -5.f * PivotLoad * MotionWeight);
+			Output.Pose[Hips].AddToTranslation(Parent.IsValid() ? GetMeshSpaceTransform(Output.Pose, Parent).InverseTransformVector(Dip) : Dip);
+			for (int32 I = 0; I < 2; ++I)
+			{
+				const auto Knee = Output.Pose.GetParentBoneIndex(Feet[I]);
+				if (Knee.IsValid()) { Reach(Output.Pose, Feet[I], Targets[I], GetMeshSpaceTransform(Output.Pose, Knee).GetLocation() + FVector(0, 12, 0)); }
+			}
+		}
+	}
 	if (MotionLean > KINDA_SMALL_NUMBER)
 	{
 		// Forward about the mesh's side axis (+X is its left, +Y its front; a negative turn tips the front down), spread up
@@ -842,6 +1578,15 @@ void FRRRandomBodyAnimInstanceProxy::PreEvaluateAnimation(UAnimInstance* InAnimI
 	// transform leaves the planted feet one movement frame ahead of their anchors.
 	Melee.MeshToWorld = InAnimInstance->GetSkelMeshComponent()->GetComponentTransform();
 	const ARRRandomCharacter* Brawler = Cast<ARRRandomCharacter>(InAnimInstance->GetOwningActor());
+	bRightStrafe = Brawler && MotionWeight > 0.85f
+		&& Brawler->WantsMotionMatch() && Brawler->WantsAimFacing() && Brawler->GetVelocity().Size2D() > 85.f
+		&& FVector::DotProduct(Brawler->GetVelocity().GetSafeNormal2D(), Brawler->GetActorRightVector()) > 0.8f;
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		FVector Goal;
+		GripWeights[Side] = Brawler ? Brawler->GetLedgeGrip(Side, Goal) : 0.f;
+		if (GripWeights[Side] > 0.f) { GripGoals[Side] = Melee.MeshToWorld.InverseTransformPosition(Goal); }
+	}
 	if (Brawler && Aim.bSeparateBody)
 	{
 		const float MeshYaw = Melee.MeshToWorld.TransformVectorNoScale(FVector::RightVector).Rotation().Yaw;
@@ -862,6 +1607,11 @@ void FRRRandomBodyAnimInstanceProxy::PreEvaluateAnimation(UAnimInstance* InAnimI
 			Yaw += FMath::Clamp(FMath::FindDeltaAngleDegrees(BodyYaw, Brawler->GetVelocity().Rotation().Yaw), -80.f, 80.f);
 		}
 		Aim.GazeFacing = Melee.MeshToWorld.InverseTransformVectorNoScale(FRotator(Pitch, Yaw, 0.f).Vector()).GetSafeNormal();
+	}
+	if (Aim.ListeningWeight > 0.f)
+	{
+		Aim.GazeFacing = Melee.MeshToWorld.InverseTransformVectorNoScale(Aim.ListeningDirection);
+		Aim.GazeWeight = Aim.ListeningWeight;
 	}
 	const UPrimitiveComponent* Support = Brawler ? Cast<UPrimitiveComponent>(Brawler->GetMovementBaseObject()) : nullptr;
 	Melee.SupportToWorld = Support ? Support->GetComponentTransform() : FTransform::Identity;
@@ -1153,6 +1903,7 @@ bool FRRRandomBodyAnimInstanceProxy::Evaluate(FPoseContext& Output)
 	const FBoneContainer& Bones = Output.Pose.GetBoneContainer();
 	const FReferenceSkeleton& RefSkeleton = Bones.GetReferenceSkeleton();
 	const int32 Count = FMath::Min3(TailBones.Num(), TailSwing.Num(), TailLift.Num());
+	float TailHeading = 0.f;
 	for (int32 Bone = 0; Bone < Count; ++Bone)
 	{
 		const int32 MeshIndex = RefSkeleton.FindBoneIndex(TailBones[Bone]);
@@ -1173,11 +1924,93 @@ bool FRRRandomBodyAnimInstanceProxy::Evaluate(FPoseContext& Output)
 			ParentRotation = Output.Pose[Parent].GetRotation() * ParentRotation;
 		}
 
-		// The tail points down the mesh's -Y: swinging right turns it about -Z, lifting it about -X
-		const FQuat Bend = FQuat(FVector::UpVector, FMath::DegreesToRadians(-TailSwing[Bone]))
-			* FQuat(FVector::ForwardVector, FMath::DegreesToRadians(-TailLift[Bone]));
+		// The tail points down the mesh's -Y: swinging right turns it about -Z, lifting it about -X - the bone's own
+		// -X, turned by the swing of the chain down to it (2026-11-24: a tail curled round to a side lifts its end up,
+		// not over; with the mesh's X the far bones of a curl only rolled)
+		TailHeading += TailSwing[Bone];
+		const FQuat Swung = FQuat(FVector::UpVector, FMath::DegreesToRadians(-TailSwing[Bone]));
+		const FVector SideAxis = FQuat(FVector::UpVector, FMath::DegreesToRadians(-TailHeading)).RotateVector(FVector::ForwardVector);
+		const FQuat Bend = FQuat(SideAxis, FMath::DegreesToRadians(-TailLift[Bone])) * Swung;
 		FTransform& Local = Output.Pose[Index];
 		Local.SetRotation((ParentRotation.Inverse() * Bend * ParentRotation * Local.GetRotation()).GetNormalized());
+	}
+
+	// The tail's size (FRRSpeciesLook::TailSize: the tiger's 0.7, 2026-11-25): its first bone scaled, the rest with it
+	TArray<FCompactPoseBoneIndex, TInlineAllocator<16>> Tail;
+	for (int32 Bone = 0; Bone < Count; ++Bone)
+	{
+		const int32 MeshIndex = RefSkeleton.FindBoneIndex(TailBones[Bone]);
+		const FCompactPoseBoneIndex Index = MeshIndex != INDEX_NONE ? Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(MeshIndex)) : FCompactPoseBoneIndex(INDEX_NONE);
+		if (!Index.IsValid())
+		{
+			break;
+		}
+		Tail.Add(Index);
+	}
+	if (Tail.Num() > 0 && !FMath::IsNearlyEqual(TailSize, 1.f))
+	{
+		Output.Pose[Tail[0]].SetScale3D(Output.Pose[Tail[0]].GetScale3D() * TailSize);
+	}
+	// No joint under the floor (2026-11-25, the user: "바닥을 뚫고 안 보이는 부분은 없게"): root to tip, a bone whose next joint
+	// (the last one's end: one more of its own length on) comes nearer the floor than the margin is turned up toward the
+	// floor's normal just enough; the bones after it go with it, then are looked at in turn. The springs don't know: when
+	// the tail swings back up it simply leaves the floor.
+	if (bTailFloor && Tail.Num() > 0)
+	{
+		const FVector Up = TailFloorNormal;
+		for (int32 Bone = 0; Bone < Tail.Num(); ++Bone)
+		{
+			const FTransform Here = GetMeshSpaceTransform(Output.Pose, Tail[Bone]);
+			const FVector Joint = Here.GetLocation();
+			const FVector Next = Bone + 1 < Tail.Num() ? GetMeshSpaceTransform(Output.Pose, Tail[Bone + 1]).GetLocation()
+				: Here.TransformPosition(Output.Pose[Tail[Bone]].GetTranslation());
+			const FVector Along = Next - Joint;
+			const float Length = static_cast<float>(Along.Size());
+			if (Length < KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+			const FVector Direction = Along / Length;
+			const float Height = static_cast<float>(FVector::DotProduct(Joint - TailFloorPoint, Up));
+			const float Wanted = FMath::Asin(FMath::Clamp((TailFloorMargin - Height) / Length, -1.f, 1.f));
+			const float Now = FMath::Asin(FMath::Clamp(static_cast<float>(FVector::DotProduct(Direction, Up)), -1.f, 1.f));
+			const FVector Axis = FVector::CrossProduct(Direction, Up).GetSafeNormal();
+			if (Now < Wanted && !Axis.IsNearlyZero())
+			{
+				TurnBone(Output.Pose, Tail[Bone], FQuat(Axis, Wanted - Now));
+			}
+		}
+	}
+
+	// The ears (2026-11-25): each bone's turn was worked out in the reference pose's mesh space; turned with the head as it
+	// stands now, then put on the bone like the tail's (the head's later turns - gaze, facing - carry the ears along)
+	const int32 EarHeadMesh = EarBones.Num() > 0 && EarBends.Num() == EarBones.Num() ? RefSkeleton.FindBoneIndex(EarHead) : INDEX_NONE;
+	const FCompactPoseBoneIndex EarHeadIndex = EarHeadMesh != INDEX_NONE ? Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(EarHeadMesh)) : FCompactPoseBoneIndex(INDEX_NONE);
+	if (EarHeadIndex.IsValid())
+	{
+		FQuat HeadNow = FQuat::Identity;
+		for (FCompactPoseBoneIndex Up = EarHeadIndex; Up.IsValid(); Up = Output.Pose.GetParentBoneIndex(Up))
+		{
+			HeadNow = Output.Pose[Up].GetRotation() * HeadNow;
+		}
+		const FQuat Turned = HeadNow * EarHeadRest.Inverse();
+		for (int32 Bone = 0; Bone < EarBones.Num(); ++Bone)
+		{
+			const int32 MeshIndex = RefSkeleton.FindBoneIndex(EarBones[Bone]);
+			const FCompactPoseBoneIndex Index = MeshIndex != INDEX_NONE ? Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(MeshIndex)) : FCompactPoseBoneIndex(INDEX_NONE);
+			if (!Index.IsValid())
+			{
+				continue;
+			}
+			FQuat ParentRotation = FQuat::Identity;
+			for (FCompactPoseBoneIndex Parent = Output.Pose.GetParentBoneIndex(Index); Parent.IsValid(); Parent = Output.Pose.GetParentBoneIndex(Parent))
+			{
+				ParentRotation = Output.Pose[Parent].GetRotation() * ParentRotation;
+			}
+			const FQuat Bend = Turned * EarBends[Bone] * Turned.Inverse();
+			FTransform& Local = Output.Pose[Index];
+			Local.SetRotation((ParentRotation.Inverse() * Bend * ParentRotation * Local.GetRotation()).GetNormalized());
+		}
 	}
 
 	// The flying or jumping pose, then the wings (roots before tips, so a tip's parent is already turned)
@@ -1196,8 +2029,114 @@ bool FRRRandomBodyAnimInstanceProxy::Evaluate(FPoseContext& Output)
 	// The left hand onto the gun, once the spine and the right arm are where they end up
 	if (GunHands.Weight > 0.f) { EvaluateGunHands(Output); }
 	if (Aim.GazeWeight > 0.f) { EvaluateGaze(Output); }
+	PlantStrafeFeet(Output);
+	if (GripWeights[0] > 0.f || GripWeights[1] > 0.f) { EvaluateClimbGrip(Output); }
 	StoreSwordContacts(Output);
 	return true;
+}
+
+void FRRRandomBodyAnimInstanceProxy::Reach(FCompactPose& Pose, FCompactPoseBoneIndex End, const FVector& Target, const FVector& Pole)
+{
+	const auto Joint = Pose.GetParentBoneIndex(End);
+	if (!Joint.IsValid()) { return; }
+	const auto Root = Pose.GetParentBoneIndex(Joint);
+	if (!Root.IsValid()) { return; }
+	const FVector A = GetMeshSpaceTransform(Pose, Root).GetLocation();
+	const FVector B = GetMeshSpaceTransform(Pose, Joint).GetLocation();
+	const FVector C = GetMeshSpaceTransform(Pose, End).GetLocation();
+	FVector JointGoal, EndGoal;
+	AnimationCore::SolveTwoBoneIK(A, B, C, Pole, Target, JointGoal, EndGoal, false, 1.f, 1.f);
+	TurnBone(Pose, Root, FQuat::FindBetweenNormals((B-A).GetSafeNormal(), (JointGoal-A).GetSafeNormal()));
+	const FVector NewJoint = GetMeshSpaceTransform(Pose, Joint).GetLocation();
+	TurnBone(Pose, Joint, FQuat::FindBetweenNormals((GetMeshSpaceTransform(Pose, End).GetLocation()-NewJoint).GetSafeNormal(), (EndGoal-NewJoint).GetSafeNormal()));
+}
+
+void FRRRandomBodyAnimInstanceProxy::PlantStrafeFeet(FPoseContext& Output)
+{
+	if (!bRightStrafe && !StrafeFeet[0].bPlanted && !StrafeFeet[1].bPlanted
+		&& StrafeFeet[0].Offset.IsNearlyZero() && StrafeFeet[1].Offset.IsNearlyZero()) { return; }
+	const FBoneContainer& Bones = Output.Pose.GetBoneContainer();
+	const FCompactPoseBoneIndex Feet[] = {FindBone(Bones, TEXT("LeftFoot")), FindBone(Bones, TEXT("RightFoot"))};
+	if (!Feet[0].IsValid() || !Feet[1].IsValid()) { StrafeFeet[0] = {}; StrafeFeet[1] = {}; return; }
+	const FTransform& World = Melee.MeshToWorld;
+	const FVector At[] = {World.TransformPosition(GetMeshSpaceTransform(Output.Pose, Feet[0]).GetLocation()),
+		World.TransformPosition(GetMeshSpaceTransform(Output.Pose, Feet[1]).GetLocation())};
+	for (int32 I = 0; I < 2; ++I)
+	{
+		FStrafeFoot& Foot = StrafeFeet[I];
+		const float Below = At[1-I].Z - At[I].Z;
+		if (bRightStrafe && !Foot.bPlanted && Below > 2.4f)
+		{
+			Foot.Anchor = At[I] + Foot.Offset;
+			Foot.bPlanted = true;
+		}
+		else if (!bRightStrafe || Below < -0.5f || FVector::DistSquared2D(At[I], Foot.Anchor) > FMath::Square(32.f))
+		{
+			Foot.bPlanted = false;
+		}
+		if (Foot.bPlanted)
+		{
+			Foot.Offset = ((Foot.Anchor - At[I]) * FVector(1, 1, 0)).GetClampedToMaxSize(17.f);
+		}
+		else
+		{
+			Foot.Offset *= FMath::Exp(-28.f * Melee.DeltaSeconds);
+			if (Foot.Offset.SizeSquared() < 0.04f) { Foot.Offset = FVector::ZeroVector; }
+		}
+		const auto Knee = Output.Pose.GetParentBoneIndex(Feet[I]);
+		if (!Foot.Offset.IsNearlyZero() && Knee.IsValid())
+		{
+			const FVector Pole = GetMeshSpaceTransform(Output.Pose, Knee).GetLocation() + FVector(0, 12, 0);
+			Reach(Output.Pose, Feet[I], World.InverseTransformPosition(At[I]+Foot.Offset), Pole);
+		}
+	}
+}
+
+void FRRRandomBodyAnimInstanceProxy::EvaluateClimbGrip(FPoseContext& Output) const
+{
+	const FBoneContainer& Bones = Output.Pose.GetBoneContainer();
+	const FCompactPoseBoneIndex Hands[] = {FindBone(Bones, TEXT("LeftHand")), FindBone(Bones, TEXT("RightHand"))};
+	const FCompactPoseBoneIndex Fingers[] = {FindBone(Bones, TEXT("LeftHandIndex1")), FindBone(Bones, TEXT("RightHandIndex1"))};
+	FVector WristGoals[2], BodyPull = FVector::ZeroVector;
+	FQuat HandRotations[2];
+	float LargestPull = 0.f;
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		if (!Hands[Side].IsValid() || GripWeights[Side] <= 0.f) { continue; }
+		const auto Elbow = Output.Pose.GetParentBoneIndex(Hands[Side]);
+		if (!Elbow.IsValid()) { continue; }
+		const auto Shoulder = Output.Pose.GetParentBoneIndex(Elbow);
+		const FTransform HandPose = GetMeshSpaceTransform(Output.Pose, Hands[Side]);
+		HandRotations[Side] = HandPose.GetRotation();
+		const FVector PalmOffset = Fingers[Side].IsValid() ? (GetMeshSpaceTransform(Output.Pose, Fingers[Side]).GetLocation() - HandPose.GetLocation()) * 0.5f : FVector::ZeroVector;
+		WristGoals[Side] = GripGoals[Side] - PalmOffset;
+		if (!Shoulder.IsValid()) { continue; }
+		const FVector Root = GetMeshSpaceTransform(Output.Pose, Shoulder).GetLocation();
+		const FVector Joint = GetMeshSpaceTransform(Output.Pose, Elbow).GetLocation();
+		const FVector ToGoal = WristGoals[Side] - Root;
+		const float ReachLength = FVector::Dist(Root, Joint) + FVector::Dist(Joint, HandPose.GetLocation());
+		const float Short = static_cast<float>(ToGoal.Size()) - ReachLength * 0.94f;
+		const float Pull = FMath::Clamp(Short, 0.f, 14.f) * (1.f - FMath::SmoothStep(20.f, 38.f, Short)) * GripWeights[Side];
+		if (Pull > LargestPull) { LargestPull = Pull; BodyPull = ToGoal.GetSafeNormal() * Pull; }
+	}
+	const auto Hips = FindBone(Bones, TEXT("Hips"));
+	if (LargestPull > 0.f && Hips.IsValid())
+	{
+		const auto Parent = Output.Pose.GetParentBoneIndex(Hips);
+		Output.Pose[Hips].AddToTranslation(Parent.IsValid() ? GetMeshSpaceTransform(Output.Pose, Parent).InverseTransformVector(BodyPull) : BodyPull);
+	}
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		const auto Hand = Hands[Side];
+		if (!Hand.IsValid() || GripWeights[Side] <= 0.f) { continue; }
+		const auto Elbow = Output.Pose.GetParentBoneIndex(Hand);
+		if (!Elbow.IsValid()) { continue; }
+		const FVector Wrist = GetMeshSpaceTransform(Output.Pose, Hand).GetLocation();
+		const FVector Target = FMath::Lerp(Wrist, WristGoals[Side], GripWeights[Side]);
+		const FVector Pole = GetMeshSpaceTransform(Output.Pose, Elbow).GetLocation() + FVector(Side == 0 ? 10.f : -10.f, -7.f, -10.f);
+		Reach(Output.Pose, Hand, Target, Pole);
+		Output.Pose[Hand].SetRotation((GetMeshSpaceTransform(Output.Pose, Elbow).GetRotation().Inverse() * HandRotations[Side]).GetNormalized());
+	}
 }
 
 void FRRRandomBodyAnimInstanceProxy::UpdateSwordContacts(const FPoseContext& Output)
