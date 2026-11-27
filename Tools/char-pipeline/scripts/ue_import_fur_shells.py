@@ -26,15 +26,34 @@ Makes, in /Game/Characters/<Name>:
   "TidyShow" 1 paints the tidy share pink, to place the ellipsoid.
   "TidyNear" = "TidyFar" = -1 turns it off.
 
+- The face texture's fur mask (2026-11-23, "FurMaskTex" = T_<Name>_BaseColor_FurMask, blender_fur_mask.py through
+  ue_fur_mask_lib.py; only animal friends listed with a rig in fur_chars.json): no fur on the painted eyes, brows, nose
+  and mouth, shorter fur toward them. Made here from the base colour's own source picture when it is missing.
+  "FurMaskShow" 1 paints the masked share cyan. Animal friends with a "bare" spec in fur_chars.json get ue_fur_bare.py
+  run again at the end (their modelled eyes and clothes).
+
 <fur fbx> and <strands png> may be empty ("Fox|||"): only the material is rebuilt, on the mesh and texture already
 there, and it keeps the old material's "RootShade", "FurLength", "FullLayersTo", "FewLayersFrom", "WindStrength".
 With no <face>, the inner face on the old material (if it had one) is kept, whether or not the mesh is brought in again.
 """
+import importlib.util
+import os
 import sys
 
 import unreal
 
 U = unreal
+
+
+def load_lib():
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location("ue_fur_mask_lib", os.path.join(here, "ue_fur_mask_lib.py"))
+    lib = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lib)
+    return lib
+
+
+furlib = load_lib()
 args = " ".join(sys.argv[1:]).split("|")
 name, fbx, strands = args[:3]
 fur_cm = float(args[3]) if len(args) > 3 and args[3] else 3.6  # the fur length in the game: 2% of the model x its MeshScale (fox 1.8)
@@ -97,6 +116,10 @@ strand_tex.set_editor_property("compression_settings", U.TextureCompressionSetti
 strand_tex.set_editor_property("mip_gen_settings", U.TextureMipGenSettings.TMGS_NO_MIPMAPS)
 eal.save_asset(strand_tex.get_path_name())
 base_tex = U.load_asset(f"{dest}/Textures/T_{name}_BaseColor")
+# (2026-11-23) the face texture's fur mask, T_<Name>_BaseColor_FurMask: there already, or made now from the picture the
+# base colour was imported from. None: this animal friend has none (fur_chars.json) and the material is as before.
+mask_tex = furlib.mask_of_asset(name, f"{dest}/Textures/T_{name}_BaseColor")
+log(f"fur mask: {mask_tex.get_path_name() if mask_tex else 'none'}")
 
 mpath = f"{dest}/M_{name}Fur"
 kept = {}
@@ -200,13 +223,31 @@ mel.connect_material_expressions(scalar("TidyFacingFrom", 0.3, -2300, 2000), "",
 mel.connect_material_expressions(scalar("TidyFacingFull", 0.5, -2300, 2070), "", tidy, "FaceFull")
 mel.connect_material_expressions(scalar("TidyFacing", 0.55, -2300, 2105), "", tidy, "Facing")
 
+# The fur mask of the face texture in use (2026-11-23, "FurMaskTex", in the body's UVs: 1 = fur, 0 = bare, between = the
+# fur that much shorter): no fur over the painted eyes, brows, nose and mouth, and none leaning over them. It is the
+# twin of the base colour texture (ue_fur_mask_lib.py); a copy of this material for another face (an expression) takes
+# that face's base colour AND its mask. Without a mask for this animal friend: 1 everywhere.
+if mask_tex:
+    bare = node(U.MaterialExpressionTextureSampleParameter2D, -1400, -520, parameter_name="FurMaskTex", texture=mask_tex,
+                sampler_type=U.MaterialSamplerType.SAMPLERTYPE_MASKS)
+    bare_pin = "R"
+else:
+    bare = node(U.MaterialExpressionConstant, -1400, -520, r=1.0)
+    bare_pin = ""
+
 color = custom(
     "float h = VC.r; float w = VC.g;\n"
     "float cut = lerp(1.0, TidyLen, Tidy);\n"
-    "float shade = VC.b > 0.5 ? lerp(1.0, RootShade, w) : lerp(RootShade, 1.1, saturate(h / cut));\n"
+    # (the base layer's shade fades out toward a bare place, so its edge there doesn't show as a darker rim)
+    "float shade = VC.b > 0.5 ? lerp(1.0, RootShade, w * saturate(Bare * 2.0)) : lerp(RootShade, 1.1, saturate(h / cut));\n"
     "shade = lerp(shade, 1.0, Tidy * Even);\n"
-    "return lerp(Col * shade, float3(1.0, 0.0, 0.6), Tidy * Show);",
-    U.CustomMaterialOutputType.CMOT_FLOAT3, ["Col", "VC", "RootShade", "Tidy", "Even", "TidyLen", "Show"], -900, -300, "FurColor")
+    "float3 c = lerp(Col * shade, float3(1.0, 0.0, 0.6), Tidy * Show);\n"
+    "return lerp(c, float3(0.0, 0.8, 1.0), (1.0 - Bare) * MaskShow);",
+    U.CustomMaterialOutputType.CMOT_FLOAT3, ["Col", "VC", "RootShade", "Tidy", "Even", "TidyLen", "Show", "Bare", "MaskShow"], -900, -300, "FurColor")
+mel.connect_material_expressions(bare, bare_pin, color, "Bare")
+# "FurMaskShow" 1: the shortened fur in cyan and the bare places left furred, to see where the mask lies
+mask_show = scalar("FurMaskShow", 0.0, -1200, -220)
+mel.connect_material_expressions(mask_show, "", color, "MaskShow")
 tidy_len = scalar("TidyLength", 0.4, -1200, 800)
 mel.connect_material_expressions(tidy, "", color, "Tidy")
 mel.connect_material_expressions(scalar("TidyEven", 0.25, -1200, -80), "", color, "Even")
@@ -220,18 +261,23 @@ mel.connect_material_property(color, "", U.MaterialProperty.MP_BASE_COLOR)
 mask = custom(
     "float h = VC.r; float w = VC.g;\n"
     "if (w < 0.02) return 0;\n"
+    # the face texture's fur mask: nothing at all on the bare places (the base layer too), shorter fur toward them
+    "float m = lerp(Bare, 1.0, MaskShow);\n"
+    "if (m < 0.04) return 0;\n"
     "if (VC.b > 0.5) return 1;\n"
     "float lod = saturate((Dist - Near) / max(Far - Near, 1.0));\n"
     "if (h > 1.0 - 0.85 * lod + 0.001) return 0;\n"
     # the long strands, shorter and thinner where tidy ...
-    "float len = lerp(0.55, 1.0, S.g) * lerp(1.0, TidyLen, Tidy);\n"
+    "float len = lerp(0.55, 1.0, S.g) * lerp(1.0, TidyLen, Tidy) * m;\n"
     "float coarse = 0.48 * lerp(1.0, Coarse, Tidy) * (1.0 - h / len);\n"
     # ... and a short fine undercoat growing in between them (the same strand texture, more cells across)
-    "float lenF = lerp(0.55, 1.0, SF.g) * TidyLen;\n"
+    "float lenF = lerp(0.55, 1.0, SF.g) * TidyLen * m;\n"
     "float fine = FineRadius * Tidy * (1.0 - h / lenF);\n"
     "return (S.r < coarse || SF.r < fine) ? 1 : 0;",
     U.CustomMaterialOutputType.CMOT_FLOAT1,
-    ["S", "VC", "Dist", "Near", "Far", "Tidy", "TidyLen", "Coarse", "SF", "FineRadius"], -900, 300, "FurMask")
+    ["S", "VC", "Dist", "Near", "Far", "Tidy", "TidyLen", "Coarse", "SF", "FineRadius", "Bare", "MaskShow"], -900, 300, "FurMask")
+mel.connect_material_expressions(bare, bare_pin, mask, "Bare")
+mel.connect_material_expressions(mask_show, "", mask, "MaskShow")
 fine_uv = node(U.MaterialExpressionMultiply, -1700, 900)
 mel.connect_material_expressions(uv1, "", fine_uv, "A")
 mel.connect_material_expressions(scalar("TidyFine", 2.0, -1950, 960), "", fine_uv, "B")
@@ -291,4 +337,18 @@ mats = [U.SkeletalMaterial(material_interface=mat, material_slot_name=s.get_edit
 mesh.set_editor_property("materials", mats)
 eal.save_asset(mesh.get_path_name())
 log(f"material {mpath} on {len(mats)} slot(s); strands {strand_tex.get_path_name()}")
+# (2026-11-23) the round 99 patch that keeps fur off modelled eyes and clothes (ue_fur_bare.py) lives in this material:
+# the tidy rebuild of 2026-11-20 made the material anew and lost it on the squirrel, the red fox and the rabbit without
+# a word. Its numbers are now kept in fur_chars.json ("bare") and it is put back after every rebuild.
+bare_spec = furlib.config(name).get("bare")
+if bare_spec:
+    one = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ue_fur_bare.py")
+    old_argv = sys.argv
+    sys.argv = [one, f"{name}|{bare_spec}"]
+    try:
+        with open(one, encoding="utf-8") as f:
+            exec(compile(f.read(), one, "exec"), {"__name__": "__main__", "__file__": one})
+    finally:
+        sys.argv = old_argv
+    log(f"eyes and clothes left bare again: {bare_spec}")
 log("DONE")

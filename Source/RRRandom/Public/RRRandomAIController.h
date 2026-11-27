@@ -250,9 +250,35 @@ private:
 		bool bNavRoute = false;
 		bool bRouteOffMesh = false;
 		bool bRoutePartial = false;
+		TArray<bool> RouteHops;
 	};
 	FRouteMemo ErrandRoute;
 	void SwapErrandRoute();
+
+	/**
+	 * Round 103, the sky paths: which corners of the route are the far end of a hop (a 2 m climb, a jump over a gap; Dice
+	 * Town's GetSkyHops), and whether the bot is on one this frame: straight at its far end, jumping at the ledge or the
+	 * edge (HopAlong), not steered round anything.
+	 */
+	TArray<bool> RouteHops;
+	/** A long gun's perch up a sky path to shoot from (round 103): where, for how long more, and when it may pick another. */
+	FVector PerchGoal = FVector::ZeroVector;
+	float PerchTimer = 0.f;
+	float PerchCooldown = 0.f;
+	bool bHopping = false;
+	float HopPressTimer = 0.f;
+	void MarkRouteHops(const FVector& Feet);
+	void HopAlong(ARRRandomCharacter* Self, const FVector& Move, float DeltaSeconds);
+
+	/**
+	 * Round 103 (the user: "호랑이는 길이 막히면 망치로 파괴하면서 전진할 수 있게"): a tiger with its hammer whose way is
+	 * blocked by a wall it can't climb, or whose route goes far round one, smashes straight through it (SmashThrough): for
+	 * SmashTime it heads straight for where it is going and swings at what is in the way.
+	 */
+	FVector SmashThrough(ARRRandomCharacter* Self, const FVector& Goal, const FVector& Move, float DeltaSeconds);
+	float SmashTimer = 0.f;
+	float SmashCheckTimer = 0.f;
+	FVector SmashGoal = FVector::ZeroVector;
 
 	/**
 	 * Stalls (wanting to move but getting nowhere): where the bot was at the start of the current window and how long the

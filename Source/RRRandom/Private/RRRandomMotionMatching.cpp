@@ -98,6 +98,33 @@ namespace
 }
 #endif
 
+int32 URRRandomMotionMatchLibrary::AddClips(UPoseSearchDatabase* Database, const TArray<UAnimSequence*>& Clips)
+{
+#if WITH_EDITOR
+	if (!Database || !Database->Schema || Clips.IsEmpty()) { return INDEX_NONE; }
+	const UAnimationAsset* First = Cast<UAnimationAsset>(Database->GetNumAnimationAssets() ? Database->GetAnimationAsset(0) : nullptr);
+	for (const UAnimSequence* Clip : Clips)
+	{
+		if (!Clip || !First || Clip->GetSkeleton() != First->GetSkeleton()) { return INDEX_NONE; }
+	}
+	TSet<UObject*> Existing;
+	for (int32 I = 0; I < Database->GetNumAnimationAssets(); ++I) { Existing.Add(Database->GetAnimationAsset(I)); }
+	for (UAnimSequence* Clip : Clips)
+	{
+		if (Existing.Contains(Clip)) { continue; }
+		Database->Modify();
+		FPoseSearchDatabaseAnimationAsset Entry;
+		Entry.AnimAsset = Clip;
+		Database->AddAnimationAsset(Entry);
+		Existing.Add(Clip);
+	}
+	Database->PostEditChange();
+	return UEditorLoadingAndSavingUtils::SavePackages({Database->GetPackage()}, false) ? Database->GetNumAnimationAssets() : INDEX_NONE;
+#else
+	return INDEX_NONE;
+#endif
+}
+
 FString URRRandomMotionMatchLibrary::BuildSet(USkeletalMesh* Mesh, const TArray<UAnimSequence*>& Clips, const FString& Folder, const FString& Name)
 {
 #if WITH_EDITOR

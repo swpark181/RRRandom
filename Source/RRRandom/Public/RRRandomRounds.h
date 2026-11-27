@@ -191,6 +191,71 @@ private:
 };
 
 /**
+ * Round 102, the dice spots (the user's "3:3 대전 진행할 때 시작 지점을 랜덤으로 하고 주사위를 2개 굴려서 그 숫자에 맞는 지역에
+ * 리스폰, 위치는 일반 평지만"): eleven spots on open flat ground in the main mode's arena, numbered 2..12 (the sums of two
+ * dice), clockwise from the top of the map. At each round's start each team rolls two dice and starts at that spot (never
+ * the other team's, nor close to it); each knockout rolls two dice for where that one gets back up. The game mode finds the
+ * spots (on the host) and spawns this; it replicates where they are and the teams' start dice, and every machine paints a
+ * pad with the number on the ground at each. The HUD shows them on the map and the rolls on screen.
+ */
+UCLASS()
+class RRRANDOM_API ARRRandomSpawnZones : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ARRRandomSpawnZones();
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void Tick(float DeltaSeconds) override;
+
+	/** Two dice make 2..12. */
+	static constexpr int32 Count = 11;
+	static constexpr int32 FirstNumber = 2;
+	/** The open flat ground a spot needs round it (a team of three stands in it), and how far its teammates stand from the middle. */
+	static constexpr float PadRadius = 260.f;
+	static constexpr float SpotSpacing = 170.f;
+
+	/** Server, before it finishes spawning: the spots' middles (feet) in number order. */
+	void SetZones(const TArray<FVector>& InZones);
+	/** Server: a team's start dice this round. */
+	void SetTeamDice(int32 Team, int32 DieA, int32 DieB);
+	/** The middle (feet) of the spot with this number (2..12); false without one. */
+	bool GetZone(int32 Number, FVector& OutFeet) const;
+	int32 GetZoneCount() const { return Zones.Num(); }
+	/** A team's start die (Which 0 or 1, 1..6) this round; 0 before any roll. */
+	int32 GetTeamDie(int32 Team, int32 Which) const;
+	/** The spot a team starts at this round (its dice's sum), or 0. */
+	int32 GetTeamZone(int32 Team) const { return GetTeamDie(Team, 0) + GetTeamDie(Team, 1); }
+	static ARRRandomSpawnZones* Get(const UObject* WorldContext);
+
+protected:
+	virtual void BeginPlay() override;
+
+private:
+	UFUNCTION()
+	void OnRep_Zones();
+	void Build();
+
+	UPROPERTY(ReplicatedUsing = OnRep_Zones)
+	TArray<FVector_NetQuantize> Zones;
+
+	UPROPERTY(Replicated)
+	uint8 TeamDice[4];
+
+	bool bBuilt = false;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<class UStaticMeshComponent>> Pads;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> PadMaterial;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<class UTextRenderComponent>> Numbers;
+};
+
+/**
  * Round 98, the squirrel's Q (ERRAbility::AcornTrap, its trapper role): an acorn half buried in the ground at its feet. It
  * arms after ArmTime; the first opponent to come within TriggerRadius sets it off: it pops up and bursts, hurting and
  * throwing everyone of the other team within BlastRadius. It goes by itself after Lifetime. Server decides; replicated.

@@ -326,6 +326,417 @@ void ARRRandomGameMode::SetUpRoundsArena()
 		}
 	}
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: rounds arena fenced %.0f each way round (%.0f, %.0f); %d rides outside put away."), RRRounds::ArenaHalf, Center.X, Center.Y, Removed);
+	// Round 102: the dice spots
+	FindSpawnZones(Town->GetFloorZ());
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Round 102: the dice spots
+
+namespace
+{
+	// What a spot's ground and room are tested against: the town's hidden boxes, props and parked rides
+	FCollisionObjectQueryParams GetSolidQuery(bool bPawns)
+	{
+		FCollisionObjectQueryParams Solid;
+		Solid.AddObjectTypesToQuery(ECC_WorldStatic);
+		Solid.AddObjectTypesToQuery(ECC_WorldDynamic);
+		Solid.AddObjectTypesToQuery(ECC_PhysicsBody);
+		Solid.AddObjectTypesToQuery(ECC_Vehicle);
+		if (bPawns)
+		{
+			Solid.AddObjectTypesToQuery(ECC_Pawn);
+		}
+		return Solid;
+	}
+	// Flat: every test point's ground this close to the floor level, this level; open sky this high over it
+	constexpr float FlatTolerance = 8.f;
+	constexpr float FlatNormalZ = 0.97f;
+	constexpr float OpenSkyHeight = 1500.f;
+	// The arena is searched on a grid this fine, this far in from the fence
+	constexpr float ZoneSearchStep = 150.f;
+	constexpr float ZoneFenceMargin = 650.f;
+	// Round 103 (the sky paths: "스폰 4·10번을 대문에서 떨어뜨리기"): no spot this close across under a perch this much higher
+	constexpr float SkyOverlookReach = 1100.f;
+	constexpr float SkyOverlookDrop = 500.f;
+}
+
+bool ARRRandomGameMode::IsOpenFlat(const FVector2D& Spot, float Radius, float FloorZ) const
+{
+	const UWorld* World = GetWorld();
+	const FCollisionObjectQueryParams Solid = GetSolidQuery(false);
+	auto IsFloor = [&](const FVector2D& Where)
+	{
+		FHitResult Hit;
+		return World->LineTraceSingleByObjectType(Hit, FVector(Where, FloorZ + OpenSkyHeight), FVector(Where, FloorZ - 300.f), Solid)
+			&& FMath::Abs(Hit.ImpactPoint.Z - FloorZ) <= FlatTolerance && Hit.ImpactNormal.Z >= FlatNormalZ;
+	};
+	if (!IsFloor(Spot))
+	{
+		return false;
+	}
+	// Two rings of eight round it, the inner one turned half a step
+	for (int32 Ring = 0; Ring < 2; ++Ring)
+	{
+		for (int32 Point = 0; Point < 8; ++Point)
+		{
+			const float Angle = 2.f * PI * Point / 8.f + (Ring == 0 ? PI / 8.f : 0.f);
+			if (!IsFloor(Spot + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius * (Ring == 0 ? 0.55f : 1.f)))
+			{
+				return false;
+			}
+		}
+	}
+	// Nothing standing in it (a low curb is fine)
+	return !World->OverlapAnyTestByObjectType(FVector(Spot, FloorZ + 30.f + 200.f), FQuat::Identity, Solid, FCollisionShape::MakeBox(FVector(Radius, Radius, 200.f)));
+}
+
+void ARRRandomGameMode::FindSpawnZones(float FloorZ)
+{
+	const double StartTime = FPlatformTime::Seconds();
+	const FVector2D Center(GetArenaCenter().X, GetArenaCenter().Y);
+	const float Reach = RRRounds::ArenaHalf - ZoneFenceMargin;
+	const ARRRandomDiceTown* Town = ARRRandomDiceTown::FindAt(this, FVector(Center, FloorZ));
+	TArray<FVector2D> Open;
+	int32 Overlooked = 0;
+	for (float X = -Reach; X <= Reach + 1.f; X += ZoneSearchStep)
+	{
+		for (float Y = -Reach; Y <= Reach + 1.f; Y += ZoneSearchStep)
+		{
+			const FVector2D Spot = Center + FVector2D(X, Y);
+			if (IsOpenFlat(Spot, ARRRandomSpawnZones::PadRadius, FloorZ))
+			{
+				if (Town && Town->IsOverlookedBySkyPath(FVector(Spot, FloorZ), SkyOverlookReach, SkyOverlookDrop))
+				{
+					++Overlooked;
+					continue;
+				}
+				Open.Add(Spot);
+			}
+		}
+	}
+	if (Open.Num() < ARRRandomSpawnZones::Count)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("RRRandom: only %d open flat spots in the arena; no dice spots (everyone starts and gets up at home)."), Open.Num());
+		return;
+	}
+	// Spread out: the open spot farthest from the middle first, then each time the one farthest from all picked so far
+	TArray<FVector2D> Picked;
+	int32 First = 0;
+	for (int32 Index = 1; Index < Open.Num(); ++Index)
+	{
+		if (FVector2D::DistSquared(Open[Index], Center) > FVector2D::DistSquared(Open[First], Center))
+		{
+			First = Index;
+		}
+	}
+	Picked.Add(Open[First]);
+	TArray<float> Nearest;
+	Nearest.Init(UE_BIG_NUMBER, Open.Num());
+	while (Picked.Num() < ARRRandomSpawnZones::Count)
+	{
+		int32 Best = INDEX_NONE;
+		for (int32 Index = 0; Index < Open.Num(); ++Index)
+		{
+			Nearest[Index] = FMath::Min(Nearest[Index], FVector2D::DistSquared(Open[Index], Picked.Last()));
+			if (Best == INDEX_NONE || Nearest[Index] > Nearest[Best])
+			{
+				Best = Index;
+			}
+		}
+		Picked.Add(Open[Best]);
+	}
+	// Numbered 2..12 clockwise round the middle from the top of the map (+X; the map's right is +Y)
+	auto Clockwise = [&Center](const FVector2D& Spot)
+	{
+		const float Angle = FMath::Atan2(Spot.Y - Center.Y, Spot.X - Center.X);
+		return Angle < 0.f ? Angle + 2.f * PI : Angle;
+	};
+	Picked.Sort([&Clockwise](const FVector2D& A, const FVector2D& B) { return Clockwise(A) < Clockwise(B); });
+	TArray<FVector> Feet;
+	for (const FVector2D& Spot : Picked)
+	{
+		Feet.Add(FVector(Spot, FloorZ));
+	}
+	const FTransform Where(FVector(Center, FloorZ));
+	if (ARRRandomSpawnZones* Zones = GetWorld()->SpawnActorDeferred<ARRRandomSpawnZones>(ARRRandomSpawnZones::StaticClass(), Where))
+	{
+		Zones->SetZones(Feet);
+		Zones->FinishSpawning(Where);
+	}
+	FString List;
+	for (int32 Index = 0; Index < Feet.Num(); ++Index)
+	{
+		List += FString::Printf(TEXT(" %d=(%.0f, %.0f)"), Index + ARRRandomSpawnZones::FirstNumber, Feet[Index].X - Center.X, Feet[Index].Y - Center.Y);
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: dice spots from %d open flat spots (%d more under the sky paths left out) in %.0f ms:%s."), Open.Num(), Overlooked, (FPlatformTime::Seconds() - StartTime) * 1000.0, *List);
+}
+
+int32 ARRRandomGameMode::RollTwoDice(int32& OutA, int32& OutB)
+{
+	OutA = RoundStream.RandRange(1, 6);
+	OutB = RoundStream.RandRange(1, 6);
+	return OutA + OutB;
+}
+
+bool ARRRandomGameMode::FindZoneSpot(int32 Number, float HalfHeight, float Radius, const AActor* Ignore, int32 Index, bool bCheckPawns, FTransform& OutTransform) const
+{
+	const ARRRandomSpawnZones* Zones = ARRRandomSpawnZones::Get(this);
+	FVector Wanted;
+	if (!Zones || !Zones->GetZone(Number, Wanted))
+	{
+		return false;
+	}
+	const UWorld* World = GetWorld();
+	// The spot first, then the others nearest it
+	TArray<int32> Order;
+	for (int32 Zone = ARRRandomSpawnZones::FirstNumber; Zone < ARRRandomSpawnZones::FirstNumber + Zones->GetZoneCount(); ++Zone)
+	{
+		Order.Add(Zone);
+	}
+	Order.StableSort([Zones, &Wanted](int32 A, int32 B)
+	{
+		FVector AFeet;
+		FVector BFeet;
+		Zones->GetZone(A, AFeet);
+		Zones->GetZone(B, BFeet);
+		return FVector::DistSquared2D(AFeet, Wanted) < FVector::DistSquared2D(BFeet, Wanted);
+	});
+	const FCollisionObjectQueryParams Ground = GetSolidQuery(false);
+	const FCollisionObjectQueryParams Room = GetSolidQuery(bCheckPawns);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RRZoneSpot), false, Ignore);
+	const FVector Middle = GetArenaCenter();
+	for (const int32 Zone : Order)
+	{
+		FVector Feet;
+		Zones->GetZone(Zone, Feet);
+		const ARRRandomDiceTown* Town = ARRRandomDiceTown::FindAt(this, Feet);
+		for (int32 Try = 0; Try < 7; ++Try)
+		{
+			// The middle, then six round it
+			const int32 Place = (FMath::Max(0, Index) + Try) % 7;
+			FVector Spot = Feet;
+			if (Place > 0)
+			{
+				const float Angle = FMath::DegreesToRadians(60.f * (Place - 1));
+				Spot += FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.f) * ARRRandomSpawnZones::SpotSpacing;
+			}
+			// Standing ground at the spot's level (not dug out by a wreck, not lava)
+			FHitResult Hit;
+			float LavaTop = 0.f;
+			if (!World->LineTraceSingleByObjectType(Hit, Spot + FVector(0.f, 0.f, 400.f), Spot - FVector(0.f, 0.f, 300.f), Ground, Params)
+				|| FMath::Abs(Hit.ImpactPoint.Z - Feet.Z) > 30.f || Hit.ImpactNormal.Z < 0.9f || (Town && Town->GetLavaAt(Hit.ImpactPoint, LavaTop)))
+			{
+				continue;
+			}
+			const FVector Standing = Hit.ImpactPoint + FVector(0.f, 0.f, HalfHeight + 5.f);
+			if (World->OverlapAnyTestByObjectType(Standing, FQuat::Identity, Room, FCollisionShape::MakeCapsule(Radius, HalfHeight), Params))
+			{
+				continue;
+			}
+			const FVector Facing = (Middle - Standing).GetSafeNormal2D();
+			OutTransform = FTransform(FRotator(0.f, Facing.IsNearlyZero() ? 0.f : Facing.Rotation().Yaw, 0.f), Standing);
+			UE_CLOG(Zone != Number, LogTemp, Log, TEXT("RRRandom: dice spot %d has no room; spot %d instead."), Number, Zone);
+			return true;
+		}
+	}
+	return false;
+}
+
+void ARRRandomGameMode::RollTeamZones(bool bMoveNow)
+{
+	ARRRandomSpawnZones* Zones = ARRRandomSpawnZones::Get(this);
+	if (!Zones || Zones->GetZoneCount() < ARRRandomSpawnZones::Count)
+	{
+		return;
+	}
+	// Blue rolls; red rolls till it lands away from blue (never the same spot, at least StartZoneGap off, or the furthest it found)
+	int32 Dice[4] = { 0, 0, 0, 0 };
+	int32 Picks[2] = { RollTwoDice(Dice[0], Dice[1]), 0 };
+	FVector BlueFeet;
+	Zones->GetZone(Picks[0], BlueFeet);
+	float BestGap = -1.f;
+	int32 Rolls = 0;
+	for (; Rolls < 40 && BestGap < StartZoneGap; ++Rolls)
+	{
+		int32 A = 0;
+		int32 B = 0;
+		const int32 Sum = RollTwoDice(A, B);
+		FVector Feet;
+		Zones->GetZone(Sum, Feet);
+		const float Gap = Sum == Picks[0] ? -1.f : FVector::Dist2D(Feet, BlueFeet);
+		if (Gap > BestGap)
+		{
+			BestGap = Gap;
+			Picks[1] = Sum;
+			Dice[2] = A;
+			Dice[3] = B;
+		}
+	}
+	Zones->SetTeamDice(0, Dice[0], Dice[1]);
+	Zones->SetTeamDice(1, Dice[2], Dice[3]);
+	int32 Placed = 0;
+	for (int32 Team = 0; Team < 2 && Team < TeamSlots.Num(); ++Team)
+	{
+		int32 Index = 0;
+		for (const FTeamSlot& Slot : TeamSlots[Team])
+		{
+			ARRRandomCharacter* Brawler = Slot.Brawler.Get();
+			if (!IsValid(Brawler))
+			{
+				continue;
+			}
+			const UCapsuleComponent* Capsule = Brawler->GetCapsuleComponent();
+			FTransform Where;
+			if (!FindZoneSpot(Picks[Team], Capsule->GetUnscaledCapsuleHalfHeight(), Capsule->GetUnscaledCapsuleRadius(), Brawler, Index++, false, Where))
+			{
+				continue;
+			}
+			Brawler->SetHome(Where.GetLocation(), Where.Rotator());
+			++Placed;
+			if (bMoveNow)
+			{
+				Brawler->SetActorLocationAndRotation(Where.GetLocation(), Where.Rotator(), false, nullptr, ETeleportType::TeleportPhysics);
+				Brawler->GetCharacterMovement()->StopMovementImmediately();
+				if (APlayerController* Player = Cast<APlayerController>(Brawler->GetController()))
+				{
+					Player->ClientSetRotation(Where.Rotator());
+				}
+				else if (AController* Own = Brawler->GetController())
+				{
+					Own->SetControlRotation(Where.Rotator());
+				}
+				Brawler->ForceNetUpdate();
+			}
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: start dice: blue %d+%d = spot %d, red %d+%d = spot %d (%.0f apart, %d roll%s); %d placed."), Dice[0], Dice[1], Picks[0], Dice[2], Dice[3], Picks[1],
+		BestGap, Rolls, Rolls == 1 ? TEXT("") : TEXT("s"), Placed);
+}
+
+void ARRRandomGameMode::RollRespawnZone(ARRRandomCharacter* Brawler)
+{
+	const ARRRandomSpawnZones* Zones = ARRRandomSpawnZones::Get(this);
+	if (!bRounds || !Brawler || !Zones || Zones->GetZoneCount() < ARRRandomSpawnZones::Count)
+	{
+		return;
+	}
+	int32 A = 0;
+	int32 B = 0;
+	const int32 Sum = RollTwoDice(A, B);
+	Brawler->SetRespawnRoll(A, B);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %s rolls %d+%d: gets back up at dice spot %d."), *Brawler->GetName(), A, B, Sum);
+}
+
+void ARRRandomGameMode::PlaceForRespawn(ARRRandomCharacter* Brawler)
+{
+	if (!Brawler || Brawler->GetRespawnZone() <= 0)
+	{
+		return;
+	}
+	const UCapsuleComponent* Capsule = Brawler->GetCapsuleComponent();
+	FTransform Where;
+	if (!FindZoneSpot(Brawler->GetRespawnZone(), Capsule->GetUnscaledCapsuleHalfHeight(), Capsule->GetUnscaledCapsuleRadius(), Brawler, RoundStream.RandRange(0, 6), true, Where))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("RRRandom: no room at any dice spot for %s; it gets up at home."), *Brawler->GetName());
+		return;
+	}
+	Brawler->SetHome(Where.GetLocation(), Where.Rotator());
+	if (APlayerController* Player = Cast<APlayerController>(Brawler->GetController()))
+	{
+		Player->ClientSetRotation(Where.Rotator());
+	}
+	else if (AController* Own = Brawler->GetController())
+	{
+		Own->SetControlRotation(Where.Rotator());
+	}
+	// (round 103, the playtest numbers: where it got up, and when)
+	LastRespawn.Add(Brawler, TPair<float, int32>(GetWorld()->GetTimeSeconds(), Brawler->GetRespawnZone()));
+	for (FSkyStats* Stats : { &RoundSky, &MatchSky })
+	{
+		++Stats->Respawns.FindOrAdd(Brawler->GetRespawnZone());
+	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Round 103: the sky paths' numbers
+
+void ARRRandomGameMode::UpdateSkyStats(float DeltaSeconds)
+{
+	const ARRRandomDiceTown* Town = ARRRandomDiceTown::FindAt(this, GetArenaCenter());
+	if (!Town || Town->GetSkyPerches().Num() == 0)
+	{
+		return;
+	}
+	for (TActorIterator<ARRRandomCharacter> It(GetWorld()); It; ++It)
+	{
+		ARRRandomCharacter* Brawler = *It;
+		if (Brawler->IsDecoy() || Brawler->IsVillain())
+		{
+			continue;
+		}
+		const bool bUp = Brawler->IsAlive() && Town->IsOnSkyPath(Brawler->GetActorLocation() - FVector(0.f, 0.f, Brawler->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
+		const float Now = GetWorld()->GetTimeSeconds();
+		float& LastUp = LastOnSkyPath.FindOrAdd(Brawler, -UE_BIG_NUMBER);
+		const bool bClimb = bUp && Now - LastUp > SkyClimbGap;
+		const int32 Who = Brawler->IsPlayerControlled() ? 0 : 1;
+		for (FSkyStats* Stats : { &RoundSky, &MatchSky })
+		{
+			Stats->Climbs[Who] += bClimb ? 1 : 0;
+			Stats->Seconds[Who] += bUp ? DeltaSeconds : 0.f;
+		}
+		UE_CLOG(bClimb, LogTemp, Log, TEXT("RRRandom: sky path: %s (%s) is up at %s."), *Brawler->GetName(), Who == 0 ? TEXT("player") : TEXT("bot"), *Brawler->GetActorLocation().ToCompactString());
+		LastUp = bUp ? Now : LastUp;
+	}
+}
+
+void ARRRandomGameMode::NoteSkyKnockOut(const ARRRandomCharacter* Victim, const ARRRandomCharacter* Attacker)
+{
+	const ARRRandomDiceTown* Town = ARRRandomDiceTown::FindAt(this, GetArenaCenter());
+	if (!Town || !Victim)
+	{
+		return;
+	}
+	auto IsUp = [Town](const ARRRandomCharacter* Brawler)
+	{
+		return Brawler && Town->IsOnSkyPath(Brawler->GetActorLocation() - FVector(0.f, 0.f, Brawler->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
+	};
+	const bool bFromUp = Attacker && Attacker != Victim && IsUp(Attacker);
+	const bool bVictimUp = IsUp(Victim);
+	int32 QuickZone = 0;
+	if (const TPair<float, int32>* Up = LastRespawn.Find(Victim); Up && GetWorld()->GetTimeSeconds() - Up->Key <= SkyQuickKnockOut)
+	{
+		QuickZone = Up->Value;
+	}
+	for (FSkyStats* Stats : { &RoundSky, &MatchSky })
+	{
+		++Stats->KnockOuts;
+		Stats->KnockOutsFromUp += bFromUp ? 1 : 0;
+		Stats->KnockOutsUp += bVictimUp ? 1 : 0;
+		if (QuickZone > 0)
+		{
+			++Stats->QuickKnockOuts.FindOrAdd(QuickZone);
+		}
+	}
+	UE_CLOG(bFromUp || bVictimUp || QuickZone > 0, LogTemp, Log, TEXT("RRRandom: sky stats: %s knocked out%s%s%s."), *Victim->GetName(), bVictimUp ? TEXT(" up on a sky path") : TEXT(""),
+		bFromUp ? *FString::Printf(TEXT(" by %s from a sky path"), *Attacker->GetName()) : TEXT(""),
+		QuickZone > 0 ? *FString::Printf(TEXT(" %.0f s after getting up at dice spot %d"), GetWorld()->GetTimeSeconds() - LastRespawn[Victim].Key, QuickZone) : TEXT(""));
+}
+
+void ARRRandomGameMode::LogSkyStats(const TCHAR* What, const FSkyStats& Stats) const
+{
+	FString Spots;
+	for (int32 Zone = ARRRandomSpawnZones::FirstNumber; Zone < ARRRandomSpawnZones::FirstNumber + ARRRandomSpawnZones::Count; ++Zone)
+	{
+		if (const int32* Got = Stats.Respawns.Find(Zone))
+		{
+			const int32* Quick = Stats.QuickKnockOuts.Find(Zone);
+			Spots += FString::Printf(TEXT(" %d:%d/%d"), Zone, Quick ? *Quick : 0, *Got);
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: sky stats (%s): up on a sky path %d times by players (%.0f s), %d by bots (%.0f s); %d knockouts, %d from up there, %d of someone up there; knocked out within %.0f s of getting up, by dice spot (quick/got up):%s."),
+		What, Stats.Climbs[0], Stats.Seconds[0], Stats.Climbs[1], Stats.Seconds[1], Stats.KnockOuts, Stats.KnockOutsFromUp, Stats.KnockOutsUp, SkyQuickKnockOut,
+		Spots.IsEmpty() ? TEXT(" none") : *Spots);
 }
 
 void ARRRandomGameMode::StartRound(int32 Round)
@@ -348,6 +759,9 @@ void ARRRandomGameMode::StartRound(int32 Round)
 		Face = Forced * 2 + 1;
 	}
 	const ERRRoundRule Rule = RRRounds::GetRuleForFace(Face);
+	// Round 102: each team's start spot by two dice (the first round moves everyone there now; later rounds' reset takes
+	// them home, which is there)
+	RollTeamZones(Round == 1);
 	if (Round > 1)
 	{
 		ResetForRound();
@@ -408,6 +822,7 @@ void ARRRandomGameMode::UpdateRound()
 	{
 		return;
 	}
+	UpdateSkyStats(0.2f);
 	const float Now = GetWorld()->GetTimeSeconds();
 	if (State->IsOvertime())
 	{
@@ -455,6 +870,10 @@ void ARRRandomGameMode::EndRound(int32 Winner, int32 DieBlue, int32 DieRed)
 		return;
 	}
 	State->EndRound(Winner, DieBlue, DieRed);
+	// (round 103: the sky paths' numbers, the round's and so far)
+	LogSkyStats(*FString::Printf(TEXT("round %d"), State->GetRound()), RoundSky);
+	LogSkyStats(TEXT("match so far"), MatchSky);
+	RoundSky = FSkyStats();
 	// The meteor round's director stops here (the ore stays on the ground till the next round clears it)
 	for (TActorIterator<ARRRandomMeteorRushDirector> It(GetWorld()); It; ++It)
 	{
@@ -515,6 +934,11 @@ void ARRRandomGameMode::OnBrawlerKnockedOut(ARRRandomCharacter* Victim, ARRRando
 	if (State && (State->IsMatchOver() || State->IsRoundOver()))
 	{
 		return;
+	}
+	// (round 103: the sky paths' numbers)
+	if (bRounds)
+	{
+		NoteSkyKnockOut(Victim, Attacker);
 	}
 	// Defense: no score; a villain down is the director's (its killer's knockout, a die maybe), a friend just gets back up
 	if (bDefense)
@@ -1109,6 +1533,15 @@ bool ARRRandomGameMode::GetSlotTransform(int32 Team, int32 Slot, float HalfHeigh
 		OutTransform = FTransform(FRotator(0.f, (Out.IsNearlyZero() ? FVector::ForwardVector : -Out).Rotation().Yaw, 0.f), Location);
 		return true;
 	}
+	// Round 102, the main mode: at the team's start spot this round (a player joining mid-round)
+	if (const ARRRandomSpawnZones* Zones = bRounds ? ARRRandomSpawnZones::Get(this) : nullptr; Zones && Zones->GetTeamZone(Team) > 0)
+	{
+		const float Radius = HalfHeight * 0.45f;
+		if (FindZoneSpot(Zones->GetTeamZone(Team), HalfHeight, Radius, nullptr, Slot, true, OutTransform))
+		{
+			return true;
+		}
+	}
 	// Blue below the middle, red above it across from blue, facing down the screen
 	const FVector Origin = GetArenaCenter() + FVector(TeamSpawnDistance * (Team == 1 ? 0.5f : -0.5f), 0.f, 0.f);
 	// The middle spot first (the first player's), then alternating right and left of it
@@ -1434,8 +1867,15 @@ void ARRRandomGameMode::SpawnVehiclesIfNoneExist()
 	constexpr float StarCarGroundStep = 40.f;
 	for (const FParking& Spot : Spots)
 	{
-		// The studio keeps its floor bare: only the star team's cars, for RRStarCars to bring
-		if (bStudio && Spot.Kind < ERRVehicleKind::StarChest)
+		// The studio keeps its floor bare: only the star team's cars, for RRStarCars to bring (-RRStudioVehicles: the other vehicles instead,
+		// for filming the animal friends riding on its flat floor - 2026-11-25, the ears in the wind)
+		static const bool bStudioVehicles = FParse::Param(FCommandLine::Get(), TEXT("RRStudioVehicles"));
+		if (bStudio && !bStudioVehicles && Spot.Kind < ERRVehicleKind::StarChest)
+		{
+			continue;
+		}
+		// (and then without the star cars: by them the ride key starts combining the star robot instead)
+		if (bStudio && bStudioVehicles && Spot.Kind >= ERRVehicleKind::StarChest)
 		{
 			continue;
 		}

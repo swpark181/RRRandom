@@ -643,6 +643,38 @@ void ARRRandomHUD::DrawMapMarkers(const FBox2D& Rect, const ARRRandomCharacter* 
 		DrawUltimateOnMap(ToScreen, Scale);
 	}
 
+	// Round 102, the main mode's dice spots: numbered dots; before play the teams' start spots in their colors, and while
+	// I wait to get up the spot my dice said, ringing
+	if (const ARRRandomSpawnZones* Zones = ARRRandomSpawnZones::Get(this); Zones && ARRRandomGameState::IsRounds(this))
+	{
+		const ARRRandomGameState* State = GetWorld()->GetGameState<ARRRandomGameState>();
+		const bool bIntro = State && !State->HasPlayStarted();
+		const bool bLanded = Viewer && !Viewer->IsAlive() && Viewer->GetRespawnTotal() - Viewer->GetRespawnRemaining() > 1.1f;
+		const int32 MyZone = bLanded ? Viewer->GetRespawnDie(0) + Viewer->GetRespawnDie(1) : 0;
+		const float Pulse = FMath::Fmod(GetWorld()->GetTimeSeconds() * 1.5f, 1.f);
+		for (int32 Number = ARRRandomSpawnZones::FirstNumber; Number < ARRRandomSpawnZones::FirstNumber + Zones->GetZoneCount(); ++Number)
+		{
+			FVector Feet;
+			Zones->GetZone(Number, Feet);
+			const FVector2D Point = ToScreen(Feet);
+			const int32 StartTeam = !bIntro ? INDEX_NONE : Zones->GetTeamZone(0) == Number ? 0 : Zones->GetTeamZone(1) == Number ? 1 : INDEX_NONE;
+			const bool bMine = Number == MyZone;
+			const bool bLit = bMine || StartTeam != INDEX_NONE;
+			const FLinearColor Fill = bMine ? RRUI::PinkDeep : StartTeam != INDEX_NONE ? RRUI::TeamColorDeep(StartTeam) : RRUI::LavenderDeep;
+			const float Dot = (bLit ? 6.5f : 4.8f) * Scale;
+			if (bMine)
+			{
+				RRUI::DrawRing(Canvas, Point, Dot + (3.f + 9.f * Pulse) * Scale, 2.f * Scale, RRUI::WithAlpha(Fill, 1.f - Pulse));
+			}
+			RRUI::DrawDisc(Canvas, Point, Dot + 1.2f * Scale, RRUI::White);
+			RRUI::DrawDisc(Canvas, Point, Dot, RRUI::WithAlpha(Fill, bLit ? 1.f : 0.8f));
+			const FString Label = FString::FromInt(Number);
+			const float TextSize = (bLit ? 8.5f : 6.5f) * Scale;
+			const FVector2D Box = RRUI::MeasureText(Label, TextSize, EWeight::Black);
+			RRUI::DrawText(Canvas, Label, Point - Box * 0.5f, TextSize, EWeight::Black, RRUI::White);
+		}
+	}
+
 	// Meteor Rush: where meteors are coming down (a pulsing ring), the ore lying about (small dots in its color) and
 	// anyone carrying a crystal, seen or not (a gold ring)
 	if (ARRRandomGameState::IsMeteorRush(this))

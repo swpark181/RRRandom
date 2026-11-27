@@ -1,0 +1,321 @@
+<title>꼬리 스프링 체인 전후 비교</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* layout: a review sheet. What changed in plain words, how to read the clips, then one clip per animal friend (before
+   on the left, after on the right, the four cases one after another). Same look as the other project pages. */
+:root {
+  --bg: #f2f1f6; --sheet: #ffffff; --ink: #1c1a29; --soft: #5d5a70; --line: #d6d3e2; --accent: #5b3fd0; --accent-soft: #e9e4fb; --open: #a05a00;
+  --font: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --num: "Barlow Condensed", "Arial Narrow", "Noto Sans KR", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #15141d; --sheet: #1e1c2a; --ink: #ecebf4; --soft: #a3a0b8; --line: #353247; --accent: #a892ff; --accent-soft: #2c2650; --open: #e6b04a; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --bg: #15141d; --sheet: #1e1c2a; --ink: #ecebf4; --soft: #a3a0b8; --line: #353247; --accent: #a892ff; --accent-soft: #2c2650; --open: #e6b04a; color-scheme: dark; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 15px; line-height: 1.65;
+  padding-block: 28px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+header { display: flex; flex-direction: column; gap: 10px; }
+.eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--accent); }
+h1 { font-size: clamp(24px, 4vw, 34px); font-weight: 700; line-height: 1.25; margin: 0; text-wrap: balance; }
+h2 { font-size: 18px; font-weight: 700; margin: 0; }
+h3 { font-size: 15px; font-weight: 700; margin: 0; }
+p { margin: 0; max-width: 70ch; }
+.lead { color: var(--soft); }
+.small { font-size: 13px; }
+section { display: flex; flex-direction: column; gap: 12px; }
+.nav { display: flex; flex-wrap: wrap; gap: 6px; }
+.nav a { font-size: 14px; font-weight: 700; text-decoration: none; color: var(--ink); background: var(--accent-soft); border: 1px solid var(--line); border-radius: 4px; padding: 3px 14px; }
+.nav a:hover, .nav a:focus-visible { background: var(--accent); color: var(--sheet); outline: none; }
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.box { background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.box ul { margin: 0; padding-left: 18px; font-size: 14px; }
+.box li + li { margin-top: 5px; }
+.animal { background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 12px; }
+.animal .name { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.animal .name b { font-family: var(--num); font-size: 30px; font-weight: 700; color: var(--accent); line-height: 1; }
+.animal .name span { font-size: 13px; color: var(--soft); }
+video { width: 100%; height: auto; display: block; border-radius: 6px; background: #000; border: 1px solid var(--line); }
+.tablebox { overflow-x: auto; background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 14px; }
+th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 12px; color: var(--soft); font-weight: 700; white-space: nowrap; }
+td.t { white-space: nowrap; font-variant-numeric: tabular-nums; }
+code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px; background: var(--accent-soft); border-radius: 3px; padding: 0 4px; overflow-wrap: anywhere; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.four figure { margin: 0; display: flex; flex-direction: column; gap: 6px; background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.four figure.pick { border: 2px solid var(--accent); }
+.four img { width: 100%; height: auto; display: block; border-radius: 4px; }
+.four figcaption { font-size: 13px; }
+.four figcaption b { display: block; font-size: 14px; }
+.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.three figure, .wide { margin: 0; display: flex; flex-direction: column; gap: 6px; background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.three figure.pick { border: 2px solid var(--accent); }
+.three img, .wide img { width: 100%; height: auto; display: block; border-radius: 4px; }
+.three figcaption, .wide figcaption { font-size: 13px; }
+.three figcaption b { display: block; font-size: 14px; }
+@media (max-width: 820px) { .two { grid-template-columns: minmax(0, 1fr); } .four { grid-template-columns: repeat(2, minmax(0, 1fr)); } .three { grid-template-columns: minmax(0, 1fr); } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">RRRANDOM · 게임 · 2026-11-24</div>
+    <h1>꼬리 스프링 체인 전후 비교</h1>
+    <p class="lead">게임의 꼬리 코드를 뼈마다 따로 출렁이는 스프링 체인으로 바꿨습니다. 동물 다섯을 같은 동작(걷기, 뛰기, 점프, 사격)으로 찍어 나란히 붙였습니다. 왼쪽이 바꾸기 전, 오른쪽이 바꾼 뒤이고, 윗줄은 옆에서, 아랫줄은 위에서 본 화면입니다.</p>
+    <p class="lead small">3판: "흔들리는 부분이 뿌리에 더 가까워져야 한다, 전과 차이가 거의 없다"는 의견에 따라 여우·다람쥐·호랑이·레드 폭스의 꼬리가 뿌리에서부터 휘게 했고, 걷고 뛸 때 좌우로 흔드는 폭도 키웠습니다. 용은 2판 그대로입니다.</p>
+    <nav class="nav" aria-label="동물">
+      <a href="#regen">8판: 여우를 다시 뽑음</a><a href="#idle">아이들 꼬리</a><a href="#new">7판: Tripo로 새로 만든 꼬리</a><a href="#straight">6판: 일자로 이어 붙인 여우 꼬리</a><a href="#part">5판: 따로 만든 여우 꼬리</a><a href="#rest">4판: 여우 기본 자세</a><a href="#fox">여우</a><a href="#squirrel">다람쥐</a><a href="#tiger">호랑이</a><a href="#redfox">레드 폭스</a><a href="#dragon">용</a>
+    </nav>
+  </header>
+
+  <section id="regen">
+    <h2>8판: 여우 모델을 다시 뽑음 (지금 게임에 든 것)</h2>
+    <p class="lead small">"비용이 크더라도 여우 모델링을 다시 뽑아야 할 것 같다. 이제 캐릭터 그릴 때 꼬리는 캐릭터 고유 디자인이 아니면 쭉 펴서 그리고 애니메이션과 스프링으로 유지시킨다"는 말씀에 따라, 여우를 꼬리가 곧은 그림으로 다시 그려 3D 모델을 새로 뽑았습니다. 뼈대와 애니메이션은 예전 것을 그대로 쓰고, 얼굴은 예전 여우의 눈·눈썹·입을 옮겼습니다.</p>
+    <article class="animal" id="idle"><div class="name"><b>아이들 꼬리</b><span>가만히 서 있으면 꼬리를 오른쪽으로 말고 끝을 들어 올리며, 걸으면 펴고, 멈추면 다시 맙니다 · 왼쪽부터 뒤, 옆, 비스듬한 앞</span></div>
+      <video controls muted loop playsinline preload="metadata" src="FoxIdle.mp4"></video>
+      <img src="idle_pose.jpg" alt="서 있을 때의 말린 꼬리를 뒤, 옆, 비스듬한 앞에서 본 모습. 흰 끝이 위로 들려 있음" style="width:100%;height:auto;border-radius:6px;border:1px solid var(--line)">
+      <p class="small lead">"아이들 상태일 때 꼬리를 기존처럼 살짝 들어서 한쪽으로 말고 있으면 좋겠다", 이어서 "끝을 조금 더 들어 올리고 싶다, 이전 말린 느낌이 좋았다"는 말씀에 따라 넣었습니다. 모델의 꼬리는 곧은 그대로이고, 서 있을 때만 코드가 꼬리 뼈를 돌립니다. 끝으로 갈수록 더 많이 오른쪽으로 말고(전체 120도), 뿌리에서 살짝 들고(22도), 말린 끝 쪽을 위로 올립니다(80도). 멈춘 뒤 1초쯤에 걸쳐 말리고, 움직이기 시작하면 더 빨리 풉니다. 콘솔에서 <code>rr.Tail.IdleCurl</code>(음수면 왼쪽), <code>rr.Tail.IdleLift</code>, <code>rr.Tail.IdleTipLift</code>로 바로 바꿔 볼 수 있습니다.</p></article>
+    <figure class="wide"><img src="regen_size.jpg" alt="꼬리 크기 비교. 왼쪽 셋이 키운 새 꼬리의 옆, 뒤, 위 모습이고 오른쪽 둘이 예전 모델의 옆, 위 모습"><figcaption><b>꼬리 크기를 예전대로 키웠습니다.</b> "예전엔 꼬리가 더 컸던 것 같다"는 말씀대로였습니다. 다시 뽑은 꼬리는 길이 46cm에 가장 굵은 곳 반지름 9.6cm였고, 예전 꼬리는 약 65cm에 11.5cm였습니다. 길이를 1.4배, 굵기를 가운데 1.2배에서 끝 쪽 1.6배까지 키워 64cm에 11.6cm로 맞췄습니다. 왼쪽 셋이 지금 모델(옆, 뒤, 위), 오른쪽 둘이 예전 모델(옆, 위)입니다. 끝은 예전보다 조금 더 뾰족합니다.</figcaption></figure>
+    <article class="animal"><div class="name"><b>여우</b><span>왼쪽 두 칸이 6판(예전 모델의 꼬리를 편 것), 오른쪽 두 칸이 8판(다시 뽑은 모델) · 걷기, 뛰기, 점프, 사격</span></div>
+      <video controls muted loop playsinline preload="metadata" src="FoxRegen.mp4"></video></article>
+    <figure class="wide"><img src="regen_game.jpg" alt="다시 뽑은 여우의 게임 화면. 정면, 옆, 뒤, 위, 비스듬한 앞 두 장"><figcaption>게임 화면. 윗줄은 정면, 옆, 뒤이고, 아랫줄은 위, 비스듬한 앞 두 장입니다(꼬리 흔들림을 끈 상태).</figcaption></figure>
+    <div class="two">
+      <figure class="wide"><img src="regen_concept.jpg" alt="3D 입력 그림 네 장. 정면은 꼬리가 몸에 가려지고, 옆모습은 꼬리가 곧게 뒤로 뻗고, 뒷모습은 꼬리 끝이 보임"><figcaption><b>3D 입력 그림</b> 예전 T자 포즈 그림 네 장에서 꼬리만 "몸 뒤로 곧게"로 다시 그렸습니다(Tripo 이미지 편집, 무료 횟수 10장).</figcaption></figure>
+      <figure class="wide"><img src="regen_face.jpg" alt="얼굴 비교. 맨 왼쪽이 예전 얼굴, 나머지 셋이 새 모델의 정면, 비스듬, 옆"><figcaption><b>얼굴</b> 맨 왼쪽이 예전 여우, 나머지 셋이 새 모델(정면, 비스듬, 옆)입니다. 눈·눈썹·입은 예전 그림을 옮겼고 코는 새 모델의 것입니다.</figcaption></figure>
+    </div>
+    <figure class="wide"><img src="regen_model.jpg" alt="털 없이 본 모델 비교. 윗줄 새 모델, 아랫줄 예전 모델. 정면, 오른쪽, 뒤, 위"><figcaption>털 없이 본 모델(Blender). 윗줄이 새로 뽑은 모델(얼굴을 옮기기 전), 아랫줄이 예전 모델이고, 왼쪽부터 정면, 오른쪽, 뒤, 위입니다.</figcaption></figure>
+    <figure class="wide"><img src="regen_root.jpg" alt="게임에서 꼬리 밑동을 가까이서 본 모습. 윗줄 6판, 아랫줄 8판"><figcaption>게임에서 밑동을 가까이서 본 모습. 윗줄이 6판, 아랫줄이 8판이고, 왼쪽부터 옆, 뒤, 뒤쪽 위, 반대쪽 옆입니다.</figcaption></figure>
+    <div class="two">
+      <div class="box">
+        <h3>어떻게 만들었나</h3>
+        <ul>
+          <li><b>그림</b>: 네 방향 모두 꼬리를 엉덩이 한가운데에서 몸 뒤로 수평에 가깝게 곧게 그렸습니다. 정면에서는 몸에 가려지고, 뒤에서는 꼬리 끝이 정면으로 보입니다.</li>
+          <li><b>3D</b>: Smart Mesh 20,617면에 텍스처까지 130 크레딧(19,750에서 19,620). 꼬리는 가운데에서 0.2cm도 벗어나지 않습니다. 처음에는 46cm였고, 예전 크기에 맞춰 64cm로 키웠습니다.</li>
+          <li><b>뼈대</b>: 새 메시를 예전 몸에 맞춰 놓고(평균 오차 1cm) 예전 메시의 가중치를 옮겼습니다. 뼈대가 그대로라 애니메이션 49개와 모션 매칭을 다시 받을 필요가 없었습니다.</li>
+          <li><b>꼬리</b>: 뼈 8개를 곧은 꼬리 가운데에 다시 놓았고, 밑동 7cm는 몸의 가중치와 나눠 갖습니다.</li>
+          <li><b>얼굴</b>: 정면 그림에서 예전 여우의 눈·눈썹·입을 새 모델로 옮겨 정면에서 입혔습니다.</li>
+          <li><b>털</b>: 새 모양에 맞춰 다시 만들었습니다.</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>알아 둘 것</h3>
+        <ul>
+          <li><b>시네마틱은 아직 예전 모델에 맞춰져 있습니다.</b> 표정 텍스처 7장, 표정별 주둥이 파츠 5개, 시네마틱용 털을 새 모델에 맞춰 다시 만들어야 합니다. 그 전까지 시네마틱의 여우 얼굴은 깨져 보입니다. 새 모델을 확인해 주시면 이어서 하겠습니다.</li>
+          <li>새 모델은 코가 예전보다 조금 작고 1cm쯤 위에 있습니다. 입은 그에 맞춰 올려 붙였습니다.</li>
+          <li>옆에서 보면 입 선이 주둥이 옆면에서 조금 옅습니다. 예전에도 같은 문제를 따로 손봤던 자리입니다.</li>
+          <li>가만히 서 있을 때는 꼬리를 살짝 들어 오른쪽으로 맙니다(위의 "아이들 꼬리" 영상). 말린 정도와 든 높이는 제가 다섯 가지를 찍어 보고 고른 값입니다.</li>
+          <li>표면에서 표면으로 얼굴을 옮기는 방법도 해 봤지만 눈동자가 길쭉해지고 코가 어긋나서 버렸습니다.</li>
+          <li>예전 게임 에셋은 모두 백업해 두었습니다.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="new">
+    <h2>7판: Tripo로 새로 만든 여우 꼬리 (6판과 비교, 기록)</h2>
+    <p class="lead small">"따로 만든 꼬리 영상으로 업데이트해 줘, 직접 보고 결정할게"라는 말씀에 따라, 꼬리만 Tripo에서 새로 생성해 몸에 이어 붙이고 같은 동작으로 찍었습니다. 아래 영상과 사진에서 왼쪽(또는 윗줄)이 6판, 오른쪽(또는 아랫줄)이 새로 만든 꼬리입니다. 둘 중 하나를 골라 주시면 됩니다.</p>
+    <article class="animal"><div class="name"><b>여우</b><span>왼쪽 두 칸이 6판(지금 꼬리를 일자로 편 것), 오른쪽 두 칸이 7판(Tripo로 새로 만든 꼬리) · 걷기, 뛰기, 점프, 사격</span></div>
+      <video controls muted loop playsinline preload="metadata" src="FoxNew.mp4"></video></article>
+    <div class="two">
+      <figure class="wide"><img src="rest_6.jpg" alt="6판 꼬리, 게임에서 뒤와 위에서 본 모습"><figcaption><b>6판: 지금 꼬리를 일자로 편 것</b> 게임 화면, 흔들림을 끄고 뒤와 위에서.</figcaption></figure>
+      <figure class="wide"><img src="rest_7.jpg" alt="7판 꼬리, 게임에서 뒤와 위에서 본 모습"><figcaption><b>7판: Tripo로 새로 만든 꼬리</b> 같은 조건. 조금 더 굵고 둥글며 표면이 매끈합니다.</figcaption></figure>
+    </div>
+    <figure class="wide"><img src="root_new.jpg" alt="게임에서 꼬리 밑동을 가까이서 본 모습. 윗줄 6판, 아랫줄 7판"><figcaption>게임에서 밑동을 가까이서 본 모습. 윗줄이 6판, 아랫줄이 7판이고, 왼쪽부터 옆, 뒤, 뒤쪽 위, 반대쪽 옆입니다. 둘 다 몸과 한 표면으로 이어져 있습니다.</figcaption></figure>
+    <figure class="wide"><img src="model_new.jpg" alt="털 없이 본 모델. 윗줄 6판, 아랫줄 7판. 뒤, 위, 오른쪽, 비스듬한 뒤"><figcaption>털 없이 본 모델(Blender). 윗줄이 6판, 아랫줄이 7판이고, 왼쪽부터 뒤, 위, 오른쪽, 비스듬한 뒤입니다.</figcaption></figure>
+    <div class="two">
+      <div class="box">
+        <h3>어떻게 만들었나</h3>
+        <ul>
+          <li>6판의 일자 꼬리만 떼어 네 방향으로 렌더하고, Tripo 이미지 편집으로 털 결이 있는 깔끔한 그림으로 다시 그렸습니다(무료 횟수 2장).</li>
+          <li>그 네 방향 그림으로 Smart Mesh를 만들고 텍스처를 입혔습니다. 4,284면, 크레딧 130(19,880에서 19,750).</li>
+          <li>새 꼬리를 예전 꼬리 자리에 맞추고(평균 오차 0.8cm), 몸에서 7.5cm 지점에서 예전 꼬리를 잘라 낸 뒤 그 뒤를 새 꼬리로 바꿔 면으로 이었습니다. 이은 구간은 새 꼬리의 굵기를 예전 표면에 맞춰 줄였습니다.</li>
+          <li>새 꼬리의 그림은 여우 텍스처의 빈자리에 넣고, 색을 예전 꼬리의 평균과 폭에 맞췄습니다.</li>
+          <li>뼈 8개와 스프링 설정은 6판과 같습니다.</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>고르기 전에 알아 둘 것</h3>
+        <ul>
+          <li>이 비교 뒤에 여우 모델 전체를 다시 뽑기로 해서(8판), 6판과 7판은 기록으로만 남겨 둡니다.</li>
+          <li><b>7판을 고르면 할 일이 더 있습니다.</b> 표정 텍스처 7장에 새 꼬리 그림을 넣어야 하고, 시네마틱용 촘촘한 털도 새로 만들어야 합니다. 안 하면 시네마틱에서 꼬리 색이 깨집니다.</li>
+          <li>7판은 꼬리 그림의 해상도가 낮습니다(텍스처 빈자리가 744픽셀 정사각형). 털에 덮여 게임 거리에서는 차이가 잘 안 보이지만, 가까이서는 6판보다 흐릴 수 있습니다.</li>
+          <li>7판은 면이 2,500개쯤 더 많고, 털 껍질까지 치면 삼각형이 3만 5천 개쯤 늘어납니다.</li>
+          <li>이음매에는 예전 그림과 새 그림이 만나는 옅은 색 경계가 있습니다. 게임 화면에서는 털에 가려 찾지 못했습니다.</li>
+          <li>일자 꼬리가 뒤 시점에서 등 가운데를 가리는 점은 6판과 7판이 같습니다.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="straight">
+    <h2>6판: 일자로 펴서 몸에 이어 붙인 여우 꼬리</h2>
+    <p class="lead small">"여전히 연결 부위가 노출되어 보인다, 꼬리만 일자로 새로 만들어서 몸에 이어 붙이는 게 좋을 것 같다"는 의견에 따라 다시 만들었습니다. 꼬리를 몸에서 잘라 내지 않고, 꼬리 표면 전체를 일자로 다시 펴면서 엉덩이 피부가 꼬리로 그대로 이어지게 했습니다. 게임의 여우에 들어가 있습니다.</p>
+    <div class="three">
+      <figure><img src="rest_0.jpg" alt="3판, 모델 그대로의 여우 꼬리"><figcaption><b>3판: 모델 그대로</b>몸에서 나오자마자 오른쪽으로 40도 틀어져 있습니다.</figcaption></figure>
+      <figure><img src="rest_5.jpg" alt="5판, 따로 만들어 꽂은 여우 꼬리"><figcaption><b>5판: 따로 만들어 꽂음</b>곡선은 매끈하지만 바지에 꽂힌 자리가 드러났습니다.</figcaption></figure>
+      <figure class="pick"><img src="rest_6.jpg" alt="6판, 일자로 펴서 몸에 이어 붙인 여우 꼬리"><figcaption><b>6판: 일자, 몸과 한 표면</b>몸 뒤 한가운데에서 똑바로 뒤로 나옵니다. 뼈 8개.</figcaption></figure>
+    </div>
+    <figure class="wide"><img src="root_join.jpg" alt="게임에서 꼬리 밑동을 가까이서 본 모습. 윗줄은 5판으로 꼬리가 바지에 꽂힌 선이 보이고, 아랫줄은 6판으로 피부가 이어져 선이 없음"><figcaption>게임에서 밑동을 가까이서 본 모습. 윗줄이 5판, 아랫줄이 6판이고, 왼쪽부터 옆, 뒤, 뒤쪽 위, 반대쪽 옆입니다.</figcaption></figure>
+    <article class="animal"><div class="name"><b>여우</b><span>왼쪽 두 칸이 5판(따로 만들어 꽂음), 오른쪽 두 칸이 6판(일자, 몸과 한 표면) · 걷기, 뛰기, 점프, 사격</span></div>
+      <video controls muted loop playsinline preload="metadata" src="FoxStraight.mp4"></video></article>
+    <div class="two">
+      <div class="box">
+        <h3>무엇을 했나</h3>
+        <ul>
+          <li><b>자르지 않음</b>: 꼬리와 몸은 처음 모델처럼 한 표면입니다. 꽂힌 선도, 자른 자리의 주름도 생길 곳이 없습니다.</li>
+          <li><b>일자로 폄</b>: 꼬리의 위아래 굴곡(아래로 내려갔다가 끝이 올라가는 모양)은 그대로 두고, 좌우로는 휘지 않고 똑바로 뒤로 나가게 했습니다.</li>
+          <li><b>밑동을 넓게 이음</b>: 엉덩이에서 꼬리로 넘어가는 7cm 구간에서 조금씩 돌려 폈고, 그 구간의 표면을 엉덩이 뼈와 꼬리 뼈가 같은 비율로 나눠 갖습니다. 예전에는 이 구간이 5cm였고 뿌리가 40도 돌아가 있었습니다.</li>
+          <li><b>뼈 8개와 털</b>: 5판과 같습니다. 털은 밑동의 어두운 구간까지 이어지게 했습니다.</li>
+          <li><b>텍스처는 그대로</b>: 그림을 하나도 바꾸지 않았습니다.</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>미리 알려 드릴 것</h3>
+        <ul>
+          <li><b>Tripo로 새로 생성하지는 않았습니다.</b> 새로 뽑은 꼬리는 텍스처가 따로 나와서, 몸과 이어 붙인 자리에 두 그림의 색과 음영이 만나는 띠가 생길 위험이 있었습니다. 표정 텍스처 7장에도 꼬리 그림을 다시 넣어야 했습니다. 지금 꼬리 표면을 다시 펴는 쪽이 그 문제가 없어서 먼저 해 봤고, 결과가 깨끗해서 이것을 넣었습니다. 크레딧은 쓰지 않았습니다.</li>
+          <li><b>일자 꼬리는 뒤에서 보면 몸 한가운데를 가립니다.</b> 예전에는 꼬리가 옆으로 빠져 있어 바지와 등이 보였는데, 지금은 흰 끝이 등 가운데 앞에 옵니다. 뒤에서 따라가는 게임 시점에서 이 점이 답답해 보이는지 봐 주세요.</li>
+          <li>위에서 보면 곧은 막대처럼 보입니다. 가만히 있을 때의 좌우 흔들기와 스프링이 그 느낌을 얼마나 덜어 주는지는 영상으로 봐 주세요.</li>
+          <li>시네마틱의 여우도 꼬리가 일자로 바뀌었습니다. 영상은 다시 렌더하지 않았습니다.</li>
+          <li>처음 모델과 털은 백업해 두었습니다.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="part">
+    <h2>5판: 따로 만든 여우 꼬리</h2>
+    <p class="lead small">(6판으로 바뀌었습니다. 기록으로 남겨 둡니다.) "꺾인 게 보여서 문제가 된다, 몸통과 꼬리를 따로 만들어 붙이면 해결이 될까"라는 의견에 따라, 여우 꼬리를 몸에서 잘라 내 따로 다시 만들었습니다. 새로 생성한 것이 아니라 지금 모델의 꼬리를 그대로 써서 색과 무늬는 같습니다.</p>
+    <div class="three">
+      <figure><img src="rest_0.jpg" alt="3판, 모델 그대로의 여우 꼬리: 뒤와 위에서 본 모습"><figcaption><b>3판: 모델 그대로</b>몸에서 나오자마자 오른쪽으로 40도 틀어져 있습니다. 뼈 4개.</figcaption></figure>
+      <figure><img src="rest_B.jpg" alt="4판, 코드로 뼈를 돌려 편 여우 꼬리"><figcaption><b>4판: 코드로 뼈를 돌려 폄</b>뿌리는 펴졌지만 마디마다 꺾이고 몸과 만나는 자리가 접힙니다.</figcaption></figure>
+      <figure class="pick"><img src="rest_5.jpg" alt="5판, 따로 만든 여우 꼬리: 곧게 나와 매끈하게 오른쪽으로 말림"><figcaption><b>5판: 따로 만든 꼬리</b>몸 뒤 한가운데에서 곧게 나와 매끈한 곡선으로 오른쪽으로 말립니다. 뼈 8개.</figcaption></figure>
+    </div>
+    <p class="small lead">사진마다 위는 뒤에서, 아래는 위에서 본 게임 화면이고, 흔들림을 끄고 찍었습니다.</p>
+    <div class="two">
+      <div class="box">
+        <h3>무엇을 했나</h3>
+        <ul>
+          <li><b>잘라 냄</b>: 꼬리가 몸에서 나온 뒤 5cm 지점에서 잘랐습니다. 몸에 남은 그루터기는 없애고 그 자리를 막았습니다.</li>
+          <li><b>다시 폄</b>: 꼬리의 위아래 굴곡은 그대로 두고 좌우 방향만 새로 잡았습니다. 몸에서는 똑바로 뒤로 나오고, 끝으로 가면서 오른쪽으로 75도까지 말립니다.</li>
+          <li><b>뼈 8개</b>: 뼈를 4개에서 8개로 늘리고, 표면을 이웃한 두 뼈가 고르게 나눠 갖게 했습니다. 예전에는 마디 3cm 구간에서만 나눠서 마디마다 각이 졌습니다.</li>
+          <li><b>밑동</b>: 꼬리 표면은 꼬리 뼈에만 묶여 있고, 밑동이 9cm 더 몸속으로 들어가 있습니다. 꼬리가 어느 쪽으로 돌아도 몸과 만나는 자리가 접히지 않습니다.</li>
+          <li><b>털</b>: 게임용 털과 시네마틱용 촘촘한 털을 새 모양에 맞춰 다시 만들었습니다. 꼬리는 색과 상관없이 밑동까지 전부 털이 자라게 했습니다.</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>알아 둘 것</h3>
+        <ul>
+          <li><b>4판 때 드린 설명 하나가 틀렸습니다.</b> "뿌리 뼈가 몸 가운데에서 9만큼 벗어나 있다"고 했는데, 여우는 몸 자체가 모델 좌표에서 그만큼 옆에 놓여 있었고 뿌리 뼈는 몸 한가운데에 있었습니다. 4판의 꺾임은 뼈 위치가 아니라 좁은 마디와 휜 채로 만들어진 모양 때문이었습니다.</li>
+          <li>코드에 넣었던 여우의 기본 각도(-40, 25, 30, 15)는 뺐습니다. 이제 모양 자체가 그 자세입니다.</li>
+          <li>말린 정도는 4판에서 고른 것과 비슷하게 제가 정했습니다. 더 펴거나 더 말고 싶으면 숫자 하나로 다시 만들 수 있습니다.</li>
+          <li>뛸 때 꼬리가 머리 높이까지 올라가는 것은 3판부터의 세기 그대로입니다.</li>
+          <li>시네마틱의 여우도 같은 모델이라 꼬리 모양이 같이 바뀌었습니다. 한 장면을 렌더해 깨지지 않은 것만 확인했고, 영상 전체는 다시 렌더하지 않았습니다.</li>
+          <li>예전 모델과 털은 백업해 두었습니다. 되돌리려면 파일 넷을 덮어쓰면 됩니다.</li>
+          <li>다람쥐, 호랑이, 레드 폭스, 용은 아직 예전 그대로입니다.</li>
+        </ul>
+      </div>
+    </div>
+    <article class="animal"><div class="name"><b>여우</b><span>왼쪽 두 칸이 4판(코드로 폄), 오른쪽 두 칸이 5판(따로 만든 꼬리) · 걷기, 뛰기, 점프, 사격</span></div>
+      <video controls muted loop playsinline preload="metadata" src="FoxPart.mp4"></video></article>
+    <figure class="wide"><img src="root_fur.jpg" alt="게임에서 꼬리 밑동을 가까이서 본 모습. 윗줄은 털 없는 띠와 턱이 보이고, 아랫줄은 털이 바지까지 이어짐"><figcaption><b>끊어져 보이던 밑동을 고쳤습니다.</b> 윗줄이 고치기 전, 아랫줄이 고친 뒤의 게임 화면입니다. 꼬리 텍스처가 몸 쪽으로 갈수록 어두워서 그 구간이 털 대상에서 빠져 있었고, 털 없는 띠와 털이 시작되는 턱이 끊어진 것처럼 보였습니다. 예전에는 그 자리가 몸에 붙어 있어 가려졌던 것입니다.</figcaption></figure>
+    <figure class="wide"><img src="root_close.jpg" alt="꼬리 밑동을 가까이서 본 모습. 윗줄은 예전 모델, 아랫줄은 새 모델이고 뒤, 위, 오른쪽, 비스듬한 뒤에서 본 순서"><figcaption>밑동을 가까이서 본 모습(털 없이, Blender). 윗줄이 예전 모델, 아랫줄이 새 모델이고, 왼쪽부터 뒤, 위, 오른쪽, 비스듬한 뒤입니다.</figcaption></figure>
+    <figure class="wide"><img src="bends.jpg" alt="새 꼬리를 휘어 본 모습. 줄마다 가만히, 오른쪽으로, 왼쪽으로, 위로, 섞어서"><figcaption>새 꼬리를 게임이 휘는 방식으로 휘어 본 모습(털 없이, Blender). 위에서부터 가만히, 오른쪽 60도, 왼쪽 60도, 위로 70도, 왼쪽과 위를 섞은 것입니다. 실제 게임에서 쓰는 것보다 큰 각도입니다.</figcaption></figure>
+  </section>
+
+  <section id="rest">
+    <h2>4판: 여우 꼬리의 기본 자세</h2>
+    <p class="lead small">"꼬리가 처음부터 한쪽으로 휘어 있는 게 문제 같다, 뿌리 쪽을 바로잡고 지금 휘어 있는 방향은 유지하고 싶다"는 의견에 따라 여우부터 바꿨습니다. 모델은 그대로 두고, 코드에서 꼬리 뼈마다 "가만히 있을 때의 각도"를 정했습니다. 뿌리 뼈는 왼쪽으로 40도 돌려 곧게 펴고, 그 뒤의 뼈 셋은 오른쪽으로 25도, 30도, 15도 돌려 끝이 원래처럼 오른쪽에 오게 했습니다. 스프링은 이 자세를 가운데로 놓고 흔들립니다.</p>
+    <div class="four">
+      <figure><img src="rest_0.jpg" alt="여우 꼬리, 모델 그대로: 뒤에서 본 모습과 위에서 본 모습"><figcaption><b>모델 그대로 (3판)</b>몸에서 나오자마자 오른쪽으로 40도 틀어져 있습니다.</figcaption></figure>
+      <figure class="pick"><img src="rest_B.jpg" alt="여우 꼬리, 지금 넣은 자세: 뿌리는 곧고 끝이 오른쪽으로 말림"><figcaption><b>4판에 넣었던 자세</b>뿌리는 곧게 뒤로, 끝은 원래 자리 가까이. 값 -40, 25, 30, 15</figcaption></figure>
+      <figure><img src="rest_A.jpg" alt="여우 꼬리, 덜 말린 자세"><figcaption><b>다른 후보: 덜 말림</b>끝의 방향만 원래대로. 값 -40, 20, 20, 0</figcaption></figure>
+      <figure><img src="rest_E.jpg" alt="여우 꼬리, 일찍 휘는 자세"><figcaption><b>다른 후보: 일찍 휨</b>뿌리 바로 뒤에서 휩니다. 값 -40, 35, 25, 0</figcaption></figure>
+    </div>
+    <p class="small lead">사진마다 위는 뒤에서, 아래는 위에서 본 모습이고, 흔들림을 끄고 찍었습니다. 다른 값은 게임 안 콘솔에서 <code>rr.Tail.RestSwing -40,25,30,15</code>처럼 바로 넣어 볼 수 있습니다(뿌리부터 뼈 순서, 양수가 오른쪽, <code>0,0,0,0</code>이 모델 그대로).</p>
+    <article class="animal"><div class="name"><b>여우</b><span>왼쪽 두 칸이 3판(모델 그대로), 오른쪽 두 칸이 4판(새 기본 자세) · 걷기, 뛰기, 점프, 사격</span></div>
+      <video controls muted loop playsinline preload="metadata" src="FoxRest.mp4"></video></article>
+    <div class="box">
+      <h3>알아 둘 것</h3>
+      <ul>
+        <li>이 방식은 꺾임이 보여서 5판(따로 만든 꼬리)으로 바꿨습니다. 아래 영상은 기록으로 남겨 둡니다.</li>
+        <li>여기에 "뿌리 뼈가 몸 가운데에서 9만큼 벗어나 있다"고 적었던 것은 틀렸습니다. 뿌리 뼈는 몸 한가운데에 있었습니다.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>무엇이 달라졌나</h2>
+    <div class="two">
+      <div class="box">
+        <h3>바꾼 뒤</h3>
+        <ul>
+          <li><b>뿌리에서 휨</b>: 휘는 양을 뿌리 쪽에 가장 많이 주고 끝으로 갈수록 줄였습니다(전에는 반대). 꼬리 전체가 밑동에서부터 흔들립니다. 용만 예전처럼 끝 쪽이 휩니다.</li>
+          <li><b>좌우 흔들기</b>: 서 있을 때 1.5배, 뛸 때 3배로 키웠습니다. 2판까지는 이 폭이 그대로여서, 똑바로 걷고 뛸 때는 전과 거의 같았습니다.</li>
+          <li><b>무른 스프링</b>: 뿌리 쪽도 무르게 해서(초당 2.0번에서 1.3번) 밑동이 늦게 따라오며 출렁입니다.</li>
+          <li><b>점프</b>: 올라갈 때 아래로 끌리고, 떨어질 때 떠오르고, 착지하면 튕깁니다.</li>
+          <li><b>멈출 때</b>와 <b>사격</b>: 앞으로 쏠려 올라갔다 가라앉고, 쏠 때마다 위로 튕깁니다.</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>그대로 둔 것</h3>
+        <ul>
+          <li>속도에 따라 흔드는 박자와 폭, 달릴 때 꼬리를 드는 것, 탈것에서 꼬리를 세우는 것.</li>
+          <li>쓰러지면 꼬리가 멈추는 것, 동물마다 박자가 어긋나는 것.</li>
+          <li>회전할 때 꼬리가 바깥으로 쏠리는 것. 이제 이것도 끝으로 갈수록 늦게 따라갑니다.</li>
+          <li>스위치 하나로 예전 방식으로 돌아갑니다(<code>rr.Tail.Chain 0</code>).</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>영상 보는 법</h2>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>순서</th><th>구간</th><th>무엇을 하나</th><th>볼 곳</th></tr></thead>
+        <tbody>
+          <tr><td class="t">1</td><td class="t">0~6초</td><td>걷다가 멈춤</td><td>걷는 동안 꼬리의 물결, 멈춘 직후의 출렁임</td></tr>
+          <tr><td class="t">2</td><td class="t">6~11초</td><td>돌아서 뛰다가 멈춤</td><td>돌 때 꼬리가 늦게 따라오는 것, 뛸 때 꼬리 끝의 흔들림</td></tr>
+          <tr><td class="t">3</td><td class="t">11~17초</td><td>제자리 점프, 달리며 점프</td><td>올라갈 때, 떨어질 때, 착지 직후</td></tr>
+          <tr><td class="t">4</td><td class="t">17~25초</td><td>서서 다섯 발, 걸으며 네 발</td><td>쏠 때마다 꼬리 끝</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small lead">화면은 네 칸입니다. 왼쪽 두 칸이 전, 오른쪽 두 칸이 후이고, 윗줄은 옆에서(위아래 움직임이 보임), 아랫줄은 뒤쪽 위에서(좌우 흔들림이 보임) 찍었습니다. 칸마다 왼쪽 위에 이름이 찍혀 있습니다. 네 칸은 같은 순서로 따로 찍은 것이라 타이밍이 몇 프레임 어긋날 수 있습니다.</p>
+    <p class="small lead">2판까지는 옆에서만 찍어서 좌우로 흔드는 움직임이 영상에 거의 잡히지 않았습니다. 그것도 차이가 없어 보인 이유였습니다.</p>
+  </section>
+
+  <section>
+    <h2>동물별 영상</h2>
+    <article class="animal" id="fox"><div class="name"><b>여우</b><span>꼬리 뼈 8개 · 후 = 8판(다시 뽑은 모델)</span></div>
+      <video controls muted loop playsinline preload="metadata" src="Fox.mp4"></video></article>
+    <article class="animal" id="squirrel"><div class="name"><b>다람쥐</b><span>꼬리 뼈 4개 · 크고 말린 꼬리</span></div>
+      <video controls muted loop playsinline preload="metadata" src="Squirrel.mp4"></video></article>
+    <article class="animal" id="tiger"><div class="name"><b>호랑이</b><span>꼬리 뼈 4개 · 길고 가는 꼬리</span></div>
+      <video controls muted loop playsinline preload="metadata" src="Tiger.mp4"></video></article>
+    <article class="animal" id="redfox"><div class="name"><b>레드 폭스</b><span>꼬리 뼈 4개</span></div>
+      <video controls muted loop playsinline preload="metadata" src="RedFox.mp4"></video></article>
+    <article class="animal" id="dragon"><div class="name"><b>용</b><span>꼬리 뼈 4개 · 2판 그대로 (끝 쪽이 휘고, 흔드는 폭도 그대로)</span></div>
+      <video controls muted loop playsinline preload="metadata" src="Dragon.mp4"></video></article>
+  </section>
+
+  <section>
+    <h2>알아 둘 것</h2>
+    <div class="box">
+      <ul>
+        <li>저는 프레임과 수치 기록으로 확인했고, 영상을 재생해서 보지는 못했습니다. 느낌이 과한지 모자란지는 직접 보고 알려 주셔야 합니다.</li>
+        <li>고양이와 쥐는 직접 조종할 수 없는 적이라 찍지 못했습니다. 꼬리 뼈를 전부 쓰게 된 것도 화면으로 확인하지 못했습니다.</li>
+        <li>크게 키우면서 생긴 문제 둘을 막았습니다. 꼬리가 다리와 바닥 아래로 내려가지 않게 했고, 착지할 때 공처럼 말려 올라가지 않게 뼈마다 휘는 한도를 뒀습니다.</li>
+        <li>세기는 게임 안 콘솔에서 다시 빌드하지 않고 바꿀 수 있습니다: <code>rr.Tail.Gain</code>(전체 반응 배수, 지금 3), <code>rr.Tail.RootBias</code>(0 = 끝 쪽이 휨, 1 = 뿌리 쪽이 휨), <code>rr.Tail.RootHz</code>, <code>rr.Tail.TipHz</code>(출렁이는 빠르기), <code>rr.Tail.Damping</code>(가라앉는 정도), <code>rr.Tail.Inertia</code>(끝이 늦게 따라오는 정도), <code>rr.Tail.FallLift</code>(점프 반응), <code>rr.Tail.BrakeLift</code>(멈출 때 반응), <code>rr.Tail.ShotKick</code>(사격 반응).</li>
+        <li>토끼는 리그에 꼬리 뼈가 없어서 영향을 받지 않고, 영상에서도 뺐습니다. 토끼 꼬리를 움직이려면 뼈를 추가해야 합니다.</li>
+        <li>휘는 자리와 뿌리의 무르기는 이제 동물마다 따로 정합니다(용만 다른 값). 나머지 값은 모두 같습니다. 꼬리 모양이 많이 달라서 동물마다 따로 맞추면 더 좋아질 수 있습니다.</li>
+        <li>중력으로 처지는 것과 바닥에 닿는 것은 넣지 않았습니다. 귀는 뼈가 없어서 아직입니다.</li>
+        <li>연습용 스튜디오 맵에서 찍었습니다. 실제 플레이의 카메라는 아랫줄(뒤쪽 위)에 가깝습니다.</li>
+        <li>코드는 아직 커밋하지 않았습니다.</li>
+      </ul>
+    </div>
+  </section>
+</div>

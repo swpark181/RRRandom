@@ -1,0 +1,213 @@
+<title>여우 vs 호랑이 화면 손보기</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* layout: a review sheet. The finished film on top, then one block per item (fade, fur, faces, motion): what was
+   wrong, what changed, the before/after clips, and what was left alone. Same look as the storyboard page. */
+:root {
+  --bg: #f2f1f6;
+  --sheet: #ffffff;
+  --ink: #1c1a29;
+  --soft: #5d5a70;
+  --line: #d6d3e2;
+  --accent: #5b3fd0;
+  --accent-soft: #e9e4fb;
+  --done: #1f7a4d;
+  --left: #a05a00;
+  --font: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --num: "Barlow Condensed", "Arial Narrow", "Noto Sans KR", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15141d; --sheet: #1e1c2a; --ink: #ecebf4; --soft: #a3a0b8; --line: #353247; --accent: #a892ff; --accent-soft: #2c2650; --done: #6fd3a0; --left: #e6b04a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15141d; --sheet: #1e1c2a; --ink: #ecebf4; --soft: #a3a0b8; --line: #353247; --accent: #a892ff; --accent-soft: #2c2650; --done: #6fd3a0; --left: #e6b04a;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 15px; line-height: 1.65;
+  padding-block: 28px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+header { display: flex; flex-direction: column; gap: 10px; }
+.eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--accent); }
+h1 { font-size: clamp(24px, 4vw, 34px); font-weight: 700; line-height: 1.25; margin: 0; text-wrap: balance; }
+h2 { font-size: 18px; font-weight: 700; margin: 0; }
+h3 { font-size: 14px; font-weight: 700; margin: 0; }
+p { margin: 0; max-width: 68ch; }
+.lead { color: var(--soft); }
+.small { font-size: 13px; }
+section { display: flex; flex-direction: column; gap: 12px; }
+video { width: 100%; height: auto; display: block; border-radius: 6px; background: #000; border: 1px solid var(--line); }
+.film { max-width: 960px; }
+.nav { display: flex; flex-wrap: wrap; gap: 6px; }
+.nav a { font-family: var(--num); font-size: 20px; font-weight: 700; text-decoration: none; color: var(--ink); background: var(--accent-soft);
+  border: 1px solid var(--line); border-radius: 4px; padding: 4px 14px; }
+.nav a:hover, .nav a:focus-visible { background: var(--accent); color: var(--sheet); outline: none; }
+.item { display: grid; grid-template-columns: 150px minmax(0, 1fr); background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+  scroll-margin-top: 12px; }
+.slate { padding: 16px 14px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.no { font-family: var(--num); font-size: 44px; font-weight: 700; line-height: 1; color: var(--accent); }
+.where { font-size: 12px; color: var(--soft); }
+.body { padding: 14px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.notes { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 22px; font-size: 14px; }
+.notes div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.notes dt { font-size: 12px; font-weight: 700; }
+.notes dt.done { color: var(--done); }
+.notes dt.left { color: var(--left); }
+.notes dt.why { color: var(--soft); }
+.notes dd { margin: 0; }
+.notes ul { margin: 0; padding-left: 18px; }
+.notes li + li { margin-top: 3px; }
+.clips { display: flex; flex-direction: column; gap: 14px; }
+figure { margin: 0; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+figcaption { font-size: 13px; color: var(--soft); }
+figcaption b { color: var(--ink); }
+.list { background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; padding: 12px 18px; }
+.list ul { margin: 0; padding-left: 18px; font-size: 14px; }
+.list li + li { margin-top: 4px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 720px) {
+  .item { grid-template-columns: minmax(0, 1fr); }
+  .slate { border-right: 0; border-bottom: 1px solid var(--line); flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+  .no { font-size: 34px; }
+  .notes { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">RRRANDOM · 시네마틱 · 2026-11-24</div>
+    <h1>여우 vs 호랑이 화면 손보기</h1>
+    <p class="lead">페이드, 털, 표정, 동작 이음매를 손본 결과입니다(최종 10판, 32.75초). 항목마다 고치기 전(9판)과 후(10판)를 나란히 붙인 영상을 넣었습니다. 영상은 느리게 재생되고, 오른쪽 아래 숫자가 프레임 번호입니다. 이상한 곳은 그 번호로 짚어 주시면 됩니다.</p>
+    <nav class="nav" aria-label="항목">
+      <a href="#fade">페이드</a><a href="#fur">털</a><a href="#face">표정</a><a href="#move">동작</a>
+    </nav>
+  </header>
+
+  <section>
+    <h2>고친 뒤 전체 영상</h2>
+    <video class="film" controls muted playsinline preload="metadata" src="FoxVsTiger_web_v10.mp4"></video>
+    <p class="lead small">소리는 아직 없습니다.</p>
+  </section>
+
+  <section>
+    <h2>항목별 전과 후</h2>
+
+    <article class="item" id="fade">
+      <div class="slate">
+        <div class="no">페이드</div>
+        <div class="where">컷 1 시작 · 컷 9 끝</div>
+      </div>
+      <div class="body">
+        <dl class="notes">
+          <div><dt class="why">전</dt><dd>첫 프레임부터 바로 시작하고, 웃는 얼굴에서 뚝 끊겼습니다.</dd></div>
+          <div><dt class="done">한 것</dt><dd>검은 화면에서 0.5초에 걸쳐 밝아지며 시작합니다. 끝은 웃는 컷 2초를 그대로 다 보여 준 뒤 0.75초를 더 붙여 어두워집니다. 그래서 전체가 32초에서 32.75초가 됐습니다.</dd></div>
+        </dl>
+        <div class="clips">
+          <figure><video controls muted loop playsinline preload="metadata" src="fade_in.mp4"></video>
+            <figcaption><b>시작</b> · 길이 세 가지를 나란히. 가운데(0.5초)를 넣었습니다.</figcaption></figure>
+          <figure><video controls muted loop playsinline preload="metadata" src="fade_out.mp4"></video>
+            <figcaption><b>끝</b> · 길이 세 가지를 나란히. 가운데(0.75초)를 넣었습니다.</figcaption></figure>
+        </div>
+        <p class="small lead">다른 길이가 좋으시면 숫자만 바꾸면 됩니다.</p>
+      </div>
+    </article>
+
+    <article class="item" id="fur">
+      <div class="slate">
+        <div class="no">털</div>
+        <div class="where">컷 1 · 4-3 · 9 같은 클로즈업</div>
+      </div>
+      <div class="body">
+        <dl class="notes">
+          <div><dt class="why">전</dt><dd>게임용 털은 12겹입니다. 얼굴이 화면을 채우는 컷에서는 그 겹이 하나하나 보여서, 얼굴 가장자리가 점선 줄무늬와 톱니처럼 보였습니다.</dd></div>
+          <div><dt class="done">한 것</dt><dd>여우와 호랑이에게 이 영상에서만 쓰는 36겹 털을 입혔습니다. 털의 길이, 색, 모양은 게임과 같고 겹만 촘촘합니다. 게임의 털은 건드리지 않았습니다.</dd></div>
+          <div><dt class="left">남은 것</dt><dd><ul>
+            <li>귀 안쪽 털의 지그재그 무늬는 그대로입니다.</li>
+            <li>분신 다섯은 멀리서만 보여서 게임 털 그대로입니다.</li>
+            <li>새 털 파일이 큽니다(여우 72MB, 호랑이 136MB). 전체 렌더는 2분 15초에서 2분 30초가 됐습니다.</li>
+          </ul></dd></div>
+        </dl>
+        <div class="clips">
+          <figure><video controls muted loop playsinline preload="metadata" src="fur_fox.mp4"></video>
+            <figcaption><b>컷 4-3 여우 볼</b> · 1080p 화면의 일부를 원래 크기로. 4배 느리게.</figcaption></figure>
+          <figure><video controls muted loop playsinline preload="metadata" src="fur_grin.mp4"></video>
+            <figcaption><b>컷 9 여우 머리 위</b> · 원래 크기. 2배 느리게. (후 쪽은 끝에 페이드가 들어갑니다.)</figcaption></figure>
+          <figure><video controls muted loop playsinline preload="metadata" src="fur_tiger.mp4"></video>
+            <figcaption><b>컷 4-3 호랑이 얼굴</b> · 원래 크기. 3배 느리게. 망치를 드는 높이도 9판과 같습니다.</figcaption></figure>
+        </div>
+      </div>
+    </article>
+
+    <article class="item" id="face">
+      <div class="slate">
+        <div class="no">표정</div>
+        <div class="where">컷 1 · 3 · 4-3 · 5-2</div>
+      </div>
+      <div class="body">
+        <dl class="notes">
+          <div><dt class="why">전</dt><dd>표정은 얼굴 그림을 통째로 바꾸는 방식이라, 바뀌는 순간이 한 프레임에 딱 튀었습니다. 눈 깜빡임은 전체에 두 번뿐이었습니다.</dd></div>
+          <div><dt class="done">한 것</dt><dd><ul>
+            <li>여우의 깜빡임을 2번에서 6번으로 늘렸습니다(뒤돌아볼 때, 고개를 되돌릴 때, 주저앉을 때, 주사위를 볼 때).</li>
+            <li>화면에 보이는 표정 바뀜은 눈 감은 그림 두 프레임을 거치게 하거나 컷이 바뀌는 순간으로 옮겼습니다.</li>
+            <li>컷 3에서 주저앉으며 걱정 표정으로 바뀌고, 컷 4-3의 첫 얼굴에서 다시 놀란 눈이 됩니다.</li>
+            <li>컷 5-2에서 주사위가 5로 넘어가는 순간은 일부러 딱 바뀌게 두었습니다(두 얼굴이 뒤바뀌는 웃음 포인트).</li>
+          </ul></dd></div>
+          <div><dt class="left">하지 못한 것</dt><dd><ul>
+            <li>호랑이는 눈 감은 그림이 없어서 깜빡이지 않습니다. 넣으려면 그림을 새로 그려야 합니다.</li>
+            <li>귀와 꼬리는 움직일 뼈가 없어서 연기를 넣지 못했습니다.</li>
+            <li>눈동자 방향(시선)은 그림에 그려진 그대로입니다.</li>
+          </ul></dd></div>
+        </dl>
+        <div class="clips">
+          <figure><video controls muted loop playsinline preload="metadata" src="face_cut1.mp4"></video>
+            <figcaption><b>컷 1</b> · 뒤돌아보며 깜빡이고(프레임 30~32), 고개를 되돌리며 눈을 감았다 뜹니다(40~41). 2배 느리게.</figcaption></figure>
+          <figure><video controls muted loop playsinline preload="metadata" src="face_sit.mp4"></video>
+            <figcaption><b>컷 3 주저앉기</b> · 눈을 감았다 뜨며 걱정 표정으로(238~240). 2배 느리게.</figcaption></figure>
+          <figure><video controls muted loop playsinline preload="metadata" src="face_die.mp4"></video>
+            <figcaption><b>컷 5-2</b> · 주사위가 흔들릴 때 여우가 한 번 깜빡입니다(515~517). 2배 느리게.</figcaption></figure>
+        </div>
+      </div>
+    </article>
+
+    <article class="item" id="move">
+      <div class="slate">
+        <div class="no">동작</div>
+        <div class="where">컷 3 · 5-1 · 5-3</div>
+      </div>
+      <div class="body">
+        <dl class="notes">
+          <div><dt class="done">한 것</dt><dd><ul>
+            <li><b>컷 5-1 내려치기</b>: 머리 위로 든 팔이 어깨 뒤로 한 번 빠졌다가 옆에서 들어왔습니다. 이제 위에 조금 더 머물다가 곧게 내려옵니다.</li>
+            <li><b>컷 5-3 밀려나는 호랑이</b>: 한 자세로 굳은 채 미끄러졌습니다. 이제 뒤로 젖혀졌다가 속도가 줄면서 방패 뒤로 몸을 세웁니다.</li>
+            <li><b>컷 3 주저앉는 끝</b>: 일정한 속도로 내려와 딱 멈췄습니다. 이제 점점 빨리 떨어지고, 살짝 눌렸다가 올라옵니다.</li>
+          </ul></dd></div>
+          <div><dt class="left">그대로 둔 것</dt><dd><ul>
+            <li>옆 분신의 발 미끄러짐은 컷 8이 위에서 내려다보는 화면이라 몸에 가려 보이지 않았습니다. 손대지 않았습니다.</li>
+            <li>벽을 짚는 손은 이 카메라 각도에서 어긋남이 보이지 않아 그대로 두었습니다.</li>
+          </ul></dd></div>
+        </dl>
+        <div class="clips">
+          <figure><video controls muted loop playsinline preload="metadata" src="move_blow.mp4"></video>
+            <figcaption><b>컷 5-1</b> · 내려치는 순간은 프레임 463~465. 4배 느리게.</figcaption></figure>
+          <figure><video controls muted loop playsinline preload="metadata" src="move_skid.mp4"></video>
+            <figcaption><b>컷 5-3</b> · 호랑이가 밀려나는 구간은 프레임 556~576. 2배 느리게.</figcaption></figure>
+        </div>
+        <p class="small lead">주저앉는 끝은 위 표정 항목의 "컷 3 주저앉기" 영상(프레임 237~252)에서 같이 보입니다.</p>
+      </div>
+    </article>
+  </section>
+
+  <section>
+    <h2>알아 둘 것</h2>
+    <div class="list">
+      <ul>
+        <li>저는 프레임을 하나씩 놓고 확인했고, 영상을 재생해서 보지는 못했습니다. 움직임의 느낌은 위 영상으로 직접 봐 주셔야 합니다.</li>
+        <li>털 비교 영상만 화면 일부를 원래 크기로 잘랐습니다. 나머지는 화면 전체를 절반 크기로 줄여 나란히 놓았습니다.</li>
+        <li>컷 번호와 프레임 번호는 콘티 페이지와 같습니다. 끝에 0.75초(18프레임)가 붙은 것만 다릅니다.</li>
+      </ul>
+    </div>
+  </section>
+</div>

@@ -65,6 +65,13 @@ ARRRandomCineAnimal::ARRRandomCineAnimal()
 	Body->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 	Fur = CreateDefaultSubobject<URRRandomFurComponent>(TEXT("Fur"));
 	Fur->SetupAttachment(Body);
+	// The expression's muzzle part (ExpressionParts), empty until an expression has one
+	FacePart = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FacePart"));
+	FacePart->SetupAttachment(Body);
+	FacePart->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FacePart->SetGenerateOverlapEvents(false);
+	FacePart->bUseBoundsFromLeaderPoseComponent = true;
+	FacePart->SetVisibility(false);
 	Pistol = MakeProp(this, Body, TEXT("Pistol"), TEXT("/Game/Props/GunsR90/SM_Pistol.SM_Pistol"));
 	Hammer = MakeProp(this, Body, TEXT("Hammer"), TEXT("/Game/Props/Weapons98/SM_Hammer.SM_Hammer"));
 	Shield = MakeProp(this, Body, TEXT("Shield"), TEXT("/Game/Props/Weapons98/SM_Shield.SM_Shield"));
@@ -134,6 +141,7 @@ void ARRRandomCineAnimal::ApplyExpression()
 			Body->SetMaterial(Slot, Slot == FaceSlot ? Wanted : Look.Material.Get());
 		}
 		Fur->SetFur(FurAsset, Body, Look.Material);
+		ShowFacePart(nullptr, nullptr);
 		AppliedExpression = Expression;
 		return;
 	}
@@ -141,6 +149,8 @@ void ARRRandomCineAnimal::ApplyExpression()
 	{
 		Body->SetMaterial(Slot, Wanted);
 	}
+	// The expression's own muzzle part, shaped to its mouth, in place of the body's muzzle
+	ShowFacePart(ExpressionParts.IsValidIndex(Expression) ? ExpressionParts[Expression].Get() : nullptr, Wanted);
 	Fur->SetFur(FurAsset, Body, Wanted);
 	// The fur over the face wears the same expression (its strands take the body's base color)
 	UMaterialInterface* FurWanted = ExpressionFurs.IsValidIndex(Expression) ? ExpressionFurs[Expression].Get() : nullptr;
@@ -156,6 +166,38 @@ void ARRRandomCineAnimal::ApplyExpression()
 		Fur->EmptyOverrideMaterials();
 	}
 	AppliedExpression = Expression;
+}
+
+void ARRRandomCineAnimal::ShowFacePart(USkeletalMesh* Part, UMaterialInterface* Material)
+{
+	// (as ARRRandomCharacter::SetFacePart: the part on a leader-pose component, the body's "Muzzle" section hidden)
+	const int32 MuzzleSlot = Body->GetSkeletalMeshAsset() ? Body->GetMaterialIndex(TEXT("Muzzle")) : INDEX_NONE;
+	if (MuzzleSlot == INDEX_NONE)
+	{
+		Part = nullptr;
+	}
+	if (FacePart->GetSkeletalMeshAsset() != Part)
+	{
+		FacePart->SetSkeletalMeshAsset(Part);
+		FacePart->SetLeaderPoseComponent(Part ? Body.Get() : nullptr);
+	}
+	if (Part)
+	{
+		for (int32 Slot = 0; Slot < FMath::Max(1, FacePart->GetNumMaterials()); ++Slot)
+		{
+			FacePart->SetMaterial(Slot, Material);
+		}
+		FacePart->SetRenderCustomDepth(Body->bRenderCustomDepth);
+		FacePart->SetCustomDepthStencilValue(Body->CustomDepthStencilValue);
+	}
+	FacePart->SetVisibility(Part != nullptr);
+	if (MuzzleSlot != INDEX_NONE)
+	{
+		for (int32 Lod = 0; Lod < Body->GetNumLODs(); ++Lod)
+		{
+			Body->ShowMaterialSection(MuzzleSlot, 0, Part == nullptr, Lod);
+		}
+	}
 }
 
 FRotator URRRandomCineLibrary::DieFaceRotation(int32 Face, FRotator Camera)

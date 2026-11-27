@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 5aee74b3-a9cc-4e63-9e82-a9a43d8c5f06
-  modified: 2026-11-20T14:44:30.183Z
+  modified: 2026-11-23T01:34:18.725Z
 ---
 
 2026-11-20 (user: "여우 얼굴을 가까이서 볼 때 털이 너무 듬성듬성한것 처럼 보이는데 가까워질수록 외곽털은 그대로 비교적 얼굴 안쪽 털들은
@@ -22,7 +22,9 @@ squirrel, tiger, red fox, cat, rat; the dragon has no fur), not committed. Page 
 - Material-only rebuild: `ue_import_fur_shells.py "Fox|||"` (keeps tuned values and the face ellipsoid), several at once with
   `ue_import_fur_shells_batch.py "Rabbit|||;Tiger||||<face>"`.
 - The tiger barely changes: its face front has no fur (`--face-bare`).
-- Not done: the cinematic's fur copies (`M_FoxFur_Expr_*`, `M_TigerFur_Expr_*`, need `ue_cine_expressions.py` again), 30-animal fps.
+- Not done: 30-animal fps. The cinematic's fur copies (`M_FoxFur_Expr_*`, `M_TigerFur_Expr_*`) got the tidy on 2026-11-23, when
+  `ue_cine_expressions.py` was run again for the fur masks ([[fur-mask-face-textures]]); the final video was not rendered again.
+- 2026-11-23: a material-only rebuild also re-applies the eye/clothes patch from `fur_chars.json` and wires the fur mask.
 - My reading, not the user's words: "얼굴 안쪽" = muzzle, mouth, between the eyes; cheeks keep some grain on purpose (fully tidy
   looked like clay).
 

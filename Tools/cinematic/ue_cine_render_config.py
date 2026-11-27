@@ -6,7 +6,7 @@ import os
 import unreal
 
 FOLDER = "/Game/Cinematics/FoxVsTiger"
-NAME = "MRQ_Blocking720"
+NAME = os.environ.get("RR_CINE_PRESET", "MRQ_Blocking720")   # (2026-11-23: the storyboard draft renders with its own preset)
 eal = unreal.EditorAssetLibrary
 if eal.does_asset_exist(f"{FOLDER}/{NAME}"):
     eal.delete_asset(f"{FOLDER}/{NAME}")
@@ -23,6 +23,15 @@ take = os.environ.get("RR_CINE_TAKE", "take")
 o.set_editor_property("output_directory", unreal.DirectoryPath(path=f"{out}/{take}"))
 o.set_editor_property("file_name_format", "fvt.{frame_number}")
 o.set_editor_property("override_existing_output", True)
+# RR_CINE_RANGE="from,to" (frames of the sequence): only that part, for a quick look at one cut. Effects cued before
+# the range have not happened in it (an obstacle smashed earlier stands whole).
+rng = os.environ.get("RR_CINE_RANGE", "")
+if rng:
+    first, last = (int(v) for v in rng.split(","))
+    o.set_editor_property("use_custom_playback_range", True)
+    o.set_editor_property("custom_start_frame", first)
+    o.set_editor_property("custom_end_frame", last)
+    unreal.log(f"CINECFG frames {first} to {last} only")
 cfg.find_or_add_setting_by_class(unreal.MoviePipelineDeferredPassBase)
 cfg.find_or_add_setting_by_class(unreal.MoviePipelineImageSequenceOutput_JPG)
 aa = cfg.find_or_add_setting_by_class(unreal.MoviePipelineAntiAliasingSetting)

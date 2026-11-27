@@ -189,6 +189,15 @@ task.save = True
 asset_tools.import_asset_tasks([task])
 tex = unreal.load_asset(f"{dest}/Textures/T_{name}_BaseColor")
 tex.set_editor_property("srgb", True)
+# (2026-11-23) the face texture's fur mask comes in with it, for animal friends that have one (fur_chars.json: needs
+# the rig the fur is made from; the first time a new animal friend is imported there is none yet and this does nothing)
+import importlib.util  # noqa: E402
+_spec = importlib.util.spec_from_file_location(
+    "ue_fur_mask_lib", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ue_fur_mask_lib.py"))
+_furlib = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_furlib)
+_mask = _furlib.texture_with_mask(name, base_tex, f"{dest}/Textures", f"T_{name}_BaseColor")
+log(f"fur mask: {_mask.get_path_name() if _mask else 'none for this animal friend'}")
 
 mat = asset_tools.create_asset(f"M_{name}", dest, unreal.Material, unreal.MaterialFactoryNew())
 mat.set_editor_property("used_with_skeletal_mesh", True)

@@ -83,6 +83,14 @@ public:
 	 */
 	bool IsRounds() const { return bRounds; }
 
+	/**
+	 * Round 102, the dice spots (ARRRandomSpawnZones): a knockout in the main mode rolls two dice for where it gets back up
+	 * (RollRespawnZone), and getting up puts its home at a free spot there (PlaceForRespawn; the nearest other spot when that
+	 * one is wrecked or full). Server.
+	 */
+	void RollRespawnZone(ARRRandomCharacter* Brawler);
+	void PlaceForRespawn(ARRRandomCharacter* Brawler);
+
 protected:
 	/** Seconds of countdown once the arena has loaded before anybody can move or shoot. */
 	UPROPERTY(EditAnywhere, Category = "Match", meta = (ClampMin = "0"))
@@ -281,4 +289,49 @@ private:
 	void ResetForRound();
 	/** The arena's fence, and the rides outside it put away. */
 	void SetUpRoundsArena();
+
+	// Round 102: the dice spots
+	/** Finds eleven spots of open flat ground spread over the arena, numbers them 2..12 and spawns ARRRandomSpawnZones. */
+	void FindSpawnZones(float FloorZ);
+	/** Whether a spot (2D) is open flat ground: the floor level (FloorZ) all over a disc of Radius, open sky over it, nothing in it. */
+	bool IsOpenFlat(const FVector2D& Spot, float Radius, float FloorZ) const;
+	/** Two dice from the round's stream; returns their sum. */
+	int32 RollTwoDice(int32& OutA, int32& OutB);
+	/**
+	 * Where a brawler stands in the spot with this number: the Index-th place of it (0 the middle, 1..6 round it), the next
+	 * free one on, or the nearest other spot's. On standing ground (not wrecked or lava), clear of others when bCheckPawns.
+	 * Facing the arena's middle. False when there is nowhere.
+	 */
+	bool FindZoneSpot(int32 Number, float HalfHeight, float Radius, const AActor* Ignore, int32 Index, bool bCheckPawns, FTransform& OutTransform) const;
+	/** A round's start: each team rolls two dice for its start spot (not the other's, nor close to it); everyone's home is there (moved now when bMoveNow). */
+	void RollTeamZones(bool bMoveNow);
+	/** Two teams' start spots at least this far apart. */
+	static constexpr float StartZoneGap = 4000.f;
+
+	// Round 103: the sky paths' numbers for playtests (the user's list: "사람끼리 플레이테스트에서 길 이용 횟수, 대문 위 KO/사망,
+	// 4·10 리스폰 직후 사망을 기록"), logged at each round's end and the match's ("RRRandom: sky stats")
+	struct FSkyStats
+	{
+		/** Times someone got up onto a sky path, and seconds spent up there: players [0], bots [1]. */
+		int32 Climbs[2] = { 0, 0 };
+		float Seconds[2] = { 0.f, 0.f };
+		int32 KnockOuts = 0;
+		/** Knockouts by someone up on a sky path, and of someone up there. */
+		int32 KnockOutsFromUp = 0;
+		int32 KnockOutsUp = 0;
+		/** Getting up at each dice spot, and knocked out again within SkyQuickKnockOut of it. */
+		TMap<int32, int32> Respawns;
+		TMap<int32, int32> QuickKnockOuts;
+	};
+	FSkyStats RoundSky;
+	FSkyStats MatchSky;
+	/** When each one was last up on a sky path (a climb counts after SkyClimbGap off it: not stepping along its edge). */
+	TMap<TWeakObjectPtr<ARRRandomCharacter>, float> LastOnSkyPath;
+	static constexpr float SkyClimbGap = 2.f;
+	/** When and where (a dice spot) each one last got up. */
+	TMap<TWeakObjectPtr<ARRRandomCharacter>, TPair<float, int32>> LastRespawn;
+	static constexpr float SkyQuickKnockOut = 6.f;
+	void UpdateSkyStats(float DeltaSeconds);
+	void NoteSkyKnockOut(const ARRRandomCharacter* Victim, const ARRRandomCharacter* Attacker);
+	void LogSkyStats(const TCHAR* What, const FSkyStats& Stats) const;
 };

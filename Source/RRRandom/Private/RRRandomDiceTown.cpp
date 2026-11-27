@@ -20,6 +20,8 @@
 #include "Engine/SkyLight.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
+#include "Navigation/NavLinkProxy.h"
+#include "AI/Navigation/NavLinkDefinition.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -60,6 +62,35 @@ namespace
 	constexpr int32 Story = 6;
 	constexpr int32 OpeningWidth = 3;
 	constexpr int32 OpeningHeight = 4;
+}
+
+// Round 103: the gates over the main and cross roads (LayOut), in a gate's own frame: two cells thick from U0, across the
+// road from V0 to V1, the beam at BeamLevel (pillars under it at each end, two cells wide), a battlement one level over it
+// every BattlementStep cells from V0
+namespace RRGate
+{
+	constexpr int32 U0 = -32;
+	constexpr int32 V0 = -5;
+	constexpr int32 V1 = 4;
+	constexpr int32 BeamLevel = 9;
+	constexpr int32 BattlementStep = 3;
+}
+
+namespace
+{
+	// Round 103, the sky paths (AddSkyPaths): a flat roof at least MinRoofLevel high and at most MaxRoofGap cells past the
+	// gate's end, stepping dice 2 m wide a cell apart, each at most a level over the last (a jump's reach; the climb takes
+	// the last hop up to 2), at most MaxSkyStones of them; the staircase's steps 2 m each (a climb); on the roof SkyCoverCount
+	// 2 m dice of cover, SkyCoverSpacing cells apart at least and SkyLandingClear cells off where the path lands
+	constexpr int32 MinRoofLevel = 6;
+	constexpr int32 MaxRoofGap = 9;
+	constexpr int32 MaxSkyStones = 3;
+	constexpr int32 SkyStairSteps = 4;
+	constexpr int32 SkyCoverCount = 3;
+	constexpr int32 SkyCoverSpacing = 2;
+	constexpr int32 SkyLandingClear = 3;
+	// The navmesh links' ends: found within this of the navmesh
+	constexpr float SkyLinkSnap = 60.f;
 
 	// Round 91, reflections and light here and there: the plaza's polished tiles, the dice's glossy plastic and the puddles'
 	// mirror (M_BTBlock "Roughness"; the other blocks keep 0.6); about this many puddles on the roads (each 2-3 discs this
@@ -2451,6 +2482,7 @@ void ARRRandomDiceTown::Build()
 	MakeBlocks();
 	MakeCollision();
 	MakeWalkGraph();
+	MakeSkyLinks();
 	MakeUnderside();
 	if (BuildsSky())
 	{
@@ -2640,14 +2672,15 @@ void ARRRandomDiceTown::LayOut()
 		// The gates: one over the main road, the same turned a quarter over the cross road
 		const uint8 Pillar = Plain(White);
 		const uint8 Beam = Plain(Half.bRed ? FColor(235, 70, 100) : FColor(70, 140, 240));
+		// (round 103: its cells named, RRGate: the sky paths build on the cross road's)
 		for (const FFrame& Gate : { Half, Sub(FFrame::Around(Half.bRed ? 3 : 1), 0, 0, 0) })
 		{
-			Fill(Gate, -32, -5, -31, -4, 1, 8, Pillar);
-			Fill(Gate, -32, 3, -31, 4, 1, 8, Pillar);
-			Fill(Gate, -32, -5, -31, 4, 9, 9, Beam);
-			for (int32 V = -5; V <= 4; V += 3)
+			Fill(Gate, RRGate::U0, RRGate::V0, RRGate::U0 + 1, RRGate::V0 + 1, 1, RRGate::BeamLevel - 1, Pillar);
+			Fill(Gate, RRGate::U0, RRGate::V1 - 1, RRGate::U0 + 1, RRGate::V1, 1, RRGate::BeamLevel - 1, Pillar);
+			Fill(Gate, RRGate::U0, RRGate::V0, RRGate::U0 + 1, RRGate::V1, RRGate::BeamLevel, RRGate::BeamLevel, Beam);
+			for (int32 V = RRGate::V0; V <= RRGate::V1; V += RRGate::BattlementStep)
 			{
-				Fill(Gate, -32, V, -31, V, 10, 10, Pillar);
+				Fill(Gate, RRGate::U0, V, RRGate::U0 + 1, V, RRGate::BeamLevel + 1, RRGate::BeamLevel + 1, Pillar);
 			}
 		}
 
@@ -2912,10 +2945,522 @@ void ARRRandomDiceTown::LayOut()
 	AddPuddles();
 	UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town placed %d downtown, %d canal and %d cottage buildings, %d towers, %d + %d + %d cover (each half)."),
 		Downtown, Canal, Cottages, Towers, Inner, Middle, Outer);
+
+	// Round 103: the sky paths over the cross road's gates (last: they go where nothing else stands)
+	AddSkyPaths();
 	if (bDream)
 	{
 		UE_LOG(LogTemp, Log, TEXT("RRRandom: dice town dream pass placed %d die houses (each half)."), DieHouses);
 	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Round 103: the sky paths
+
+void ARRRandomDiceTown::AddSkyPaths()
+{
+	SkyHops.Reset();
+	SkyPerches.Reset();
+	SkyAreas.Reset();
+	if (FParse::Param(FCommandLine::Get(), TEXT("RRNoSkyPath")))
+	{
+		UE_LOG(LogTemp, Log, TEXT("RRRandom: no sky paths (-RRNoSkyPath)."));
+		return;
+	}
+	// Worked out on the blue half's cross road gate (as LayOut builds it) and built on both: the town is the same turned half
+	// way round. Not cells written down for one town: the gate's own cells and whatever the town put round it, so the path
+	// keeps up with the town's layout (it says why in the log when it can't be built)
+	const FFrame Gate = FFrame::Around(1);
+	const int32 Band[2] = { RRGate::U0, RRGate::U0 + 1 };
+	const int32 GateTop = RRGate::BeamLevel + 1;
+	auto TopOf = [this](const FIntPoint& Cell)
+	{
+		for (int32 Level = LevelMax; Level >= 0; --Level)
+		{
+			if (Get(Cell.X, Cell.Y, Level))
+			{
+				return Level;
+			}
+		}
+		return -1;
+	};
+	auto IsAir = [this](const FIntPoint& Cell, int32 L0, int32 L1)
+	{
+		for (int32 Level = FMath::Max(L0, LevelMin); Level <= FMath::Min(L1, LevelMax); ++Level)
+		{
+			if (Get(Cell.X, Cell.Y, Level))
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	auto BandAir = [&](int32 V, int32 L0, int32 L1) { return IsAir(Gate.Cell(Band[0], V), L0, L1) && IsAir(Gate.Cell(Band[1], V), L0, L1); };
+
+	// Past an end of the gate (Dir out along it), along its band: the first thing that stands 2 m up or more has to be a flat
+	// roof, high enough, near enough, with room for the stepping dice over to it
+	struct FRoofPlan
+	{
+		int32 End = 0;
+		int32 Dir = 0;
+		int32 EdgeV = 0;
+		int32 Level = 0;
+		TArray<int32> StoneV;
+		TArray<int32> StoneTop;
+	};
+	auto PlanRoof = [&](int32 End, int32 Dir, FRoofPlan& Out, FString& Why)
+	{
+		Out.End = End;
+		Out.Dir = Dir;
+		int32 EdgeV = INDEX_NONE;
+		for (int32 K = 1; K <= MaxRoofGap + 1 && EdgeV == INDEX_NONE; ++K)
+		{
+			if (!BandAir(End + Dir * K, 3, LevelMax))
+			{
+				EdgeV = End + Dir * K;
+			}
+		}
+		if (EdgeV == INDEX_NONE)
+		{
+			Why = TEXT("nothing near");
+			return false;
+		}
+		// Flat: its first four cells across the band at most a level apart (a parapet), no diagonal blocks, high enough
+		int32 High = -1;
+		int32 Low = LevelMax + 1;
+		for (int32 K = 0; K < 4; ++K)
+		{
+			for (const int32 U : Band)
+			{
+				const FIntPoint Cell = Gate.Cell(U, EdgeV + Dir * K);
+				if (ShapedCells.Contains(Cell))
+				{
+					Why = TEXT("a sloped roof");
+					return false;
+				}
+				const int32 Top = TopOf(Cell);
+				High = FMath::Max(High, Top);
+				Low = K > 0 ? FMath::Min(Low, Top) : Low;
+			}
+		}
+		if (Low < MinRoofLevel || High - Low > 1)
+		{
+			Why = FString::Printf(TEXT("not a flat roof (%d..%d m) %d cells out"), Low, High, FMath::Abs(EdgeV - End));
+			return false;
+		}
+		Out.EdgeV = EdgeV;
+		Out.Level = Low;
+		// The stepping dice: each a cell on from the last, a level up at most (down two at most), till the roof is a jump away
+		int32 CurV = End;
+		int32 CurTop = GateTop;
+		for (;;)
+		{
+			const int32 Gap = FMath::Abs(EdgeV - CurV) - 1;
+			if (Gap <= 2 && Low - CurTop <= 1 && High - CurTop <= 2)
+			{
+				break;
+			}
+			if (Gap < 3 || Out.StoneV.Num() >= MaxSkyStones)
+			{
+				Why = FString::Printf(TEXT("the roof (%d m, %d cells out) is out of reach"), Low, FMath::Abs(EdgeV - End));
+				return false;
+			}
+			const int32 StoneV = CurV + Dir * 2;
+			const int32 StoneTop = CurTop + FMath::Clamp(Low - CurTop, -2, 1);
+			if (!BandAir(StoneV, StoneTop - 2, StoneTop + Headroom + 1) || !BandAir(StoneV + Dir, StoneTop - 2, StoneTop + Headroom + 1)
+				|| !BandAir(CurV + Dir, FMath::Min(CurTop, StoneTop) - 1, FMath::Max(CurTop, StoneTop) + Headroom + 1))
+			{
+				Why = TEXT("no room for a stepping die");
+				return false;
+			}
+			Out.StoneV.Add(StoneV);
+			Out.StoneTop.Add(StoneTop);
+			CurV = StoneV + Dir;
+			CurTop = StoneTop;
+		}
+		for (int32 V = CurV + Dir; V != EdgeV; V += Dir)
+		{
+			if (!BandAir(V, FMath::Min(CurTop, Low) - 1, FMath::Max(CurTop, High) + Headroom))
+			{
+				Why = TEXT("something over the last gap");
+				return false;
+			}
+		}
+		return true;
+	};
+
+	// The staircase at an end (Dir out along the gate): two cells wide just past it, its steps 2 m apart along U, the top
+	// one (8 m) beside the gate's end battlement, the rest going in toward the middle (Inward 1) or out (-1); only on bare
+	// ground with room over it. The cells of step S (SkyStairSteps: the ground before the first)
+	auto StepU = [&](int32 S, int32 Inward) { return Inward > 0 ? RRGate::U0 + 2 * S : RRGate::U0 - 2 * S; };
+	auto PlanStairs = [&](int32 End, int32 Dir, int32 Inward, int32& OutRoad)
+	{
+		OutRoad = 0;
+		for (int32 S = 0; S <= SkyStairSteps; ++S)
+		{
+			const int32 Top = 2 * (SkyStairSteps - S);
+			for (int32 DU = 0; DU < 2; ++DU)
+			{
+				for (int32 DV = 1; DV <= 2; ++DV)
+				{
+					const FIntPoint Cell = Gate.Cell(StepU(S, Inward) + DU, End + Dir * DV);
+					if (TopOf(Cell) != 0 || !IsAir(Cell, 1, Top + Headroom + 1) || ShapedCells.Contains(Cell))
+					{
+						return false;
+					}
+					OutRoad += IsRoad(Cell.X, Cell.Y) ? 1 : 0;
+				}
+			}
+		}
+		return true;
+	};
+
+	FRoofPlan Roof;
+	bool bRoof = false;
+	FString Why[2];
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		FRoofPlan Plan;
+		if (PlanRoof(Side == 0 ? RRGate::V0 : RRGate::V1, Side == 0 ? -1 : 1, Plan, Why[Side])
+			&& (!bRoof || Plan.StoneV.Num() < Roof.StoneV.Num() || (Plan.StoneV.Num() == Roof.StoneV.Num() && FMath::Abs(Plan.EdgeV - Plan.End) < FMath::Abs(Roof.EdgeV - Roof.End))))
+		{
+			Roof = Plan;
+			bRoof = true;
+		}
+	}
+	if (!bRoof)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("RRRandom: no sky paths: no flat roof near the cross road gate's ends (one end: %s; the other: %s)."), *Why[0], *Why[1]);
+		return;
+	}
+	const int32 StairEnd = Roof.End == RRGate::V0 ? RRGate::V1 : RRGate::V0;
+	const int32 StairDir = -Roof.Dir;
+	int32 Inward = 0;
+	int32 BestRoad = TNumericLimits<int32>::Max();
+	for (const int32 Way : { 1, -1 })
+	{
+		int32 Road = 0;
+		if (PlanStairs(StairEnd, StairDir, Way, Road) && Road < BestRoad)
+		{
+			Inward = Way;
+			BestRoad = Road;
+		}
+	}
+	if (Inward == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("RRRandom: no sky paths: no room for the staircase at the cross road gate's other end."));
+		return;
+	}
+
+	// The roof past the landing: its cells at its level (or its parapet's), from where the path lands
+	TSet<FIntPoint> RoofCells;
+	TArray<FIntPoint> Queue;
+	for (const int32 U : Band)
+	{
+		const FIntPoint Cell = Gate.Cell(U, Roof.EdgeV + Roof.Dir * 2);
+		RoofCells.Add(Cell);
+		Queue.Add(Cell);
+	}
+	for (int32 Head = 0; Head < Queue.Num() && RoofCells.Num() < 600; ++Head)
+	{
+		for (const FIntPoint Step : { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) })
+		{
+			const FIntPoint Next = Queue[Head] + Step;
+			const int32 Top = TopOf(Next);
+			if (!RoofCells.Contains(Next) && (Top == Roof.Level || Top == Roof.Level + 1) && !ShapedCells.Contains(Next))
+			{
+				RoofCells.Add(Next);
+				Queue.Add(Next);
+			}
+		}
+	}
+
+	// Cover on the roof (2 m dice): inside it (a ring of roof round each), clear of the landing and of the tops of its own
+	// flights, spread out; the first in front of whoever lands, the others as far from those placed as can be
+	const FIntPoint Landing = Gate.Cell(Band[0], Roof.EdgeV + Roof.Dir);
+	const FIntPoint Forward = Gate.Dir(0, Roof.Dir);
+	const FIntPoint Aim = Landing + Forward * (SkyLandingClear + 2);
+	TArray<FIntPoint> CoverCandidates;
+	for (const FIntPoint& Corner : RoofCells)
+	{
+		bool bFits = true;
+		for (int32 DX = -1; DX <= 2 && bFits; ++DX)
+		{
+			for (int32 DY = -1; DY <= 2 && bFits; ++DY)
+			{
+				const FIntPoint Cell = Corner + FIntPoint(DX, DY);
+				const bool bUnder = DX >= 0 && DX <= 1 && DY >= 0 && DY <= 1;
+				bFits = RoofCells.Contains(Cell) && (!bUnder || (TopOf(Cell) == Roof.Level && IsAir(Cell, Roof.Level + 1, Roof.Level + Headroom + 2)));
+			}
+		}
+		for (const int32 U : Band)
+		{
+			for (int32 K = 1; K <= 2 && bFits; ++K)
+			{
+				const FIntPoint Land = Gate.Cell(U, Roof.EdgeV + Roof.Dir * K);
+				bFits = FMath::Max(FMath::Abs(Land.X - Corner.X - 0.5f), FMath::Abs(Land.Y - Corner.Y - 0.5f)) >= SkyLandingClear + 0.5f;
+			}
+		}
+		for (int32 Index = 0; Index < Stairs.Num() && bFits; ++Index)
+		{
+			const FStair& Stair = Stairs[Index];
+			const FIntPoint StairTop = Stair.Start + Stair.Dir * Stair.Rise;
+			bFits = FMath::Max(FMath::Abs(StairTop.X - Corner.X - 0.5f), FMath::Abs(StairTop.Y - Corner.Y - 0.5f)) >= 2.5f;
+		}
+		if (bFits)
+		{
+			CoverCandidates.Add(Corner);
+		}
+	}
+	CoverCandidates.Sort([](const FIntPoint& A, const FIntPoint& B) { return A.X != B.X ? A.X < B.X : A.Y < B.Y; });
+	TArray<FIntPoint> Cover;
+	auto Apart = [](const FIntPoint& A, const FIntPoint& B) { return FMath::Max(FMath::Abs(A.X - B.X), FMath::Abs(A.Y - B.Y)); };
+	while (Cover.Num() < SkyCoverCount)
+	{
+		int32 Best = INDEX_NONE;
+		float BestScore = 0.f;
+		for (int32 Index = 0; Index < CoverCandidates.Num(); ++Index)
+		{
+			const FIntPoint& Corner = CoverCandidates[Index];
+			int32 Nearest = TNumericLimits<int32>::Max();
+			for (const FIntPoint& Placed : Cover)
+			{
+				Nearest = FMath::Min(Nearest, Apart(Corner, Placed));
+			}
+			if (Cover.Num() > 0 && Nearest < 2 + SkyCoverSpacing)
+			{
+				continue;
+			}
+			const float Score = Cover.Num() == 0 ? -float(FMath::Abs(Corner.X - Aim.X) + FMath::Abs(Corner.Y - Aim.Y)) : float(Nearest);
+			if (Best == INDEX_NONE || Score > BestScore)
+			{
+				Best = Index;
+				BestScore = Score;
+			}
+		}
+		if (Best == INDEX_NONE)
+		{
+			break;
+		}
+		Cover.Add(CoverCandidates[Best]);
+	}
+
+	// Built on both halves
+	auto DieAt = [this](const FFrame& Frame, int32 U, int32 V, int32 Level, int32 Size, int32 Kind)
+	{
+		const FIntPoint A = Frame.Cell(U, V);
+		const FIntPoint B = Frame.Cell(U + Size - 1, V + Size - 1);
+		AddDie(FIntPoint(FMath::Min(A.X, B.X), FMath::Min(A.Y, B.Y)), Level, Size, Kind);
+	};
+	const int32 StairV = FMath::Min(StairEnd + StairDir, StairEnd + StairDir * 2);
+	Both(Gate, [&](const FFrame& Frame)
+	{
+		for (int32 S = 0; S < SkyStairSteps; ++S)
+		{
+			const int32 U = StepU(S, Inward);
+			for (int32 Tier = 0; Tier < SkyStairSteps - S; ++Tier)
+			{
+				DieAt(Frame, U, StairV, 1 + Tier * 2, 2, 3 + S * 7 + Tier * 5);
+			}
+		}
+		for (int32 Index = 0; Index < Roof.StoneV.Num(); ++Index)
+		{
+			DieAt(Frame, RRGate::U0, FMath::Min(Roof.StoneV[Index], Roof.StoneV[Index] + Roof.Dir), Roof.StoneTop[Index] - 1, 2, 11 + Index * 4);
+		}
+	});
+	for (int32 Index = 0; Index < Cover.Num(); ++Index)
+	{
+		AddDie(Cover[Index], Roof.Level + 1, 2, 5 + Index * 9);
+		AddDie(FIntPoint(-2 - Cover[Index].X, -2 - Cover[Index].Y), Roof.Level + 1, 2, 5 + Index * 9);
+	}
+
+	// What the game and the bots need to know of it, on the blue half (a spot: the middle of two cells, a height in blocks),
+	// then turned half way round for the red
+	struct FSpot
+	{
+		FIntPoint A;
+		FIntPoint B;
+		int32 Level;
+	};
+	auto Pair = [&](int32 UA, int32 VA, int32 UB, int32 VB, int32 Level) { return FSpot{ Gate.Cell(UA, VA), Gate.Cell(UB, VB), Level }; };
+	TArray<FSpot> Path;
+	const int32 StairV0 = StairEnd + StairDir;
+	const int32 StairV1 = StairEnd + StairDir * 2;
+	for (int32 S = SkyStairSteps; S >= 0; --S)
+	{
+		const int32 U = StepU(S, Inward);
+		Path.Add(Pair(U, StairV0, U + 1, StairV1, 2 * (SkyStairSteps - S)));
+	}
+	// Along the beam, between its battlements (into the gate is Roof.Dir from the stairs' end)
+	const int32 Battlements = (RRGate::V1 - RRGate::V0) / RRGate::BattlementStep + 1;
+	for (int32 J = 0; J + 1 < Battlements; ++J)
+	{
+		Path.Add(Pair(Band[0], StairEnd + Roof.Dir * (RRGate::BattlementStep * J + 1), Band[1], StairEnd + Roof.Dir * (RRGate::BattlementStep * J + RRGate::BattlementStep - 1), RRGate::BeamLevel));
+	}
+	for (int32 Index = 0; Index < Roof.StoneV.Num(); ++Index)
+	{
+		Path.Add(Pair(Band[0], Roof.StoneV[Index], Band[1], Roof.StoneV[Index] + Roof.Dir, Roof.StoneTop[Index]));
+	}
+	Path.Add(Pair(Band[0], Roof.EdgeV + Roof.Dir, Band[1], Roof.EdgeV + Roof.Dir * 2, Roof.Level));
+
+	auto Mirror = [](const FIntPoint& Cell) { return FIntPoint(-1 - Cell.X, -1 - Cell.Y); };
+	for (const bool bRed : { false, true })
+	{
+		auto Where = [&](const FSpot& Spot)
+		{
+			const FIntPoint A = bRed ? Mirror(Spot.A) : Spot.A;
+			const FIntPoint B = bRed ? Mirror(Spot.B) : Spot.B;
+			return At((CellCenter(A) + CellCenter(B)) * 0.5f, Spot.Level * BlockSize);
+		};
+		auto CellBox = [&](const FIntPoint& Cell, float Low, float High)
+		{
+			const FIntPoint Turned = bRed ? Mirror(Cell) : Cell;
+			const FVector2D Middle = CellCenter(Turned);
+			return FBox(At(Middle - FVector2D(BlockSize * 0.5f), Low), At(Middle + FVector2D(BlockSize * 0.5f), High));
+		};
+		for (int32 Index = 0; Index + 1 < Path.Num(); ++Index)
+		{
+			SkyHops.Add({ Where(Path[Index]), Where(Path[Index + 1]) });
+		}
+		// Perches: from the top of the stairs on, and the roof every third cell
+		for (int32 Index = SkyStairSteps; Index < Path.Num(); ++Index)
+		{
+			SkyPerches.Add(Where(Path[Index]));
+		}
+		for (const FIntPoint& Cell : RoofCells)
+		{
+			if (Cell.X % 3 == 0 && Cell.Y % 3 == 0 && TopOf(Cell) == Roof.Level)
+			{
+				SkyPerches.Add(Where(FSpot{ Cell, Cell, Roof.Level }));
+			}
+		}
+		// Its boxes: the stairs from their second step, the gate's top, the stepping dice, the roof
+		FBox StairBox(ForceInit);
+		for (int32 S = 0; S + 1 < SkyStairSteps; ++S)
+		{
+			for (int32 DU = 0; DU < 2; ++DU)
+			{
+				for (int32 DV = 1; DV <= 2; ++DV)
+				{
+					StairBox += CellBox(Gate.Cell(StepU(S, Inward) + DU, StairEnd + StairDir * DV), 350.f, 2 * (SkyStairSteps - S) * BlockSize + 250.f);
+				}
+			}
+		}
+		SkyAreas.Add(StairBox);
+		FBox Top(ForceInit);
+		for (int32 V = RRGate::V0; V <= RRGate::V1; ++V)
+		{
+			for (const int32 U : Band)
+			{
+				Top += CellBox(Gate.Cell(U, V), RRGate::BeamLevel * BlockSize - 50.f, GateTop * BlockSize + 300.f);
+			}
+		}
+		SkyAreas.Add(Top);
+		for (int32 Index = 0; Index < Roof.StoneV.Num(); ++Index)
+		{
+			FBox StoneBox(ForceInit);
+			for (const int32 U : Band)
+			{
+				for (const int32 V : { Roof.StoneV[Index], Roof.StoneV[Index] + Roof.Dir })
+				{
+					StoneBox += CellBox(Gate.Cell(U, V), Roof.StoneTop[Index] * BlockSize - 50.f, Roof.StoneTop[Index] * BlockSize + 300.f);
+				}
+			}
+			SkyAreas.Add(StoneBox);
+		}
+		FBox RoofBox(ForceInit);
+		for (const FIntPoint& Cell : RoofCells)
+		{
+			RoofBox += CellBox(Cell, Roof.Level * BlockSize - 50.f, Roof.Level * BlockSize + 400.f);
+		}
+		SkyAreas.Add(RoofBox);
+	}
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: sky paths: stairs at the cross road gate's end %d (going %s, %d cells on the road), over the gate, %d stepping dice to a flat roof %d m up %d cells past its end %d (%d cells, %d cover dice from %d spots that fit); %d hops, %d perches each half."),
+		StairEnd, Inward > 0 ? TEXT("in") : TEXT("out"), BestRoad, Roof.StoneV.Num(), Roof.Level, FMath::Abs(Roof.EdgeV - Roof.End), Roof.End, RoofCells.Num(), Cover.Num(), CoverCandidates.Num(),
+		SkyHops.Num() / 2, SkyPerches.Num() / 2);
+}
+
+bool ARRRandomDiceTown::IsOnSkyPath(const FVector& Feet) const
+{
+	for (const FBox& Area : SkyAreas)
+	{
+		if (Area.IsInsideOrOn(Feet))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool ARRRandomDiceTown::GetRandomSkyPerch(FRandomStream& Stream, FVector& OutFeet) const
+{
+	if (SkyPerches.Num() == 0)
+	{
+		return false;
+	}
+	OutFeet = SkyPerches[Stream.RandRange(0, SkyPerches.Num() - 1)];
+	return true;
+}
+
+bool ARRRandomDiceTown::IsOverlookedBySkyPath(const FVector& Feet, float Reach, float Drop) const
+{
+	for (const FVector& Perch : SkyPerches)
+	{
+		if (Perch.Z - Feet.Z >= Drop && FVector::Dist2D(Perch, Feet) <= Reach)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void ARRRandomDiceTown::MakeSkyLinks()
+{
+	for (AActor* Link : SkyLinks)
+	{
+		if (IsValid(Link))
+		{
+			Link->Destroy();
+		}
+	}
+	SkyLinks.Reset();
+	UWorld* World = GetWorld();
+	if (!World || !World->IsGameWorld() || !HasAuthority() || SkyHops.Num() == 0)
+	{
+		return;
+	}
+	// (only once the navmesh is there: links spawned before it were never taken in, the bots' routes stopping short of the
+	// path; till then asked again every half second)
+	UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+	if (!Nav || !Nav->GetDefaultNavDataInstance(FNavigationSystem::DontCreate))
+	{
+		FTimerHandle Again;
+		World->GetTimerManager().SetTimer(Again, FTimerDelegate::CreateWeakLambda(this, [this]() { MakeSkyLinks(); }), 0.5f, false);
+		return;
+	}
+	// One link actor for them all, each hop a point link both ways (its ends a little over the feet, found on the navmesh
+	// within SkyLinkSnap)
+	const FTransform Where(GetActorLocation());
+	ANavLinkProxy* Links = World->SpawnActorDeferred<ANavLinkProxy>(ANavLinkProxy::StaticClass(), Where, this);
+	if (!Links)
+	{
+		return;
+	}
+	Links->PointLinks.Reset();
+	for (const FSkyHop& Hop : SkyHops)
+	{
+		FNavigationLink Link;
+		Link.Left = Hop.From - Where.GetLocation() + FVector(0.f, 0.f, 10.f);
+		Link.Right = Hop.To - Where.GetLocation() + FVector(0.f, 0.f, 10.f);
+		Link.Direction = ENavLinkDirection::BothWays;
+		Link.SnapRadius = SkyLinkSnap;
+		Link.SnapHeight = SkyLinkSnap;
+		Links->PointLinks.Add(Link);
+	}
+	Links->FinishSpawning(Where);
+	UNavigationSystemV1::UpdateActorInNavOctree(*Links);
+	SkyLinks.Add(Links);
+	UE_LOG(LogTemp, Log, TEXT("RRRandom: %d sky hops linked on the navmesh."), Links->PointLinks.Num());
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -4405,6 +4950,19 @@ void ARRRandomDiceTown::MakeWalkGraph()
 	}
 	NodeStart[GridCells * GridCells] = Nodes.Num();
 
+	// Round 103: the sky paths' hops (a 2 m climb, a jump over a gap), both ways, dear (a walk round is taken if near as short)
+	SkyGraphLinks.Reset();
+	for (const FSkyHop& Hop : SkyHops)
+	{
+		const int32 From = FindNode(Hop.From, 1);
+		const int32 To = FindNode(Hop.To, 1);
+		if (From != INDEX_NONE && To != INDEX_NONE && From != To)
+		{
+			SkyGraphLinks.Add(From, To);
+			SkyGraphLinks.Add(To, From);
+		}
+	}
+
 	// The ground anyone can reach from the plaza's edge (a battle map tile: from any of its roads)
 	TBitArray<> Seen(false, Nodes.Num());
 	TArray<int32> Queue;
@@ -4529,6 +5087,11 @@ void ARRRandomDiceTown::ForEachLink(int32 Node, TFunctionRef<void(int32, float)>
 				}
 			}
 		}
+	}
+	// Round 103: a sky path's hop
+	for (auto Hop = SkyGraphLinks.CreateConstKeyIterator(Node); Hop; ++Hop)
+	{
+		Visit(Hop.Value(), BlockSize * 4.f);
 	}
 }
 
